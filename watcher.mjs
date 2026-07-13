@@ -435,8 +435,25 @@ export async function processCrossRepo(state, crossKeepSet) {
       const watchAbs = r.abs;
       crossKeepSet.add(watchAbs);
       if (!r.ok) {
-        if (r.reason === "missing") await log(`cross: pull watch missing ${watchAbs}`);
-        else await log(`cross: pull watch ${edge.watch} rejected (${r.reason})`);
+        if (r.reason === "missing") {
+          // Rename/move IS the drift when we had previously seen this file (adv B1).
+          if (state.mtimes[watchAbs] !== undefined) {
+            const forAbs = path.resolve(repo.root, edge.for || ".");
+            await appendRowWithId(_crossCfg.crossJsonl, {
+              type: "drift", source: path.relative(repo.root, watchAbs),
+              change: `cross-repo ${edge.flow} target moved/missing — was tracked, now gone; verify ${edge.for}`,
+              downstream: [{ path: edge.for, why: edge.why, kind: "code" }], status: "open",
+              flow: edge.flow, direction: "inbound", origin_repo: repo.name,
+              partner: resolvePartner(watchAbs), correlation_id: crossCorrelationId(watchAbs, forAbs),
+            });
+            delete state.mtimes[watchAbs];   // clear so we don't re-fire every tick
+            events++;
+          } else {
+            await log(`cross: pull watch missing (never seen) ${watchAbs}`);
+          }
+        } else {
+          await log(`cross: pull watch ${edge.watch} rejected (${r.reason})`);
+        }
         continue;
       }
       const known = state.mtimes[watchAbs] !== undefined;
@@ -591,14 +608,25 @@ async function main() {
     }
 
     // Cross-repo pass (federated .propagates-cross.yml → parent cross-ledger).
-    // crossKeepSet collects every cross path so the GC below doesn't prune live edges.
-    const crossKeepSet = new Set(Object.keys(state.mtimes).filter((k) => !k.includes("/.git/")));
+    // crossKeepSet collects only the cross paths tracked THIS fire (starts empty),
+    // so a deleted cross edge's foreign key is absent and gets GC'd below.
+    const crossKeepSet = new Set();
     try {
       const crossEvents = await processCrossRepo(state, crossKeepSet);
       if (crossEvents > 0) await log(`cross: ${crossEvents} cross-repo events`);
     } catch (err) {
       await log(`cross-repo pass failed: ${err.message}`);
     }
+
+    // GC (adv B1): prune only FOREIGN keys (outside every workspace root) that are no
+    // longer a tracked cross path — i.e. deleted cross edges. Intra-workspace keys are
+    // always kept (managed by the existing intra flow; untouched here).
+    const gcKeep = new Set(crossKeepSet);
+    for (const key of Object.keys(state.mtimes)) {
+      if (WORKSPACES.some((w) => key === w.root || key.startsWith(w.root + path.sep))) gcKeep.add(key);
+    }
+    const pruned = pruneMtimes(state, gcKeep);
+    if (pruned > 0) await log(`state GC: pruned ${pruned} stale cross mtime keys`);
 
     state.lastRunAt = Date.now();
     await writeState(STATE_PATH, state);

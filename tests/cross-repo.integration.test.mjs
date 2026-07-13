@@ -29,11 +29,12 @@ platform_contracts:
   __setCrossPathsForTest({ searchRoots: [parent], crossJsonl, crossMd: path.join(parent, "PROPAGATION_CROSS_LEDGER.md") });
 
   const state = { mtimes: {}, lastRunAt: 0, version: 1 };
-  const ifaceReal = realpathSync(iface);   // rows/state key on realpath, not the /var symlink
+  // state keys on the LEXICAL abs path (stable across deletion), not realpath.
+  const ifaceKey = path.resolve(vk, "../Motherboard/sdk/iface.ts");
   // First run: bootstrap-seed, NO fire
   const n1 = await processCrossRepo(state, new Set());
   assert.equal(n1, 0, "bootstrap seeds silently");
-  assert.ok(state.mtimes[ifaceReal] !== undefined, "external watch file seeded");
+  assert.ok(state.mtimes[ifaceKey] !== undefined, "external watch file seeded");
 
   // Change the external file → fire one inbound row
   await new Promise((r) => setTimeout(r, 10));
@@ -45,4 +46,35 @@ platform_contracts:
   assert.equal(rows[0].direction, "inbound");
   assert.equal(rows[0].partner, "Motherboard");
   assert.ok(rows[0].correlation_id, "row has a logical-edge correlation_id");
+});
+
+test("rename fires a moved row (known target now missing)", async () => {
+  const { rm } = await import("node:fs/promises");
+  const parent = await mkdtemp(path.join(tmpdir(), "xren-"));
+  const mb = path.join(parent, "Motherboard"); await mkdir(mb, { recursive: true });
+  const playbook = path.join(mb, "PLAYBOOK.md"); await writeFile(playbook, "v1");
+  const vk = path.join(parent, "Vipin Kaushik"); await mkdir(vk, { recursive: true });
+  await writeFile(path.join(vk, "DESIGN.md"), "d");
+  await writeFile(path.join(vk, ".propagates-cross.yml"), `
+shared_conventions:
+  - watch: ../Motherboard/PLAYBOOK.md
+    why: design derives from playbook
+    for: DESIGN.md
+`);
+  const crossJsonl = path.join(parent, "PROPAGATION_CROSS_LEDGER.jsonl");
+  __setPartnerRootsForTest([realpathSync(mb)]);
+  __setCrossPathsForTest({ searchRoots: [parent], crossJsonl, crossMd: path.join(parent, "PROPAGATION_CROSS_LEDGER.md") });
+
+  const state = { mtimes: {}, lastRunAt: 0, version: 1 };
+  await processCrossRepo(state, new Set());           // bootstrap seed
+  const playbookKey = path.resolve(vk, "../Motherboard/PLAYBOOK.md");
+  assert.ok(state.mtimes[playbookKey] !== undefined, "seeded before rename");
+
+  await rm(playbook);                                 // the rename/move: file gone, edge still declared
+  const rows0 = (await readLedger(crossJsonl)).length;
+  await processCrossRepo(state, new Set());
+  const rows1 = await readLedger(crossJsonl);
+  assert.equal(rows1.length, rows0 + 1, "missing-while-declared fires a moved row");
+  assert.match(rows1.at(-1).change, /moved|missing|dead/i);
+  assert.equal(rows1.at(-1).partner, "Motherboard");
 });
