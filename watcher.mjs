@@ -23,7 +23,7 @@
  */
 
 import { readdir, stat, appendFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -40,7 +40,9 @@ import {
   CROSS_LEDGER_MD,
 } from "./lib/config.mjs";
 import { loadCodeCanonicalSync } from "./lib/code-canonical.mjs";
-import { readState, writeState, detectMtimeChange, pruneMtimes } from "./lib/state.mjs";
+import { readState, writeState, detectMtimeChange, pruneMtimes, pruneCrossDecisions } from "./lib/state.mjs";
+import { parseDecisions } from "./lib/decisions.mjs";
+import { CROSS_TRIGGER_EPOCH } from "./lib/config.mjs";
 import { acquireLock } from "./lib/lock.mjs";
 import {
   loadSidecar,
@@ -481,6 +483,61 @@ export async function processCrossRepo(state, crossKeepSet) {
   return events;
 }
 
+/**
+ * Decision-driven trigger (§4b, Slice 2). Parse each cross-repo participant's
+ * workspace DECISIONS.md; for entries whose Affects: names a partner (via the shared
+ * alias table), fire a `flow: decision` relay row — but seed pre-CROSS_TRIGGER_EPOCH
+ * entries as processed WITHOUT firing (bootstrap, G6) so onboarding fires only the
+ * recent, genuinely-un-relayed partner decisions. Returns {events, liveKeys}.
+ */
+export async function processDecisions(state, nowMs) {
+  const repos = discoverCrossReposSync(_crossCfg.searchRoots);
+  const liveKeys = new Set();
+  const firstRun = Object.keys(state.crossDecisions ?? {}).length === 0;
+  let events = 0, seeded = 0;
+
+  for (const repo of repos) {
+    const decPath = path.join(repo.root, "docs", "DECISIONS.md");
+    if (!existsSync(decPath)) continue;
+    let entries;
+    try { entries = parseDecisions(readFileSync(decPath, "utf8")); }
+    catch (err) { await log(`cross-decision: parse failed ${decPath}: ${err.message}`); continue; }
+
+    for (const e of entries) {
+      if (e.title.includes("<")) continue;                 // template/convention example (e.g. "<title>") — not a real decision
+      const partners = [...new Set(e.tokens.map(resolvePartner).filter(Boolean))];
+      if (partners.length === 0) continue;                 // no partner named → skip
+      const fullKey = `${repo.name}:workspace:${e.key}`;
+      liveKeys.add(fullKey);
+      if (state.crossDecisions[fullKey]) continue;         // already processed
+      if (e.date < CROSS_TRIGGER_EPOCH) {                  // bootstrap seed, no fire (G6)
+        state.crossDecisions[fullKey] = true; seeded++; continue;
+      }
+      for (const partner of partners) {                    // fire one relay row per partner
+        await appendRowWithId(_crossCfg.crossJsonl, {
+          type: "drift", source: path.relative(repo.root, decPath),
+          change: `decision affects ${partner} — relay/verify: ${e.title.slice(0, 80)}`,
+          downstream: [{ path: partner, why: e.title.slice(0, 120), kind: "prose" }],
+          status: "open", flow: "decision", direction: "outbound",
+          origin_repo: repo.name, partner, correlation_id: `decision:${fullKey}:${partner}`,
+        });
+        events++;
+      }
+      state.crossDecisions[fullKey] = true;                // mark AFTER firing (fire-first: a crash re-fires, never loses a relay)
+      if (e.collision) await log(`cross-decision: collision-disambiguated ${fullKey}`);
+    }
+  }
+
+  if (firstRun && seeded > 0) {
+    await log(`cross-decision: first run — seeded ${seeded} historical partner decisions as processed (pre-${CROSS_TRIGGER_EPOCH})`);
+  }
+  if (events > 0) {
+    try { await renderMarkdown(_crossCfg.crossJsonl, _crossCfg.crossMd); }
+    catch (err) { await log(`cross-decision: render failed: ${err.message}`); }
+  }
+  return { events, liveKeys };
+}
+
 async function main() {
   await mkdir(SKILL_DIR, { recursive: true });
 
@@ -627,6 +684,16 @@ async function main() {
     }
     const pruned = pruneMtimes(state, gcKeep);
     if (pruned > 0) await log(`state GC: pruned ${pruned} stale cross mtime keys`);
+
+    // Decision-driven trigger (§4b, Slice 2): DECISIONS.md Affects:<partner> → relay row.
+    try {
+      const { events: decEvents, liveKeys } = await processDecisions(state, Date.now());
+      if (decEvents > 0) await log(`cross-decision: ${decEvents} relay rows`);
+      const decPruned = pruneCrossDecisions(state, liveKeys, Date.now());
+      if (decPruned > 0) await log(`cross-decision GC: pruned ${decPruned} stale keys`);
+    } catch (err) {
+      await log(`cross-decision pass failed: ${err.message}`);
+    }
 
     state.lastRunAt = Date.now();
     await writeState(STATE_PATH, state);

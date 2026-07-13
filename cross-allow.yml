@@ -15,5 +15,8 @@ contract_files:
 # Shared by resolvePartner() so the file trigger (Slice 1) and the future decision
 # trigger (Slice 2) agree what a "partner" is. Matched case-insensitively, after trimming.
 partner_aliases:
-  Motherboard: [motherboard, "vipinkaushik-mb", mb, "vipin kaushik"]
+  # NOTE: aliases are matched as substrings (paths need it), so keep them long enough
+  # to avoid false positives. Bare "mb" was dropped — it matches inside words like
+  # "number". Every alias here is >=6 chars / distinctive.
+  Motherboard: [motherboard, "vipinkaushik-mb", "vipin kaushik"]
   Tathya: [tathya, "tathya-mb"]
