@@ -5,8 +5,8 @@ import path from "node:path";
 import os from "node:os";
 import Ajv from "ajv";
 import yaml from "yaml";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
-import { loadCrossRepoSync } from "../lib/cross-repo.mjs";
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, realpathSync } from "node:fs";
+import { loadCrossRepoSync, resolveTarget, resolvePartner, __setPartnerRootsForTest } from "../lib/cross-repo.mjs";
 
 const SKILL = path.join(os.homedir(), ".claude", "skills", "propagate");
 
@@ -60,4 +60,28 @@ shared_conventions:
 test("loadCrossRepoSync returns empty for missing file", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "xrepo-empty-"));
   assert.deepEqual(loadCrossRepoSync(root), { pushEdges: [], pullEdges: [] });
+});
+
+test("resolveTarget rejects a symlink escaping the partner tree", () => {
+  const parent = mkdtempSync(path.join(os.tmpdir(), "xparent-"));
+  const mb = path.join(parent, "Motherboard"); mkdirSync(mb, { recursive: true });
+  const outside = path.join(parent, "Youvan"); mkdirSync(outside, { recursive: true });
+  writeFileSync(path.join(outside, "secret.ts"), "x");
+  symlinkSync(path.join(outside, "secret.ts"), path.join(mb, "leak.ts"));
+  writeFileSync(path.join(mb, "motherboard.json"), "{}");
+  __setPartnerRootsForTest([realpathSync(mb)]);
+
+  const vk = path.join(parent, "Vipin Kaushik"); mkdirSync(vk, { recursive: true });
+  assert.equal(resolveTarget(vk, "../Motherboard/motherboard.json").ok, true);
+  const escaped = resolveTarget(vk, "../Motherboard/leak.ts");
+  assert.equal(escaped.ok, false);
+  assert.equal(escaped.reason, "outside-partner");
+  assert.equal(resolveTarget(vk, "../Motherboard/nope.json").reason, "missing");
+});
+
+test("resolvePartner maps paths and Affects tokens to canonical partner", () => {
+  assert.equal(resolvePartner("../Motherboard/motherboard.json"), "Motherboard");
+  assert.equal(resolvePartner("VipinKaushik-mb/server/impl.ts"), "Motherboard");
+  assert.equal(resolvePartner("../Tathya/tathya-strategy/x.md"), "Tathya");
+  assert.equal(resolvePartner("../Youvan/secret.ts"), null);
 });
