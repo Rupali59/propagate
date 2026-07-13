@@ -1,0 +1,21 @@
+{
+  "name": "claude-propagate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "File-watcher + ledger for prose-to-prose / prose-to-code propagation across the Vipin Kaushik workspace. See SKILL.md.",
+  "main": "watcher.mjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "watcher": "node watcher.mjs",
+    "smoke": "node watcher.mjs --smoke",
+    "test": "node --test 'tests/*.test.mjs'"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "proper-lockfile": "^4.1.2",
+    "yaml": "^2.6.0"
+  }
+}

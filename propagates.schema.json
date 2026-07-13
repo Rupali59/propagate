@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vipinkaushik.local/propagates.schema.json",
+  "title": "Propagation sidecar",
+  "description": "Schema for .propagates.yml sidecars. Each sidecar covers the docs/CLAUDE.mds in its directory and declares where edits propagate.",
+  "type": "object",
+  "required": ["sources"],
+  "properties": {
+    "sources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["propagates_to"],
+        "properties": {
+          "propagates_to": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "why"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Relative path from this sidecar to the downstream file."
+                },
+                "why": {
+                  "type": "string",
+                  "description": "Short reason this downstream depends on the source.",
+                  "minLength": 3
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["prose", "code"],
+                  "default": "prose"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "concepts": {
+            "type": "object",
+            "description": "Forward-compat: per-section concept tags for graph-augment (V2). Keys are section anchors; values are concept candidate lists.",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

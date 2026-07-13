@@ -1,0 +1,7 @@
+node_modules/
+# runtime state — not source
+state.json
+state.json.bak
+heartbeat
+.lock-target
+*.log
