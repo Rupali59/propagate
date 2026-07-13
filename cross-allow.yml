@@ -1,0 +1,19 @@
+# Two allowlists that bound every cross-repo edge. Realpath-checked at load AND fire.
+# partner_roots: absolute repo roots an edge target may resolve into. Nothing else.
+partner_roots:
+  - ~/Documents/GitHub/Motherboard
+  - ~/Documents/GitHub/Tathya
+# contract_files: glob suffixes a cross edge target may match (the "major" filter).
+contract_files:
+  - "motherboard.json"
+  - "**/plugin-sdk/**"
+  - "**/routes/**"
+  - "scripts/**"
+  - "**/ga4-property.yaml"
+  - "**/DESIGN_SYSTEM_PLAYBOOK.md"
+# partner_aliases: normalized partner name <- the strings that mean it (paths + Affects: tokens).
+# Shared by resolvePartner() so the file trigger (Slice 1) and the future decision
+# trigger (Slice 2) agree what a "partner" is. Matched case-insensitively, after trimming.
+partner_aliases:
+  Motherboard: [motherboard, "vipinkaushik-mb", mb, "vipin kaushik"]
+  Tathya: [tathya, "tathya-mb"]

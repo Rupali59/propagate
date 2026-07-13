@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vipinkaushik.local/propagates-cross.schema.json",
+  "title": "Cross-repo propagation sidecar",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "platform_contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": { "type": "string" },
+          "watch": { "type": "string" },
+          "kind": { "type": "string", "enum": ["contract"] },
+          "why": { "type": "string", "minLength": 3 },
+          "for": { "type": "string" },
+          "affects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "why"],
+              "properties": {
+                "path": { "type": "string" },
+                "why": { "type": "string", "minLength": 3 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "shared_conventions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["watch", "why"],
+        "properties": {
+          "watch": { "type": "string" },
+          "why": { "type": "string", "minLength": 3 },
+          "for": { "type": "string" }
+        }
+      }
+    }
+  }
+}
