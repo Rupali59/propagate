@@ -6,7 +6,7 @@ import os from "node:os";
 import Ajv from "ajv";
 import yaml from "yaml";
 import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, realpathSync } from "node:fs";
-import { loadCrossRepoSync, resolveTarget, resolvePartner, __setPartnerRootsForTest } from "../lib/cross-repo.mjs";
+import { loadCrossRepoSync, resolveTarget, resolvePartner, __setPartnerRootsForTest, discoverCrossReposSync, crossCorrelationId } from "../lib/cross-repo.mjs";
 
 const SKILL = path.join(os.homedir(), ".claude", "skills", "propagate");
 
@@ -84,4 +84,21 @@ test("resolvePartner maps paths and Affects tokens to canonical partner", () => 
   assert.equal(resolvePartner("VipinKaushik-mb/server/impl.ts"), "Motherboard");
   assert.equal(resolvePartner("../Tathya/tathya-strategy/x.md"), "Tathya");
   assert.equal(resolvePartner("../Youvan/secret.ts"), null);
+});
+
+test("discoverCrossReposSync finds repos with a cross file only", () => {
+  const parent = mkdtempSync(path.join(os.tmpdir(), "xdisc-"));
+  const a = path.join(parent, "RepoA"); mkdirSync(a, { recursive: true });
+  writeFileSync(path.join(a, ".propagates-cross.yml"), "platform_contracts: []\n");
+  const b = path.join(parent, "RepoB"); mkdirSync(b, { recursive: true });
+  writeFileSync(path.join(b, ".propagates.yml"), "sources: {}\n");
+  const found = discoverCrossReposSync([parent]);
+  assert.deepEqual(found.map((r) => r.name), ["RepoA"]);
+});
+
+test("crossCorrelationId is order-independent", () => {
+  const parent = mkdtempSync(path.join(os.tmpdir(), "xcorr-"));
+  const f1 = path.join(parent, "a.ts"); writeFileSync(f1, "1");
+  const f2 = path.join(parent, "b.ts"); writeFileSync(f2, "2");
+  assert.equal(crossCorrelationId(f1, f2), crossCorrelationId(f2, f1));
 });
