@@ -23,6 +23,31 @@ import {
 } from "./lib/config.mjs";
 import { readLedger } from "./lib/ledger.mjs";
 import { loadSidecar, SidecarError } from "./lib/frontmatter.mjs";
+import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
+
+/**
+ * Validate cross-repo edges: load each .propagates-cross.yml, resolve every
+ * source/watch/affects target, count missing + outside-allowlist. Exported for test.
+ */
+export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
+  const repos = discoverCrossReposSync(searchRoots);
+  let edges = 0, missing = 0, outsideAllowlist = 0;
+  for (const repo of repos) {
+    let e;
+    try { e = loadCrossRepoSync(repo.root); } catch { continue; }
+    const targets = [
+      ...e.pushEdges.flatMap((p) => p.affects.map((a) => a.path)),
+      ...e.pullEdges.map((p) => p.watch),
+    ];
+    for (const t of targets) {
+      edges++;
+      const r = resolveTarget(repo.root, t);
+      if (r.reason === "missing") missing++;
+      else if (r.reason === "outside-partner" || r.reason === "not-contract") outsideAllowlist++;
+    }
+  }
+  return { edges, missing, outsideAllowlist };
+}
 import { discoverWorkspacesSync } from "./lib/discovery.mjs";
 import { regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/plist.mjs";
 
@@ -58,6 +83,15 @@ async function findSidecars(workspaceRoot) {
 }
 
 async function status() {
+  if (process.argv.includes("--cross")) {
+    const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
+    const rows = (await readLedger(CROSS_LEDGER_JSONL)).filter((r) => r.status === "open");
+    console.log(`${BOLD}# Cross-repo — ${rows.length} open${RESET}`);
+    for (const r of rows) {
+      console.log(`  #${r.id} [${r.direction}] ${r.origin_repo} → ${r.partner}: ${r.source} → ${(r.downstream || []).map((d) => d.path).join(", ")}`);
+    }
+    return;
+  }
   for (const ws of WORKSPACES) {
     console.log(`${BOLD}# ${ws.name}${RESET}`);
     if (!existsSync(ws.ledgerJsonl)) {
@@ -193,6 +227,20 @@ async function doctor() {
     }
   }
 
+  console.log(`\n${BOLD}# Cross-repo${RESET}`);
+  try {
+    const x = await checkCrossRepo();
+    check("cross-repo edges resolve", x.missing === 0 && x.outsideAllowlist === 0,
+      `${x.edges} edges, ${x.missing} missing, ${x.outsideAllowlist} outside-allowlist`);
+    // G7: every fired row must carry a normalized `partner` join key.
+    const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
+    const rows = await readLedger(CROSS_LEDGER_JSONL);
+    const noPartner = rows.filter((r) => r.type === "drift" && !r.partner).length;
+    check("cross rows carry partner", noPartner === 0, `${noPartner} rows missing partner`);
+  } catch (err) {
+    check("cross-repo check ran", false, err.message);
+  }
+
   console.log(`\n${BOLD}# Graph integration${RESET}`);
   let graphMcp = false;
   try {
@@ -307,15 +355,20 @@ sources: {}
   console.log(`${DIM}then: touch a source file to verify the watcher fires${RESET}`);
 }
 
-const mode = process.argv[2] || "status";
-if (mode === "status") {
-  await status();
-} else if (mode === "doctor") {
-  await doctor();
-} else if (mode === "init") {
-  await init(process.argv[3]);
-} else {
-  console.error(`unknown mode: ${mode}`);
-  console.error("usage: node cli.mjs [status|doctor|init <dir>]");
-  process.exit(2);
+// Only dispatch when executed directly (node cli.mjs ...), NOT when a test imports
+// checkCrossRepo from this module.
+const _invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (_invokedDirectly) {
+  const mode = process.argv[2] || "status";
+  if (mode === "status") {
+    await status();
+  } else if (mode === "doctor") {
+    await doctor();
+  } else if (mode === "init") {
+    await init(process.argv[3]);
+  } else {
+    console.error(`unknown mode: ${mode}`);
+    console.error("usage: node cli.mjs [status|doctor|init <dir>]");
+    process.exit(2);
+  }
 }
