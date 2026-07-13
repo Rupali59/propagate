@@ -35,9 +35,12 @@ import {
   WATCHER_LOG,
   MTIME_REVERIFY_DELAY_MS,
   SKILL_DIR,
+  SEARCH_ROOTS,
+  CROSS_LEDGER_JSONL,
+  CROSS_LEDGER_MD,
 } from "./lib/config.mjs";
 import { loadCodeCanonicalSync } from "./lib/code-canonical.mjs";
-import { readState, writeState, detectMtimeChange } from "./lib/state.mjs";
+import { readState, writeState, detectMtimeChange, pruneMtimes } from "./lib/state.mjs";
 import { acquireLock } from "./lib/lock.mjs";
 import {
   loadSidecar,
@@ -47,9 +50,17 @@ import {
 } from "./lib/frontmatter.mjs";
 import {
   appendRow,
+  appendRowWithId,
   nextId,
   renderMarkdown,
 } from "./lib/ledger.mjs";
+import {
+  loadCrossRepoSync,
+  discoverCrossReposSync,
+  resolveTarget,
+  crossCorrelationId,
+  resolvePartner,
+} from "./lib/cross-repo.mjs";
 import { notify, heartbeat } from "./lib/notify.mjs";
 import {
   enumerateWorktrees,
@@ -364,6 +375,95 @@ async function processCodeCanonical(workspace, entry, state, worktreeMap) {
   return results.length > 0 ? results : null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-repo pass (federated .propagates-cross.yml → parent cross-ledger)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Test hook: override the search roots + cross-ledger paths.
+let _crossCfg = { searchRoots: SEARCH_ROOTS, crossJsonl: CROSS_LEDGER_JSONL, crossMd: CROSS_LEDGER_MD };
+export function __setCrossPathsForTest(cfg) { _crossCfg = { ..._crossCfg, ...cfg }; }
+
+/**
+ * Cross-repo pass. Runs inside the outer lock, before writeState.
+ * Push: my declared `source` changes → row telling external consumers to re-verify.
+ * Pull: external `watch` file changes → row for the declaring repo.
+ * Every tracked path is added to crossKeepSet for GC. Returns event count.
+ */
+export async function processCrossRepo(state, crossKeepSet) {
+  const repos = discoverCrossReposSync(_crossCfg.searchRoots);
+  let events = 0;
+
+  for (const repo of repos) {
+    let edges;
+    try {
+      edges = loadCrossRepoSync(repo.root);
+    } catch (err) {
+      await log(`cross: bad .propagates-cross.yml in ${repo.name}: ${err.message}`);
+      continue;
+    }
+
+    // PUSH — watch my own source files; on change, fire to external consumers.
+    for (const edge of edges.pushEdges) {
+      const srcAbs = path.resolve(repo.root, edge.source);
+      crossKeepSet.add(srcAbs);
+      if (!existsSync(srcAbs)) { await log(`cross: push source missing ${srcAbs}`); continue; }
+      const known = state.mtimes[srcAbs] !== undefined;
+      const changed = await detectMtimeChange(STATE_PATH, srcAbs, state);
+      if (changed === null) continue;
+      state.mtimes[srcAbs] = changed;
+      if (!known) continue; // bootstrap seed, no fire
+      const downstream = [];
+      for (const a of edge.affects) {
+        const r = resolveTarget(repo.root, a.path);
+        if (!r.ok) { await log(`cross: push target ${a.path} rejected (${r.reason})`); continue; }
+        downstream.push({ path: a.path, why: a.why, kind: "code" });
+      }
+      if (downstream.length === 0) continue;
+      const corr = crossCorrelationId(srcAbs, path.resolve(repo.root, edge.affects[0].path));
+      await appendRowWithId(_crossCfg.crossJsonl, {
+        type: "drift", source: path.relative(repo.root, srcAbs),
+        change: "cross-repo contract changed (outbound)", downstream, status: "open",
+        flow: "platform_contract", direction: "outbound", origin_repo: repo.name,
+        partner: resolvePartner(edge.affects[0].path), correlation_id: corr,
+      });
+      events++;
+    }
+
+    // PULL — watch external files; on change, fire a row for me.
+    for (const edge of edges.pullEdges) {
+      const r = resolveTarget(repo.root, edge.watch);
+      const watchAbs = r.abs;
+      crossKeepSet.add(watchAbs);
+      if (!r.ok) {
+        if (r.reason === "missing") await log(`cross: pull watch missing ${watchAbs}`);
+        else await log(`cross: pull watch ${edge.watch} rejected (${r.reason})`);
+        continue;
+      }
+      const known = state.mtimes[watchAbs] !== undefined;
+      const changed = await detectMtimeChange(STATE_PATH, watchAbs, state);
+      if (changed === null) continue;
+      state.mtimes[watchAbs] = changed;
+      if (!known) continue; // bootstrap seed, no fire
+      const forAbs = path.resolve(repo.root, edge.for || ".");
+      const corr = crossCorrelationId(watchAbs, forAbs);
+      await appendRowWithId(_crossCfg.crossJsonl, {
+        type: "drift", source: path.relative(repo.root, watchAbs),
+        change: `cross-repo ${edge.flow} changed (inbound) — verify ${edge.for}`,
+        downstream: [{ path: edge.for, why: edge.why, kind: "code" }], status: "open",
+        flow: edge.flow, direction: "inbound", origin_repo: repo.name,
+        partner: resolvePartner(watchAbs), correlation_id: corr,
+      });
+      events++;
+    }
+  }
+
+  if (events > 0 || !existsSync(_crossCfg.crossMd)) {
+    try { await renderMarkdown(_crossCfg.crossJsonl, _crossCfg.crossMd); }
+    catch (err) { await log(`cross: render failed: ${err.message}`); }
+  }
+  return events;
+}
+
 async function main() {
   await mkdir(SKILL_DIR, { recursive: true });
 
@@ -490,6 +590,16 @@ async function main() {
       }
     }
 
+    // Cross-repo pass (federated .propagates-cross.yml → parent cross-ledger).
+    // crossKeepSet collects every cross path so the GC below doesn't prune live edges.
+    const crossKeepSet = new Set(Object.keys(state.mtimes).filter((k) => !k.includes("/.git/")));
+    try {
+      const crossEvents = await processCrossRepo(state, crossKeepSet);
+      if (crossEvents > 0) await log(`cross: ${crossEvents} cross-repo events`);
+    } catch (err) {
+      await log(`cross-repo pass failed: ${err.message}`);
+    }
+
     state.lastRunAt = Date.now();
     await writeState(STATE_PATH, state);
     await heartbeat(HEARTBEAT_PATH);
@@ -519,8 +629,13 @@ async function main() {
   }
 }
 
-main().catch(async (err) => {
-  await log(`fatal: ${err.stack || err.message}`);
-  // exit 0 so launchd doesn't disable us
-  process.exit(0);
-});
+// Only run the watcher when executed directly (node watcher.mjs), NOT when a test
+// imports processCrossRepo/__setCrossPathsForTest from this module.
+const _invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (_invokedDirectly) {
+  main().catch(async (err) => {
+    await log(`fatal: ${err.stack || err.message}`);
+    // exit 0 so launchd doesn't disable us
+    process.exit(0);
+  });
+}
