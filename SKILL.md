@@ -98,6 +98,10 @@ Run via the bash entry below. Reports:
 - launchd plist loaded? (`launchctl list | grep com.rupali.propagate`)
 - Heartbeat age (warn if > 1 hour during a likely-active period; fail if > 1 day)
 - All `.propagates.yml` sidecars pass schema validation
+- **Sidecar downstream paths resolve on disk** (warn-only, cross-workspace): a `prose`
+  downstream that no longer exists or a glob matching 0 files is surfaced as a yellow
+  warning; `code` downstreams are treated as declare-ahead (warn, never fail). Per-repo
+  enforcement is the repo's own pre-commit, not this cross-workspace report.
 - `state.json` parseable; `.bak` exists
 - Ledger JSONL parseable
 
@@ -126,6 +130,12 @@ sources:
         why: <one-line reason>
         kind: prose  # or "code"
 ```
+
+**Glob downstreams:** `path` may be a glob (e.g. `style/pages/**/*.md`) to declare a
+"this shared doc feeds a whole tree" edge without hand-listing every consumer. The watcher
+fs-expands it (relative to the sidecar dir) and records one summary entry
+(`{glob_matched: N, sample: […]}`) rather than N rows. A glob that matches 0 files is
+skipped with a log warning (never recorded as a literal path).
 
 ### `init <dir>` — onboard a new directory
 
@@ -168,8 +178,9 @@ Re-enable: same `bootstrap` command as above. Ledger and sidecars persist.
   `concepts:` field in sidecars is schema-accepted but unused. Deferred to V2
   (TM-064 in workspace TODOS.md).
 - Code → prose drift detection (no git post-commit hooks; deferred).
-- Cross-workspace propagation (skill is general but only `Vipin Kaushik` is
-  configured in `lib/config.mjs`).
+- ~~Cross-workspace propagation~~ — **now auto-discovered**: `discovery.mjs` walks
+  `~/Documents/GitHub` for `.propagates.yml` markers, so every workspace with sidecars
+  (e.g. Vipin Kaushik, PanditPawanKaushik) is watched. `lib/config.mjs` no longer hardcodes one.
 - Linux/remote dev support (macOS-only via launchd).
 
 ## Architecture summary (for future-you)

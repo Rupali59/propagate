@@ -23,7 +23,7 @@
  */
 
 import { readdir, stat, appendFile, mkdir } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, globSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -53,6 +53,7 @@ import {
 import {
   appendRow,
   appendRowWithId,
+  hasOpenDuplicateDrift,
   nextId,
   renderMarkdown,
 } from "./lib/ledger.mjs";
@@ -242,6 +243,30 @@ async function processChange(workspace, filePath, state, worktreeMap) {
   const sidecarDir = path.dirname(sidecarPath);
   for (const d of downstreams) {
     const kind = d.kind || "prose";
+    // Glob downstream (e.g. `style/pages/**/*.md`): fs-expand relative to the
+    // sidecar dir. Store ONE summary entry (glob + match count + sample) rather
+    // than fanning out to N rows — keeps the row/notification readable. 0 matches
+    // → warn and skip (never push the literal glob string as a "path").
+    if (/[*?[\]]/.test(d.path)) {
+      let matches = [];
+      try {
+        matches = globSync(d.path, { cwd: sidecarDir }).filter((m) => !m.includes("node_modules/"));
+      } catch (err) {
+        await log(`glob downstream error: ${d.path} (${err.message})`);
+      }
+      if (matches.length === 0) {
+        await log(`glob downstream matched 0 files: ${d.path} (from ${sourceKey})`);
+        continue;
+      }
+      resolvedDownstreams.push({
+        path: d.path,
+        why: d.why,
+        kind,
+        glob_matched: matches.length,
+        sample: matches.slice(0, 10),
+      });
+      continue;
+    }
     const declaredAbs = path.resolve(sidecarDir, d.path);
     const allExpansions = expandWorktreePaths(declaredAbs, worktreeMap);
     const expansions = allExpansions.filter(
@@ -268,8 +293,14 @@ async function processChange(workspace, filePath, state, worktreeMap) {
     }
   }
 
-  const id = await nextId(workspace.ledgerJsonl);
   const sourceRel = path.relative(workspace.root, filePath);
+  // Append-time dedup: don't re-log identical drift on every mtime bump.
+  const dsPaths = resolvedDownstreams.map((d) => d.path);
+  if (await hasOpenDuplicateDrift(workspace.ledgerJsonl, sourceRel, dsPaths)) {
+    await log(`drift deduped: ${sourceRel} (identical open row already exists)`);
+    return { deduped: true, sourceRel };
+  }
+  const id = await nextId(workspace.ledgerJsonl);
   const change = `auto-detected edit (mtime advanced)`;
   const corrId = correlationKey(filePath, worktreeMap);
 

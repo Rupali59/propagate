@@ -20,7 +20,7 @@
               "properties": {
                 "path": {
                   "type": "string",
-                  "description": "Relative path from this sidecar to the downstream file."
+                  "description": "Relative path from this sidecar to the downstream file. May be a glob (e.g. `style/pages/**/*.md`) — the watcher fs-expands it and records a single summary entry {glob_matched, sample}; `doctor` requires ≥1 match."
                 },
                 "why": {
                   "type": "string",

@@ -8,7 +8,7 @@
  *   node cli.mjs init <dir>     — onboard a new workspace (scaffold marker + regen plist + reload)
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, globSync } from "node:fs";
 import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -153,6 +153,9 @@ async function doctor() {
       problems++;
     }
   }
+  function warn(label, detail = "") {
+    console.log(`  ${YELLOW}!${RESET} ${label}${detail ? "  " + DIM + detail + RESET : ""}`);
+  }
 
   console.log(`${BOLD}# launchd${RESET}`);
   try {
@@ -224,6 +227,50 @@ async function doctor() {
         const msg = err instanceof SidecarError ? err.message.split("] ").pop() : err.message;
         check(`  ${rel}`, false, msg);
       }
+    }
+
+    // Path validation: every sidecar downstream target resolves on disk.
+    // prose missing → problem (fail); code (declare-ahead) → warn; glob → need ≥1 match.
+    let pathProblems = 0;
+    let pathWarns = 0;
+    for (const sc of sidecars) {
+      const scDir = path.dirname(sc);
+      let sidecar;
+      try {
+        sidecar = await loadSidecar(sc);
+      } catch {
+        continue;
+      }
+      const rel = path.relative(ws.root, sc);
+      for (const [src, body] of Object.entries(sidecar.sources || {})) {
+        for (const d of body.propagates_to || []) {
+          const kind = d.kind || "prose";
+          if (/[*?[\]]/.test(d.path)) {
+            let n = 0;
+            try {
+              n = globSync(d.path, { cwd: scDir }).filter((m) => !m.includes("node_modules/")).length;
+            } catch {
+              /* ignore */
+            }
+            if (n === 0) {
+              warn(`${rel}: ${src} → ${d.path}`, "glob matched 0 files");
+              pathWarns++;
+            }
+          } else if (!existsSync(path.resolve(scDir, d.path))) {
+            // Warn-only: doctor is a cross-workspace health report — a stale edge
+            // in one workspace must not red the aggregate exit code. Per-repo
+            // enforcement lives in that repo's pre-commit (check-propagation.sh).
+            warn(
+              `${rel}: ${src} → ${d.path}`,
+              kind === "code" ? "declare-ahead code, not on disk" : "prose downstream missing",
+            );
+            pathWarns++;
+          }
+        }
+      }
+    }
+    if (pathProblems === 0) {
+      check("sidecar downstream paths resolve", true, pathWarns ? `${pathWarns} warn` : "");
     }
   }
 
