@@ -3,6 +3,7 @@
 partner_roots:
   - ~/Documents/GitHub/Motherboard
   - ~/Documents/GitHub/Tathya
+  - ~/Documents/GitHub/PanditPawanKaushik/SSJK-mb
 # contract_files: glob suffixes a cross edge target may match (the "major" filter).
 contract_files:
   - "motherboard.json"
@@ -11,6 +12,7 @@ contract_files:
   - "scripts/**"
   - "**/ga4-property.yaml"
   - "**/DESIGN_SYSTEM_PLAYBOOK.md"
+  - "**/ui/**"
 # partner_aliases: normalized partner name <- the strings that mean it (paths + Affects: tokens).
 # Shared by resolvePartner() so the file trigger (Slice 1) and the future decision
 # trigger (Slice 2) agree what a "partner" is. Matched case-insensitively, after trimming.
@@ -20,3 +22,4 @@ partner_aliases:
   # "number". Every alias here is >=6 chars / distinctive.
   Motherboard: [motherboard, "vipinkaushik-mb", "vipin kaushik"]
   Tathya: [tathya, "tathya-mb"]
+  SSJK: ["ssjk-mb", "shree shyam", "pandit pawan"]
