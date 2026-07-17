@@ -39,11 +39,16 @@ Invoke this skill with one of the modes below. Default mode if none given: `stat
 ### `status` — what's open
 
 ```bash
-node ~/.claude/skills/propagate/cli.mjs status
+node ~/.claude/skills/propagate/cli.mjs status          # THIS project (workspace at cwd)
+node ~/.claude/skills/propagate/cli.mjs status --all    # every workspace
+node ~/.claude/skills/propagate/cli.mjs status --cross  # cross-repo ledger
 ```
 
-Lists all drift rows with `status: open`, grouped by source doc, with row IDs.
-Use this at the start of a session in any subtree that touches constitution docs.
+Lists open drift rows grouped by source doc, with row IDs. **Scoped by default** to the
+workspace containing the current directory — it won't relay other workspaces' queues.
+Open cross-repo rows whose origin lives inside this workspace are surfaced as
+"Cross-repo dependencies" (the "unless there's a dependency" case). `--all` restores the
+every-workspace view.
 
 ### `drain` — walk through open items, apply or skip each
 

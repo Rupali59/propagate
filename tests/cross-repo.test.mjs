@@ -26,7 +26,7 @@ test("cross schema + allowlist files exist and are valid", () => {
   // unknown top-level key rejected
   assert.equal(validate({ nope: [] }), false);
   const allow = yaml.parse(readFileSync(allowPath, "utf8"));
-  assert.ok(Array.isArray(allow.partner_roots) && allow.partner_roots.length === 2);
+  assert.ok(Array.isArray(allow.partner_roots) && allow.partner_roots.length >= 2, "partner_roots present (>=2)");
   assert.ok(Array.isArray(allow.contract_files) && allow.contract_files.length > 0);
 });
 

@@ -3,7 +3,9 @@
  * /propagate CLI — status, doctor, init.
  *
  * Usage:
- *   node cli.mjs status         — list open rows by source
+ *   node cli.mjs status         — open rows for THIS project (the workspace at cwd)
+ *   node cli.mjs status --all   — every workspace's queue
+ *   node cli.mjs status --cross — the cross-repo ledger
  *   node cli.mjs doctor         — health check
  *   node cli.mjs init <dir>     — onboard a new workspace (scaffold marker + regen plist + reload)
  */
@@ -82,6 +84,18 @@ async function findSidecars(workspaceRoot) {
   return found;
 }
 
+/**
+ * The workspace whose root contains the current working directory, or null if
+ * cwd is outside every known workspace. Lets `status` default to "this project"
+ * instead of relaying every workspace's queue.
+ */
+function currentWorkspace() {
+  const cwd = process.cwd();
+  return (
+    WORKSPACES.find((ws) => cwd === ws.root || cwd.startsWith(ws.root + path.sep)) || null
+  );
+}
+
 async function status() {
   if (process.argv.includes("--cross")) {
     const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
@@ -92,8 +106,15 @@ async function status() {
     }
     return;
   }
-  for (const ws of WORKSPACES) {
-    console.log(`${BOLD}# ${ws.name}${RESET}`);
+  // Default: only THIS project's queue (the workspace containing cwd). `--all`
+  // relays every workspace. Cross-repo dependencies still surface below.
+  const showAll = process.argv.includes("--all");
+  const cur = currentWorkspace();
+  const targets = showAll || !cur ? WORKSPACES : [cur];
+  for (const ws of targets) {
+    const scopeTag =
+      !showAll && cur ? `  ${DIM}(this project — --all for every workspace)${RESET}` : "";
+    console.log(`${BOLD}# ${ws.name}${RESET}${scopeTag}`);
     if (!existsSync(ws.ledgerJsonl)) {
       console.log(`  ${DIM}(no ledger file yet)${RESET}\n`);
       continue;
@@ -137,6 +158,30 @@ async function status() {
           console.log(`      ${DIM}${arrow} ${d.path}  (${d.kind}: ${d.why})${RESET}`);
         }
         if (r.notes) console.log(`      ${DIM}notes: ${r.notes}${RESET}`);
+      }
+      console.log();
+    }
+  }
+
+  // "Unless there is a dependency": in scoped mode, surface open cross-repo rows
+  // whose origin repo lives inside THIS workspace (this project's outbound deps).
+  if (!showAll && cur) {
+    let crossRows = [];
+    try {
+      const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
+      crossRows = (await readLedger(CROSS_LEDGER_JSONL)).filter((r) => r.status === "open");
+    } catch {
+      /* no cross ledger */
+    }
+    const mine = crossRows.filter(
+      (r) => r.origin_repo && existsSync(path.join(cur.root, r.origin_repo)),
+    );
+    if (mine.length) {
+      console.log(
+        `${BOLD}# Cross-repo dependencies (${mine.length})${RESET}  ${DIM}(propagate status --cross for detail)${RESET}`,
+      );
+      for (const r of mine) {
+        console.log(`  ${YELLOW}#${r.id}${RESET} ${r.origin_repo} → ${r.partner}: ${r.source}`);
       }
       console.log();
     }
