@@ -51,6 +51,10 @@ import {
   SidecarError,
 } from "./lib/frontmatter.mjs";
 import {
+  enumerateDeclaredSources,
+  synthesizeKindCodeEntries,
+} from "./lib/edges.mjs";
+import {
   appendRow,
   appendRowWithId,
   hasOpenDuplicateDrift,
@@ -96,161 +100,6 @@ async function listCandidates(dir) {
   return entries
     .filter((e) => e.isFile() && FILE_BASENAMES_OF_INTEREST(e.name))
     .map((e) => path.join(dir, e.name));
-}
-
-/**
- * Recursively find all .propagates.yml files under a workspace root.
- * Skips node_modules, .git, .next, dist, build, .venv, __pycache__,
- * .worktrees (we don't want to discover sidecars that live in secondary
- * worktrees — primary worktree's sidecar is canonical).
- */
-async function findAllSidecarsRecursive(root) {
-  const SKIP_DIRS = new Set([
-    "node_modules",
-    ".git",
-    ".next",
-    "dist",
-    "build",
-    ".venv",
-    "venv",
-    "__pycache__",
-    ".worktrees",
-    ".gstack",
-    ".claude",
-  ]);
-  /*
-   * Nearest-ancestor workspace scoping.
-   *
-   * A source file belongs to the CLOSEST workspace above it, not to every
-   * workspace above it. Without this, a repo that is its own workspace but also
-   * sits under a broader one (e.g. Keerti-portfolio inside the GitHub hub) has
-   * every one of its sidecar sources processed twice — firing duplicate rows
-   * into two different ledgers for a single edit.
-   *
-   * Stopping the walk at another workspace's root means that workspace's own
-   * sweep is the only one that sees its sidecars. Workspaces that do NOT contain
-   * a nested workspace are completely unaffected.
-   */
-  const rootAbs = path.resolve(root);
-  const nestedWorkspaceRoots = new Set(
-    WORKSPACES.map((w) => path.resolve(w.root)).filter((r) => r !== rootAbs),
-  );
-
-  const found = [];
-  async function walk(dir) {
-    if (!existsSync(dir)) return;
-    // Hand off to the nested workspace's own sweep.
-    if (path.resolve(dir) !== rootAbs && nestedWorkspaceRoots.has(path.resolve(dir))) return;
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name)) continue;
-        await walk(path.join(dir, e.name));
-      } else if (e.isFile() && e.name === ".propagates.yml") {
-        found.push(path.join(dir, e.name));
-      }
-    }
-  }
-  await walk(root);
-  return found;
-}
-
-/**
- * Enumerate every file declared as a source in any sidecar under workspaceRoot.
- * Returns absolute paths, deduplicated. Source declarations are resolved
- * relative to the sidecar's own directory (matches loadSidecar / processChange
- * semantics).
- *
- * Why this exists (added 2026-06-09, D8 follow-up):
- * The watcher previously walked only `scanDirs = ["docs", "."]` per workspace —
- * direct children of the workspace root. Sources declared in nested project
- * sidecars (astroacharya/.propagates.yml, VipinKaushik-mb/.propagates.yml)
- * pointing at files in subdirectories (app/, server/, lib/) were never
- * statted, so drift never fired. This enumeration is sidecar-driven:
- * whatever any sidecar declares as a source gets watched, regardless of
- * subdir depth or extension.
- */
-async function enumerateDeclaredSources(workspaceRoot) {
-  const sources = new Set();
-  const sidecars = await findAllSidecarsRecursive(workspaceRoot);
-  for (const sidecarPath of sidecars) {
-    let sidecar;
-    try {
-      sidecar = await loadSidecar(sidecarPath);
-    } catch (err) {
-      // Broken sidecar — log via main loop, don't fail enumeration.
-      await log(`enumerateDeclaredSources: skip broken sidecar ${sidecarPath}: ${err.message}`);
-      continue;
-    }
-    if (!sidecar || !sidecar.sources) continue;
-    const sidecarDir = path.dirname(sidecarPath);
-    for (const sourceKey of Object.keys(sidecar.sources)) {
-      // Source key is relative to sidecar dir.
-      const sourceAbs = path.resolve(sidecarDir, sourceKey);
-      sources.add(sourceAbs);
-    }
-  }
-  return Array.from(sources);
-}
-
-/**
- * Synthesize code-canonical entries from every `.propagates.yml` `kind: code`
- * downstream declared anywhere under workspaceRoot (G3 — closes #43's gap: a
- * `kind: code` downstream previously only fired forward, doc -> verify code;
- * this makes the coupling fire code -> verify doc too).
- *
- * Reuses the same sidecar discovery + loading as enumerateDeclaredSources,
- * plus downstreamsFor to read each source's declared downstreams.
- *
- * Shape matches loadCodeCanonicalSync's output exactly:
- *   {codePath, upstreamDoc, upstreamSection, note}
- * Both codePath and upstreamDoc are WORKSPACE-RELATIVE (eng-review F4) —
- * processCodeCanonical re-resolves them against workspace.root, so an
- * absolute path here would double-resolve and never match on disk.
- *
- * Glob kind:code downstreams (e.g. `lib/**\/*.ts`) are deferred: logged and
- * skipped, matching the existing 0-match glob handling in processChange.
- */
-async function synthesizeKindCodeEntries(workspaceRoot) {
-  const synthesized = [];
-  const sidecars = await findAllSidecarsRecursive(workspaceRoot);
-  for (const sidecarPath of sidecars) {
-    let sidecar;
-    try {
-      sidecar = await loadSidecar(sidecarPath);
-    } catch (err) {
-      await log(`synthesizeKindCodeEntries: skip broken sidecar ${sidecarPath}: ${err.message}`);
-      continue;
-    }
-    if (!sidecar || !sidecar.sources) continue;
-    const sidecarDir = path.dirname(sidecarPath);
-    for (const sourceKey of Object.keys(sidecar.sources)) {
-      const downstreams = downstreamsFor(sidecar, sourceKey);
-      const sourceAbs = path.resolve(sidecarDir, sourceKey);
-      for (const d of downstreams) {
-        if ((d.kind || "prose") !== "code") continue;
-        if (/[*?[\]]/.test(d.path)) {
-          await log(
-            `kind:code glob downstream deferred (log-and-skip): ${d.path} (from ${sourceKey})`,
-          );
-          continue;
-        }
-        const codeAbs = path.resolve(sidecarDir, d.path);
-        synthesized.push({
-          codePath: path.relative(workspaceRoot, codeAbs),
-          upstreamDoc: path.relative(workspaceRoot, sourceAbs),
-          upstreamSection: d.why || "",
-          note: "declared kind:code edge (bidirectional)",
-        });
-      }
-    }
-  }
-  return synthesized;
 }
 
 export async function processChange(workspace, filePath, state, worktreeMap) {
@@ -752,7 +601,7 @@ async function main() {
       // processChange's mtime check.
       let declaredSources;
       try {
-        declaredSources = await enumerateDeclaredSources(workspace.root);
+        declaredSources = await enumerateDeclaredSources(workspace.root, log);
       } catch (err) {
         await log(`enumerateDeclaredSources failed for ${workspace.name}: ${err.message}`);
         declaredSources = [];
@@ -784,7 +633,7 @@ async function main() {
       }
       let synthesizedEntries = [];
       try {
-        synthesizedEntries = await synthesizeKindCodeEntries(workspace.root);
+        synthesizedEntries = await synthesizeKindCodeEntries(workspace.root, log);
       } catch (err) {
         await log(`error synthesizing kind:code edges for ${workspace.name}: ${err.message}`);
       }

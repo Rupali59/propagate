@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * /propagate CLI — status, doctor, init.
+ * /propagate CLI — status, doctor, init, check.
  *
  * Usage:
  *   node cli.mjs status         — open rows for THIS project (the workspace at cwd)
@@ -8,6 +8,11 @@
  *   node cli.mjs status --cross — the cross-repo ledger
  *   node cli.mjs doctor         — health check
  *   node cli.mjs init <dir>     — onboard a new workspace (scaffold marker + regen plist + reload)
+ *   node cli.mjs check --changed          — commit-time drift gate: warn on coupled files
+ *                                            (working tree + staged, vs HEAD)
+ *   node cli.mjs check --range <a>..<b>   — same, over an explicit git range (CI)
+ *   node cli.mjs check --staged           — staged files only (pre-commit use)
+ *   node cli.mjs check ... --strict       — exit 1 (not 0) when couplings are found
  */
 
 import { existsSync, globSync } from "node:fs";
@@ -26,6 +31,7 @@ import {
 import { readLedger } from "./lib/ledger.mjs";
 import { loadSidecar, SidecarError } from "./lib/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
+import { buildEdgeMap } from "./lib/edges.mjs";
 
 /**
  * Validate cross-repo edges: load each .propagates-cross.yml, resolve every
@@ -454,6 +460,146 @@ sources: {}
   console.log(`${DIM}then: touch a source file to verify the watcher fires${RESET}`);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// check — commit-time drift gate (git pre-push / CI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve an absolute changed-file path to the workspace that owns it, via
+ * nearest-ancestor matching (same rule as `currentWorkspace()` and
+ * `findAllSidecarsRecursive`'s nested-workspace scoping — longest matching
+ * root wins).
+ * @param {string} absPath
+ * @param {Array} workspaces
+ * @returns {{workspace: object, rel: string} | null}
+ */
+export function resolveChangedFile(absPath, workspaces = WORKSPACES) {
+  const matches = workspaces.filter(
+    (ws) => absPath === ws.root || absPath.startsWith(ws.root + path.sep),
+  );
+  if (matches.length === 0) return null;
+  const ws = matches.reduce((best, w) => (w.root.length > best.root.length ? w : best));
+  return { workspace: ws, rel: path.relative(ws.root, absPath) };
+}
+
+/**
+ * Core of `check`: given changed files (paths relative to `repoRoot`, as
+ * `git diff --name-only` reports them) resolve each to its workspace's
+ * declared edges (F4 — repo-relative -> absolute -> nearest-ancestor
+ * workspace -> workspace-relative, on both sides before lookup) and cross-ref
+ * the workspace ledger for already-open drift on that file.
+ *
+ * Exported (not just used internally by `check()`) so tests can drive it
+ * directly against a temp workspace, without shelling out to git or reading
+ * real WORKSPACES (eng-review: testability over shelling out).
+ *
+ * @param {string[]} changedRepoRelPaths
+ * @param {string} repoRoot absolute path to the git repo root the paths are relative to
+ * @param {Array} workspaces defaults to the real discovered WORKSPACES; override in tests
+ * @returns {Promise<{file: string, workspace: string, coupled: string[], openLedgerIds: string[]}[]>}
+ */
+export async function computeCouplings(changedRepoRelPaths, repoRoot, workspaces = WORKSPACES) {
+  const edgeMapCache = new Map(); // workspace.root -> {forward, reverse}
+  const ledgerCache = new Map(); // workspace.ledgerJsonl -> open rows
+  const results = [];
+
+  for (const relPath of changedRepoRelPaths) {
+    const abs = path.resolve(repoRoot, relPath);
+    const resolved = resolveChangedFile(abs, workspaces);
+    if (!resolved) continue;
+    const { workspace, rel } = resolved;
+
+    if (!edgeMapCache.has(workspace.root)) {
+      edgeMapCache.set(workspace.root, await buildEdgeMap(workspace.root));
+    }
+    const { forward, reverse } = edgeMapCache.get(workspace.root);
+
+    const coupled = new Set();
+    if (forward.has(rel)) for (const p of forward.get(rel)) coupled.add(p);
+    if (reverse.has(rel)) for (const u of reverse.get(rel)) coupled.add(u.upstreamDoc);
+
+    if (!ledgerCache.has(workspace.ledgerJsonl)) {
+      const rows = existsSync(workspace.ledgerJsonl) ? await readLedger(workspace.ledgerJsonl) : [];
+      ledgerCache.set(workspace.ledgerJsonl, rows.filter((r) => r.status === "open"));
+    }
+    const openIds = ledgerCache
+      .get(workspace.ledgerJsonl)
+      .filter((r) => r.source === rel)
+      .map((r) => r.id);
+
+    if (coupled.size === 0 && openIds.length === 0) continue;
+    results.push({ file: rel, workspace: workspace.name, coupled: [...coupled], openLedgerIds: openIds });
+  }
+  return results;
+}
+
+/**
+ * Print the grouped warning and return the exit code — separated from
+ * `check()`'s arg-parsing/git-shelling so tests can call this directly with
+ * a synthetic changed-file list (no git, no real WORKSPACES needed).
+ * @returns {Promise<{exitCode: number, couplings: Array}>}
+ */
+export async function runCheck({ changedFiles, repoRoot, strict = false }, workspaces = WORKSPACES) {
+  const couplings = await computeCouplings(changedFiles, repoRoot, workspaces);
+  if (couplings.length === 0) {
+    return { exitCode: 0, couplings };
+  }
+  console.log(
+    `${YELLOW}⚠ ${couplings.length} coupled file${couplings.length === 1 ? "" : "s"} in this change:${RESET}`,
+  );
+  for (const c of couplings) {
+    const parts = [...c.coupled];
+    if (c.openLedgerIds.length) {
+      parts.push(`open drift ${c.openLedgerIds.map((id) => `#${id}`).join(", ")}`);
+    }
+    console.log(`  ${c.file} → verify: ${parts.join(", ")}`);
+  }
+  return { exitCode: strict ? 1 : 0, couplings };
+}
+
+/** Run a git diff and return the list of changed paths (repo-relative), deduped. */
+function gitDiffNames(cmd, repoRoot) {
+  let out;
+  try {
+    out = execSync(cmd, { cwd: repoRoot, encoding: "utf8" });
+  } catch (err) {
+    console.error(`${RED}error:${RESET} ${cmd} failed: ${err.message}`);
+    process.exit(2);
+  }
+  return out.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+async function check() {
+  const args = process.argv.slice(3);
+  const strict = args.includes("--strict");
+  const staged = args.includes("--staged");
+  const rangeIdx = args.indexOf("--range");
+  const range = rangeIdx !== -1 ? args[rangeIdx + 1] : null;
+
+  let repoRoot;
+  try {
+    repoRoot = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+  } catch (err) {
+    console.error(`${RED}error:${RESET} not inside a git repo (${err.message})`);
+    process.exit(2);
+  }
+
+  let changedFiles;
+  if (range) {
+    changedFiles = gitDiffNames(`git diff --name-only ${range}`, repoRoot);
+  } else if (staged) {
+    changedFiles = gitDiffNames("git diff --name-only --cached", repoRoot);
+  } else {
+    // --changed (default): working tree + staged vs HEAD, unioned.
+    const workingTree = gitDiffNames("git diff --name-only HEAD", repoRoot);
+    const cached = gitDiffNames("git diff --name-only --cached", repoRoot);
+    changedFiles = [...new Set([...workingTree, ...cached])];
+  }
+
+  const { exitCode } = await runCheck({ changedFiles, repoRoot, strict });
+  process.exit(exitCode);
+}
+
 // Only dispatch when executed directly (node cli.mjs ...), NOT when a test imports
 // checkCrossRepo from this module.
 const _invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
@@ -465,9 +611,11 @@ if (_invokedDirectly) {
     await doctor();
   } else if (mode === "init") {
     await init(process.argv[3]);
+  } else if (mode === "check") {
+    await check();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir>]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]]");
     process.exit(2);
   }
 }

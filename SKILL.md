@@ -166,6 +166,73 @@ For V1: create an empty `.propagates.yml` at `<dir>/.propagates.yml` with just
 the header. Add `<dir>` to `WatchPaths` in the plist if it's not already covered
 by a parent watch. Reload the plist.
 
+### `check` — commit-time drift gate (git pre-push / CI)
+
+The watcher fires **save-time**, on one Mac. `check` is the **commit-time**
+counterpart: given a set of changed files, it warns when one of them is
+declared coupled (via `.propagates.yml`) to a file that *didn't* also change —
+the exact gap that let #43 slip (code changed, the doc it's coupled to did
+not, nothing surfaced it until the next save-time fire on the watcher's Mac).
+
+```bash
+node ~/.claude/skills/propagate/cli.mjs check --changed          # working tree + staged, vs HEAD
+node ~/.claude/skills/propagate/cli.mjs check --range <a>..<b>   # explicit range (CI)
+node ~/.claude/skills/propagate/cli.mjs check --staged           # staged only (pre-commit use)
+node ~/.claude/skills/propagate/cli.mjs check --changed --strict # exit 1 (not 0) if any coupling found
+```
+
+For each changed file, `check` looks up:
+- **forward** — is it a declared `.propagates.yml` source? → list its downstreams to re-verify.
+- **reverse** — is it a `kind: code` downstream? → list the upstream doc(s) to re-verify (the #43 case).
+- **ledger cross-ref** — does it already have an open drift row in its workspace's ledger?
+
+Output is grouped and human-readable:
+
+```
+⚠ 1 coupled file in this change:
+  lib/engine.ts → verify: SPEC.md
+```
+
+**Default = warn, exit 0.** `--strict` makes couplings a hard failure (exit 1) —
+use this in a blocking hook or a required CI check. No couplings → exit 0, no
+output.
+
+**Known limitation (documented, not a bug):** glob `kind: code` downstreams
+(e.g. `lib/**/*.ts`) are deferred — `synthesizeKindCodeEntries` logs and
+skips them, same as the watcher — so `check` won't warn on a glob-declared
+code edge. Declare non-glob `kind: code` edges for files you want the
+commit-time gate to actually catch.
+
+**git pre-push hook** (recommended install — computes the pushed range from
+the hook's stdin and calls `check` over it):
+
+```bash
+#!/usr/bin/env bash
+# .git/hooks/pre-push (chmod +x)
+remote="$1"
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue   # branch deletion — nothing to check
+  if [ "$remote_sha" = "$zero" ]; then
+    range="$local_sha"                      # new branch — no remote base yet
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  node ~/.claude/skills/propagate/cli.mjs check --range "$range" --strict || exit 1
+done
+exit 0
+```
+
+Drop this at `<repo>/.git/hooks/pre-push` (or `.githooks/pre-push` if the repo
+uses `core.hooksPath`) and mark it executable. Omit `--strict` for a
+non-blocking nudge instead of a hard gate.
+
+**CI (secondary, documented not built in v1):** the same `check --range`
+command runs unchanged in a GitHub Action once this skill (or just `cli.mjs`
++ `lib/`) is available in the runner — e.g. checkout this repo as a step, then
+`node cli.mjs check --range "${{ github.event.before }}..${{ github.sha }}" --strict`.
+No CI wiring is built here; this is a pointer for when that's worth doing.
+
 ## Initial install (once per machine)
 
 ```bash
