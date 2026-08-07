@@ -118,9 +118,29 @@ async function findAllSidecarsRecursive(root) {
     ".gstack",
     ".claude",
   ]);
+  /*
+   * Nearest-ancestor workspace scoping.
+   *
+   * A source file belongs to the CLOSEST workspace above it, not to every
+   * workspace above it. Without this, a repo that is its own workspace but also
+   * sits under a broader one (e.g. Keerti-portfolio inside the GitHub hub) has
+   * every one of its sidecar sources processed twice — firing duplicate rows
+   * into two different ledgers for a single edit.
+   *
+   * Stopping the walk at another workspace's root means that workspace's own
+   * sweep is the only one that sees its sidecars. Workspaces that do NOT contain
+   * a nested workspace are completely unaffected.
+   */
+  const rootAbs = path.resolve(root);
+  const nestedWorkspaceRoots = new Set(
+    WORKSPACES.map((w) => path.resolve(w.root)).filter((r) => r !== rootAbs),
+  );
+
   const found = [];
   async function walk(dir) {
     if (!existsSync(dir)) return;
+    // Hand off to the nested workspace's own sweep.
+    if (path.resolve(dir) !== rootAbs && nestedWorkspaceRoots.has(path.resolve(dir))) return;
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });

@@ -91,9 +91,16 @@ async function findSidecars(workspaceRoot) {
  */
 function currentWorkspace() {
   const cwd = process.cwd();
-  return (
-    WORKSPACES.find((ws) => cwd === ws.root || cwd.startsWith(ws.root + path.sep)) || null
+  // Nearest ancestor, not first match. A repo registered as its own workspace
+  // also sits under a broader one (e.g. Keerti-portfolio inside the GitHub hub),
+  // and `.find()` returned whichever was discovered first — so `status` run from
+  // inside the repo relayed the hub's queue instead of the repo's. Longest
+  // matching root wins, matching `findAllSidecarsRecursive`'s scoping.
+  const matches = WORKSPACES.filter(
+    (ws) => cwd === ws.root || cwd.startsWith(ws.root + path.sep),
   );
+  if (matches.length === 0) return null;
+  return matches.reduce((best, ws) => (ws.root.length > best.root.length ? ws : best));
 }
 
 async function status() {

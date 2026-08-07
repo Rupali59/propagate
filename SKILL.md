@@ -13,9 +13,17 @@ declaring new sidecars, and verifying health.
 - Watcher script: `~/.claude/skills/propagate/watcher.mjs`
 - Worktree helpers: `~/.claude/skills/propagate/lib/worktrees.mjs`
 - launchd plist: `~/Library/LaunchAgents/com.rupali.propagate.plist`
-- Ledger (JSONL, authoritative): `Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl`
-- Ledger (Markdown, rendered): `Vipin Kaushik/docs/PROPAGATION_LEDGER.md`
-- Sidecars: `Vipin Kaushik/**/.propagates.yml`
+- Ledger (JSONL, authoritative): **per-workspace, resolved by `lib/discovery.mjs` `makeWorkspaceRecord`** —
+  `<workspace-root>/docs/PROPAGATION_LEDGER.jsonl` when `<root>/docs/` exists, otherwise
+  `<workspace-root>/.propagation/ledger.jsonl`. There is NOT one global ledger. Examples:
+  `Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl` (has `docs/`), but the **GitHub hub** workspace
+  (`~/Documents/GitHub`, which any sub-project without its own registered workspace resolves to via
+  `currentWorkspace()`) has no `docs/`, so its ledger is `~/Documents/GitHub/.propagation/ledger.jsonl`.
+  ⚠️ Always resolve the ledger for the row you're closing from the SAME workspace `status`/`doctor`
+  reports it under (see the drain note below) — writing `markStatus` to a different workspace's ledger
+  silently no-ops (the row never clears).
+- Ledger (Markdown, rendered): the sibling `…/PROPAGATION_LEDGER.md` or `…/.propagation/ledger.md`.
+- Sidecars: `<workspace-root>/**/.propagates.yml` (every discovered workspace)
 - State: `~/.claude/skills/propagate/state.json` (with `.bak` rotation)
 - Heartbeat: `~/.claude/skills/propagate/heartbeat`
 - Logs: `~/.claude/skills/propagate/watcher.log`, `watcher.stdout.log`, `watcher.stderr.log`
@@ -77,25 +85,30 @@ Rows without `correlation_id` (workspace docs, orphan files) are handled per-row
 
 Drain is a Claude-driven workflow — there is no automated drain command. The
 skill walks the human through each item using AskUserQuestion. After each
-decision, append a `status_change` record by calling the helper:
+decision, append a `status_change` record by calling the helper.
+
+⚠️ **Resolve the ledger path from the workspace the row belongs to — do NOT hardcode
+a path.** A row shown under `# <Name>` by `status` lives in THAT workspace's ledger
+(see the per-workspace rule under "Canonical state"). `markStatus` against any other
+ledger silently no-ops and the row stays open. Derive it via discovery so it always
+matches what `status` reads:
 
 ```javascript
-import { markStatus } from "~/.claude/skills/propagate/lib/ledger.mjs";
-await markStatus(
-  "/Users/rupali.b/Documents/GitHub/Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl",
-  "003",
-  "done",
-);
+import { markStatus, renderMarkdown } from "~/.claude/skills/propagate/lib/ledger.mjs";
+import { discoverWorkspacesSync } from "~/.claude/skills/propagate/lib/discovery.mjs";
+import { SEARCH_ROOTS } from "~/.claude/skills/propagate/lib/config.mjs";
+
+// pick the workspace whose root contains the row's source file (nearest ancestor)
+const ws = discoverWorkspacesSync(SEARCH_ROOTS)
+  .filter((w) => sourceAbsPath === w.root || sourceAbsPath.startsWith(w.root + "/"))
+  .reduce((best, w) => (w.root.length > (best?.root.length ?? -1) ? w : best), null);
+
+await markStatus(ws.ledgerJsonl, "003", "done");
+await renderMarkdown(ws.ledgerJsonl, ws.ledgerMd); // re-render the sibling MD
 ```
 
-Then re-render the MD view:
-```javascript
-import { renderMarkdown } from "~/.claude/skills/propagate/lib/ledger.mjs";
-await renderMarkdown(
-  "/Users/rupali.b/Documents/GitHub/Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl",
-  "/Users/rupali.b/Documents/GitHub/Vipin Kaushik/docs/PROPAGATION_LEDGER.md",
-);
-```
+Quick sanity check after closing: re-run `status` — the row should be gone. If it
+isn't, you wrote to the wrong ledger file.
 
 ### `doctor` — health check
 
