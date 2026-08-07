@@ -198,7 +198,62 @@ async function enumerateDeclaredSources(workspaceRoot) {
   return Array.from(sources);
 }
 
-async function processChange(workspace, filePath, state, worktreeMap) {
+/**
+ * Synthesize code-canonical entries from every `.propagates.yml` `kind: code`
+ * downstream declared anywhere under workspaceRoot (G3 — closes #43's gap: a
+ * `kind: code` downstream previously only fired forward, doc -> verify code;
+ * this makes the coupling fire code -> verify doc too).
+ *
+ * Reuses the same sidecar discovery + loading as enumerateDeclaredSources,
+ * plus downstreamsFor to read each source's declared downstreams.
+ *
+ * Shape matches loadCodeCanonicalSync's output exactly:
+ *   {codePath, upstreamDoc, upstreamSection, note}
+ * Both codePath and upstreamDoc are WORKSPACE-RELATIVE (eng-review F4) —
+ * processCodeCanonical re-resolves them against workspace.root, so an
+ * absolute path here would double-resolve and never match on disk.
+ *
+ * Glob kind:code downstreams (e.g. `lib/**\/*.ts`) are deferred: logged and
+ * skipped, matching the existing 0-match glob handling in processChange.
+ */
+async function synthesizeKindCodeEntries(workspaceRoot) {
+  const synthesized = [];
+  const sidecars = await findAllSidecarsRecursive(workspaceRoot);
+  for (const sidecarPath of sidecars) {
+    let sidecar;
+    try {
+      sidecar = await loadSidecar(sidecarPath);
+    } catch (err) {
+      await log(`synthesizeKindCodeEntries: skip broken sidecar ${sidecarPath}: ${err.message}`);
+      continue;
+    }
+    if (!sidecar || !sidecar.sources) continue;
+    const sidecarDir = path.dirname(sidecarPath);
+    for (const sourceKey of Object.keys(sidecar.sources)) {
+      const downstreams = downstreamsFor(sidecar, sourceKey);
+      const sourceAbs = path.resolve(sidecarDir, sourceKey);
+      for (const d of downstreams) {
+        if ((d.kind || "prose") !== "code") continue;
+        if (/[*?[\]]/.test(d.path)) {
+          await log(
+            `kind:code glob downstream deferred (log-and-skip): ${d.path} (from ${sourceKey})`,
+          );
+          continue;
+        }
+        const codeAbs = path.resolve(sidecarDir, d.path);
+        synthesized.push({
+          codePath: path.relative(workspaceRoot, codeAbs),
+          upstreamDoc: path.relative(workspaceRoot, sourceAbs),
+          upstreamSection: d.why || "",
+          note: "declared kind:code edge (bidirectional)",
+        });
+      }
+    }
+  }
+  return synthesized;
+}
+
+export async function processChange(workspace, filePath, state, worktreeMap) {
   const newMtime = await detectMtimeChange(STATE_PATH, filePath, state);
   if (newMtime === null) return null;
 
@@ -344,12 +399,29 @@ async function processChange(workspace, filePath, state, worktreeMap) {
 /**
  * Code-canonical scan — bidirectional drift detection, worktree-aware.
  *
- * For each entry in `.code-canonical.yml`, expand the canonical code path
- * to all worktree-equivalents via `expandWorktreePaths`. For each worktree
- * whose copy of the file changed, fire ONE `code_drift` row (the row's
- * `source` includes the worktree's path so drain can locate the actual
- * edit; `correlation_id` groups all worktree-copies of the same logical
- * file so drain dedupes the upstream-verification prompt).
+ * `upstreams` is an ARRAY of `{upstreamDoc, upstreamSection, note}` — one
+ * codePath can be coupled to multiple docs (declared in both
+ * `.code-canonical.yml` and a `.propagates.yml` `kind: code` edge, or
+ * pointing at two docs). Callers group entries by codePath BEFORE calling
+ * this (G3 — eng-review): merging here, one row per codePath, keeps a
+ * changed code file from firing N rows or cross-suppressing when the same
+ * file is declared more than once.
+ *
+ * For codePath, expand the canonical code path to all worktree-equivalents
+ * via `expandWorktreePaths`. For each worktree whose copy of the file
+ * changed, fire ONE `code_drift` row whose `downstream[]` lists every
+ * upstream doc to verify (the row's `source` includes the worktree's path
+ * so drain can locate the actual edit; `correlation_id` groups all
+ * worktree-copies of the same logical file so drain dedupes the
+ * upstream-verification prompt).
+ *
+ * Dedup is `state.mtimes` mtime-advance (per file) + the caller's grouping
+ * by codePath — NOT `hasOpenDuplicateDrift` (eng-review F2: that helper
+ * filters `type === "drift"` only and ignores `code_drift`, so it was never
+ * applicable here). Consequence (correct, not a bug): after a drain
+ * (`status_change -> done`), a subsequent real edit of the code file
+ * re-fires — the doc genuinely needs re-verification after each code
+ * change.
  *
  * Bootstrap behaviour: on first-observation of a sibling-worktree path
  * (state.mtimes[filePath] === undefined AND the worktree is NOT canonical),
@@ -357,8 +429,19 @@ async function processChange(workspace, filePath, state, worktreeMap) {
  * the worktree-aware watcher floods the ledger with one row per
  * sibling-worktree file on first fire (S2 — bootstrap seed).
  */
-async function processCodeCanonical(workspace, entry, state, worktreeMap) {
-  const canonicalAbs = path.resolve(workspace.root, entry.codePath);
+export async function processCodeCanonical(workspace, codePath, upstreams, state, worktreeMap) {
+  // De-dup upstream docs — a codePath can arrive here with the same doc
+  // declared twice (e.g. present in both .code-canonical.yml AND a
+  // kind:code sidecar edge). One downstream entry per doc, not per
+  // declaration.
+  const seenDocs = new Map();
+  for (const u of upstreams) {
+    if (u && u.upstreamDoc && !seenDocs.has(u.upstreamDoc)) seenDocs.set(u.upstreamDoc, u);
+  }
+  const uniqueUpstreams = [...seenDocs.values()];
+  if (uniqueUpstreams.length === 0) return null;
+
+  const canonicalAbs = path.resolve(workspace.root, codePath);
   const expansions = expandWorktreePaths(canonicalAbs, worktreeMap);
   if (expansions.length === 0) {
     // Canonical doesn't exist and no worktree has the file — nothing to do.
@@ -401,29 +484,36 @@ async function processCodeCanonical(workspace, entry, state, worktreeMap) {
     const corrId = correlationKey(filePath, worktreeMap);
     const stamp = worktreeStamp(exp.worktree);
 
+    const downstream = uniqueUpstreams.map((u) => ({
+      path: u.upstreamDoc,
+      why: u.upstreamSection,
+      kind: "prose",
+    }));
+    const changeSummary =
+      uniqueUpstreams.length === 1
+        ? `code-canonical edit — verify ${uniqueUpstreams[0].upstreamDoc} ${uniqueUpstreams[0].upstreamSection} still matches`
+        : `code-canonical edit — verify ${uniqueUpstreams.length} upstream docs still match`;
+    const notes = uniqueUpstreams.map((u) => u.note).filter(Boolean).join("; ");
+
     const row = {
       type: "code_drift",
       id,
       source: sourceForRow,
-      change: `code-canonical edit — verify ${entry.upstreamDoc} ${entry.upstreamSection} still matches`,
-      downstream: [
-        {
-          path: entry.upstreamDoc,
-          why: entry.upstreamSection,
-          kind: "prose",
-        },
-      ],
+      change: changeSummary,
+      downstream,
       status: "open",
-      notes: entry.note,
+      notes,
     };
     if (corrId) row.correlation_id = corrId;
     if (stamp) row.source_worktree = stamp;
 
     await appendRow(workspace.ledgerJsonl, row);
     await log(
-      `code_drift logged: ${sourceForRow} -> upstream ${entry.upstreamDoc} ${entry.upstreamSection}`,
+      `code_drift logged: ${sourceForRow} -> upstream ${uniqueUpstreams
+        .map((u) => `${u.upstreamDoc} ${u.upstreamSection}`)
+        .join(", ")}`,
     );
-    results.push({ id, sourceRel: sourceForRow, count: 1, kind: "code_drift" });
+    results.push({ id, sourceRel: sourceForRow, count: downstream.length, kind: "code_drift" });
   }
   return results.length > 0 ? results : null;
 }
@@ -676,28 +766,49 @@ async function main() {
         }
       }
 
-      // Code-canonical scan — bidirectional drift detection. V2: entries
-      // loaded from per-workspace .code-canonical.yml. For each declared
-      // code path under this workspace, expand to all worktrees and fire
-      // a code_drift row pointing upstream when any worktree's copy mtime
-      // advances. Returns an array of results (one per firing worktree)
-      // or null if no firings.
+      // Code-canonical scan — bidirectional drift detection. Entries come
+      // from TWO sources, merged (G3): the per-workspace .code-canonical.yml
+      // AND every `.propagates.yml` `kind: code` downstream, synthesized
+      // into the same shape. Grouped by codePath BEFORE calling
+      // processCodeCanonical so a code file declared in both sidecars (or
+      // pointing at two docs) fires ONE code_drift row with N downstreams,
+      // not N rows. For each declared code path under this workspace,
+      // expand to all worktrees and fire a code_drift row pointing upstream
+      // when any worktree's copy mtime advances. Returns an array of
+      // results (one per firing worktree) or null if no firings.
       let canonicalEntries = [];
       try {
         canonicalEntries = loadCodeCanonicalSync(workspace.root);
       } catch (err) {
         await log(`error loading .code-canonical.yml for ${workspace.name}: ${err.message}`);
       }
-      for (const entry of canonicalEntries) {
+      let synthesizedEntries = [];
+      try {
+        synthesizedEntries = await synthesizeKindCodeEntries(workspace.root);
+      } catch (err) {
+        await log(`error synthesizing kind:code edges for ${workspace.name}: ${err.message}`);
+      }
+      const groupedByCodePath = new Map();
+      for (const entry of [...canonicalEntries, ...synthesizedEntries]) {
+        if (!entry.codePath || !entry.upstreamDoc) continue;
+        const list = groupedByCodePath.get(entry.codePath) || [];
+        list.push({
+          upstreamDoc: entry.upstreamDoc,
+          upstreamSection: entry.upstreamSection,
+          note: entry.note,
+        });
+        groupedByCodePath.set(entry.codePath, list);
+      }
+      for (const [codePath, upstreams] of groupedByCodePath) {
         try {
-          const results = await processCodeCanonical(workspace, entry, state, worktreeMap);
+          const results = await processCodeCanonical(workspace, codePath, upstreams, state, worktreeMap);
           if (results) {
             for (const r of results) {
               events.push({ workspace: workspace.name, ...r });
             }
           }
         } catch (err) {
-          await log(`error processing code-canonical ${entry.codePath}: ${err.message}`);
+          await log(`error processing code-canonical ${codePath}: ${err.message}`);
         }
       }
 

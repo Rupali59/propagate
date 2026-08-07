@@ -5,3 +5,5 @@ state.json.bak
 heartbeat
 .lock-target
 *.log
+.DS_Store
+.code-review-graph/

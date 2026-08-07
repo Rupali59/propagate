@@ -155,6 +155,11 @@ fs-expands it (relative to the sidecar dir) and records one summary entry
 (`{glob_matched: N, sample: […]}`) rather than N rows. A glob that matches 0 files is
 skipped with a log warning (never recorded as a literal path).
 
+**`kind: code` is bidirectional:** the edge fires both ways — the doc changing fires
+forward (verify the code), and the code file changing now also fires a `code_drift`
+row back at the doc (verify the doc). Non-glob `kind: code` downstreams only; glob
+`kind: code` entries are log-and-skipped on the code→doc direction (deferred).
+
 ### `init <dir>` — onboard a new directory
 
 For V1: create an empty `.propagates.yml` at `<dir>/.propagates.yml` with just
@@ -195,7 +200,17 @@ Re-enable: same `bootstrap` command as above. Ledger and sidecars persist.
 - Graph integration. `code-review-graph` MCP is not currently registered; the
   `concepts:` field in sidecars is schema-accepted but unused. Deferred to V2
   (TM-064 in workspace TODOS.md).
-- Code → prose drift detection (no git post-commit hooks; deferred).
+- ~~Code → prose drift detection~~ — **exists, two ways**: (1) `.code-canonical.yml`
+  per-workspace canonical-pairs fire a `code_drift` row when the declared code path's
+  mtime advances. (2) Every `.propagates.yml` `kind: code` downstream is now
+  **bidirectional** — a doc's `kind: code` edge previously only fired forward
+  (doc changes → verify code); code changes on that same edge now also fire a
+  `code_drift` row back at the doc (closes #43's gap: task-engine-v2.md declared a
+  `kind: code` downstream, the code changed, and nothing fired). Both sources are
+  merged and grouped by code path, so a file declared in both fires ONE row with
+  N downstream docs, not N rows. Glob `kind: code` downstreams are still deferred
+  (logged and skipped). No git post-commit hooks involved either way — same
+  mtime-watch mechanism as everything else in this skill.
 - ~~Cross-workspace propagation~~ — **now auto-discovered**: `discovery.mjs` walks
   `~/Documents/GitHub` for `.propagates.yml` markers, so every workspace with sidecars
   (e.g. Vipin Kaushik, PanditPawanKaushik) is watched. `lib/config.mjs` no longer hardcodes one.
