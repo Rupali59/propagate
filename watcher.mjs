@@ -466,10 +466,12 @@ export async function processCrossRepo(state, crossKeepSet) {
     }
   }
 
-  if (events > 0 || !existsSync(_crossCfg.crossMd)) {
-    try { await renderMarkdown(_crossCfg.crossJsonl, _crossCfg.crossMd); }
-    catch (err) { await log(`cross: render failed: ${err.message}`); }
-  }
+  // Unconditional: the staleness banner is time-derived, so gating on events
+  // let the cross-ledger freeze at "Watcher healthy" for 28+ days. renderMarkdown
+  // is idempotent (content-diff guard), so this is a no-op write when nothing
+  // changed.
+  try { await renderMarkdown(_crossCfg.crossJsonl, _crossCfg.crossMd); }
+  catch (err) { await log(`cross: render failed: ${err.message}`); }
   return events;
 }
 
@@ -521,10 +523,10 @@ export async function processDecisions(state, nowMs) {
   if (firstRun && seeded > 0) {
     await log(`cross-decision: first run — seeded ${seeded} historical partner decisions as processed (pre-${CROSS_TRIGGER_EPOCH})`);
   }
-  if (events > 0) {
-    try { await renderMarkdown(_crossCfg.crossJsonl, _crossCfg.crossMd); }
-    catch (err) { await log(`cross-decision: render failed: ${err.message}`); }
-  }
+  // Unconditional for the same reason as processCrossRepo; idempotent render
+  // makes the duplicate call per fire a no-op when the body is unchanged.
+  try { await renderMarkdown(_crossCfg.crossJsonl, _crossCfg.crossMd); }
+  catch (err) { await log(`cross-decision: render failed: ${err.message}`); }
   return { events, liveKeys };
 }
 
@@ -570,14 +572,10 @@ async function main() {
         worktreeMap = new Map();
       }
 
-      // Track events added during THIS workspace's pass so we can skip the
-      // ledger MD re-render when nothing changed. Re-rendering on every fire
-      // ticks the ledger file's mtime, which triggers launchd (docs/ is in
-      // WatchPaths) and creates a feedback loop firing the watcher ~every
-      // 5s indefinitely. Explicit StartInterval in the plist replaces that
-      // accidental polling.
-      const workspaceEventsStart = events.length;
-      const ledgerMdMissing = !existsSync(workspace.ledgerMd);
+      // B0 loop protection moved into renderMarkdown (content-diff guard), so
+      // no event-count bookkeeping is needed here. Writing the ledger MD still
+      // ticks mtime and triggers launchd via WatchPaths, but that now happens
+      // only on a genuine content change rather than on every fire.
 
       for (const relDir of workspace.scanDirs) {
         const dir = path.resolve(workspace.root, relDir);
@@ -661,17 +659,20 @@ async function main() {
         }
       }
 
-      // Re-render ledger MD only when this workspace had new events or the
-      // rendered file is missing entirely (first deploy / accidental delete).
-      // Re-rendering on every fire would tick the file mtime and re-trigger
-      // launchd via WatchPaths — the feedback loop B0 fix targets.
-      const workspaceEventsAdded = events.length - workspaceEventsStart;
-      if (workspaceEventsAdded > 0 || ledgerMdMissing) {
-        try {
-          await renderMarkdown(workspace.ledgerJsonl, workspace.ledgerMd);
-        } catch (err) {
-          await log(`render failed for ${workspace.name}: ${err.message}`);
-        }
+      // Re-render on every fire. The staleness tripwire in the MD header is
+      // time-derived, so gating the render on "this workspace had new events"
+      // meant a ledger that went silent froze its own health banner at whatever
+      // it last said — "Watcher healthy" on a ledger dead for weeks.
+      //
+      // Loop safety (B0) now lives in renderMarkdown itself: it diffs the
+      // rendered body against the file, ignoring the generated-at footer, and
+      // returns false without writing when nothing changed. So mtime only ticks
+      // on a real content change (≈ once/day when daysAgo increments), not on
+      // every fire.
+      try {
+        await renderMarkdown(workspace.ledgerJsonl, workspace.ledgerMd);
+      } catch (err) {
+        await log(`render failed for ${workspace.name}: ${err.message}`);
       }
     }
 
