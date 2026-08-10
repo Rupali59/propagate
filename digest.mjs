@@ -1,0 +1,738 @@
+#!/usr/bin/env node
+/**
+ * /propagate daily digest — the replacement for the cut web UI, and the
+ * adoption probe that gates any future UI (docs/DECISIONS.md 2026-08-10,
+ * "the local web UI is cut").
+ *
+ * Leads with the SINCE-LAST-RUN DIFF, not totals. A digest that restates
+ * "95 open" every morning is the exact failure already demonstrated by
+ * PROPAGATION_CROSS_LEDGER.md reading "Watcher healthy" for a month while
+ * frozen. See docs/DECISIONS.md "renderMarkdown is idempotent" entry.
+ *
+ * Usage:
+ *   node digest.mjs             — compute diff, deliver, persist new state
+ *   node digest.mjs --dry-run   — print, write NO state
+ *   node digest.mjs --stdout    — print instead of delivering
+ *
+ * Zero new npm deps. Imports lib/ primitives directly — does not shell out
+ * to cli.mjs and screen-scrape its text output. A handful of pure, already-
+ * tested helpers (heartbeatState, findDuplicateOpenAcrossLedgers,
+ * parsePlistWatchPaths, expectedWatchPaths) are imported as named exports
+ * from cli.mjs — that's a module import of pure functions, not a subprocess.
+ */
+
+import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+import os from "node:os";
+
+import {
+  WORKSPACES,
+  HEARTBEAT_PATH,
+  DISCOVERY_DEGRADED,
+  SUSPICIOUS_MARKERS,
+  CROSS_LEDGER_JSONL,
+  SEARCH_ROOTS,
+  SKILL_DIR,
+} from "./lib/config.mjs";
+import { readLedgerWithStats, lastActivityAt } from "./lib/ledger.mjs";
+import { PLIST_PATH } from "./lib/plist.mjs";
+import { notify } from "./lib/notify.mjs";
+import {
+  heartbeatState,
+  findDuplicateOpenAcrossLedgers,
+  parsePlistWatchPaths,
+  expectedWatchPaths,
+} from "./cli.mjs";
+import { rebuildIndex, latestMtimeUnderDir } from "./lib/index-db.mjs";
+
+const HOME = os.homedir();
+const DIGEST_STATE_PATH = path.join(HOME, ".claude", "propagate-digest-state.json");
+const DAILY_MD_PATH = path.join(HOME, ".claude", "DAILY.md");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Disk hygiene — measurement only, never deletion. `df` free space is the
+// authoritative number; `du` sizes are apparent-size hints only (APFS clones
+// mean du can wildly overstate what's actually reclaimable — see
+// docs/DECISIONS.md and the digest task brief for the uv-cache measurement
+// that proved this: du said -35.5 GiB, df moved ~2 GiB).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GITHUB_ROOT = path.join(HOME, "Documents", "GitHub");
+const DISK_DATA_VOLUME = "/System/Volumes/Data";
+const DISK_BUDGET_MS = 25000;
+const SIX_WEEKS_MS = 6 * 7 * 24 * 60 * 60 * 1000;
+const KB_PER_GB = 1024 * 1024;
+
+const CACHE_PATHS = [
+  path.join(HOME, ".cache", "uv"),
+  path.join(HOME, ".npm"),
+  path.join(HOME, "Library", "pnpm"),
+  path.join(HOME, "Library", "Caches", "ms-playwright"),
+  path.join(HOME, ".cache", "puppeteer"),
+  path.join(HOME, ".bun"),
+  path.join(HOME, "Library", "Caches", "Homebrew"),
+  path.join(HOME, "Library", "Caches", "pip"),
+  path.join(HOME, "Library", "Caches", "go-build"),
+];
+
+/** `df -k <path>` -> { availKb, usedPct }, or null on any failure. */
+function safeDf(target) {
+  try {
+    const out = execFileSync("df", ["-k", target], { encoding: "utf8", timeout: 5000 });
+    const lines = out.trim().split("\n");
+    const cols = lines[lines.length - 1].trim().split(/\s+/);
+    const availKb = parseInt(cols[3], 10);
+    const usedPct = parseInt(cols[4], 10); // "83%" -> 83
+    if (!Number.isFinite(availKb) || !Number.isFinite(usedPct)) return null;
+    return { availKb, usedPct };
+  } catch {
+    return null;
+  }
+}
+
+/** `du -sk <path>` apparent size in KB, or null if missing/failed. Never throws. */
+function safeDuKb(target) {
+  if (!existsSync(target)) return null;
+  try {
+    const out = execFileSync("du", ["-sk", target], { encoding: "utf8", timeout: 10000 });
+    const kb = parseInt(out.trim().split(/\s+/)[0], 10);
+    return Number.isFinite(kb) ? kb : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Newest mtime (ms) of any file under dir, skipping node_modules/.next/.git. Null on failure. */
+function safeNewestMtimeMs(dir, timeoutMs) {
+  if (!existsSync(dir)) return null;
+  try {
+    const out = execFileSync(
+      "find",
+      [
+        dir,
+        "-maxdepth", "6",
+        "-type", "f",
+        "-not", "-path", "*/node_modules/*",
+        "-not", "-path", "*/.next/*",
+        "-not", "-path", "*/.git/*",
+        "-exec", "stat", "-f", "%m", "{}", "+",
+      ],
+      { encoding: "utf8", timeout: Math.max(500, timeoutMs) },
+    );
+    let max = 0;
+    for (const line of out.trim().split("\n")) {
+      const n = parseInt(line, 10);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    return max > 0 ? max * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** package.json dirs at depth<=3 under GITHUB_ROOT, excluding node_modules. Empty array on failure. */
+function discoverProjectDirs() {
+  try {
+    const out = execFileSync(
+      "find",
+      [GITHUB_ROOT, "-maxdepth", "4", "-name", "package.json", "-not", "-path", "*/node_modules/*"],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    return out
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((p) => path.dirname(p));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Disk hygiene snapshot: authoritative df free space, plus apparent-size
+ * (du) hints for fixed cache paths and per-project node_modules/.next, plus
+ * newest-source-file mtime for dormancy checks. Every measurement is
+ * individually guarded; a missing path or slow du must never break the
+ * digest. Total wall time is capped by DISK_BUDGET_MS — remaining
+ * measurements are skipped (and `truncated: true` set) rather than let a
+ * slow disk hang the only reporting channel that currently works.
+ */
+async function diskSnapshot(indexDb = null) {
+  const start = Date.now();
+  const result = {
+    availKb: null,
+    usedPct: null,
+    caches: [],
+    projects: [],
+    truncated: false,
+  };
+
+  try {
+    const df = safeDf(DISK_DATA_VOLUME);
+    if (df) {
+      result.availKb = df.availKb;
+      result.usedPct = df.usedPct;
+    }
+  } catch {
+    // safeDf already never throws; belt-and-suspenders.
+  }
+
+  for (const p of CACHE_PATHS) {
+    if (Date.now() - start > DISK_BUDGET_MS) {
+      result.truncated = true;
+      break;
+    }
+    try {
+      const kb = safeDuKb(p);
+      if (kb !== null) result.caches.push({ path: p, apparentKb: kb });
+    } catch {
+      // ignore, per-path
+    }
+  }
+
+  let projectDirs = [];
+  try {
+    projectDirs = discoverProjectDirs();
+  } catch {
+    projectDirs = [];
+  }
+
+  for (const dir of projectDirs) {
+    if (Date.now() - start > DISK_BUDGET_MS) {
+      result.truncated = true;
+      break;
+    }
+    try {
+      const nodeModulesKb = safeDuKb(path.join(dir, "node_modules"));
+      const nextKb = safeDuKb(path.join(dir, ".next"));
+      if (nodeModulesKb === null && nextKb === null) continue;
+      // Reuse the propagate index's already-scanned STATE.md/DECISIONS.md/
+      // ledger mtimes as a free "is this project active" signal, instead of
+      // spending a `find -exec stat` walk (safeNewestMtimeMs) on every
+      // project dir. This is what let the 25s budget blow past 10/29
+      // projects on the first real run — see docs/DECISIONS.md "prevention
+      // lives in the existing digest, not a new daemon". Only dirs with no
+      // indexed file (no STATE.md/DECISIONS.md/ledger under them) fall back
+      // to the real walk.
+      const indexedMtime = indexDb ? latestMtimeUnderDir(indexDb, dir) : null;
+      let newestSourceMs = indexedMtime ? new Date(indexedMtime).getTime() : null;
+      if (newestSourceMs === null) {
+        const budgetLeft = DISK_BUDGET_MS - (Date.now() - start);
+        newestSourceMs = budgetLeft > 1000 ? safeNewestMtimeMs(dir, Math.min(4000, budgetLeft)) : null;
+      }
+      result.projects.push({ dir, nodeModulesKb, nextKb, newestSourceMs });
+    } catch {
+      // ignore, per-project
+    }
+  }
+
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Snapshot — the current state of the world, built from lib/ primitives.
+// Mirrors cli.mjs's statusJson() shape but is computed independently so this
+// file never depends on cli.mjs's non-exported internals.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function watcherSnapshot() {
+  let heartbeatMs = null;
+  let ageSeconds = null;
+  if (existsSync(HEARTBEAT_PATH)) {
+    const raw = (await readFile(HEARTBEAT_PATH, "utf8")).trim();
+    const ts = parseInt(raw, 10);
+    if (Number.isFinite(ts)) {
+      heartbeatMs = ts;
+      ageSeconds = Math.floor((Date.now() - ts) / 1000);
+    }
+  }
+  return { heartbeatMs, ageSeconds, state: heartbeatState(ageSeconds) };
+}
+
+async function ledgerSnapshot(jsonlPath) {
+  const exists = existsSync(jsonlPath);
+  const { rows, malformed } = exists
+    ? await readLedgerWithStats(jsonlPath)
+    : { rows: [], malformed: 0 };
+  const open = rows.filter((r) => r.status === "open");
+  const done = rows.filter((r) => r.status === "done");
+  const wontfix = rows.filter((r) => r.status === "wontfix");
+  const lastActivityIso = exists ? await lastActivityAt(jsonlPath) : null;
+  const quietDays = lastActivityIso
+    ? Math.floor((Date.now() - new Date(lastActivityIso).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+  return {
+    counts: { total: rows.length, open: open.length, done: done.length, wontfix: wontfix.length },
+    malformed,
+    quietDays,
+    openRows: open.map((r) => ({
+      id: r.id,
+      source: r.source ?? null,
+      downstreamCount: Array.isArray(r.downstream) ? r.downstream.length : 0,
+    })),
+  };
+}
+
+async function plistMismatch() {
+  if (!existsSync(PLIST_PATH)) return { checked: false, mismatched: false, detail: "plist not installed" };
+  let xml;
+  try {
+    xml = await readFile(PLIST_PATH, "utf8");
+  } catch (err) {
+    return { checked: false, mismatched: false, detail: `read failed: ${err.message}` };
+  }
+  const actual = new Set(parsePlistWatchPaths(xml));
+  const expected = expectedWatchPaths(WORKSPACES);
+  const missing = [...expected].filter((p) => !actual.has(p));
+  const extra = [...actual].filter((p) => !expected.has(p));
+  return { checked: true, mismatched: missing.length > 0 || extra.length > 0, missing, extra };
+}
+
+/**
+ * Build the full snapshot the digest diffs against. Not the same object as
+ * cli.mjs's statusJson() — computed independently from lib/ primitives.
+ */
+async function buildSnapshot(indexDb = null) {
+  const watcher = await watcherSnapshot();
+  const workspaces = [];
+  const ledgerEntries = [];
+  for (const ws of WORKSPACES) {
+    const block = await ledgerSnapshot(ws.ledgerJsonl);
+    workspaces.push({ name: ws.name, root: ws.root, ledgerJsonl: ws.ledgerJsonl, ...block });
+    ledgerEntries.push({
+      workspaceRoot: ws.root,
+      ledgerPath: ws.ledgerJsonl,
+      rows: [...block.openRows.map((r) => ({ status: "open", source: r.source }))],
+    });
+  }
+  const crossBlock = await ledgerSnapshot(CROSS_LEDGER_JSONL);
+  const cross = { name: "cross", root: SEARCH_ROOTS[0], ledgerJsonl: CROSS_LEDGER_JSONL, ...crossBlock };
+
+  const duplicateOpenAcrossLedgers = findDuplicateOpenAcrossLedgers(ledgerEntries);
+  const plist = await plistMismatch();
+
+  let disk;
+  try {
+    disk = await diskSnapshot(indexDb);
+  } catch (err) {
+    // diskSnapshot() already guards every individual measurement; this is
+    // the outermost belt-and-suspenders so a disk-hygiene bug can never take
+    // down the only reporting channel that currently works.
+    disk = { availKb: null, usedPct: null, caches: [], projects: [], truncated: true, error: String(err.message || err) };
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    degraded: DISCOVERY_DEGRADED,
+    suspiciousMarkers: SUSPICIOUS_MARKERS,
+    watcher,
+    workspaces,
+    cross,
+    duplicateOpenAcrossLedgers,
+    plist,
+    disk,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Digest-state persistence — a lean prior snapshot (open row ids + a few
+// fields per row) sufficient to compute the diff. Atomic write via
+// temp+rename, matching lib/state.mjs's pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function toStateWorkspace(ws) {
+  return {
+    total: ws.counts.total,
+    open: ws.counts.open,
+    done: ws.counts.done,
+    wontfix: ws.counts.wontfix,
+    openRows: ws.openRows.map((r) => ({ id: r.id, source: r.source, downstreamCount: r.downstreamCount })),
+  };
+}
+
+/** Lean prior-disk record: apparent sizes only, keyed by path — enough to diff, not re-derive. */
+function toStateDisk(disk) {
+  if (!disk) return null;
+  const caches = {};
+  for (const c of disk.caches) caches[c.path] = c.apparentKb;
+  const projects = {};
+  for (const p of disk.projects) projects[p.dir] = { nodeModulesKb: p.nodeModulesKb, nextKb: p.nextKb };
+  return { availKb: disk.availKb, usedPct: disk.usedPct, caches, projects };
+}
+
+function snapshotToDigestState(snapshot) {
+  const workspaces = {};
+  for (const ws of snapshot.workspaces) workspaces[ws.name] = toStateWorkspace(ws);
+  return {
+    version: 1,
+    lastRunAt: snapshot.generatedAt,
+    workspaces,
+    cross: toStateWorkspace(snapshot.cross),
+    disk: toStateDisk(snapshot.disk),
+  };
+}
+
+export async function readDigestState(statePath = DIGEST_STATE_PATH) {
+  if (!existsSync(statePath)) return null;
+  try {
+    const raw = await readFile(statePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && parsed.workspaces) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeDigestState(state, statePath = DIGEST_STATE_PATH) {
+  await mkdir(path.dirname(statePath), { recursive: true });
+  const tmp = `${statePath}.tmp.${process.pid}`;
+  await writeFile(tmp, JSON.stringify(state, null, 2));
+  await rename(tmp, statePath);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diff — the core logic. Pure function of (snapshot, priorDigestState) so it
+// is directly unit-testable without touching real ledgers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @param {object} snapshot from buildSnapshot()
+ * @param {object|null} prior from readDigestState() — null on first run
+ * @returns {object} diff report, consumed by formatDigest()
+ */
+export function computeDiff(snapshot, prior) {
+  const broken = [];
+
+  if (snapshot.watcher.state !== "alive") {
+    broken.push({
+      kind: "watcher",
+      detail:
+        snapshot.watcher.state === "never"
+          ? "watcher heartbeat file missing — has it ever run?"
+          : `watcher heartbeat is ${snapshot.watcher.state} (${snapshot.watcher.ageSeconds}s old)`,
+    });
+  }
+  if (snapshot.degraded) {
+    broken.push({ kind: "discovery", detail: "DISCOVERY_DEGRADED — markers seen but zero workspaces resolved" });
+  }
+  if (snapshot.suspiciousMarkers && snapshot.suspiciousMarkers.length > 0) {
+    for (const m of snapshot.suspiciousMarkers) {
+      broken.push({ kind: "suspiciousMarker", detail: `${m.path}: ${m.reason}` });
+    }
+  }
+  if (snapshot.plist.checked && snapshot.plist.mismatched) {
+    broken.push({
+      kind: "plist",
+      detail: `WatchPaths drifted from discovered workspaces (missing: ${snapshot.plist.missing.length}, extra: ${snapshot.plist.extra.length})`,
+    });
+  }
+  const allLedgers = [...snapshot.workspaces, snapshot.cross];
+  for (const ws of allLedgers) {
+    if (ws.malformed > 0) {
+      broken.push({ kind: "malformedLedgerLines", detail: `${ws.name}: ${ws.malformed} malformed line(s)` });
+    }
+  }
+  if (snapshot.duplicateOpenAcrossLedgers.count > 0) {
+    broken.push({
+      kind: "duplicateOpenAcrossLedgers",
+      detail: `${snapshot.duplicateOpenAcrossLedgers.count} source(s) open in more than one ledger`,
+    });
+  }
+
+  const firstRun = prior === null;
+  const newByWorkspace = [];
+  const closedByWorkspace = [];
+
+  if (!firstRun) {
+    for (const ws of allLedgers) {
+      const priorWs = ws.name === "cross" ? prior.cross : prior.workspaces?.[ws.name];
+      const priorOpenIds = new Set((priorWs?.openRows ?? []).map((r) => r.id));
+      const currentOpenIds = new Set(ws.openRows.map((r) => r.id));
+
+      const newRows = ws.openRows.filter((r) => !priorOpenIds.has(r.id));
+      if (newRows.length > 0) newByWorkspace.push({ name: ws.name, rows: newRows });
+
+      const closedRows = (priorWs?.openRows ?? []).filter((r) => !currentOpenIds.has(r.id));
+      if (closedRows.length > 0) closedByWorkspace.push({ name: ws.name, rows: closedRows });
+    }
+  }
+
+  const totals = {
+    open: allLedgers.reduce((sum, ws) => sum + ws.counts.open, 0),
+    workspaces: snapshot.workspaces.length,
+  };
+
+  // ── Disk hygiene ──────────────────────────────────────────────────────────
+  // Emit lines ONLY when a threshold trips (see formatDigest's quiet-day
+  // suppression, which now also gates on diskLines being empty). Critical
+  // low space routes through `broken` — the channel that already escalates
+  // to the macOS notification, per the digest task's constraint not to build
+  // a second escalation path.
+  const diskLines = [];
+  if (snapshot.disk) {
+    const d = snapshot.disk;
+    const priorDisk = prior?.disk ?? null;
+
+    if (typeof d.availKb === "number") {
+      const availGb = d.availKb / KB_PER_GB;
+      if (availGb < 30) {
+        broken.push({ kind: "diskCritical", detail: `disk free ${availGb.toFixed(1)} GiB (df) — below 30 GiB` });
+      } else if (availGb < 60) {
+        diskLines.push(`WARN: disk free ${availGb.toFixed(1)} GiB (df) — below 60 GiB threshold`);
+        if (priorDisk) {
+          const deltas = [];
+          for (const c of d.caches) {
+            const priorKb = priorDisk.caches?.[c.path];
+            if (typeof priorKb === "number") deltas.push({ label: c.path, deltaGb: (c.apparentKb - priorKb) / KB_PER_GB });
+          }
+          for (const p of d.projects) {
+            const priorP = priorDisk.projects?.[p.dir];
+            if (priorP) {
+              const priorTotal = (priorP.nodeModulesKb || 0) + (priorP.nextKb || 0);
+              const curTotal = (p.nodeModulesKb || 0) + (p.nextKb || 0);
+              deltas.push({ label: p.dir, deltaGb: (curTotal - priorTotal) / KB_PER_GB });
+            }
+          }
+          const top3 = deltas
+            .filter((x) => x.deltaGb > 0)
+            .sort((a, b) => b.deltaGb - a.deltaGb)
+            .slice(0, 3);
+          for (const t of top3) diskLines.push(`  top growth: ${t.label} +${t.deltaGb.toFixed(1)} GiB (apparent, du)`);
+        }
+      }
+    }
+
+    // Any single cache that grew >5 GiB apparent since last run — independent of the availGb bands above.
+    if (priorDisk) {
+      for (const c of d.caches) {
+        const priorKb = priorDisk.caches?.[c.path];
+        if (typeof priorKb === "number") {
+          const deltaGb = (c.apparentKb - priorKb) / KB_PER_GB;
+          if (deltaGb > 5) diskLines.push(`GROWTH: ${c.path} grew ${deltaGb.toFixed(1)} GiB (apparent, du) since last run`);
+        }
+      }
+    }
+
+    // Dormant project still holding a heavy node_modules — report, never delete.
+    const now = Date.now();
+    for (const p of d.projects) {
+      const nmKb = p.nodeModulesKb || 0;
+      if (nmKb > 200 * 1024 && p.newestSourceMs && now - p.newestSourceMs > SIX_WEEKS_MS) {
+        const idleDays = Math.floor((now - p.newestSourceMs) / (24 * 60 * 60 * 1000));
+        diskLines.push(`prunable: ${p.dir} — node_modules ${(nmKb / KB_PER_GB).toFixed(1)} GiB (apparent, du), idle ${idleDays}d`);
+      }
+    }
+
+    if (d.truncated) diskLines.push("(disk measurement truncated — time budget exceeded, partial data above)");
+  }
+
+  const hasChange = newByWorkspace.length > 0 || closedByWorkspace.length > 0;
+
+  return { firstRun, broken, newByWorkspace, closedByWorkspace, totals, watcher: snapshot.watcher, hasChange, diskLines };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Formatting — WHAT CHANGED leads; totals trail as a one-line footer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function formatDigest(diff) {
+  const lines = [];
+  const watcherLine = `watcher: ${diff.watcher.state}${
+    diff.watcher.ageSeconds !== null ? ` (${diff.watcher.ageSeconds}s)` : ""
+  }`;
+
+  const diskLines = diff.diskLines || [];
+
+  if (diff.broken.length === 0 && !diff.firstRun && !diff.hasChange && diskLines.length === 0) {
+    // Quiet day. One short line, not a full report. Disk hygiene prints ZERO
+    // lines here too, on purpose — see digest.mjs disk-hygiene section: a
+    // digest that restates disk facts every day is the same wallpaper
+    // failure mode the whole file is built to avoid.
+    lines.push(`propagate: no change, ${watcherLine}, ${diff.totals.open} open`);
+    return lines.join("\n");
+  }
+
+  lines.push(`propagate digest — ${new Date().toISOString()}`);
+  lines.push("");
+
+  if (diff.firstRun) {
+    lines.push(
+      `FIRST RUN — no prior digest state, nothing to diff against. ` +
+        `Currently ${diff.totals.open} open across ${diff.totals.workspaces} workspace(s). ` +
+        `This run establishes the baseline; tomorrow's digest will show what changed.`,
+    );
+    lines.push("");
+  }
+
+  if (diff.broken.length > 0) {
+    lines.push(`BROKEN (${diff.broken.length}):`);
+    for (const b of diff.broken) lines.push(`  ✗ [${b.kind}] ${b.detail}`);
+    lines.push("");
+  }
+
+  if (diskLines.length > 0) {
+    lines.push(`DISK:`);
+    for (const l of diskLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  if (diff.newByWorkspace.length > 0) {
+    const totalNew = diff.newByWorkspace.reduce((s, w) => s + w.rows.length, 0);
+    lines.push(`NEW DRIFT (${totalNew}):`);
+    for (const w of diff.newByWorkspace) {
+      lines.push(`  ${w.name}:`);
+      for (const r of w.rows) {
+        lines.push(`    + ${r.source ?? "(no source)"}  [downstream: ${r.downstreamCount}]`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (diff.closedByWorkspace.length > 0) {
+    const totalClosed = diff.closedByWorkspace.reduce((s, w) => s + w.rows.length, 0);
+    lines.push(`CLOSED (${totalClosed}):`);
+    for (const w of diff.closedByWorkspace) {
+      lines.push(`  ${w.name}:`);
+      for (const r of w.rows) {
+        lines.push(`    ✓ ${r.source ?? "(no source)"}`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (!diff.firstRun && diff.newByWorkspace.length === 0 && diff.closedByWorkspace.length === 0) {
+    lines.push("(no new or closed rows since last run)");
+    lines.push("");
+  }
+
+  lines.push(`— ${diff.totals.open} open across ${diff.totals.workspaces} workspace(s), ${watcherLine}`);
+
+  return lines.join("\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delivery — pluggable so the channel can change without touching diff logic.
+// Preference order: telegram skill's non-interactive send path (if it
+// exposes one) > DAILY.md append (newest first) + macOS notification.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Look for a usable non-interactive send script inside the telegram skill.
+ * Returns a delivery function or null if the skill / a send path isn't
+ * available. Kept separate from the fallback so the "which channel" choice
+ * is explicit and testable.
+ */
+async function resolveTelegramDelivery() {
+  const skillDir = path.join(HOME, ".claude", "skills", "telegram");
+  if (!existsSync(skillDir)) return null;
+  const skillMdPath = path.join(skillDir, "SKILL.md");
+  if (!existsSync(skillMdPath)) return null;
+  // No SKILL.md / no skill directory found on this machine as of writing —
+  // deferred until the skill exists. If it later ships a scriptable send
+  // path, wire it here rather than reaching for it ad hoc at digest time.
+  return null;
+}
+
+async function deliverViaDailyMdAndNotify(text) {
+  const stamp = new Date().toISOString();
+  const entry = `## ${stamp}\n\n${text}\n`;
+  let existing = "";
+  if (existsSync(DAILY_MD_PATH)) {
+    existing = await readFile(DAILY_MD_PATH, "utf8");
+  }
+  const updated = existing.length > 0 ? `${entry}\n---\n\n${existing}` : entry;
+  await mkdir(path.dirname(DAILY_MD_PATH), { recursive: true });
+  const tmp = `${DAILY_MD_PATH}.tmp.${process.pid}`;
+  await writeFile(tmp, updated, "utf8");
+  await rename(tmp, DAILY_MD_PATH);
+
+  const firstLine = text.split("\n").find((l) => l.trim().length > 0) || "propagate digest";
+  await notify("propagate digest", firstLine.slice(0, 200));
+}
+
+/**
+ * Choose and run delivery. Returns the channel name used, for reporting.
+ */
+async function deliverDigest(text) {
+  const telegram = await resolveTelegramDelivery();
+  if (telegram) {
+    await telegram(text);
+    return "telegram";
+  }
+  await deliverViaDailyMdAndNotify(text);
+  return "daily.md+notify";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Rebuild the propagate index at the start of the run — read-only over the
+ * corpus, well under a second (see lib/index-db.mjs). Its source_file table
+ * then lets diskSnapshot() skip a `find` walk for every project dir that
+ * already has an indexed STATE.md/DECISIONS.md/ledger. Never fatal: a
+ * rebuild failure just means diskSnapshot() falls back to its own walk. */
+async function rebuildIndexForDigest() {
+  const dbPath = path.join(SKILL_DIR, "index.db");
+  try {
+    const result = rebuildIndex({ dbPath, roots: SEARCH_ROOTS, skillDir: SKILL_DIR });
+    process.stderr.write(
+      `[propagate-digest] index rebuilt in ${result.timingsMs.total}ms (${result.counts.ledger_row} ledger rows, ${result.counts.decision} decisions)\n`,
+    );
+    return result.db;
+  } catch (err) {
+    process.stderr.write(`[propagate-digest] index rebuild failed (non-fatal): ${err.message}\n`);
+    return null;
+  }
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const dryRun = args.includes("--dry-run");
+  const stdoutOnly = args.includes("--stdout");
+
+  const indexDb = await rebuildIndexForDigest();
+  try {
+    await runDigest({ dryRun, stdoutOnly, indexDb });
+  } finally {
+    if (indexDb) indexDb.close();
+  }
+}
+
+async function runDigest({ dryRun, stdoutOnly, indexDb }) {
+  const snapshot = await buildSnapshot(indexDb);
+  const prior = dryRun ? await readDigestState() : await readDigestState();
+  const diff = computeDiff(snapshot, prior);
+  const text = formatDigest(diff);
+
+  if (stdoutOnly || dryRun) {
+    console.log(text);
+  }
+
+  if (!dryRun) {
+    if (!stdoutOnly) {
+      const channel = await deliverDigest(text);
+      process.stderr.write(`[propagate-digest] delivered via ${channel}\n`);
+    }
+    await writeDigestState(snapshotToDigestState(snapshot));
+  }
+}
+
+const _invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (_invokedDirectly) {
+  main().catch((err) => {
+    process.stderr.write(`[propagate-digest] fatal: ${err.stack || err.message}\n`);
+    process.exit(1);
+  });
+}
+
+export {
+  buildSnapshot,
+  deliverDigest,
+  DIGEST_STATE_PATH,
+  DAILY_MD_PATH,
+  snapshotToDigestState as snapshotToDigestStateForTest,
+};

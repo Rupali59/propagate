@@ -9,3 +9,8 @@ heartbeat
 .code-review-graph/
 watcher.log
 *.log.*.gz
+# derived index — disposable, rebuilt in <1s via `node index.mjs --rebuild`
+index.db
+index.db-journal
+index.db-wal
+index.db-shm

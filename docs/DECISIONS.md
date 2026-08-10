@@ -152,3 +152,50 @@ coverage, which is why 80/80 green had never been evidence of anything here.
 
 **Affects:** propagate, Vipin Kaushik, PanditPawanKaushik, ManavDaehi, Keerti
 **Refs:** `lib/discovery.mjs`, `lib/config.mjs`, `lib/edges.mjs`, `cli.mjs`, `tests/discovery.test.mjs`, `tests/edges-nesting.test.mjs`, `tests/cli-json.test.mjs`
+
+---
+
+## 2026-08-10: a derived index — distributed writes, centralised reads
+
+**What:** `index.db`, a SQLite projection over all 8 ledgers and 31 authored
+STATE/DECISIONS files. Gitignored, full rebuild every run (~400ms), no
+incremental logic. Seven tables: `ledger_row`, `ledger_unknown`, `decision`,
+`decision_affects`, `state_doc`, `source_file`, `coverage_gap`. Rebuilt at the
+start of each digest run.
+
+**Why:** authored docs and ledgers stay distributed, because git colocation is
+what keeps decision records honest — an entry lands in the same commit as the
+change it explains, and the three workspaces with fresh docs are exactly the
+ones where that holds. But cross-cutting reads then cost 20+ file-opens; this
+audit answered "what happened today across the ecosystem" by hand. The
+resolution is a read/write split: writes stay local, reads get one place.
+
+**Because it is derived it cannot drift.** Verified: `rm index.db && --rebuild`
+reproduces byte-identical query output. A hand-maintained central store would
+have rotted exactly like the docs it indexes.
+
+**Gotchas:**
+- It deliberately does **not** use `discoverWorkspacesSync` for discovery. That
+  is the function whose blind spot orphaned 5 of 8 ledgers until this morning.
+  It sweeps the filesystem directly and records any disagreement in
+  `coverage_gap` — that disagreement is itself the finding. It currently reports
+  one: the cross-ledger, which discovery legitimately does not return
+  (federated path, not workspace-discovered). Flagged rather than
+  special-cased, so the check stays honest.
+- Dot-directories are excluded, which keeps the 3 worktree-copy ledgers under
+  `PanditPawanKaushik/.claude/worktrees/` from being indexed as real ledgers.
+- `state_doc` stores `header_last_updated` and `file_mtime` **separately** and
+  they must never be collapsed. `Vipin Kaushik/STATE.md` reads 2026-07-16 in its
+  header with a 2026-08-10 mtime — that gap is how "touched by tooling, not by
+  hand" becomes visible instead of inferred.
+
+**Found immediately:** `ledger_unknown` surfaced the one `type:"manual"` row
+(Vipin Kaushik ledger, id 256, line 470) that has been invisible to every reader
+since 2026-06-20 because `readLedger` silently drops unknown types. It documents
+the `Campaigner/` -> `marketing-intel/` rename with six downstream references.
+
+**Verified:** 99 open rows in the index matches `cli.mjs status --all --json`
+exactly, per-ledger. 154/154 tests. No ledger, STATE or DECISIONS file modified.
+
+**Affects:** propagate, hub
+**Refs:** `index.mjs`, `lib/index-db.mjs`, `tests/index.test.mjs`, `digest.mjs`
