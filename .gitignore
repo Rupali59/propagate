@@ -7,3 +7,5 @@ heartbeat
 *.log
 .DS_Store
 .code-review-graph/
+watcher.log
+*.log.*.gz

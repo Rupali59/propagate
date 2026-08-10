@@ -27,8 +27,11 @@ import {
   HEARTBEAT_PATH,
   WATCHER_LOG,
   SEARCH_ROOTS,
+  DISCOVERY_DEGRADED,
+  SUSPICIOUS_MARKERS,
+  CROSS_LEDGER_JSONL,
 } from "./lib/config.mjs";
-import { readLedger } from "./lib/ledger.mjs";
+import { readLedger, readLedgerWithStats, lastActivityAt } from "./lib/ledger.mjs";
 import { loadSidecar, SidecarError } from "./lib/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
 import { buildEdgeMap } from "./lib/edges.mjs";
@@ -56,7 +59,7 @@ export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
   }
   return { edges, missing, outsideAllowlist };
 }
-import { discoverWorkspacesSync } from "./lib/discovery.mjs";
+import { discoverWorkspacesSync, isWorkspaceMarker } from "./lib/discovery.mjs";
 import { regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/plist.mjs";
 
 const RESET = "\x1b[0m";
@@ -65,6 +68,117 @@ const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const BOLD = "\x1b[1m";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure helpers — exported for tests (tests/cli-json.test.mjs).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Watcher liveness derives ONLY from the heartbeat file's age. 70s = the
+ * StartInterval (60s) plus slack. Never combine with ledger activity — a
+ * quiet ledger on a healthy watcher is not the same signal as a dead watcher.
+ * @param {number|null} ageSeconds
+ * @returns {"alive"|"late"|"dead"|"never"}
+ */
+export function heartbeatState(ageSeconds) {
+  if (ageSeconds === null || ageSeconds === undefined || !Number.isFinite(ageSeconds)) {
+    return "never";
+  }
+  if (ageSeconds < 70) return "alive";
+  if (ageSeconds <= 300) return "late";
+  return "dead";
+}
+
+/** Extract the <string> entries inside the plist's <key>WatchPaths</key> array. */
+export function parsePlistWatchPaths(xml) {
+  const m = xml.match(/<key>WatchPaths<\/key>\s*<array>([\s\S]*?)<\/array>/);
+  if (!m) return [];
+  return [...m[1].matchAll(/<string>([^<]*)<\/string>/g)].map((mm) =>
+    mm[1]
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'"),
+  );
+}
+
+/** Expected WatchPaths for a set of discovered workspaces (root + docs/ when present). */
+export function expectedWatchPaths(workspaces) {
+  const set = new Set();
+  for (const ws of workspaces) {
+    set.add(ws.root);
+    const docsDir = path.join(ws.root, "docs");
+    if (existsSync(docsDir)) set.add(docsDir);
+  }
+  return set;
+}
+
+/**
+ * Given every ledger's open rows, find absolute source paths open in more
+ * than one ledger — the expiry signal for the deferred hub-row migration
+ * (docs/DECISIONS.md 2026-08-10, "the 69 misfiled hub rows are deferred").
+ * @param {Array<{workspaceRoot: string, ledgerPath: string, rows: Array}>} ledgerEntries
+ * @returns {{count: number, examples: Array<{path: string, ledgers: string[]}>}}
+ */
+export function findDuplicateOpenAcrossLedgers(ledgerEntries) {
+  const bySource = new Map(); // absPath -> Set(ledgerPath)
+  for (const { workspaceRoot, ledgerPath, rows } of ledgerEntries) {
+    for (const row of rows) {
+      if (row.status !== "open" || !row.source) continue;
+      const abs = path.resolve(workspaceRoot, row.source);
+      if (!bySource.has(abs)) bySource.set(abs, new Set());
+      bySource.get(abs).add(ledgerPath);
+    }
+  }
+  const dups = [...bySource.entries()].filter(([, set]) => set.size > 1);
+  return {
+    count: dups.length,
+    examples: dups.slice(0, 5).map(([abs, set]) => ({ path: abs, ledgers: [...set] })),
+  };
+}
+
+/** Root of the nearest ancestor workspace, or null. */
+export function nestedUnderOf(ws, workspaces) {
+  const ancestors = workspaces.filter(
+    (o) => o.root !== ws.root && (ws.root === o.root || ws.root.startsWith(o.root + path.sep)),
+  );
+  if (ancestors.length === 0) return null;
+  const nearest = ancestors.reduce((best, o) => (o.root.length > best.root.length ? o : best));
+  return nearest.root;
+}
+
+/**
+ * Sweep for `.propagates.yml` markers to `maxDepth`, deeper than discovery's
+ * default (2), so a workspace marker discovery silently dropped is caught.
+ * Skips dot-directories (e.g. `.claude/worktrees/`) at every level.
+ */
+async function sweepMarkers(roots, maxDepth) {
+  const found = [];
+  async function walk(dir, depth) {
+    if (depth > maxDepth) return;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    if (entries.some((e) => e.isFile() && e.name === ".propagates.yml")) {
+      found.push(path.join(dir, ".propagates.yml"));
+    }
+    if (depth === maxDepth) return;
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      if (e.name.startsWith(".")) continue; // skip dot-directories (worktree copies etc.)
+      if (e.name === "node_modules") continue;
+      await walk(path.join(dir, e.name), depth + 1);
+    }
+  }
+  for (const root of roots) {
+    if (existsSync(root)) await walk(root, 0);
+  }
+  return found;
+}
 
 async function findSidecars(workspaceRoot) {
   const found = [];
@@ -109,7 +223,117 @@ function currentWorkspace() {
   return matches.reduce((best, ws) => (ws.root.length > best.root.length ? ws : best));
 }
 
+/**
+ * Watcher liveness block for `status --json`. Derives `state` ONLY from the
+ * heartbeat file — never from ledger content (see heartbeatState doc comment).
+ */
+async function watcherJsonBlock() {
+  let heartbeatMs = null;
+  let ageSeconds = null;
+  if (existsSync(HEARTBEAT_PATH)) {
+    const raw = (await readFile(HEARTBEAT_PATH, "utf8")).trim();
+    const ts = parseInt(raw, 10);
+    if (Number.isFinite(ts)) {
+      heartbeatMs = ts;
+      ageSeconds = Math.floor((Date.now() - ts) / 1000);
+    }
+  }
+  let launchdLoaded = false;
+  try {
+    const out = execSync("launchctl list", { encoding: "utf8" });
+    launchdLoaded = out.split("\n").some((l) => l.includes("com.rupali.propagate"));
+  } catch {
+    launchdLoaded = false;
+  }
+  let trackedFiles = 0;
+  if (existsSync(STATE_PATH)) {
+    try {
+      const parsed = JSON.parse(await readFile(STATE_PATH, "utf8"));
+      trackedFiles = Object.keys(parsed.mtimes || {}).length;
+    } catch {
+      /* leave 0 */
+    }
+  }
+  return {
+    heartbeatMs,
+    ageSeconds,
+    state: heartbeatState(ageSeconds),
+    launchdLoaded,
+    trackedFiles,
+  };
+}
+
+/**
+ * Ledger-derived status block, shared shape for a workspace and for cross.
+ * `quietDays` derives ONLY from ledger content (lastActivityAt) — never
+ * combined with watcher heartbeat (see docs/DECISIONS.md discovery-partition
+ * entry: a quiet ledger on a healthy watcher is a distinct, valid state).
+ */
+async function ledgerJsonBlock(jsonlPath) {
+  const exists = existsSync(jsonlPath);
+  const { rows, malformed, unknownTypes } = exists
+    ? await readLedgerWithStats(jsonlPath)
+    : { rows: [], malformed: 0, unknownTypes: {} };
+  const open = rows.filter((r) => r.status === "open");
+  const done = rows.filter((r) => r.status === "done");
+  const wontfix = rows.filter((r) => r.status === "wontfix");
+  const lastActivityIso = exists ? await lastActivityAt(jsonlPath) : null;
+  const quietDays = lastActivityIso
+    ? Math.floor((Date.now() - new Date(lastActivityIso).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+  return {
+    counts: { total: rows.length, open: open.length, done: done.length, wontfix: wontfix.length },
+    lastActivityIso,
+    quietDays,
+    malformed,
+    unknownTypes,
+    openRows: open.map((r) => ({
+      id: r.id,
+      source: r.source ?? null,
+      change: r.change ?? null,
+      downstream: r.downstream ?? [],
+      correlation_id: r.correlation_id ?? null,
+    })),
+  };
+}
+
+async function statusJson() {
+  const watcher = await watcherJsonBlock();
+  const workspaces = [];
+  for (const ws of WORKSPACES) {
+    const ledgerBlock = await ledgerJsonBlock(ws.ledgerJsonl);
+    workspaces.push({
+      name: ws.name,
+      root: ws.root,
+      ledgerJsonl: ws.ledgerJsonl,
+      nestedUnder: nestedUnderOf(ws, WORKSPACES),
+      ...ledgerBlock,
+    });
+  }
+  const crossLedgerBlock = await ledgerJsonBlock(CROSS_LEDGER_JSONL);
+  const cross = {
+    name: "cross",
+    root: SEARCH_ROOTS[0],
+    ledgerJsonl: CROSS_LEDGER_JSONL,
+    nestedUnder: null,
+    ...crossLedgerBlock,
+  };
+  return {
+    generatedAt: new Date().toISOString(),
+    degraded: DISCOVERY_DEGRADED,
+    suspiciousMarkers: SUSPICIOUS_MARKERS,
+    watcher,
+    workspaces,
+    cross,
+  };
+}
+
 async function status() {
+  if (process.argv.includes("--json")) {
+    const obj = await statusJson();
+    console.log(JSON.stringify(obj));
+    return;
+  }
   if (process.argv.includes("--cross")) {
     const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
     const rows = (await readLedger(CROSS_LEDGER_JSONL)).filter((r) => r.status === "open");
@@ -360,6 +584,116 @@ async function doctor() {
     console.log(`  ${YELLOW}!${RESET} code-review-graph MCP not registered  ${DIM}(V1 expected; see TM-064)${RESET}`);
   }
 
+  console.log(`\n${BOLD}# Discovery integrity${RESET}`);
+  if (DISCOVERY_DEGRADED) {
+    check(
+      "discovery not degraded",
+      false,
+      "markers found on disk but none opted into workspace: true — discovery is silently swallowing every workspace",
+    );
+  } else {
+    check("discovery not degraded", true);
+  }
+
+  // Partial-loss signal (distinct from total-collapse DISCOVERY_DEGRADED
+  // above): one marker among several silently dropping out — corrupted YAML,
+  // `workspace: "true"` typo'd as a string, or a throw while building its
+  // workspace record — while the rest of discovery still succeeds.
+  check(
+    "no suspicious workspace markers",
+    SUSPICIOUS_MARKERS.length === 0,
+    SUSPICIOUS_MARKERS.length
+      ? SUSPICIOUS_MARKERS.map((m) => `${m.path}: ${m.reason}`).join("; ")
+      : "",
+  );
+
+  // (a) plist WatchPaths vs currently-discovered workspace roots + docs dirs.
+  try {
+    if (existsSync(PLIST_PATH)) {
+      const xml = await readFile(PLIST_PATH, "utf8");
+      const actual = new Set(parsePlistWatchPaths(xml));
+      const expected = expectedWatchPaths(WORKSPACES);
+      const missing = [...expected].filter((p) => !actual.has(p));
+      const extra = [...actual].filter((p) => !expected.has(p));
+      check(
+        "plist WatchPaths matches discovered workspaces",
+        missing.length === 0 && extra.length === 0,
+        missing.length || extra.length
+          ? `missing: ${missing.join(", ") || "(none)"}; stale: ${extra.join(", ") || "(none)"}`
+          : "",
+      );
+    } else {
+      check("plist WatchPaths matches discovered workspaces", false, `${PLIST_PATH} does not exist`);
+    }
+  } catch (err) {
+    check("plist WatchPaths matches discovered workspaces", false, err.message);
+  }
+
+  // (b) same absolute source open in more than one ledger (see DECISIONS.md
+  // "the 69 misfiled hub rows are deferred" — this is that deferral's expiry signal).
+  try {
+    const ledgerEntries = [];
+    for (const ws of WORKSPACES) {
+      if (!existsSync(ws.ledgerJsonl)) continue;
+      const { rows } = await readLedgerWithStats(ws.ledgerJsonl);
+      ledgerEntries.push({ workspaceRoot: ws.root, ledgerPath: ws.ledgerJsonl, rows });
+    }
+    const dup = findDuplicateOpenAcrossLedgers(ledgerEntries);
+    check(
+      "no source open in more than one ledger",
+      dup.count === 0,
+      dup.count
+        ? `${dup.count} source path(s) open in >1 ledger, e.g. ${dup.examples
+            .map((e) => `${e.path} [${e.ledgers.join(", ")}]`)
+            .join("; ")}`
+        : "",
+    );
+  } catch (err) {
+    check("no source open in more than one ledger", false, err.message);
+  }
+
+  // (c) malformed JSONL lines per ledger — readLedger silently `continue`s
+  // past unparseable lines, so the existing "ledger JSONL parseable" check
+  // above is vacuous; this makes a non-zero count a real problem.
+  try {
+    let totalMalformed = 0;
+    const perLedger = [];
+    for (const ws of WORKSPACES) {
+      if (!existsSync(ws.ledgerJsonl)) continue;
+      const { malformed } = await readLedgerWithStats(ws.ledgerJsonl);
+      totalMalformed += malformed;
+      if (malformed > 0) perLedger.push(`${ws.name}: ${malformed}`);
+    }
+    check(
+      "no malformed ledger lines",
+      totalMalformed === 0,
+      totalMalformed ? perLedger.join(", ") : "",
+    );
+  } catch (err) {
+    check("no malformed ledger lines", false, err.message);
+  }
+
+  // (d) `.propagates.yml` markers carrying workspace: true that discovery did
+  // NOT return — silently dropping a workspace is the exact failure this
+  // fix exists to prevent. Sweeps deeper (depth 5) than discovery (depth 2).
+  try {
+    const markers = await sweepMarkers(SEARCH_ROOTS, 5);
+    const discoveredRoots = new Set(WORKSPACES.map((ws) => ws.root));
+    const unreachable = [];
+    for (const markerPath of markers) {
+      if (!isWorkspaceMarker(markerPath)) continue;
+      const dir = path.dirname(markerPath);
+      if (!discoveredRoots.has(dir)) unreachable.push(dir);
+    }
+    check(
+      "no unreachable workspace markers",
+      unreachable.length === 0,
+      unreachable.length ? unreachable.join(", ") : "",
+    );
+  } catch (err) {
+    check("no unreachable workspace markers", false, err.message);
+  }
+
   console.log(`\n${BOLD}# Log tail${RESET}`);
   if (existsSync(WATCHER_LOG)) {
     const raw = await readFile(WATCHER_LOG, "utf8");
@@ -431,7 +765,7 @@ sources: {}
   }
 
   // Re-discover workspaces (now includes the new one if under SEARCH_ROOTS)
-  const workspaces = discoverWorkspacesSync(SEARCH_ROOTS);
+  const { workspaces } = discoverWorkspacesSync(SEARCH_ROOTS);
   console.log(`${DIM}discovered ${workspaces.length} workspace${workspaces.length === 1 ? "" : "s"}:${RESET}`);
   for (const ws of workspaces) {
     const isNew = ws.root === abs;

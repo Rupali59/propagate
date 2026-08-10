@@ -6,6 +6,11 @@
   "type": "object",
   "required": ["sources"],
   "properties": {
+    "workspace": {
+      "type": "boolean",
+      "default": false,
+      "description": "This dir is a ledger-owning workspace root, not just an edge sidecar."
+    },
     "sources": {
       "type": "object",
       "additionalProperties": {
