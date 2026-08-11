@@ -46,6 +46,7 @@ import {
   expectedWatchPaths,
 } from "./cli.mjs";
 import { rebuildIndex, latestMtimeUnderDir } from "./lib/index-db.mjs";
+import { scanSkills, probeTranscripts } from "./lib/skills-scan.mjs";
 
 const HOME = os.homedir();
 const DIGEST_STATE_PATH = path.join(HOME, ".claude", "propagate-digest-state.json");
@@ -678,7 +679,7 @@ async function deliverDigest(text) {
 async function rebuildIndexForDigest() {
   const dbPath = path.join(SKILL_DIR, "index.db");
   try {
-    const result = rebuildIndex({ dbPath, roots: SEARCH_ROOTS, skillDir: SKILL_DIR });
+    const result = rebuildIndex({ dbPath, roots: SEARCH_ROOTS, skillDir: SKILL_DIR, scanSkillsFn: scanSkills, probeTranscriptsFn: probeTranscripts });
     process.stderr.write(
       `[propagate-digest] index rebuilt in ${result.timingsMs.total}ms (${result.counts.ledger_row} ledger rows, ${result.counts.decision} decisions)\n`,
     );

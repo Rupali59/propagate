@@ -35,11 +35,12 @@ import {
   queryUnknownTypes,
   runReadOnlySql,
 } from "./lib/index-db.mjs";
+import { scanSkills, probeTranscripts } from "./lib/skills-scan.mjs";
 
 export const DB_PATH = path.join(SKILL_DIR, "index.db");
 
 export function doRebuild(dbPath = DB_PATH, roots = SEARCH_ROOTS, skillDir = SKILL_DIR) {
-  const result = rebuildIndex({ dbPath, roots, skillDir });
+  const result = rebuildIndex({ dbPath, roots, skillDir, scanSkillsFn: scanSkills, probeTranscriptsFn: probeTranscripts });
   result.db.close();
   return {
     timingsMs: result.timingsMs,

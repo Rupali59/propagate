@@ -13,6 +13,8 @@ import {
   queryAffects,
   queryStaleState,
   queryUnknownTypes,
+  querySkillsNeverInvoked,
+  querySkillsNoProvenance,
   runReadOnlySql,
   isWriteStatement,
 } from "../lib/index-db.mjs";
@@ -313,4 +315,63 @@ test("tableCounts reflects rebuild output", async () => {
 
   assert.equal(counts.ledger_row, 1);
   assert.equal(counts.decision, 0);
+});
+
+test("skill sweep is opt-in: rebuildIndex does not touch global state by default", async () => {
+  // The skill sweep reads ~/.claude/skills, ~/.claude.json and 861 MB of
+  // transcripts -- all outside `roots`. Defaulting it on would make every test
+  // in this file depend on whatever is installed on the machine running it.
+  const { root, skillDir } = await makeFixture();
+  const discover = () => ({ workspaces: [], markersSeen: 0, degraded: false });
+  let called = false;
+  const spy = () => { called = true; return { skills: [] }; };
+
+  const off = rebuildIndex({ dbPath: ":memory:", roots: [root], skillDir, discover });
+  assert.equal(off.counts.skill, 0);
+  assert.equal(called, false, "default must not invoke a skill scanner");
+
+  const on = rebuildIndex({
+    dbPath: ":memory:", roots: [root], skillDir, discover,
+    scanSkillsFn: spy, probeTranscriptsFn: () => ({ byName: {} }),
+  });
+  assert.equal(called, true);
+  assert.equal(on.counts.skill, 0);
+});
+
+test("skill rows carry both probes and the derived never_invoked flag", async () => {
+  const { root, skillDir } = await makeFixture();
+  const discover = () => ({ workspaces: [], markersSeen: 0, degraded: false });
+  const scanSkillsFn = ({ transcripts }) => ({
+    skills: [
+      { id: "used", dir: "/d/used", installer: "handmade", declaredName: "used",
+        nameMismatch: false, dangling: false, provenance: null,
+        usageCount: 5, lastUsedAt: 1700000000000,
+        transcriptCount: transcripts.used?.count ?? 0, transcriptSessions: 1,
+        neverInvoked: false },
+      { id: "dead", dir: "/d/dead", installer: "npx-skills", declaredName: "dead",
+        nameMismatch: false, dangling: false,
+        provenance: { sourceUrl: "https://e.com/x", installedAt: "2026-01-01T00:00:00Z" },
+        usageCount: 0, lastUsedAt: null, transcriptCount: 0, transcriptSessions: 0,
+        neverInvoked: true },
+    ],
+  });
+  const r = rebuildIndex({
+    dbPath: ":memory:", roots: [root], skillDir, discover,
+    scanSkillsFn, probeTranscriptsFn: () => ({ byName: { used: { count: 3, sessions: 1 } } }),
+  });
+  assert.equal(r.counts.skill, 2);
+
+  const never = querySkillsNeverInvoked(r.db);
+  assert.deepEqual(never.map((x) => x.id), ["dead"]);
+
+  const row = r.db.prepare("SELECT * FROM skill WHERE id='used'").get();
+  assert.equal(row.usage_count, 5);
+  assert.equal(row.transcript_count, 3);
+  assert.equal(row.never_invoked, 0);
+  // lastUsedAt is stored as ISO, not a raw epoch, so the column is readable.
+  assert.match(row.last_used_at, /^\d{4}-\d{2}-\d{2}T/);
+
+  // provenance -> source_url; a handmade skill stays null and shows up as such.
+  assert.equal(r.db.prepare("SELECT source_url FROM skill WHERE id='dead'").get().source_url, "https://e.com/x");
+  assert.deepEqual(querySkillsNoProvenance(r.db).map((x) => x.id), ["used"]);
 });
