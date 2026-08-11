@@ -999,6 +999,80 @@ async function skills() {
     console.log(`  ${BOLD}dangling${RESET}`);
     for (const s of scan.skills.filter((x) => x.dangling)) console.log(`    ${RED}${s.id}${RESET}`);
   }
+
+  await lifecycleReport(tx);
+}
+
+/**
+ * The quarantine/promoted tiers of the Tathya marketplace, appended to
+ * `skills` output. Separate from the ~/.claude/skills inventory above because
+ * they are different populations: that one is what is installed, this one is
+ * what the registry is shepherding through a lifecycle.
+ */
+async function lifecycleReport(tx) {
+  const lc = await import("./lib/skills-lifecycle.mjs");
+  const { quarantined, promoted } = lc.scanLifecycle({ transcripts: tx.byName });
+  if (!quarantined.length && !promoted.length) return;
+
+  const ready = lc.promotable(quarantined);
+  const doomed = lc.reapable(quarantined);
+  const readyIds = new Set(ready.map((s) => s.id));
+  const doomedIds = new Set(doomed.map((s) => s.id));
+
+  console.log();
+  console.log(`  ${BOLD}lifecycle${RESET} ${DIM}${lc.MARKETPLACE_DIR}${RESET}`);
+  if (lc.isDisarmed()) console.log(`  ${YELLOW}DISARMED${RESET} ${DIM}(${lc.DISARM_FILE} exists — no promote/demote/reap)${RESET}`);
+
+  for (const s of quarantined) {
+    const uses = Math.max(s.usageCount, s.transcriptCount);
+    const mark = readyIds.has(s.id) ? `${GREEN}ready to promote${RESET}` : doomedIds.has(s.id) ? `${RED}reapable${RESET}` : DIM + `${lc.PROMOTE_MIN_USES - uses} more use(s), reaped in ${Math.max(0, lc.REAP_AFTER_DAYS - s.ageDays)}d` + RESET;
+    console.log(`    quarantine  ${s.name.padEnd(26)} uses=${uses} age=${s.ageDays}d  ${mark}`);
+  }
+  for (const s of promoted) {
+    console.log(`    ${GREEN}promoted${RESET}    ${s.name.padEnd(26)} uses=${Math.max(s.usageCount, s.transcriptCount)}`);
+  }
+}
+
+/** `skills-promote <name>` / `skills-demote <name>` / `skills-reap [--apply]` */
+async function skillsLifecycleCmd(mode) {
+  const lc = await import("./lib/skills-lifecycle.mjs");
+  const name = process.argv[3];
+
+  if (mode === "skills-promote" || mode === "skills-demote") {
+    if (!name) {
+      console.error(`usage: node cli.mjs ${mode} <skill-name>`);
+      process.exit(2);
+    }
+    const res = mode === "skills-promote" ? await lc.promote(name) : await lc.demote(name);
+    if (!res.ok) {
+      console.log(`${RED}✗${RESET} ${name}: ${res.reason}`);
+      process.exit(1);
+    }
+    console.log(`${GREEN}✓${RESET} ${res.from} → ${res.to}`);
+    return;
+  }
+
+  // reap
+  const apply = process.argv.includes("--apply");
+  const { probeTranscripts } = await import("./lib/skills-scan.mjs");
+  const { quarantined } = lc.scanLifecycle({ transcripts: probeTranscripts().byName });
+  const candidates = lc.reapable(quarantined);
+
+  if (!candidates.length) {
+    console.log(`${DIM}nothing reapable — quarantine has no skill that is both unused and older than ${lc.REAP_AFTER_DAYS}d${RESET}`);
+    return;
+  }
+  const res = await lc.reap(candidates, { apply });
+  if (!res.applied) {
+    const why = res.reason === "disarmed" ? ` ${YELLOW}(DISARMED)${RESET}` : ` ${DIM}(dry run — pass --apply)${RESET}`;
+    console.log(`would reap ${res.planned.length}:${why}`);
+    for (const p of res.planned) console.log(`  ${p.id} ${DIM}age ${p.ageDays}d${RESET}`);
+    return;
+  }
+  for (const d of res.done) {
+    if (d.removed) console.log(`${GREEN}✓${RESET} reaped ${d.id} ${DIM}→ ${d.archive}${RESET}`);
+    else console.log(`${RED}✗${RESET} kept ${d.id}: ${d.reason}`);
+  }
 }
 
 // Only dispatch when executed directly (node cli.mjs ...), NOT when a test imports
@@ -1016,9 +1090,11 @@ if (_invokedDirectly) {
     await check();
   } else if (mode === "skills") {
     await skills();
+  } else if (mode === "skills-promote" || mode === "skills-demote" || mode === "skills-reap") {
+    await skillsLifecycleCmd(mode);
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]|skills [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]|skills [--json]|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
     process.exit(2);
   }
 }

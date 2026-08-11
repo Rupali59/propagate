@@ -14,3 +14,7 @@ index.db
 index.db-journal
 index.db-wal
 index.db-shm
+
+# Lifecycle event log — machine-local history of promote/demote/reap. Like
+# index.db this is per-machine state, not source.
+SKILLS_LIFECYCLE.jsonl
