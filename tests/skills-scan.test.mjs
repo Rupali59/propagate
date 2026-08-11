@@ -27,6 +27,7 @@ import {
   readSkillLock,
   scanSkills,
   summarize,
+  probeTranscripts,
 } from "../lib/skills-scan.mjs";
 
 function fixture() {
@@ -209,6 +210,94 @@ test("readFrontmatterName tolerates quotes and missing frontmatter", () => {
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+test("neverInvoked is the AND of both probes, not either alone", () => {
+  // The reaper deletes on this flag, so a skill visible to EITHER probe must
+  // survive. skillUsage is a file we do not control; transcripts only cover the
+  // era since the Skill tool existed. Neither is trustworthy alone.
+  const f = fixture();
+  try {
+    for (const n of ["both", "usage-only", "transcript-only", "neither"]) {
+      writeSkill(path.join(f.skills, n), n);
+    }
+    const { skills } = scanSkills({
+      skillsDir: f.skills,
+      lock: {},
+      usage: {
+        both: { usageCount: 3, lastUsedAt: 1 },
+        "usage-only": { usageCount: 2, lastUsedAt: 1 },
+      },
+      transcripts: {
+        both: { count: 1, sessions: 1 },
+        "transcript-only": { count: 1, sessions: 1 },
+      },
+    });
+    const byId = Object.fromEntries(skills.map((s) => [s.id, s]));
+    assert.equal(byId.both.neverInvoked, false);
+    assert.equal(byId["usage-only"].neverInvoked, false);
+    assert.equal(byId["transcript-only"].neverInvoked, false, "transcript evidence alone must protect a skill");
+    assert.equal(byId.neither.neverInvoked, true);
+
+    // The surprising direction is worth surfacing: present in transcripts but
+    // absent from skillUsage would undermine skillUsage as the primary probe.
+    assert.equal(summarize({ skills, orphanUsageKeys: [] }).transcriptOnly, 1);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("probeTranscripts attributes matches to skills and sessions", () => {
+  const f = fixture();
+  try {
+    const proj = path.join(f.root, "projects", "-Users-x-repo");
+    mkdirSync(proj, { recursive: true });
+    // Two calls to one skill in one session, one call in a second session.
+    writeFileSync(
+      path.join(proj, "session-aaa.jsonl"),
+      `{"type":"tool_use","name":"Skill","input":{"skill":"propagate"}}\n` +
+      `{"type":"tool_use","name":"Skill","input":{"skill":"propagate"}}\n` +
+      `{"type":"tool_use","name":"Skill","input":{"skill":"gstack-ship"}}\n`,
+    );
+    writeFileSync(
+      path.join(proj, "session-bbb.jsonl"),
+      `{"type":"tool_use","name":"Skill","input":{"skill":"propagate"}}\n`,
+    );
+    // A non-transcript file must be excluded by the glob.
+    writeFileSync(path.join(proj, "notes.txt"), `{"skill":"should-not-count"}\n`);
+
+    const { byName, scanned } = probeTranscripts({ projectsDir: path.join(f.root, "projects") });
+    assert.equal(scanned, true);
+    assert.equal(byName.propagate.count, 3);
+    assert.equal(byName.propagate.sessions, 2);
+    assert.equal(byName["gstack-ship"].count, 1);
+    assert.equal(byName["should-not-count"], undefined);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("probeTranscripts returns empty-but-scanned when there are no matches", () => {
+  // Both searchers exit 1 on "no matches". That is a real empty result and must
+  // not be reported as a failed scan, or the digest would say "probe
+  // unavailable" on a genuinely quiet tree.
+  const f = fixture();
+  try {
+    const proj = path.join(f.root, "projects");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(path.join(proj, "empty.jsonl"), `{"type":"text"}\n`);
+    const r = probeTranscripts({ projectsDir: proj });
+    assert.equal(r.scanned, true);
+    assert.deepEqual(r.byName, {});
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("probeTranscripts reports scanned:false when the tree is missing", () => {
+  const r = probeTranscripts({ projectsDir: "/nonexistent-transcripts-xyz" });
+  assert.equal(r.scanned, false);
+  assert.deepEqual(r.byName, {});
 });
 
 test("summarize counts installers, never-invoked and orphans", () => {

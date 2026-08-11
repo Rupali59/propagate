@@ -947,8 +947,9 @@ async function check() {
  * a git checkout that tracks upstream.
  */
 async function skills() {
-  const { scanSkills, summarize, INSTALLER } = await import("./lib/skills-scan.mjs");
-  const scan = scanSkills();
+  const { scanSkills, summarize, probeTranscripts, INSTALLER } = await import("./lib/skills-scan.mjs");
+  const tx = probeTranscripts();
+  const scan = scanSkills({ transcripts: tx.byName });
   const sum = summarize(scan);
 
   if (process.argv.includes("--json")) {
@@ -970,7 +971,11 @@ async function skills() {
 
   const pct = sum.total ? Math.round((sum.neverInvoked / sum.total) * 100) : 0;
   console.log();
-  console.log(`  ${YELLOW}${sum.neverInvoked}${RESET} never invoked ${DIM}(${pct}% of the directory)${RESET}`);
+  console.log(`  ${YELLOW}${sum.neverInvoked}${RESET} never invoked ${DIM}(${pct}% — zero in skillUsage AND zero in transcripts)${RESET}`);
+  if (!tx.scanned) console.log(`  ${YELLOW}transcript probe unavailable${RESET} ${DIM}— never-invoked rests on skillUsage alone${RESET}`);
+  if (sum.transcriptOnly) {
+    console.log(`  ${RED}${sum.transcriptOnly}${RESET} in transcripts but absent from skillUsage ${DIM}— undermines skillUsage as primary${RESET}`);
+  }
   if (sum.dangling) console.log(`  ${RED}${sum.dangling}${RESET} dangling SKILL.md symlink(s)`);
   if (sum.orphanUsageKeys) {
     console.log(`  ${DIM}${sum.orphanUsageKeys} usage keys with no directory (counter is never pruned on delete)${RESET}`);
