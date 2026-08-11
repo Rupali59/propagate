@@ -333,6 +333,13 @@ async function buildSnapshot(indexDb = null) {
     skills = { available: false, error: String(err.message || err) };
   }
 
+  let lifecycle;
+  try {
+    lifecycle = await lifecycleSweep();
+  } catch (err) {
+    lifecycle = { available: false, error: String(err.message || err) };
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     degraded: DISCOVERY_DEGRADED,
@@ -344,6 +351,36 @@ async function buildSnapshot(indexDb = null) {
     plist,
     disk,
     skills,
+    lifecycle,
+  };
+}
+
+/**
+ * The one unattended mutation in this whole system: reap quarantined skills
+ * that neither probe has ever seen and that are past the age threshold.
+ *
+ * Reaping runs here rather than in a detector because it is the half of
+ * auto-creation that is genuinely safe — it only ever touches the quarantine
+ * tier, it archives to a tarball before deleting, it keeps the skill if the
+ * archive fails, and the kill switch stops it. Creation is explicit instead;
+ * see lib/skills-create.mjs for the measurement that decided that.
+ */
+async function lifecycleSweep() {
+  const lc = await import("./lib/skills-lifecycle.mjs");
+  const { probeTranscripts } = await import("./lib/skills-scan.mjs");
+  const { quarantined, promoted } = lc.scanLifecycle({ transcripts: probeTranscripts().byName });
+  const ready = lc.promotable(quarantined);
+  const candidates = lc.reapable(quarantined);
+  // apply:true — armed. reap() itself refuses when disarmed and archives first.
+  const reaped = candidates.length ? await lc.reap(candidates, { apply: true }) : { applied: false, planned: [], done: [] };
+  return {
+    available: true,
+    disarmed: lc.isDisarmed(),
+    quarantined: quarantined.length,
+    promoted: promoted.length,
+    readyToPromote: ready.map((s) => ({ name: s.name, uses: Math.max(s.usageCount, s.transcriptCount) })),
+    reaped: (reaped.done || []).filter((d) => d.removed).map((d) => d.id),
+    reapBlocked: reaped.reason === "disarmed" ? reaped.planned.map((p) => p.id) : [],
   };
 }
 
@@ -611,6 +648,19 @@ export function computeDiff(snapshot, prior) {
     } else if (!firstRun) {
       // Index gained skill rows for the first time; state the baseline once.
       skillLines.push(`inventory online: ${sk.total} skills, ${sk.neverInvoked} never invoked`);
+    }
+  }
+
+  // Lifecycle events are always worth a line — they are actions the system took
+  // or is waiting on, not standing facts, so they cannot become wallpaper.
+  const lc = snapshot.lifecycle;
+  if (lc?.available) {
+    for (const r of lc.readyToPromote) {
+      skillLines.push(`ready to promote: quarantine:${r.name} (${r.uses} uses) — \`propagate skills-promote ${r.name}\``);
+    }
+    for (const id of lc.reaped) skillLines.push(`reaped ${id} — unused past the age threshold, archived first`);
+    if (lc.reapBlocked.length) {
+      skillLines.push(`DISARMED: would have reaped ${lc.reapBlocked.join(", ")} (rm ~/.claude/skills-registry.off to re-arm)`);
     }
   }
 

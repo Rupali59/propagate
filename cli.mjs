@@ -1033,6 +1033,34 @@ async function lifecycleReport(tx) {
   }
 }
 
+/** `skills-create <name> <intent...>` — draft, audit, land in quarantine. */
+async function skillsCreateCmd() {
+  const name = process.argv[3];
+  const intent = process.argv.slice(4).join(" ").trim();
+  if (!name || !intent) {
+    console.error('usage: node cli.mjs skills-create <kebab-name> <what it should do>');
+    process.exit(2);
+  }
+  const sc = await import("./lib/skills-create.mjs");
+  const gate = await sc.creationAllowed({ name });
+  if (!gate.ok) {
+    console.log(`${RED}✗${RESET} refused: ${gate.reason}`);
+    process.exit(1);
+  }
+  console.log(`${DIM}drafting via skill-creator (this spawns claude -p and takes a while)…${RESET}`);
+  const res = await sc.createSkill(name, intent);
+  if (!res.ok) {
+    console.log(`${RED}✗${RESET} ${res.reason}`);
+    process.exit(1);
+  }
+  const a = res.audit;
+  const auditLine = !a.ran ? `${YELLOW}audit skipped${RESET} ${DIM}(${a.reason})${RESET}`
+    : a.passed ? `${GREEN}audit passed${RESET}` : `${YELLOW}audit failed${RESET} ${DIM}(kept in quarantine — fix or let it be reaped)${RESET}`;
+  console.log(`${GREEN}✓${RESET} created ${res.id}  ${auditLine}`);
+  console.log(`  ${DIM}${res.dir}${RESET}`);
+  console.log(`  ${DIM}invoke it as ${res.id}; it needs ${sc.MAX_QUARANTINED > 0 ? "3" : "3"} uses to be promotable${RESET}`);
+}
+
 /** `skills-promote <name>` / `skills-demote <name>` / `skills-reap [--apply]` */
 async function skillsLifecycleCmd(mode) {
   const lc = await import("./lib/skills-lifecycle.mjs");
@@ -1090,11 +1118,13 @@ if (_invokedDirectly) {
     await check();
   } else if (mode === "skills") {
     await skills();
+  } else if (mode === "skills-create") {
+    await skillsCreateCmd();
   } else if (mode === "skills-promote" || mode === "skills-demote" || mode === "skills-reap") {
     await skillsLifecycleCmd(mode);
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]|skills [--json]|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
     process.exit(2);
   }
 }
