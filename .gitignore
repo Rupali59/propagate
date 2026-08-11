@@ -1,4 +1,17 @@
-node_modules/
+# node_modules IS committed, deliberately.
+#
+# Claude Code does not run `npm install` when a plugin is installed from a
+# marketplace, and three dependencies (yaml, ajv, proper-lockfile) are used on
+# the module-load path -- lib/discovery.mjs imports `yaml` before anything else
+# runs. Without them vendored, a plugin install throws "Cannot find module
+# 'yaml'" on first use, which is a worse failure than 4 MB of repo weight.
+#
+# Bundling with `bun build` was tried and produces 4 files instead of 798, but
+# the entry points would then be dist/*.js while SKILL.md, the launchd plist and
+# every doc reference the .mjs sources -- a build artifact that must be
+# regenerated on every change is exactly the drift this repo exists to detect.
+#
+# Regenerate with: npm ci --omit=dev
 # runtime state — not source
 state.json
 state.json.bak
