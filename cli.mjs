@@ -60,7 +60,7 @@ export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
   return { edges, missing, outsideAllowlist };
 }
 import { discoverWorkspacesSync, isWorkspaceMarker } from "./lib/discovery.mjs";
-import { regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/plist.mjs";
+import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/plist.mjs";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -241,7 +241,7 @@ async function watcherJsonBlock() {
   let launchdLoaded = false;
   try {
     const out = execSync("launchctl list", { encoding: "utf8" });
-    launchdLoaded = out.split("\n").some((l) => l.includes("com.rupali.propagate"));
+    launchdLoaded = out.split("\n").some((l) => l.includes(LAUNCHD_LABEL));
   } catch {
     launchdLoaded = false;
   }
@@ -442,8 +442,8 @@ async function doctor() {
   console.log(`${BOLD}# launchd${RESET}`);
   try {
     const out = execSync("launchctl list", { encoding: "utf8" });
-    const loaded = out.split("\n").some((l) => l.includes("com.rupali.propagate"));
-    check("plist loaded", loaded, loaded ? "" : "run: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rupali.propagate.plist");
+    const loaded = out.split("\n").some((l) => l.includes(LAUNCHD_LABEL));
+    check("plist loaded", loaded, loaded ? "" : `run: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/${LAUNCHD_LABEL}.plist`);
   } catch (err) {
     check("launchctl reachable", false, err.message);
   }
@@ -934,6 +934,68 @@ async function check() {
   process.exit(exitCode);
 }
 
+/**
+ * `skills` — inventory of ~/.claude/skills with provenance and liveness.
+ *
+ * Read-only by construction. It reads ~/.claude.json for the harness-maintained
+ * skillUsage counter and never writes there; corrupting that file breaks Claude
+ * Code globally.
+ *
+ * Reports rather than repairs. In particular the frontmatter/directory name
+ * mismatches are left alone: Claude Code resolves a skill by its DIRECTORY
+ * name, so the mismatch is cosmetic, and "fixing" it would rewrite files inside
+ * a git checkout that tracks upstream.
+ */
+async function skills() {
+  const { scanSkills, summarize, INSTALLER } = await import("./lib/skills-scan.mjs");
+  const scan = scanSkills();
+  const sum = summarize(scan);
+
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({ generatedAt: new Date().toISOString(), summary: sum, ...scan }, null, 2));
+    return;
+  }
+
+  if (scan.error) {
+    console.log(`${RED}cannot read ${scan.skillsDir}: ${scan.error}${RESET}`);
+    process.exit(1);
+  }
+
+  console.log(`${BOLD}skills${RESET} ${DIM}${scan.skillsDir}${RESET}`);
+  console.log(`  ${sum.total} skills`);
+  for (const [k, v] of Object.entries(sum.byInstaller).sort((a, b) => b[1] - a[1])) {
+    const prov = k === INSTALLER.NPX_SKILLS ? "provenance recorded" : k === INSTALLER.GSTACK ? "provenance implicit (checkout)" : "no provenance";
+    console.log(`    ${String(v).padStart(3)}  ${k.padEnd(14)} ${DIM}${prov}${RESET}`);
+  }
+
+  const pct = sum.total ? Math.round((sum.neverInvoked / sum.total) * 100) : 0;
+  console.log();
+  console.log(`  ${YELLOW}${sum.neverInvoked}${RESET} never invoked ${DIM}(${pct}% of the directory)${RESET}`);
+  if (sum.dangling) console.log(`  ${RED}${sum.dangling}${RESET} dangling SKILL.md symlink(s)`);
+  if (sum.orphanUsageKeys) {
+    console.log(`  ${DIM}${sum.orphanUsageKeys} usage keys with no directory (counter is never pruned on delete)${RESET}`);
+  }
+  if (sum.nameMismatches) {
+    console.log(`  ${DIM}${sum.nameMismatches} frontmatter/dir name mismatches — cosmetic, resolution is by directory${RESET}`);
+  }
+
+  const top = scan.skills.filter((s) => s.usageCount > 0).sort((a, b) => b.usageCount - a.usageCount);
+  if (top.length) {
+    console.log();
+    console.log(`  ${BOLD}most used${RESET}`);
+    for (const s of top.slice(0, 10)) {
+      const when = s.lastUsedAt ? new Date(s.lastUsedAt).toISOString().slice(0, 10) : "—";
+      console.log(`    ${String(s.usageCount).padStart(4)}  ${s.id.padEnd(30)} ${DIM}${when}${RESET}`);
+    }
+  }
+
+  if (scan.skills.some((s) => s.dangling)) {
+    console.log();
+    console.log(`  ${BOLD}dangling${RESET}`);
+    for (const s of scan.skills.filter((x) => x.dangling)) console.log(`    ${RED}${s.id}${RESET}`);
+  }
+}
+
 // Only dispatch when executed directly (node cli.mjs ...), NOT when a test imports
 // checkCrossRepo from this module.
 const _invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
@@ -947,9 +1009,11 @@ if (_invokedDirectly) {
     await init(process.argv[3]);
   } else if (mode === "check") {
     await check();
+  } else if (mode === "skills") {
+    await skills();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]|skills [--json]]");
     process.exit(2);
   }
 }
