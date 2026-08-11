@@ -324,6 +324,15 @@ async function buildSnapshot(indexDb = null) {
     disk = { availKb: null, usedPct: null, caches: [], projects: [], truncated: true, error: String(err.message || err) };
   }
 
+  let skills;
+  try {
+    skills = skillsSnapshot(indexDb);
+  } catch (err) {
+    // Same belt-and-suspenders as disk: a skills bug must never take down the
+    // only reporting channel that currently works.
+    skills = { available: false, error: String(err.message || err) };
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     degraded: DISCOVERY_DEGRADED,
@@ -334,6 +343,36 @@ async function buildSnapshot(indexDb = null) {
     duplicateOpenAcrossLedgers,
     plist,
     disk,
+    skills,
+  };
+}
+
+/**
+ * Skill inventory for the digest, read from the already-rebuilt index rather
+ * than re-scanning. Returns available:false when the index has no skill rows
+ * (e.g. a rebuild that ran without the opt-in sweep) so the formatter can stay
+ * silent instead of reporting a confident zero.
+ */
+function skillsSnapshot(indexDb) {
+  if (!indexDb) return { available: false, error: "no index" };
+  const row = indexDb
+    .prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(never_invoked) AS never_invoked,
+              SUM(CASE WHEN dangling = 1 THEN 1 ELSE 0 END) AS dangling,
+              SUM(CASE WHEN usage_count = 0 AND transcript_count > 0 THEN 1 ELSE 0 END) AS disagreement
+       FROM skill`,
+    )
+    .get();
+  if (!row || !row.total) return { available: false, error: "no skill rows" };
+  const ids = indexDb.prepare(`SELECT id FROM skill ORDER BY id`).all().map((r) => r.id);
+  return {
+    available: true,
+    total: row.total,
+    neverInvoked: Number(row.never_invoked ?? 0),
+    dangling: Number(row.dangling ?? 0),
+    disagreement: Number(row.disagreement ?? 0),
+    ids,
   };
 }
 
@@ -350,6 +389,18 @@ function toStateWorkspace(ws) {
     done: ws.counts.done,
     wontfix: ws.counts.wontfix,
     openRows: ws.openRows.map((r) => ({ id: r.id, source: r.source, downstreamCount: r.downstreamCount })),
+  };
+}
+
+/** Lean prior-skills record: the id set plus the alarm counters, so the next
+ *  run can diff appearances/disappearances instead of restating the inventory. */
+function toStateSkills(skills) {
+  if (!skills || !skills.available) return null;
+  return {
+    total: skills.total,
+    ids: skills.ids,
+    dangling: skills.dangling,
+    disagreement: skills.disagreement,
   };
 }
 
@@ -372,6 +423,7 @@ function snapshotToDigestState(snapshot) {
     workspaces,
     cross: toStateWorkspace(snapshot.cross),
     disk: toStateDisk(snapshot.disk),
+    skills: toStateSkills(snapshot.skills),
   };
 }
 
@@ -532,7 +584,37 @@ export function computeDiff(snapshot, prior) {
 
   const hasChange = newByWorkspace.length > 0 || closedByWorkspace.length > 0;
 
-  return { firstRun, broken, newByWorkspace, closedByWorkspace, totals, watcher: snapshot.watcher, hasChange, diskLines };
+  // ── Skills ────────────────────────────────────────────────────────────
+  // Diff-only, for the same reason disk is threshold-only: a block that
+  // restates "92 skills, 36 never invoked" every morning is wallpaper within a
+  // week, which is precisely how PROPAGATION_CROSS_LEDGER.md came to read
+  // "Watcher healthy" for a month. Report what CHANGED.
+  const skillLines = [];
+  const sk = snapshot.skills;
+  const priorSk = prior?.skills ?? null;
+  if (sk?.available) {
+    if (priorSk && Array.isArray(priorSk.ids)) {
+      const before = new Set(priorSk.ids);
+      const after = new Set(sk.ids);
+      const added = sk.ids.filter((id) => !before.has(id));
+      const removed = priorSk.ids.filter((id) => !after.has(id));
+      if (added.length) skillLines.push(`+${added.length} appeared: ${added.slice(0, 6).join(", ")}${added.length > 6 ? ` (+${added.length - 6} more)` : ""}`);
+      if (removed.length) skillLines.push(`-${removed.length} removed: ${removed.slice(0, 6).join(", ")}${removed.length > 6 ? ` (+${removed.length - 6} more)` : ""}`);
+      // Alarms fire on transition, not on persistence, so a known-and-accepted
+      // dangling symlink does not nag daily.
+      if (sk.dangling !== priorSk.dangling && sk.dangling > 0) {
+        skillLines.push(`${sk.dangling} dangling SKILL.md symlink(s)`);
+      }
+      if (sk.disagreement > 0 && sk.disagreement !== priorSk.disagreement) {
+        skillLines.push(`!! ${sk.disagreement} skill(s) in transcripts but absent from skillUsage — the primary liveness probe has lost events`);
+      }
+    } else if (!firstRun) {
+      // Index gained skill rows for the first time; state the baseline once.
+      skillLines.push(`inventory online: ${sk.total} skills, ${sk.neverInvoked} never invoked`);
+    }
+  }
+
+  return { firstRun, broken, newByWorkspace, closedByWorkspace, totals, watcher: snapshot.watcher, hasChange, diskLines, skillLines };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -546,8 +628,9 @@ export function formatDigest(diff) {
   }`;
 
   const diskLines = diff.diskLines || [];
+  const skillLines = diff.skillLines || [];
 
-  if (diff.broken.length === 0 && !diff.firstRun && !diff.hasChange && diskLines.length === 0) {
+  if (diff.broken.length === 0 && !diff.firstRun && !diff.hasChange && diskLines.length === 0 && skillLines.length === 0) {
     // Quiet day. One short line, not a full report. Disk hygiene prints ZERO
     // lines here too, on purpose — see digest.mjs disk-hygiene section: a
     // digest that restates disk facts every day is the same wallpaper
@@ -577,6 +660,12 @@ export function formatDigest(diff) {
   if (diskLines.length > 0) {
     lines.push(`DISK:`);
     for (const l of diskLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  if (skillLines.length > 0) {
+    lines.push(`SKILLS:`);
+    for (const l of skillLines) lines.push(`  ${l}`);
     lines.push("");
   }
 

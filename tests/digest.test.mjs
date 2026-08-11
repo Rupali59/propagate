@@ -243,3 +243,55 @@ test("readDigestState: malformed JSON on disk returns null rather than throwing"
   await writeFile(statePath, "{not json", "utf8");
   assert.equal(await readDigestState(statePath), null);
 });
+
+// ── Skills block ────────────────────────────────────────────────────────────
+// The whole point is that it says NOTHING on a quiet day. A block restating
+// "92 skills, 36 never invoked" every morning becomes wallpaper in a week --
+// the exact failure that let PROPAGATION_CROSS_LEDGER.md read "Watcher
+// healthy" for a month.
+
+const skillSnap = (over = {}) => ({
+  available: true, total: 3, neverInvoked: 1, dangling: 0, disagreement: 0,
+  ids: ["a", "b", "c"], ...over,
+});
+
+test("skills contribute zero lines when the inventory is unchanged", () => {
+  const snap = { ...baseSnapshot(), skills: skillSnap() };
+  const prior = { ...snapshotToDigestStateForTest(snap) };
+  const diff = computeDiff(snap, prior);
+  assert.deepEqual(diff.skillLines, []);
+  // and the quiet-day early return must still be reachable
+  assert.match(formatDigest(diff), /^propagate: no change/);
+});
+
+test("skills report appearances and disappearances, not the inventory", () => {
+  const before = { ...baseSnapshot(), skills: skillSnap() };
+  const prior = snapshotToDigestStateForTest(before);
+  const after = { ...baseSnapshot(), skills: skillSnap({ ids: ["a", "c", "d"], total: 3 }) };
+  const diff = computeDiff(after, prior);
+  const text = diff.skillLines.join("\n");
+  assert.match(text, /\+1 appeared: d/);
+  assert.match(text, /-1 removed: b/);
+  assert.doesNotMatch(text, /never invoked/, "must not restate the inventory");
+  assert.match(formatDigest(diff), /SKILLS:/);
+});
+
+test("probe disagreement fires on transition, and is loud", () => {
+  const before = { ...baseSnapshot(), skills: skillSnap() };
+  const prior = snapshotToDigestStateForTest(before);
+  const after = { ...baseSnapshot(), skills: skillSnap({ disagreement: 2 }) };
+  const diff = computeDiff(after, prior);
+  assert.match(diff.skillLines.join("\n"), /primary liveness probe has lost events/);
+
+  // Persisting at the same value must NOT re-fire — alarms nag on change only.
+  const prior2 = snapshotToDigestStateForTest(after);
+  assert.deepEqual(computeDiff({ ...baseSnapshot(), skills: skillSnap({ disagreement: 2 }) }, prior2).skillLines, []);
+});
+
+test("an unavailable skill index stays silent rather than reporting zero", () => {
+  // A rebuild that ran without the opt-in sweep has no skill rows. Reporting
+  // "0 skills" would read as "everything was deleted".
+  const snap = { ...baseSnapshot(), skills: { available: false, error: "no skill rows" } };
+  const diff = computeDiff(snap, snapshotToDigestStateForTest({ ...baseSnapshot(), skills: skillSnap() }));
+  assert.deepEqual(diff.skillLines, []);
+});
