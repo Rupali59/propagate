@@ -233,3 +233,31 @@ for a bigger hammer than the mess required.
 you own outright over cleaning up inside a real path. Before any recursive delete,
 ask what that path will hold *next release*, not just what it holds now — a cleanup
 that is safe today and catastrophic later is a landmine with a timer.
+
+**Update 2026-08-14:** `~/.propagate/events` now holds **379 baselined events** —
+the v2 store went live with `bootstrap --apply`. The window this entry described as
+hypothetical has closed. The same command run today destroys every verification the
+system has.
+
+### G22 · A safety flag is a claim, and claims need a test
+`digest.mjs`'s header promised `--dry-run — print, write NO state`. It was false.
+`dryRun` existed only inside `runDigest()`, gating state-writing and delivery, while
+`buildSnapshot()` → `lifecycleSweep()` called `lc.reap(candidates, { apply: true })`
+**unconditionally**. Running the documented preview performed an armed skill
+deletion.
+
+Nothing was lost, and only by luck: zero skills were quarantined when a subagent
+found it — while refusing to run `--dry-run` on production precisely *because* it had
+read the code first rather than trusting the flag.
+
+Note what the inner guards did and did not do. `reap()` archives before deleting and
+refuses when disarmed, so the blast radius was bounded and recoverable. Neither guard
+makes the *documented* claim true, and both are invisible to the person reading
+`--dry-run` and reasonably concluding it is safe.
+
+**Do:** every safety flag gets a test asserting the unsafe path is unreachable when
+it is set. A flag is an API promise, and this codebase's whole subject is promises
+drifting from behaviour. Inner mitigations bound damage; they do not substitute for
+the guarantee on the label. When a flag threads through several layers, assert each
+link — this failed because a parameter did not reach its call site, not because
+anyone misunderstood the intent.

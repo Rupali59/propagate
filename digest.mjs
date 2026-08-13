@@ -37,7 +37,7 @@ import {
   SKILL_DIR,
 } from "./lib/config.mjs";
 import { readLedgerWithStats, lastActivityAt } from "./lib/ledger.mjs";
-import { reconcile, inboundRows } from "./lib/reconcile.mjs";
+import { reconcile, inboundRows, toNodeId } from "./lib/reconcile.mjs";
 import { PLIST_PATH } from "./lib/plist.mjs";
 import { notify } from "./lib/notify.mjs";
 import {
@@ -317,13 +317,30 @@ async function metricsSnapshot() {
 }
 
 /**
+ * Run reconcile() exactly ONCE for the whole digest (task constraint: both
+ * the INBOUND section and the new DRIFT section derive from this single
+ * call — never a second reconcile()). Never fatal: same belt-and-suspenders
+ * as disk/skills/lifecycle above — a reconcile bug must not take down the
+ * only reporting channel that currently works. On failure, both downstream
+ * snapshots must say "status unknown", never render as "no drift" (G2).
+ */
+async function reconcileOnce() {
+  try {
+    const { rows } = await reconcile(WORKSPACES);
+    return { available: true, rows };
+  } catch (err) {
+    return { available: false, error: String(err.message || err), rows: [] };
+  }
+}
+
+/**
  * Inbound cross-repo drift, per workspace (2026-08 plan Part 2: "the digest
- * gains an inbound section"). A pure filter over ONE reconcile() call across
- * every workspace — lib/reconcile.mjs's `inboundRows`, treating each
- * discovered WORKSPACES root as the repo boundary, same as `check`'s and
- * `reconcile --inbound`'s CLI surfaces. Only DRIFTED/DIVERGED edges are
- * reported — an inbound edge that is still CLEAN or NEVER_VERIFIED is not
- * something to wake up to.
+ * gains an inbound section"). A pure filter over the ONE shared reconcile()
+ * call (`reconcileOnce()`, above) — lib/reconcile.mjs's `inboundRows`,
+ * treating each discovered WORKSPACES root as the repo boundary, same as
+ * `check`'s and `reconcile --inbound`'s CLI surfaces. Only DRIFTED/DIVERGED
+ * edges are reported — an inbound edge that is still CLEAN or
+ * NEVER_VERIFIED is not something to wake up to.
  *
  * Distinct from the existing cross-repo decision-relay layer (cross.mjs /
  * CROSS_LEDGER_JSONL, digest.mjs:335-ish) — that relays `flow: decision`
@@ -331,38 +348,95 @@ async function metricsSnapshot() {
  * different section, no overlap to dedupe (G20 doesn't apply — nothing here
  * restates a fact another section already reports).
  *
- * Never fatal: same belt-and-suspenders as disk/skills/lifecycle above — a
- * reconcile bug must not take down the only reporting channel that
- * currently works.
+ * @param {{available: boolean, rows: object[], error?: string}} reconcileResult
+ * @param {{root: string, name: string}[]} [workspaces] defaults to the real
+ *   discovered WORKSPACES; overridable so tests can supply fake roots
+ *   without touching real discovery.
  */
-async function inboundSnapshot() {
-  try {
-    const { rows } = await reconcile(WORKSPACES);
-    const byWorkspace = [];
-    for (const ws of WORKSPACES) {
-      const drifted = inboundRows(rows, ws.root).filter((r) => r.state === "DRIFTED" || r.state === "DIVERGED");
-      if (drifted.length === 0) continue;
-      byWorkspace.push({
-        name: ws.name,
-        rows: drifted.map((r) => ({
-          edge_id: r.edge_id,
-          source: path.relative(ws.root, r.source.path),
-          downstream: r.downstream.path ? path.relative(ws.root, r.downstream.path) : "(unmatched)",
-          state: r.state,
-        })),
-      });
-    }
-    return { available: true, byWorkspace };
-  } catch (err) {
-    return { available: false, error: String(err.message || err) };
+function inboundSnapshot(reconcileResult, workspaces = WORKSPACES) {
+  if (!reconcileResult.available) return { available: false, error: reconcileResult.error };
+  const rows = reconcileResult.rows;
+  const byWorkspace = [];
+  for (const ws of workspaces) {
+    const drifted = inboundRows(rows, ws.root).filter((r) => r.state === "DRIFTED" || r.state === "DIVERGED");
+    if (drifted.length === 0) continue;
+    byWorkspace.push({
+      name: ws.name,
+      rows: drifted.map((r) => ({
+        edge_id: r.edge_id,
+        source: path.relative(ws.root, r.source.path),
+        downstream: r.downstream.path ? path.relative(ws.root, r.downstream.path) : "(unmatched)",
+        state: r.state,
+      })),
+    });
   }
+  return { available: true, byWorkspace };
+}
+
+/**
+ * The DRIFT section (watcher retirement: reconcile() replaces the v1
+ * launchd watcher as the source of drift rows — see file header + task
+ * brief). Partitions every DRIFTED/DIVERGED row from the SAME reconcile()
+ * call `inboundSnapshot()` uses, so the digest never reports one edge in
+ * two sections (G20):
+ *
+ *   - `sameRepo`  — `row.sameRepo === true`: both sides in one repo. This
+ *     is the intra-repo drift the retired watcher used to write.
+ *   - `outboundUnknown` — cross-repo (`sameRepo === false`) rows whose
+ *     downstream is NOT under any discovered WORKSPACES root, i.e. exactly
+ *     the complement of what `inboundSnapshot()` reports. A cross-repo row
+ *     inbound to a known workspace belongs to INBOUND, not here — computed
+ *     by re-running the identical `inboundRows()` filter used there and
+ *     excluding whatever it matches, so the two sections can never overlap
+ *     and no row can fall through either (G2: absence must be
+ *     attributable, not silent).
+ *
+ * Together, INBOUND + DRIFT.sameRepo + DRIFT.outboundUnknown is exhaustive
+ * over every DRIFTED/DIVERGED row — asserted directly in
+ * tests/digest-drift.test.mjs.
+ *
+ * @param {{available: boolean, rows: object[], error?: string}} reconcileResult
+ * @param {{root: string, name: string}[]} [workspaces] defaults to the real
+ *   discovered WORKSPACES; overridable so tests can supply fake roots
+ *   without touching real discovery. Must be the SAME list passed to
+ *   `inboundSnapshot()` for the same reconcile run, or the partition
+ *   invariant (INBOUND + DRIFT exhaustive, no overlap) does not hold.
+ */
+function driftSnapshot(reconcileResult, workspaces = WORKSPACES) {
+  if (!reconcileResult.available) return { available: false, error: reconcileResult.error };
+  const rows = reconcileResult.rows;
+  const driftRows = rows.filter((r) => r.state === "DRIFTED" || r.state === "DIVERGED");
+  const sameRepoRows = driftRows.filter((r) => r.sameRepo === true);
+  const crossRepoRows = driftRows.filter((r) => r.sameRepo === false);
+
+  // Everything in crossRepoRows that ANY known workspace already claims as
+  // inbound — the exact set INBOUND reports. Whatever's left is the gap.
+  const inboundEdgeIds = new Set();
+  for (const ws of workspaces) {
+    for (const r of inboundRows(crossRepoRows, ws.root)) inboundEdgeIds.add(r.edge_id);
+  }
+  const outboundUnknownRows = crossRepoRows.filter((r) => !inboundEdgeIds.has(r.edge_id));
+
+  const formatRow = (r) => ({
+    edge_id: r.edge_id,
+    source: r.node_id,
+    downstream: r.downstream.path ? toNodeId(r.downstream.path) : "(unmatched)",
+    state: r.state,
+  });
+
+  return {
+    available: true,
+    total: driftRows.length,
+    sameRepo: sameRepoRows.map(formatRow),
+    outboundUnknown: outboundUnknownRows.map(formatRow),
+  };
 }
 
 /**
  * Build the full snapshot the digest diffs against. Not the same object as
  * cli.mjs's statusJson() — computed independently from lib/ primitives.
  */
-async function buildSnapshot(indexDb = null) {
+async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
   const watcher = await watcherSnapshot();
   const workspaces = [];
   const ledgerEntries = [];
@@ -402,13 +476,17 @@ async function buildSnapshot(indexDb = null) {
 
   let lifecycle;
   try {
-    lifecycle = await lifecycleSweep();
+    lifecycle = await lifecycleSweep(dryRun);
   } catch (err) {
     lifecycle = { available: false, error: String(err.message || err) };
   }
 
   const metrics = await metricsSnapshot();
-  const inbound = await inboundSnapshot();
+  // ONE reconcile() call, shared by INBOUND and DRIFT (task constraint — see
+  // reconcileOnce()'s doc comment). Neither downstream snapshot re-derives it.
+  const reconcileResult = await reconcileOnce();
+  const inbound = inboundSnapshot(reconcileResult);
+  const drift = driftSnapshot(reconcileResult);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -424,6 +502,7 @@ async function buildSnapshot(indexDb = null) {
     lifecycle,
     metrics,
     inbound,
+    drift,
   };
 }
 
@@ -437,14 +516,21 @@ async function buildSnapshot(indexDb = null) {
  * archive fails, and the kill switch stops it. Creation is explicit instead;
  * see lib/skills-create.mjs for the measurement that decided that.
  */
-async function lifecycleSweep() {
+async function lifecycleSweep(dryRun = false) {
   const lc = await import("./lib/skills-lifecycle.mjs");
   const { probeTranscripts } = await import("./lib/skills-scan.mjs");
   const { quarantined, promoted } = lc.scanLifecycle({ transcripts: probeTranscripts().byName });
   const ready = lc.promotable(quarantined);
   const candidates = lc.reapable(quarantined);
-  // apply:true — armed. reap() itself refuses when disarmed and archives first.
-  const reaped = candidates.length ? await lc.reap(candidates, { apply: true }) : { applied: false, planned: [], done: [] };
+  // apply:!dryRun. reap() also refuses when disarmed and archives before
+  // deleting, but those are inner guards; this is the one that makes the
+  // documented "--dry-run — write NO state" promise true. It was false until
+  // 2026-08-14: dryRun lived only in runDigest and gated state-writing and
+  // delivery, so a "preview" ran an armed deletion. Nothing was lost (zero
+  // skills were reapable when it was found) — see docs/GOTCHAS.md G22.
+  const reaped = candidates.length
+    ? await lc.reap(candidates, { apply: !dryRun })
+    : { applied: false, planned: [], done: [] };
   return {
     available: true,
     disarmed: lc.isDisarmed(),
@@ -453,6 +539,9 @@ async function lifecycleSweep() {
     readyToPromote: ready.map((s) => ({ name: s.name, uses: Math.max(s.usageCount, s.transcriptCount) })),
     reaped: (reaped.done || []).filter((d) => d.removed).map((d) => d.id),
     reapBlocked: reaped.reason === "disarmed" ? reaped.planned.map((p) => p.id) : [],
+    // Named separately from reapBlocked so a preview never reads as a kill
+    // switch firing — two different reasons for the same absence (G2).
+    reapPreviewOnly: dryRun ? (reaped.planned || []).map((p) => p.id) : [],
   };
 }
 
@@ -810,6 +899,28 @@ export function computeDiff(snapshot, prior) {
     inboundLines.push(`!! inbound reconciliation unavailable: ${snapshot.inbound.error}`);
   }
 
+  // ── Drift (watcher retirement) ──────────────────────────────────────────
+  // State-based, same shape as INBOUND directly above — a DRIFTED edge is
+  // still the fact someone needs on the way to touching that file, whether
+  // it drifted yesterday or five minutes ago. Renders nothing when empty
+  // (plan/task constraint) and participates in the quiet-day collapse below.
+  // Partition discipline (G20): every row here is EITHER same-repo OR
+  // cross-repo-but-outside-any-known-workspace — never a row already
+  // reported by INBOUND above. See driftSnapshot()'s doc comment.
+  const driftLines = [];
+  if (snapshot.drift?.available) {
+    for (const r of snapshot.drift.sameRepo) {
+      driftLines.push(`${r.source} → ${r.downstream}   ${r.state}`);
+    }
+    for (const r of snapshot.drift.outboundUnknown) {
+      driftLines.push(`outbound — downstream outside any known workspace: ${r.source} → ${r.downstream}   ${r.state}`);
+    }
+  } else if (snapshot.drift?.error && !firstRun) {
+    // Vanished-signal case (R6): reconcile() failed, so drift status is
+    // UNKNOWN — never rendered as "no drift" (G2).
+    driftLines.push(`!! drift reconciliation unavailable: ${snapshot.drift.error}`);
+  }
+
   return {
     firstRun,
     broken,
@@ -822,6 +933,7 @@ export function computeDiff(snapshot, prior) {
     skillLines,
     metricLines,
     inboundLines,
+    driftLines,
   };
 }
 
@@ -839,6 +951,7 @@ export function formatDigest(diff) {
   const skillLines = diff.skillLines || [];
   const metricLines = diff.metricLines || [];
   const inboundLines = diff.inboundLines || [];
+  const driftLines = diff.driftLines || [];
 
   if (
     diff.broken.length === 0 &&
@@ -847,7 +960,8 @@ export function formatDigest(diff) {
     diskLines.length === 0 &&
     skillLines.length === 0 &&
     metricLines.length === 0 &&
-    inboundLines.length === 0
+    inboundLines.length === 0 &&
+    driftLines.length === 0
   ) {
     // Quiet day. One short line, not a full report. Disk hygiene prints ZERO
     // lines here too, on purpose — see digest.mjs disk-hygiene section: a
@@ -896,6 +1010,12 @@ export function formatDigest(diff) {
   if (inboundLines.length > 0) {
     lines.push(`INBOUND (${inboundLines.length}) — cross-repo edges pointing at your workspaces, drifted or diverged:`);
     for (const l of inboundLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  if (driftLines.length > 0) {
+    lines.push(`DRIFT (${driftLines.length}) — reconciled edges that moved since last verified:`);
+    for (const l of driftLines) lines.push(`  ${l}`);
     lines.push("");
   }
 
@@ -1023,7 +1143,7 @@ async function main() {
 }
 
 async function runDigest({ dryRun, stdoutOnly, indexDb }) {
-  const snapshot = await buildSnapshot(indexDb);
+  const snapshot = await buildSnapshot(indexDb, { dryRun });
   const prior = dryRun ? await readDigestState() : await readDigestState();
   const diff = computeDiff(snapshot, prior);
   const text = formatDigest(diff);
@@ -1055,4 +1175,6 @@ export {
   DIGEST_STATE_PATH,
   DAILY_MD_PATH,
   snapshotToDigestState as snapshotToDigestStateForTest,
+  inboundSnapshot as inboundSnapshotForTest,
+  driftSnapshot as driftSnapshotForTest,
 };
