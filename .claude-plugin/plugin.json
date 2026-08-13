@@ -1,0 +1,9 @@
+{
+  "name": "propagate",
+  "description": "Documentation-drift watcher. Detects when a change to one file leaves a coupled doc stale, records it in a per-workspace append-only ledger, and reports the backlog in a daily digest.",
+  "version": "0.1.0",
+  "author": { "name": "Rupali" },
+  "homepage": "https://github.com/Rupali59/propagate-skill",
+  "repository": "https://github.com/Rupali59/propagate-skill",
+  "keywords": ["documentation", "drift", "ledger", "propagation"]
+}

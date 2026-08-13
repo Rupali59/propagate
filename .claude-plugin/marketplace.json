@@ -1,0 +1,8 @@
+{
+  "name": "propagate",
+  "metadata": { "description": "The propagate skill, installable directly from its own repo." },
+  "owner": { "name": "Rupali" },
+  "plugins": [
+    { "name": "propagate", "source": "./", "description": "Documentation-drift watcher with a per-workspace ledger and a daily digest.", "version": "0.1.0" }
+  ]
+}

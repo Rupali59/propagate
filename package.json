@@ -6,7 +6,7 @@
   "description": "File-watcher + ledger for prose-to-prose / prose-to-code propagation across the Vipin Kaushik workspace. See SKILL.md.",
   "main": "watcher.mjs",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "watcher": "node watcher.mjs",
