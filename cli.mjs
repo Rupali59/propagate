@@ -13,6 +13,15 @@
  *   node cli.mjs check --range <a>..<b>   — same, over an explicit git range (CI)
  *   node cli.mjs check --staged           — staged files only (pre-commit use)
  *   node cli.mjs check ... --strict       — exit 1 (not 0) when couplings are found
+ *   node cli.mjs check ... --json         — machine-readable result (couplings + exit code)
+ *   node cli.mjs drain                    — list open rows, grouped by correlation_id (read-only)
+ *   node cli.mjs drain --all              — every workspace's queue
+ *   node cli.mjs drain --close <id>[,<id>...] --status <done|wontfix|partial>
+ *                      [--reason "..."] [--notes "..."] [--closed-by <who>]
+ *                                         — batch close (non-interactive; SPEC §6)
+ *   node cli.mjs drain --group <correlation_id> --status <...> [...]
+ *                                         — close every open row sharing that correlation_id
+ *   node cli.mjs drain ... --json         — machine-readable result on either mode
  */
 
 import { existsSync, globSync, realpathSync } from "node:fs";
@@ -20,7 +29,7 @@ import { pathToFileURL } from "node:url";
 import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 
 import {
   WORKSPACES,
@@ -31,11 +40,13 @@ import {
   DISCOVERY_DEGRADED,
   SUSPICIOUS_MARKERS,
   CROSS_LEDGER_JSONL,
+  SKILL_DIR,
 } from "./lib/config.mjs";
-import { readLedger, readLedgerWithStats, lastActivityAt } from "./lib/ledger.mjs";
+import { readLedger, readLedgerWithStats, lastActivityAt, markStatus } from "./lib/ledger.mjs";
 import { loadSidecar, SidecarError } from "./lib/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
 import { buildEdgeMap } from "./lib/edges.mjs";
+import { parseDecisions, zeroTokenEntries } from "./lib/decisions.mjs";
 
 /**
  * Validate cross-repo edges: load each .propagates-cross.yml, resolve every
@@ -73,6 +84,27 @@ const BOLD = "\x1b[1m";
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers — exported for tests (tests/cli-json.test.mjs).
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * N12: classify a DECISIONS.md's `Affects:` attribution health. `lib/decisions.mjs`'s
+ * `zeroTokenEntries` already isolates the exact N12 failure mode (regex mismatch,
+ * empty field, all-placeholder tokens) — this wraps it into the two shapes
+ * `doctor` needs: a hard failure when EVERY entry in a non-empty file parses to
+ * zero tokens (the bug returning wholesale), and a named warning when only SOME
+ * do (partial attribution loss, still worth flagging by date/title).
+ *
+ * Exported and pure (text in, verdict out) so it's unit-testable directly
+ * against synthetic fixtures, without shelling out to `doctor` as a subprocess
+ * or touching the real `docs/DECISIONS.md` — same testability-over-shelling-out
+ * reasoning as `computeCouplings`/`runCheck` above.
+ * @param {string} text - raw DECISIONS.md content
+ * @returns {{entries: Array, zero: Array, allZero: boolean}}
+ */
+export function decisionsAttributionReport(text) {
+  const entries = parseDecisions(text);
+  const zero = zeroTokenEntries(entries);
+  return { entries, zero, allZero: entries.length > 0 && zero.length === entries.length };
+}
 
 /**
  * Watcher liveness derives ONLY from the heartbeat file's age. 70s = the
@@ -441,6 +473,10 @@ async function doctor() {
   }
 
   console.log(`${BOLD}# launchd${RESET}`);
+  // N10 (doctor half): print the label doctor actually resolved and checked —
+  // a reader must be able to see WHICH agent doctor is talking about, not
+  // just whether *something* is loaded.
+  console.log(`  ${DIM}resolved label: ${LAUNCHD_LABEL}${RESET}`);
   try {
     const out = execSync("launchctl list", { encoding: "utf8" });
     const loaded = out.split("\n").some((l) => l.includes(LAUNCHD_LABEL));
@@ -489,9 +525,28 @@ async function doctor() {
     check("ledger JSONL exists", existsSync(ws.ledgerJsonl));
     if (existsSync(ws.ledgerJsonl)) {
       try {
-        const rows = await readLedger(ws.ledgerJsonl);
+        const { rows, unknownTypes } = await readLedgerWithStats(ws.ledgerJsonl);
         const openCount = rows.filter((r) => r.status === "open").length;
         check("ledger JSONL parseable", true, `${rows.length} rows, ${openCount} open`);
+
+        // N1: readLedgerWithStats already counts row types the fold doesn't
+        // know how to handle (e.g. hand-authored "manual" rows); readLedger
+        // and every one of its callers throw that count away. Surface it as
+        // a FAILURE naming the ledger and the offending type strings — this
+        // is "unknown to the reader", not "corrupt": a type like "manual" is
+        // a legitimate-but-unhandled kind (docs/DATA_MODEL.md), and reporting
+        // it as corruption would be inaccurate.
+        const unknownEntries = Object.entries(unknownTypes);
+        const unknownCount = unknownEntries.reduce((sum, [, n]) => sum + n, 0);
+        check(
+          "no row types unknown to the reader",
+          unknownCount === 0,
+          unknownCount
+            ? `${ws.ledgerJsonl}: ${unknownEntries
+                .map(([t, n]) => `"${t}"×${n}`)
+                .join(", ")} — unknown to readLedger, silently dropped by the fold (docs/DATA_MODEL.md)`
+            : "",
+        );
       } catch (err) {
         check("ledger JSONL parseable", false, err.message);
       }
@@ -571,6 +626,46 @@ async function doctor() {
     check("cross-repo check ran", false, err.message);
   }
 
+  console.log(`\n${BOLD}# DECISIONS.md attribution${RESET}`);
+  // N12: the mechanism that records *why* a choice was made must be able to
+  // read its own Affects: attribution field. A non-empty file where every
+  // entry parses to zero tokens means the parser is reading nothing from
+  // content that exists — that is always a bug, and it is the exact failure
+  // that shipped silently for weeks (all 8 live entries, 0 tokens) before
+  // being caught by hand. Checks the skill's own docs/DECISIONS.md.
+  try {
+    const decPath = path.join(SKILL_DIR, "docs", "DECISIONS.md");
+    if (!existsSync(decPath)) {
+      console.log(`  ${DIM}(no docs/DECISIONS.md at ${decPath})${RESET}`);
+    } else {
+      const text = await readFile(decPath, "utf8");
+      const { entries, zero, allZero } = decisionsAttributionReport(text);
+      if (allZero) {
+        check(
+          "Affects: tokens parse",
+          false,
+          `${decPath}: all ${entries.length} entries have zero Affects tokens — N12 regression (SPEC I1)`,
+        );
+      } else {
+        check(
+          "Affects: tokens parse",
+          true,
+          `${entries.length} entries, ${entries.length - zero.length} with tokens`,
+        );
+        if (zero.length > 0) {
+          warn(
+            "some DECISIONS.md entries have zero Affects tokens",
+            `${decPath}: ${zero
+              .map((e) => `${e.date} ${e.title || "(untitled)"}`)
+              .join("; ")}`,
+          );
+        }
+      }
+    }
+  } catch (err) {
+    check("Affects: tokens parse", false, err.message);
+  }
+
   console.log(`\n${BOLD}# Graph integration${RESET}`);
   let graphMcp = false;
   try {
@@ -586,6 +681,22 @@ async function doctor() {
   }
 
   console.log(`\n${BOLD}# Discovery integrity${RESET}`);
+  // N7: zero discovered workspaces must fail, not pass. DISCOVERY_DEGRADED
+  // only trips when markers were seen on disk but none opted into
+  // `workspace: true` (lib/discovery.mjs: `markersSeen > 0 && found.length
+  // === 0`). It stays false when SEARCH_ROOTS itself is wrong and zero
+  // markers are seen at all — e.g. PROPAGATE_SEARCH_ROOTS pointing outside
+  // the real tree — and in that case the per-workspace loop below simply runs
+  // zero times, every check in it trivially "passes" by not running, and
+  // doctor reports healthy. That is precisely the "abandoned automation
+  // reports itself healthy" failure lib/config.mjs's own comment names.
+  check(
+    "at least one workspace discovered",
+    WORKSPACES.length > 0,
+    WORKSPACES.length === 0
+      ? `SEARCH_ROOTS=[${SEARCH_ROOTS.join(", ")}] — zero workspaces found; every per-workspace check below silently did not run`
+      : "",
+  );
   if (DISCOVERY_DEGRADED) {
     check(
       "discovery not degraded",
@@ -874,10 +985,19 @@ export async function computeCouplings(changedRepoRelPaths, repoRoot, workspaces
  * a synthetic changed-file list (no git, no real WORKSPACES needed).
  * @returns {Promise<{exitCode: number, couplings: Array}>}
  */
-export async function runCheck({ changedFiles, repoRoot, strict = false }, workspaces = WORKSPACES) {
+export async function runCheck(
+  { changedFiles, repoRoot, strict = false, json = false },
+  workspaces = WORKSPACES,
+) {
   const couplings = await computeCouplings(changedFiles, repoRoot, workspaces);
+  const exitCode = couplings.length === 0 ? 0 : strict ? 1 : 0;
+  if (json) {
+    // Printing is check()'s job when --json is set (it wraps couplings in an
+    // envelope with generatedAt/repoRoot/etc, matching statusJson's shape).
+    return { exitCode, couplings };
+  }
   if (couplings.length === 0) {
-    return { exitCode: 0, couplings };
+    return { exitCode, couplings };
   }
   console.log(
     `${YELLOW}⚠ ${couplings.length} coupled file${couplings.length === 1 ? "" : "s"} in this change:${RESET}`,
@@ -889,16 +1009,23 @@ export async function runCheck({ changedFiles, repoRoot, strict = false }, works
     }
     console.log(`  ${c.file} → verify: ${parts.join(", ")}`);
   }
-  return { exitCode: strict ? 1 : 0, couplings };
+  return { exitCode, couplings };
 }
 
-/** Run a git diff and return the list of changed paths (repo-relative), deduped. */
-function gitDiffNames(cmd, repoRoot) {
+/**
+ * Run `git <gitArgs>` and return the list of changed paths (repo-relative),
+ * deduped. Takes an argv array and shells out via `execFileSync` — NOT a
+ * template string through `execSync` — so a hostile `range` (e.g. from a
+ * pre-push hook fed attacker-controlled ref names) is passed to git as a
+ * single literal argument and can never be interpreted by a shell. See
+ * ISSUES.md G1.
+ */
+export function gitDiffNames(gitArgs, repoRoot) {
   let out;
   try {
-    out = execSync(cmd, { cwd: repoRoot, encoding: "utf8" });
+    out = execFileSync("git", gitArgs, { cwd: repoRoot, encoding: "utf8" });
   } catch (err) {
-    console.error(`${RED}error:${RESET} ${cmd} failed: ${err.message}`);
+    console.error(`${RED}error:${RESET} git ${gitArgs.join(" ")} failed: ${err.message}`);
     process.exit(2);
   }
   return out.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -908,6 +1035,7 @@ async function check() {
   const args = process.argv.slice(3);
   const strict = args.includes("--strict");
   const staged = args.includes("--staged");
+  const json = args.includes("--json");
   const rangeIdx = args.indexOf("--range");
   const range = rangeIdx !== -1 ? args[rangeIdx + 1] : null;
 
@@ -921,18 +1049,328 @@ async function check() {
 
   let changedFiles;
   if (range) {
-    changedFiles = gitDiffNames(`git diff --name-only ${range}`, repoRoot);
+    changedFiles = gitDiffNames(["diff", "--name-only", range], repoRoot);
   } else if (staged) {
-    changedFiles = gitDiffNames("git diff --name-only --cached", repoRoot);
+    changedFiles = gitDiffNames(["diff", "--name-only", "--cached"], repoRoot);
   } else {
     // --changed (default): working tree + staged vs HEAD, unioned.
-    const workingTree = gitDiffNames("git diff --name-only HEAD", repoRoot);
-    const cached = gitDiffNames("git diff --name-only --cached", repoRoot);
+    const workingTree = gitDiffNames(["diff", "--name-only", "HEAD"], repoRoot);
+    const cached = gitDiffNames(["diff", "--name-only", "--cached"], repoRoot);
     changedFiles = [...new Set([...workingTree, ...cached])];
   }
 
-  const { exitCode } = await runCheck({ changedFiles, repoRoot, strict });
+  const { exitCode, couplings } = await runCheck({ changedFiles, repoRoot, strict, json });
+  if (json) {
+    console.log(
+      JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        repoRoot,
+        changedFiles,
+        strict,
+        exitCode,
+        couplings,
+      }),
+    );
+  }
   process.exit(exitCode);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drain — the supported close path (SPEC §6: "new, and required").
+//
+// Non-interactive by design: this is mechanism, not interaction. `SKILL.md`'s
+// drain prose is the human-facing walkthrough (AskUserQuestion per row/group);
+// this command is what that walkthrough calls to actually execute a decision.
+// No readline/inquirer loop here — a CLI cannot prompt a human, and a prompt
+// loop cannot be tested.
+//
+//   node cli.mjs drain                                   — list, read-only
+//   node cli.mjs drain --all                              — every workspace
+//   node cli.mjs drain --close <id>[,<id>...] --status <done|wontfix|partial>
+//                      [--reason "..."] [--notes "..."] [--closed-by <who>]
+//   node cli.mjs drain --group <correlation_id> --status <...> [...]
+//   ... --json on either mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Open rows for one discovered workspace record (WORKSPACES entry). */
+async function openRowsForWorkspace(ws) {
+  if (!existsSync(ws.ledgerJsonl)) return [];
+  const rows = await readLedger(ws.ledgerJsonl);
+  return rows.filter((r) => r.status === "open");
+}
+
+/**
+ * Split open rows into correlation_id groups and an ungrouped remainder.
+ * Rows sharing a correlation_id are the same logical change observed on
+ * different branches/worktrees — the parallel-coordination behaviour the
+ * skill's premise names, so grouping is the default presentation, not an
+ * option (SPEC §6, SKILL.md "Correlation grouping matters under the premise").
+ */
+function groupOpenRows(rows) {
+  const groups = new Map(); // correlation_id -> rows[]
+  const ungrouped = [];
+  for (const r of rows) {
+    if (r.correlation_id) {
+      if (!groups.has(r.correlation_id)) groups.set(r.correlation_id, []);
+      groups.get(r.correlation_id).push(r);
+    } else {
+      ungrouped.push(r);
+    }
+  }
+  return { groups, ungrouped };
+}
+
+function rowAgeMs(r) {
+  const t = Date.parse(r.timestamp);
+  return Number.isFinite(t) ? Date.now() - t : null;
+}
+
+function formatAge(ms) {
+  if (ms === null) return "unknown age";
+  const days = Math.floor(ms / 86_400_000);
+  if (days > 0) return `${days}d`;
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours > 0) return `${hours}h`;
+  const mins = Math.floor(ms / 60_000);
+  return `${mins}m`;
+}
+
+function drainRowSummary(r) {
+  return {
+    id: r.id,
+    source: r.source ?? null,
+    downstreamCount: (r.downstream || []).length,
+    ageMs: rowAgeMs(r),
+    correlation_id: r.correlation_id ?? null,
+  };
+}
+
+/** Workspaces to operate over: current workspace at cwd, unless --all or cwd matches none. */
+function drainScope(args) {
+  const showAll = args.includes("--all");
+  const cur = currentWorkspace();
+  return showAll || !cur ? WORKSPACES : [cur];
+}
+
+async function drainList(args, json) {
+  const targets = drainScope(args);
+
+  if (json) {
+    const workspaces = [];
+    for (const ws of targets) {
+      const rows = await openRowsForWorkspace(ws);
+      const { groups, ungrouped } = groupOpenRows(rows);
+      workspaces.push({
+        name: ws.name,
+        root: ws.root,
+        ledgerJsonl: ws.ledgerJsonl,
+        groups: [...groups.entries()].map(([correlation_id, rs]) => ({
+          correlation_id,
+          count: rs.length,
+          rows: rs.map(drainRowSummary),
+        })),
+        ungrouped: ungrouped.map(drainRowSummary),
+      });
+    }
+    console.log(JSON.stringify({ generatedAt: new Date().toISOString(), workspaces }));
+    return;
+  }
+
+  for (const ws of targets) {
+    console.log(`${BOLD}# ${ws.name}${RESET}`);
+    const rows = await openRowsForWorkspace(ws);
+    if (rows.length === 0) {
+      console.log(`  ${GREEN}✓ no open rows${RESET}\n`);
+      continue;
+    }
+    const { groups, ungrouped } = groupOpenRows(rows);
+    for (const [correlation_id, rs] of groups) {
+      console.log(
+        `  ${BOLD}${correlation_id}${RESET}  ${DIM}(${rs.length} rows — same logical change, different branch/worktree)${RESET}`,
+      );
+      for (const r of rs) {
+        console.log(
+          `    ${YELLOW}#${r.id}${RESET}  ${r.source || "(unknown source)"}  ${DIM}${(r.downstream || []).length} downstream, ${formatAge(rowAgeMs(r))} old${RESET}`,
+        );
+      }
+    }
+    for (const r of ungrouped) {
+      console.log(
+        `  ${YELLOW}#${r.id}${RESET}  ${r.source || "(unknown source)"}  ${DIM}${(r.downstream || []).length} downstream, ${formatAge(rowAgeMs(r))} old${RESET}`,
+      );
+    }
+    console.log();
+  }
+}
+
+async function drainClose(args, json) {
+  const closeIdx = args.indexOf("--close");
+  const groupIdx = args.indexOf("--group");
+  const statusIdx = args.indexOf("--status");
+  const reasonIdx = args.indexOf("--reason");
+  const notesIdx = args.indexOf("--notes");
+  const closedByIdx = args.indexOf("--closed-by");
+
+  const closeIds =
+    closeIdx !== -1
+      ? (args[closeIdx + 1] || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+  const groupId = groupIdx !== -1 ? args[groupIdx + 1] : null;
+  const status = statusIdx !== -1 ? args[statusIdx + 1] : null;
+  const reason = reasonIdx !== -1 ? args[reasonIdx + 1] : undefined;
+  const notes = notesIdx !== -1 ? args[notesIdx + 1] : undefined;
+  const closedBy = closedByIdx !== -1 ? args[closedByIdx + 1] : "drain";
+
+  if (closeIds.length === 0 && !groupId) {
+    console.error(
+      `${RED}error:${RESET} nothing to close — pass --close <id[,id...]> and/or --group <correlation_id>`,
+    );
+    process.exit(2);
+  }
+  if (!status) {
+    console.error(`${RED}error:${RESET} --status <done|wontfix|partial> is required with --close/--group`);
+    process.exit(2);
+  }
+  if (!["done", "wontfix", "partial"].includes(status)) {
+    console.error(`${RED}error:${RESET} --status must be one of done|wontfix|partial (got "${status}")`);
+    process.exit(2);
+  }
+
+  const scope = drainScope(args);
+  const openByWs = new Map(); // ws -> open rows
+  for (const ws of scope) {
+    openByWs.set(ws, await openRowsForWorkspace(ws));
+  }
+
+  // Resolve every --close id to the (single) workspace ledger where it's
+  // currently open. Ids are file-local (lib/ledger.mjs nextId), so the same
+  // id string can legitimately be open in two different ledgers when scoped
+  // with --all — that's ambiguous and must fail loudly (I1), not guess.
+  const targets = []; // {ws, row}
+  const notFound = [];
+  for (const id of closeIds) {
+    const found = [];
+    for (const [ws, rows] of openByWs) {
+      const r = rows.find((row) => row.id === id);
+      if (r) found.push({ ws, row: r });
+    }
+    if (found.length === 0) {
+      notFound.push(id);
+    } else if (found.length > 1) {
+      console.error(
+        `${RED}error:${RESET} row id "${id}" is open in more than one workspace ledger (${found
+          .map((f) => f.ws.name)
+          .join(", ")}) — re-run scoped to a single workspace instead of --all`,
+      );
+      process.exit(1);
+    } else {
+      targets.push(found[0]);
+    }
+  }
+  if (notFound.length) {
+    console.error(
+      `${RED}error:${RESET} row id(s) not found (or not open) in scope: ${notFound.join(", ")}`,
+    );
+    console.error(
+      `${DIM}run \`node cli.mjs drain\` (add --all to widen scope) to see current open ids${RESET}`,
+    );
+    process.exit(1);
+  }
+
+  if (groupId) {
+    let matched = 0;
+    for (const [ws, rows] of openByWs) {
+      for (const r of rows) {
+        if (r.correlation_id === groupId) {
+          targets.push({ ws, row: r });
+          matched++;
+        }
+      }
+    }
+    if (matched === 0) {
+      console.error(`${RED}error:${RESET} no open rows found with correlation_id "${groupId}"`);
+      process.exit(1);
+    }
+  }
+
+  // De-dupe: an id could arrive via both --close and --group.
+  const seen = new Set();
+  const uniqueTargets = [];
+  for (const t of targets) {
+    const key = `${t.ws.ledgerJsonl}:${t.row.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueTargets.push(t);
+  }
+
+  const opts = { closed_by: closedBy };
+  if (notes !== undefined) opts.notes = notes;
+  if (status === "wontfix") opts.wontfix_reason = reason;
+
+  const closed = [];
+  const failed = [];
+
+  for (const { ws, row } of uniqueTargets) {
+    try {
+      await markStatus(ws.ledgerJsonl, row.id, status, opts);
+    } catch (err) {
+      // markStatus throws for status:"wontfix" with no wontfix_reason, and for
+      // an invalid closed_by — surface the message, not a stack trace.
+      failed.push({ id: row.id, workspace: ws.name, error: err.message });
+      continue;
+    }
+    // Verify the close actually landed — do not trust "did not throw". A
+    // wrong-ledger write or a discovery mismatch would otherwise silently
+    // no-op and leave the row open (I1: no silent no-op).
+    const after = await readLedger(ws.ledgerJsonl);
+    const updated = after.find((r) => r.id === row.id);
+    const stillOpen = !updated || updated.status === "open";
+    if (stillOpen) {
+      failed.push({
+        id: row.id,
+        workspace: ws.name,
+        error: "verify-after-write failed: row still open after markStatus",
+      });
+    } else {
+      closed.push({ id: row.id, workspace: ws.name, status: updated.status });
+    }
+  }
+
+  if (json) {
+    console.log(
+      JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        status,
+        closed_by: closedBy,
+        wontfix_reason: status === "wontfix" ? reason : undefined,
+        closed,
+        failed,
+        exitCode: failed.length ? 1 : 0,
+      }),
+    );
+  } else {
+    for (const c of closed) {
+      console.log(`${GREEN}✓${RESET} #${c.id}  ${c.workspace}  → ${c.status}  ${DIM}(closed_by: ${closedBy})${RESET}`);
+    }
+    for (const f of failed) {
+      console.log(`${RED}✗${RESET} #${f.id}  ${f.workspace}  ${RED}${f.error}${RESET}`);
+    }
+  }
+
+  if (failed.length) process.exit(1);
+}
+
+async function drain() {
+  const args = process.argv.slice(3);
+  const json = args.includes("--json");
+  if (args.includes("--close") || args.includes("--group")) {
+    await drainClose(args, json);
+  } else {
+    await drainList(args, json);
+  }
 }
 
 /**
@@ -1136,6 +1574,8 @@ if (_invokedDirectly) {
     await init(process.argv[3]);
   } else if (mode === "check") {
     await check();
+  } else if (mode === "drain") {
+    await drain();
   } else if (mode === "skills") {
     await skills();
   } else if (mode === "skills-create") {
@@ -1144,7 +1584,7 @@ if (_invokedDirectly) {
     await skillsLifecycleCmd(mode);
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir>|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
     process.exit(2);
   }
 }

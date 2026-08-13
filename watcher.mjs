@@ -55,10 +55,8 @@ import {
   synthesizeKindCodeEntries,
 } from "./lib/edges.mjs";
 import {
-  appendRow,
   appendRowWithId,
   hasOpenDuplicateDrift,
-  nextId,
   renderMarkdown,
 } from "./lib/ledger.mjs";
 import {
@@ -75,6 +73,7 @@ import {
   worktreeStamp,
   correlationKey,
 } from "./lib/worktrees.mjs";
+import { getGitContext } from "./lib/git-context.mjs";
 
 const FILE_BASENAMES_OF_INTEREST = (basename) =>
   basename === "CLAUDE.md" ||
@@ -224,13 +223,13 @@ export async function processChange(workspace, filePath, state, worktreeMap) {
     await log(`drift deduped: ${sourceRel} (identical open row already exists)`);
     return { deduped: true, sourceRel };
   }
-  const id = await nextId(workspace.ledgerJsonl);
   const change = `auto-detected edit (mtime advanced)`;
   const corrId = correlationKey(filePath, worktreeMap);
+  const { context: gitContext, error: gitError } = getGitContext(filePath);
+  if (gitError) await log(gitError);
 
   const row = {
     type: "drift",
-    id,
     source: sourceRel,
     change,
     downstream: resolvedDownstreams,
@@ -238,8 +237,9 @@ export async function processChange(workspace, filePath, state, worktreeMap) {
     pending_graph_augment: resolvedDownstreams.some((d) => d.kind === "code"),
   };
   if (corrId) row.correlation_id = corrId;
+  if (gitContext) row.git = gitContext;
 
-  await appendRow(workspace.ledgerJsonl, row);
+  const id = await appendRowWithId(workspace.ledgerJsonl, row);
 
   await log(`drift logged: ${sourceRel} -> ${resolvedDownstreams.length} downstream`);
   return { id, sourceRel, count: resolvedDownstreams.length };
@@ -328,10 +328,11 @@ export async function processCodeCanonical(workspace, codePath, upstreams, state
       continue;
     }
 
-    const id = await nextId(workspace.ledgerJsonl);
     const sourceForRow = path.relative(workspace.root, filePath);
     const corrId = correlationKey(filePath, worktreeMap);
     const stamp = worktreeStamp(exp.worktree);
+    const { context: gitContext, error: gitError } = getGitContext(filePath);
+    if (gitError) await log(gitError);
 
     const downstream = uniqueUpstreams.map((u) => ({
       path: u.upstreamDoc,
@@ -346,7 +347,6 @@ export async function processCodeCanonical(workspace, codePath, upstreams, state
 
     const row = {
       type: "code_drift",
-      id,
       source: sourceForRow,
       change: changeSummary,
       downstream,
@@ -355,8 +355,9 @@ export async function processCodeCanonical(workspace, codePath, upstreams, state
     };
     if (corrId) row.correlation_id = corrId;
     if (stamp) row.source_worktree = stamp;
+    if (gitContext) row.git = gitContext;
 
-    await appendRow(workspace.ledgerJsonl, row);
+    const id = await appendRowWithId(workspace.ledgerJsonl, row);
     await log(
       `code_drift logged: ${sourceForRow} -> upstream ${uniqueUpstreams
         .map((u) => `${u.upstreamDoc} ${u.upstreamSection}`)

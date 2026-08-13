@@ -170,18 +170,24 @@ test("every CLI command the docs name is registered in cli.mjs", () => {
   );
 });
 
-test("drain and declare are never presented as CLI commands", () => {
-  // These are prose procedures, not subcommands. Presenting them as `cli.mjs
-  // drain` is what let a reader believe a close path existed: markStatus
-  // (lib/ledger.mjs) has no production callers at all.
+test("declare is never presented as a CLI command", () => {
+  // `declare` is a prose procedure an agent walks through -- there is no
+  // `cli.mjs declare`, and documenting one would send a reader to a command
+  // that does not exist.
+  //
+  // NOTE: `drain` was in this assertion until 2026-08-13, when `cli drain`
+  // shipped (SPEC.md §6, "new, and required"). It is now a real subcommand and
+  // is covered by the registered-commands test above instead. The narrowing is
+  // deliberate: the invariant is "docs must not name commands that do not
+  // exist", not "drain must never exist".
   const offenders = documentedCommands()
-    .filter(({ cmd }) => cmd === "drain" || cmd === "declare")
+    .filter(({ cmd }) => cmd === "declare")
     .map(({ file, cmd }) => `${file}: cli.mjs ${cmd}`);
 
   assert.deepEqual(
     offenders,
     [],
-    `drain/declare documented as CLI commands:\n  ${offenders.join("\n  ")}`,
+    `declare documented as a CLI command:\n  ${offenders.join("\n  ")}`,
   );
 });
 

@@ -56,7 +56,7 @@ test("lastActivityAt tolerates a trailing malformed line and returns the last go
   assert.equal(await lastActivityAt(jsonl), "2026-07-13T06:55:15.057Z");
 });
 
-test("markStatus with notes persists them; readLedger output shape is unchanged", async () => {
+test("markStatus with notes persists them; the fold NOW carries notes onto the Event (inverted from prior lossy behaviour — see docs/DATA_MODEL.md §4-§6)", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "ledactivity-"));
   const jsonl = path.join(dir, "notes.jsonl");
   await appendRow(jsonl, {
@@ -65,7 +65,11 @@ test("markStatus with notes persists them; readLedger output shape is unchanged"
     source: "docs/FOO.md",
     status: "open",
   });
-  await markStatus(jsonl, "001", "wontfix", "deferred pending migration manifest");
+  await markStatus(jsonl, "001", "wontfix", {
+    notes: "deferred pending migration manifest",
+    closed_by: "wontfix",
+    wontfix_reason: "blocked on migration manifest",
+  });
 
   const raw = await readFile(jsonl, "utf8");
   const lastLine = raw.trim().split("\n").pop();
@@ -77,10 +81,17 @@ test("markStatus with notes persists them; readLedger output shape is unchanged"
   const rows = await readLedger(jsonl);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, "wontfix");
-  assert.equal(rows[0].notes, undefined, "readLedger never copies notes off status_change rows");
+  // Was: assert.equal(rows[0].notes, undefined, "readLedger never copies
+  // notes off status_change rows"). That assertion documented a bug: the
+  // fold dropped every Transition field but `status`. The fold now carries
+  // `notes` (plus `closed_by`/`wontfix_reason`/`closed_at`) forward, so this
+  // is the fix landing, not a regression.
+  assert.equal(rows[0].notes, "deferred pending migration manifest");
+  assert.equal(rows[0].closed_by, "wontfix");
+  assert.equal(rows[0].wontfix_reason, "blocked on migration manifest");
 });
 
-test("markStatus without notes still works (backward compat)", async () => {
+test("markStatus without notes still works (backward compat) — terminal close requires closed_by", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "ledactivity-"));
   const jsonl = path.join(dir, "no-notes.jsonl");
   await appendRow(jsonl, {
@@ -89,7 +100,7 @@ test("markStatus without notes still works (backward compat)", async () => {
     source: "docs/BAR.md",
     status: "open",
   });
-  await markStatus(jsonl, "001", "done");
+  await markStatus(jsonl, "001", "done", { closed_by: "drain" });
 
   const raw = await readFile(jsonl, "utf8");
   const lastLine = raw.trim().split("\n").pop();
@@ -100,6 +111,182 @@ test("markStatus without notes still works (backward compat)", async () => {
 
   const rows = await readLedger(jsonl);
   assert.equal(rows[0].status, "done");
+  assert.equal(rows[0].closed_by, "drain");
+});
+
+test("markStatus: wontfix without wontfix_reason throws, naming the row id", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ledactivity-"));
+  const jsonl = path.join(dir, "wontfix-no-reason.jsonl");
+  await appendRow(jsonl, { type: "drift", id: "001", source: "a.md", status: "open" });
+
+  await assert.rejects(
+    () => markStatus(jsonl, "001", "wontfix", { closed_by: "wontfix" }),
+    (err) => {
+      assert.match(err.message, /001/);
+      assert.match(err.message, /wontfix_reason/);
+      return true;
+    },
+  );
+
+  // Legacy string form (means `notes`) must also throw — no wontfix_reason
+  // route around the requirement.
+  await assert.rejects(
+    () => markStatus(jsonl, "001", "wontfix", "just a note, no reason"),
+    /wontfix_reason/,
+  );
+});
+
+test("markStatus: terminal close without closed_by throws; invalid closed_by throws", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ledactivity-"));
+  const jsonl = path.join(dir, "no-closed-by.jsonl");
+  await appendRow(jsonl, { type: "drift", id: "001", source: "a.md", status: "open" });
+
+  await assert.rejects(
+    () => markStatus(jsonl, "001", "done"),
+    (err) => {
+      assert.match(err.message, /001/);
+      assert.match(err.message, /closed_by/);
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    () => markStatus(jsonl, "001", "wontfix", { wontfix_reason: "x", closed_by: "bogus" }),
+    /closed_by/,
+  );
+
+  // partial and open require neither wontfix_reason nor closed_by.
+  await markStatus(jsonl, "001", "partial");
+  await markStatus(jsonl, "001", "open");
+  const rows = await readLedger(jsonl);
+  assert.equal(rows[0].status, "open");
+});
+
+test("markStatus: legacy string 4th arg still works for non-terminal statuses", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ledactivity-"));
+  const jsonl = path.join(dir, "legacy-string.jsonl");
+  await appendRow(jsonl, { type: "drift", id: "001", source: "a.md", status: "open" });
+  await markStatus(jsonl, "001", "partial", "waiting on review");
+
+  const rows = await readLedger(jsonl);
+  assert.equal(rows[0].status, "partial");
+  assert.equal(rows[0].notes, "waiting on review");
+});
+
+test("markStatus: unknown id throws, naming both the id and the ledger path (N4)", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ledactivity-"));
+  const jsonl = path.join(dir, "unknown-id.jsonl");
+  await appendRow(jsonl, { type: "drift", id: "001", source: "a.md", status: "open" });
+
+  await assert.rejects(
+    () => markStatus(jsonl, "999", "done", { closed_by: "drain" }),
+    (err) => {
+      assert.match(err.message, /999/, "message names the unknown id");
+      assert.match(err.message, new RegExp(jsonl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "message names the ledger path");
+      return true;
+    },
+  );
+
+  // No status_change was appended for the bad id — writer refused, not
+  // silently no-op'd. The known row is untouched too.
+  const rows = await readLedger(jsonl);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "001");
+  assert.equal(rows[0].status, "open");
+});
+
+test("markStatus: known id still works after the N4 existence check (regression)", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ledactivity-"));
+  const jsonl = path.join(dir, "known-id.jsonl");
+  await appendRow(jsonl, { type: "drift", id: "001", source: "a.md", status: "open" });
+
+  await markStatus(jsonl, "001", "done", { closed_by: "drain" });
+
+  const rows = await readLedger(jsonl);
+  assert.equal(rows[0].status, "done");
+});
+
+test("fold carries closed_by, wontfix_reason, notes, and closed_at onto the Event", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "fold-fixture-"));
+  const jsonl = path.join(dir, "ledger.jsonl");
+  const lines = [
+    { type: "drift", id: "001", source: "a.md", status: "open", timestamp: "2026-08-01T00:00:00.000Z" },
+    {
+      type: "status_change",
+      id: "001",
+      status: "wontfix",
+      timestamp: "2026-08-05T12:00:00.000Z",
+      closed_by: "wontfix",
+      wontfix_reason: "not applicable anymore",
+      notes: "checked with owner first",
+    },
+  ];
+  await writeFile(jsonl, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+  const rows = await readLedger(jsonl);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, "wontfix");
+  assert.equal(rows[0].closed_by, "wontfix");
+  assert.equal(rows[0].wontfix_reason, "not applicable anymore");
+  assert.equal(rows[0].notes, "checked with owner first");
+  // closed_at is the Transition's timestamp, distinct from the Event's own
+  // timestamp (when the drift fired).
+  assert.equal(rows[0].closed_at, "2026-08-05T12:00:00.000Z");
+  assert.equal(rows[0].timestamp, "2026-08-01T00:00:00.000Z");
+  assert.notEqual(rows[0].closed_at, rows[0].timestamp);
+});
+
+test("fold: a Transition with both note (singular) and notes yields both, neither dropped", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "fold-note-"));
+  const jsonl = path.join(dir, "ledger.jsonl");
+  const lines = [
+    { type: "drift", id: "001", source: "a.md", status: "open", timestamp: "2026-08-01T00:00:00.000Z" },
+    {
+      type: "status_change",
+      id: "001",
+      status: "wontfix",
+      timestamp: "2026-08-02T00:00:00.000Z",
+      closed_by: "wontfix",
+      wontfix_reason: "superseded",
+      notes: "primary note",
+      note: "legacy singular note",
+    },
+  ];
+  await writeFile(jsonl, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+  const rows = await readLedger(jsonl);
+  assert.match(rows[0].notes, /primary note/);
+  assert.match(rows[0].notes, /legacy singular note/);
+});
+
+test("fold: a later transition wins over an earlier one for the same id", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "fold-later-wins-"));
+  const jsonl = path.join(dir, "ledger.jsonl");
+  const lines = [
+    { type: "drift", id: "001", source: "a.md", status: "open", timestamp: "2026-08-01T00:00:00.000Z" },
+    {
+      type: "status_change",
+      id: "001",
+      status: "partial",
+      timestamp: "2026-08-02T00:00:00.000Z",
+      notes: "first pass",
+    },
+    {
+      type: "status_change",
+      id: "001",
+      status: "done",
+      timestamp: "2026-08-03T00:00:00.000Z",
+      closed_by: "drain",
+      notes: "second pass, actually done",
+    },
+  ];
+  await writeFile(jsonl, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+  const rows = await readLedger(jsonl);
+  assert.equal(rows[0].status, "done");
+  assert.equal(rows[0].closed_by, "drain");
+  assert.equal(rows[0].notes, "second pass, actually done");
+  assert.equal(rows[0].closed_at, "2026-08-03T00:00:00.000Z");
 });
 
 test("readLedgerWithStats counts malformed lines and unknown types", async () => {

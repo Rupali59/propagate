@@ -43,7 +43,7 @@ test("hasOpenDuplicateDrift — a done row is not a duplicate (re-fire allowed)"
     downstream: [{ path: "d.md", why: "x", kind: "prose" }],
     status: "open",
   });
-  await markStatus(jsonl, "001", "done");
+  await markStatus(jsonl, "001", "done", { closed_by: "drain" });
   assert.equal(await hasOpenDuplicateDrift(jsonl, "s.md", ["d.md"]), false);
 });
 
