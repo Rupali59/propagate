@@ -25,7 +25,11 @@
               "properties": {
                 "path": {
                   "type": "string",
-                  "description": "Relative path from this sidecar to the downstream file. May be a glob (e.g. `style/pages/**/*.md`) — the watcher fs-expands it and records a single summary entry {glob_matched, sample}; `doctor` requires ≥1 match."
+                  "minLength": 1,
+                  "not": {
+                    "pattern": "/$"
+                  },
+                  "description": "Relative path from this sidecar to the downstream file. May be a glob (e.g. `style/pages/**/*.md`) — the watcher fs-expands it and records a single summary entry {glob_matched, sample}; `doctor` requires ≥1 match. Must not be empty and must not end in '/' — a bare directory is never a valid downstream (reading it as content fails with EISDIR); declare a file or a glob instead. Schema cannot detect a directory that lacks a trailing slash — that check runs at doctor/validate time against the filesystem (see `classifyDownstreamPath` in cli.mjs)."
                 },
                 "why": {
                   "type": "string",

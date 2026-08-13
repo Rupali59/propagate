@@ -213,6 +213,33 @@ async function sweepMarkers(roots, maxDepth) {
   return found;
 }
 
+/**
+ * Classify a single non-glob downstream path declared in a sidecar, relative
+ * to that sidecar's own directory (SPEC §3c bug B: a directory declared as a
+ * downstream; docs/ISSUES.md N11-adjacent).
+ *
+ * Distinct from "missing": a directory is always a declaration error — reading
+ * it as content fails with EISDIR, and there is no "I intend to create this
+ * directory later" allowance the way there is for a not-yet-written `kind:
+ * code` file. A missing *file* may be legitimate declare-ahead; a missing
+ * *directory-shaped* thing never is, because a directory is never valid
+ * content to begin with.
+ *
+ * @param {string} scDir absolute path to the sidecar's own directory
+ * @param {string} downstreamPath the declared `path` (already known non-glob)
+ * @returns {Promise<"ok"|"missing"|"is-directory">}
+ */
+export async function classifyDownstreamPath(scDir, downstreamPath) {
+  const abs = path.resolve(scDir, downstreamPath);
+  try {
+    const st = await stat(abs);
+    return st.isDirectory() ? "is-directory" : "ok";
+  } catch (err) {
+    if (err.code === "ENOENT") return "missing";
+    throw err;
+  }
+}
+
 async function findSidecars(workspaceRoot) {
   const found = [];
   async function walk(dir, depth) {
@@ -594,21 +621,44 @@ async function doctor() {
               warn(`${rel}: ${src} → ${d.path}`, "glob matched 0 files");
               pathWarns++;
             }
-          } else if (!existsSync(path.resolve(scDir, d.path))) {
-            // Warn-only: doctor is a cross-workspace health report — a stale edge
-            // in one workspace must not red the aggregate exit code. Per-repo
-            // enforcement lives in that repo's pre-commit (check-propagation.sh).
-            warn(
-              `${rel}: ${src} → ${d.path}`,
-              kind === "code" ? "declare-ahead code, not on disk" : "prose downstream missing",
-            );
-            pathWarns++;
+          } else {
+            // SPEC §3c bug B: stat the target so a directory-shaped downstream
+            // (EISDIR at read time) is distinguished from one that's simply
+            // absent. Different problems, different messages, different severities.
+            const classification = await classifyDownstreamPath(scDir, d.path);
+            if (classification === "is-directory") {
+              // Always a FAILURE, never intentional — unlike a missing file,
+              // there is no "declare-ahead" reading of "this is a directory".
+              check(
+                `${rel}: ${src} → ${d.path}`,
+                false,
+                "downstream is a directory, not a file — a downstream must be a file or a glob, never a bare directory (reads as EISDIR)",
+              );
+              pathProblems++;
+            } else if (classification === "missing") {
+              // Warn-only: doctor is a cross-workspace health report — a stale edge
+              // in one workspace must not red the aggregate exit code. Per-repo
+              // enforcement lives in that repo's pre-commit (check-propagation.sh).
+              // v1's prose/code distinction is intentional and unchanged here:
+              // `kind: code` missing is declare-ahead, not a bug.
+              warn(
+                `${rel}: ${src} → ${d.path}`,
+                kind === "code" ? "declare-ahead code, not on disk" : "prose downstream missing",
+              );
+              pathWarns++;
+            }
           }
         }
       }
     }
     if (pathProblems === 0) {
       check("sidecar downstream paths resolve", true, pathWarns ? `${pathWarns} warn` : "");
+    } else {
+      check(
+        "sidecar downstream paths resolve",
+        false,
+        `${pathProblems} directory-as-downstream failure${pathProblems === 1 ? "" : "s"}${pathWarns ? `, ${pathWarns} warn` : ""}`,
+      );
     }
   }
 
