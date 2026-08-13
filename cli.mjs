@@ -29,6 +29,19 @@
  *   node cli.mjs drain --group <correlation_id> --status <...> [...]
  *                                         — close every open row sharing that correlation_id
  *   node cli.mjs drain ... --json         — machine-readable result on either mode
+ *   node cli.mjs bootstrap [--baseline-from-git|--baseline-all|--none] [--apply] [--json]
+ *                                         — v2 write side (plan Part 1): turns the
+ *                                            NEVER_VERIFIED starting position into an honest
+ *                                            baseline. Dry-run by default; --apply writes. The
+ *                                            git stage runs first (offers `git init` for a
+ *                                            non-repo workspace, never runs it without --apply),
+ *                                            then reconciles, then classifies every
+ *                                            NEVER_VERIFIED edge under the chosen policy
+ *                                            (baseline-from-git is the default AND the
+ *                                            recommended one — dry-run is what makes previewing
+ *                                            it safe). Every applied write is a `baselined`
+ *                                            event, never `verified` — a baseline is a claim,
+ *                                            not a verification (plan §3/§5).
  *   node cli.mjs reconcile                — v2 derivation (READ-ONLY): derives state per
  *                                            declared edge from content + the v2 event store;
  *                                            writes nothing. Current workspace by default.
@@ -82,6 +95,7 @@ import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges.mjs";
 import { reconcile, STATES, groupRows } from "./lib/reconcile.mjs";
 import { appendEvent, DISPOSITIONS, edgeId } from "./lib/events.mjs";
+import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/bootstrap.mjs";
 import { parseDecisions, zeroTokenEntries } from "./lib/decisions.mjs";
 import {
   METRICS_PATH,
@@ -2333,6 +2347,177 @@ async function verifyCmd() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// bootstrap — plan Part 1 (~/.claude/plans/jolly-waddling-sphinx.md): turns
+// the 623 NEVER_VERIFIED starting position into an honest baseline. Dry-run
+// by default; --apply writes, same posture as verify --apply.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function parseBootstrapArgs(args) {
+  const policyFlags = BASELINE_POLICIES.filter((p) => args.includes(`--${p}`));
+  const boundIdx = args.indexOf("--bound");
+  const bound = boundIdx !== -1 ? parseInt(args[boundIdx + 1], 10) : undefined;
+  return {
+    policyFlags,
+    apply: args.includes("--apply"),
+    json: args.includes("--json"),
+    bound: Number.isFinite(bound) ? bound : undefined,
+  };
+}
+
+async function bootstrapCmd() {
+  const args = process.argv.slice(3);
+  const { policyFlags, apply, json, bound } = parseBootstrapArgs(args);
+
+  if (policyFlags.length > 1) {
+    console.error(
+      `${RED}error:${RESET} choose exactly one of ${BASELINE_POLICIES.map((p) => `--${p}`).join(" | ")}`,
+    );
+    process.exit(2);
+  }
+  // No flag given -> the recommended policy (plan §5), previewed safely
+  // because dry-run is this command's default posture regardless of which
+  // policy is selected — nothing writes without --apply.
+  const policy = policyFlags[0] || "baseline-from-git";
+  const walkBound = bound ?? DEFAULT_WALK_COMMITS;
+
+  // Bootstrap is a whole-tree operation (like `doctor`), not scoped to cwd's
+  // workspace the way `status`/`drain`/`reconcile` default to — "turn 623
+  // edges into an honest starting position" is a tree-wide claim.
+  const workspaces = WORKSPACES;
+
+  // 1. THE GIT STAGE — explicit and first (plan §"THE GIT STAGE, EXPLICIT AND FIRST").
+  const stage = await gitStage(workspaces, { apply });
+
+  // 2. Enumerate + reconcile. Everything with no prior event reads
+  // NEVER_VERIFIED — that is TRUE (plan §5 step 4), the premise this
+  // command classifies against.
+  const { rows, stats } = await reconcile(workspaces);
+
+  // 3. Baseline, explicitly (plan §5 step 5) — classify, never write yet.
+  const { outcomes, neverVerifiedCount } = planBaseline(rows, policy, { bound: walkBound });
+
+  // 4. Apply (or not), then verify-after-write. Reuses verify's own
+  // verify-after-write pattern (computeVerifyAfterWrite/expectedStateAfter)
+  // rather than re-implementing it: "baselined" pins like every
+  // non-deferred disposition, so its expected post-write state is CLEAN,
+  // the exact same rule verify already encodes.
+  let applied = [];
+  let failed = [];
+  let confirmed = [];
+  let verifyFailed = [];
+  if (apply) {
+    ({ applied, failed } = await applyBaseline(outcomes));
+    if (applied.length > 0) {
+      const { rows: afterRows } = await reconcile(workspaces);
+      ({ confirmed, failed: verifyFailed } = computeVerifyAfterWrite(applied, afterRows));
+    }
+  }
+
+  const pct = (n) => (neverVerifiedCount ? `${((n / neverVerifiedCount) * 100).toFixed(1)}%` : "n/a");
+  const exitCode = failed.length > 0 || verifyFailed.length > 0 ? 1 : 0;
+
+  if (json) {
+    console.log(
+      JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        policy,
+        apply,
+        bound: walkBound,
+        gitStage: stage,
+        reconcileStats: stats,
+        neverVerifiedCount,
+        outcomeCounts: {
+          baselined: outcomes.baselined.length,
+          noCoCommit: outcomes.noCoCommit.length,
+          boundReached: outcomes.boundReached.length,
+          ineligibleCrossRepo: outcomes.ineligibleCrossRepo.length,
+        },
+        applied,
+        failed,
+        confirmed,
+        verifyFailed,
+        exitCode,
+      }),
+    );
+    process.exit(exitCode);
+  }
+
+  console.log(
+    `${BOLD}# bootstrap${RESET}  ${DIM}(${apply ? "APPLY — writing" : "dry run — pass --apply to write"})${RESET}\n`,
+  );
+
+  console.log(`${BOLD}## git stage${RESET}`);
+  for (const s of stage) {
+    if (!s.isRepoNow) {
+      console.log(`  ${YELLOW}!${RESET} ${s.root}`);
+      console.log(
+        `    ${YELLOW}not a git repo — without it there are no refs and the ref lens does not apply${RESET}`,
+      );
+      console.log(`    ${DIM}offer: ${s.offeredInitCommand}${RESET}`);
+      if (s.initError) console.log(`    ${RED}git init failed: ${s.initError}${RESET}`);
+      continue;
+    }
+    const createdTag = s.created ? ` ${GREEN}(created by this run)${RESET}` : "";
+    const errTag = s.refsError ? `  ${RED}git error: ${s.refsError}${RESET}` : "";
+    console.log(
+      `  ${GREEN}✓${RESET} ${s.root}${createdTag}  ${DIM}${s.branches} branch${s.branches === 1 ? "" : "es"}, ` +
+        `${s.worktrees} worktree${s.worktrees === 1 ? "" : "s"}${RESET}${errTag}`,
+    );
+  }
+
+  console.log(`\n${BOLD}## workspace scaffolding${RESET}`);
+  for (const ws of workspaces) {
+    const markerOk = existsSync(path.join(ws.root, ".propagates.yml"));
+    const ledgerOk = existsSync(ws.ledgerJsonl);
+    if (markerOk && ledgerOk) {
+      console.log(`  ${GREEN}✓${RESET} ${ws.name}  ${DIM}marker + ledger present${RESET}`);
+    } else {
+      const missing = [!markerOk && "no .propagates.yml marker", !ledgerOk && "no ledger yet"]
+        .filter(Boolean)
+        .join(", ");
+      console.log(
+        `  ${YELLOW}!${RESET} ${ws.name}  ${DIM}${missing} — run: node cli.mjs init "${ws.root}"${RESET}`,
+      );
+    }
+  }
+
+  console.log(`\n${BOLD}## baseline (${policy})${RESET}  ${DIM}bound=${walkBound} commits${RESET}`);
+  console.log(`  ${neverVerifiedCount} edge${neverVerifiedCount === 1 ? "" : "s"} NEVER_VERIFIED before this run\n`);
+  console.log(
+    `  ${YELLOW}${String(outcomes.baselined.length).padStart(4)}${RESET}  baselineable  ${DIM}${pct(outcomes.baselined.length)}${RESET}`,
+  );
+  console.log(
+    `  ${YELLOW}${String(outcomes.noCoCommit.length).padStart(4)}${RESET}  no-co-commit  ${DIM}${pct(outcomes.noCoCommit.length)}${RESET}`,
+  );
+  console.log(
+    `  ${YELLOW}${String(outcomes.boundReached.length).padStart(4)}${RESET}  bound-reached  ${DIM}${pct(outcomes.boundReached.length)}${RESET}`,
+  );
+  console.log(
+    `  ${YELLOW}${String(outcomes.ineligibleCrossRepo.length).padStart(4)}${RESET}  ineligible-cross-repo  ${DIM}${pct(outcomes.ineligibleCrossRepo.length)}${RESET}`,
+  );
+
+  if (!apply) {
+    console.log(
+      `\n  ${DIM}dry run — pass --apply to write ${outcomes.baselined.length} "baselined" event${outcomes.baselined.length === 1 ? "" : "s"}${RESET}`,
+    );
+  } else {
+    console.log(`\n${BOLD}## write${RESET}`);
+    console.log(
+      `  ${GREEN}${confirmed.length}${RESET} confirmed baselined (now CLEAN; disposition "baselined" — never "verified")`,
+    );
+    if (failed.length) {
+      console.log(`  ${RED}${failed.length}${RESET} failed to write:`);
+      for (const f of failed) console.log(`    ${RED}✗${RESET} ${f.edge_id}  ${f.error}`);
+    }
+    if (verifyFailed.length) {
+      console.log(`  ${RED}${verifyFailed.length}${RESET} did not confirm after write:`);
+      for (const f of verifyFailed) console.log(`    ${RED}✗${RESET} ${f.edge_id}  ${f.error}`);
+    }
+  }
+  process.exit(exitCode);
+}
+
 /**
  * `skills` — inventory of ~/.claude/skills with provenance and liveness.
  *
@@ -2542,6 +2727,8 @@ if (_invokedDirectly) {
     await reconcileCmd();
   } else if (mode === "verify") {
     await verifyCmd();
+  } else if (mode === "bootstrap") {
+    await bootstrapCmd();
   } else if (mode === "skills") {
     await skills();
   } else if (mode === "skills-create") {
@@ -2550,7 +2737,7 @@ if (_invokedDirectly) {
     await skillsLifecycleCmd(mode);
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
     process.exit(2);
   }
 }
