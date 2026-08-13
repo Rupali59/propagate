@@ -117,32 +117,57 @@ something fires a lot and you need to know why, fast.
 
 ## 5 · Coverage — every known issue, and what catches it
 
+> Refreshed 2026-08-13 after §6 step 1 landed (`lib/metrics.mjs`, wired into
+> `doctor()` and `digest.mjs`). Rows below are marked **built** where the
+> metric is now actually persisted and asserted, not just designed. Everything
+> else in this table is still the design from the original write-up — a plan,
+> not a claim of coverage. Per GOTCHAS G2, an issue with nothing in the
+> "caught by" column says so explicitly rather than being left to imply a
+> signal that doesn't exist.
+
 | Issue | Caught by | Layer |
 |---|---|---|
-| N1 unknown row types discarded | `ledger.unknown_types > 0` | M |
-| N2 id race | `ledger.duplicate_ids > 0` | M |
-| N3 sequential ids across branches | `ledger.duplicate_ids` + `row.fired.content_id` | M+E |
-| N4 `markStatus` no-op | `close.attempted != close.verified` | M |
-| N5 dedup blind to `code_drift` | `rows.fired` rate + duplicate-source ratio | M |
-| N6 glob `kind: code` inert | `edges.declared != edges.enforced` · `edge.unenforced` | M+E |
-| N7 zero workspaces = healthy | `workspaces.discovered == 0` · `discovery.degraded` | M+E |
-| N8 worktree enum swallows | span error on `worktree.enumerate` | T |
-| N9 schema rejection silent | `sidecar.rejected` · `sidecars.rejected > 0` | E+M |
-| N10 wrong launchd label | `plist.label` vs `launchctl` loaded set | M |
-| N11 `../` breaks on move | `downstream.unresolved` step change | M |
-| N12 `Affects:` parses to nothing | `decisions.entries != decisions.with_tokens` | M |
-| N13 state not scoped | `state.baseline_changed` · `state.tracked_files` drop | E+M |
-| **N14 plist not scoped** | `plist.regenerated` · `plist.watchpaths == 0` | E+M |
-| A1 promotion strands rows | `rows.open_multi_ledger` | M |
-| A2 dup open across ledgers | same | M |
-| B1 branch-local blindness | `ledgers.swept != ledgers.discovered` | M |
-| C1 undeclared files unreported | `files.undeclared` (needs C1 built first) | M |
-| G3 gate not installed | `check.hook_installed` | M |
-| no close path (months) | `close.calls == 0` | M |
-| 87% hand-written | `rows.written{writer=external}` | M |
-| 39 closes with no audit trail | `rows.closed_without_transition` | M |
-| `doctor` 21s | `doctor.duration_ms` p95 | M |
-| the 298-rows-ignored failure | `rows.open` trend + `row.closed.age_ms` | M+E |
+| N1 unknown row types discarded | `ledger.unknown_types == 0` — **built**, asserted every `doctor` run | M |
+| N2 id race | `ledger.duplicate_ids > 0` — designed, not built | M |
+| N3 sequential ids across branches | `ledger.duplicate_ids` + `row.fired.content_id` — designed, not built | M+E |
+| N4 `markStatus` no-op | `close.attempted != close.verified` — designed, not built | M |
+| N5 dedup blind to `code_drift` | `rows.fired` rate + duplicate-source ratio — designed, not built | M |
+| N6 glob `kind: code` inert | `edges.declared != edges.enforced` · `edge.unenforced` — designed, not built | M+E |
+| N7 zero workspaces = healthy | `workspaces.discovered >= 1` — **built**, asserted; `discovery.degraded` event still designed only | M+E |
+| N8 worktree enum swallows | span error on `worktree.enumerate` — designed, not built (needs §4 traces) | T |
+| N9 schema rejection silent | `sidecars.rejected == 0` — **built**, asserted; `sidecar.rejected` event still designed only | E+M |
+| N10 wrong launchd label | `plist.label` vs `launchctl` loaded set — covered by `doctor`'s existing "plist loaded" check, not by a persisted metric | M |
+| N11 `../` breaks on move | `downstream.unresolved` step change — designed, not built | M |
+| N12 `Affects:` parses to nothing | `decisions.with_tokens == decisions.entries` — **built**, asserted every `doctor` run | M |
+| N13 state not scoped | `state.tracked_files` — **recorded** every run, but **uncalibrated**: no run-over-run history yet to set the >20% drop threshold against; `state.baseline_changed` event still designed only | E+M |
+| **N14 plist not scoped** | `plist.watchpaths >= workspaces.discovered` — **built**, asserted; `plist.regenerated` event still designed only | E+M |
+| **N17** `pathProblems` never incremented | **RESOLVED 2026-08-13** (docs/ISSUES.md), before this metrics work started. `sidecars.problems` — **recorded** every run (uncalibrated: no basis yet for what count is normal) | M |
+| **N18** source keys never validated to exist | none — `doctor` validates downstream paths (N17's fix) but never stats a sidecar's `sources:` keys. No metric, no check, nothing in this build touches it | — |
+| **N19** 39 rows terminal with no Transition | none — `rows.closed_without_transition` is designed in §1 but not built; would need a schema-level pass over every ledger this session did not do | M (planned) |
+| **N20** 87% hand-authored ledger data | none — `rows.written{writer}` is designed in §1 but not built; needs the `JSON.stringify`-spacing forensic to become a real check, not a one-off audit | M (planned) |
+| **N21** glob-zero-matches must report UNMATCHED | none — `edge.unenforced` event is designed in §2 but not built; zero live instances as of the finding (2026-08-13), so this is deliberately deferred, not forgotten | E (planned) |
+| **N22** glob expansion inflates raw counts | not a telemetry problem — a v2 UI grouping requirement (design note, docs/ISSUES.md). No metric will fix a display bug | — |
+| **N23** `WATCHER_LOG` not test-scoped | none — a test-hygiene gap (four test files invoke `watcher.mjs` directly without `PROPAGATE_STATE_DIR`), not something a runtime metric can catch. Same family as N13/G10, but the fix is in the test files, not in telemetry | — |
+| A1 promotion strands rows | `rows.open_multi_ledger` — designed, not built | M |
+| A2 dup open across ledgers | `doctor`'s existing "no source open in more than one ledger" check (28 live instances, unchanged by this work) — not yet persisted as its own metric | M |
+| **A4** nested-workspace multiplication is structural | none — no shared "assign to nearest owner" helper exists yet (docs/ISSUES.md's own fix note); any future metrics emitter that walks `WORKSPACES` without it inherits the same over-counting `sidecar-dedup` had to fix once already. This build's counters (`sidecars.loaded` etc.) DO walk `assignedByWsRoot`, i.e. already deduplicated — but that's inherited from `doctor`'s existing dedup, not a new fix for A4 | M |
+| B1 branch-local blindness | `ledgers.swept != ledgers.discovered` — designed, not built | M |
+| C1 undeclared files unreported | `files.undeclared` (needs C1 built first) — designed, not built | M |
+| G3 gate not installed | `check.hook_installed` — designed, not built | M |
+| no close path (months) | `close.calls == 0` — designed, not built | M |
+| 87% hand-written | see N20 above | M |
+| 39 closes with no audit trail | see N19 above | M |
+| `doctor` duration | `doctor.duration_ms` — **recorded** every run (uncalibrated: one post-optimization data point, ~0.3–0.5s warm as of 2026-08-13, is not a p95 distribution) | M |
+| the 298-rows-ignored failure | `rows.open` — **recorded** every run (uncalibrated: needs a 30-day trend before a slope threshold means anything); `row.closed.age_ms` event still designed only | M+E |
+
+**Transitional note (v1 → v2):** `rows.open`, `close.calls`, and the row/close
+vocabulary throughout this table are v1 nouns. §7 of `docs/DATA_MODEL.md`
+already reframes v2 around **verifications** and **derived states** rather than
+mutable rows with a `status` field — when that lands, the metrics above keyed
+to "open"/"close" become metrics keyed to "unverified"/"stale", not new
+concepts. Nothing in this build assumes v1's shape will last; `lib/metrics.mjs`
+takes metric values as plain `{key: number}` pairs precisely so the v2 rename
+is a relabeling, not a rewrite.
 
 **Not coverable by telemetry, and worth saying so:** the lossy fold (a schema/test
 problem), the docs-vs-reality drift (a doc test — `tests/skill-doc.test.mjs`), and
@@ -155,14 +180,59 @@ otherwise; that pretence is how a green dashboard becomes the new silent no-op.
 
 Cheapest first, and each is independently useful.
 
-1. **Counters + gauges into the existing `state.json` run record.** No infrastructure
-   at all. `doctor` asserts the expectations in §1. This alone covers ~15 issues.
-2. **`run_id` + JSON log lines.** One field, unlocks correlation and §4 later.
+1. **Counters + gauges into the existing `state.json` run record. — BUILT 2026-08-13.**
+   Landed as `lib/metrics.mjs`, a dedicated append-only `metrics.jsonl`
+   (`PROPAGATE_STATE_DIR`-scoped, not `state.json` itself — `state.json` is the
+   watcher's mtime baseline and mixing a growing metrics history into it risked
+   the exact "a default that moves loses state silently" failure GOTCHAS G12
+   names). What actually shipped:
+   - `doctor()` (`cli.mjs`) tallies twelve metrics it was already computing
+     and throwing away (`workspaces.discovered`, `sidecars.loaded/.rejected/.problems`,
+     `ledger.unknown_types/.malformed`, `rows.open`, `decisions.entries/.with_tokens`,
+     `plist.watchpaths`, `state.tracked_files`, `doctor.duration_ms`,
+     `doctor.problems`) and appends one record per run.
+   - The five equality/non-zero expectations from §1 that needed no rate-style
+     guessing (N7, N12, N1, N9, N14) are asserted every run, each carrying the
+     concrete incident that motivated its threshold (`EXPECTATIONS` in
+     `lib/metrics.mjs`) — not invented numbers (GOTCHAS G16).
+   - Six more metrics are recorded but explicitly marked `UNCALIBRATED`
+     (`rows.open`, `doctor.duration_ms`, `sidecars.loaded`, `sidecars.problems`,
+     `ledger.malformed`, `state.tracked_files`) — no threshold exists for them
+     yet, and per G3/G16 an invented one would be worse than none.
+   - `detectVanishedKeys` catches R6: a metric key present last run and absent
+     this run is its own `doctor` failure, distinct from an out-of-range value.
+   - `digest.mjs` delivers both halves without recomputing them: violations
+     from the newest `doctor` run feed the existing `BROKEN` section; metric
+     values that changed since the *last digest cycle* (not the last `doctor`
+     run — those can differ) render under a new `METRICS (doctor):` section,
+     diff-only, same "report what changed" discipline as the existing
+     DISK/SKILLS sections.
+   - `metrics.jsonl` is capped at 3,000 records (oldest trimmed first) so it
+     cannot become the next unbounded, unread artifact — the entire point of
+     this section per GOTCHAS G3.
+   - **Known limitation, stated rather than hidden:** `doctor` is a manual/
+     point-in-time check; nothing in this codebase runs it on a schedule. The
+     digest is daily. A metric that regresses between `doctor` invocations is
+     invisible until someone runs `doctor` again — there is no continuous
+     collection yet. §6 step 4 below (a scheduled `doctor --since`) is what
+     would close that gap, not this step.
+
+   This alone covers the five equality-shaped issues in §5 outright and
+   surfaces (without yet calibrating) six more.
+2. **`run_id` + JSON log lines.** One field, unlocks correlation and §4 later. Not built —
+   `metrics.jsonl` records carry a `run_id` per doctor run, but `watcher.log` lines still
+   do not (out of scope: watcher.mjs was explicitly off-limits for this build).
 3. **Events to an append-only `~/.propagate/events/telemetry.jsonl`.** Same store as
-   the v2 ledger; the disposable-index discipline applies.
+   the v2 ledger; the disposable-index discipline applies. Not built — every §2 event
+   (`sidecar.rejected`, `state.baseline_changed`, `plist.regenerated`, etc.) is still
+   design-only; `doctor`'s per-run gauges are a substitute for the aggregate picture,
+   not for "what happened and to what."
 4. **`doctor --since <t>`** reading the above — troubleshooting becomes a query
-   rather than an archaeology dig, which is what this session actually was.
-5. **Spans.** Only after 1–4, and only if attribution is still slow.
+   rather than an archaeology dig, which is what this session actually was. Not built.
+   `readMetricsRecords`/`readLastMetricsRecord` (`lib/metrics.mjs`) already read the
+   full history and the newest record respectively — a `--since` flag is a thin CLI
+   layer over data that already exists, not a new storage problem.
+5. **Spans.** Only after 1–4, and only if attribution is still slow. Not built.
 
 **Design rule, restated because it is the whole point:** a metric without an
 expectation is decoration. Every gauge above ships with the assertion that makes it

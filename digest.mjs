@@ -47,6 +47,7 @@ import {
 } from "./cli.mjs";
 import { rebuildIndex, latestMtimeUnderDir } from "./lib/index-db.mjs";
 import { scanSkills, probeTranscripts } from "./lib/skills-scan.mjs";
+import { readMetricsRecords, evaluateExpectations } from "./lib/metrics.mjs";
 
 const HOME = os.homedir();
 const DIGEST_STATE_PATH = path.join(HOME, ".claude", "propagate-digest-state.json");
@@ -292,6 +293,29 @@ async function plistMismatch() {
 }
 
 /**
+ * `doctor`-recorded metrics (docs/OBSERVABILITY.md §6 step 1/step 4). Reads
+ * metrics.jsonl (lib/metrics.mjs) rather than re-running doctor's checks —
+ * digest is a delivery channel over what doctor already persisted, not a
+ * second computation of the same numbers. `doctor` runs by hand or via
+ * whatever wraps it; digest reports the newest record left since it last ran,
+ * so a fast burst between `doctor` invocations is only visible the next
+ * digest cycle (accepted latency — doctor remains the point-in-time check;
+ * see docs/OBSERVABILITY.md §4/§6).
+ */
+async function metricsSnapshot() {
+  let records;
+  try {
+    records = await readMetricsRecords();
+  } catch (err) {
+    return { available: false, error: String(err.message || err) };
+  }
+  if (records.length === 0) return { available: false, error: "no doctor runs recorded yet" };
+  const latest = records[records.length - 1];
+  const violations = evaluateExpectations(latest.metrics || {});
+  return { available: true, latest, violations };
+}
+
+/**
  * Build the full snapshot the digest diffs against. Not the same object as
  * cli.mjs's statusJson() — computed independently from lib/ primitives.
  */
@@ -340,6 +364,8 @@ async function buildSnapshot(indexDb = null) {
     lifecycle = { available: false, error: String(err.message || err) };
   }
 
+  const metrics = await metricsSnapshot();
+
   return {
     generatedAt: new Date().toISOString(),
     degraded: DISCOVERY_DEGRADED,
@@ -352,6 +378,7 @@ async function buildSnapshot(indexDb = null) {
     disk,
     skills,
     lifecycle,
+    metrics,
   };
 }
 
@@ -451,6 +478,14 @@ function toStateDisk(disk) {
   return { availKb: disk.availKb, usedPct: disk.usedPct, caches, projects };
 }
 
+/** Lean prior-metrics record: the last-seen run's metrics values + run_id, so
+ *  the next digest can diff "changed since we last reported" without
+ *  re-reading every record between the two digest runs. */
+function toStateMetrics(metrics) {
+  if (!metrics || !metrics.available) return null;
+  return { runId: metrics.latest.run_id, ts: metrics.latest.ts, values: metrics.latest.metrics };
+}
+
 function snapshotToDigestState(snapshot) {
   const workspaces = {};
   for (const ws of snapshot.workspaces) workspaces[ws.name] = toStateWorkspace(ws);
@@ -461,6 +496,7 @@ function snapshotToDigestState(snapshot) {
     cross: toStateWorkspace(snapshot.cross),
     disk: toStateDisk(snapshot.disk),
     skills: toStateSkills(snapshot.skills),
+    metrics: toStateMetrics(snapshot.metrics),
   };
 }
 
@@ -530,6 +566,14 @@ export function computeDiff(snapshot, prior) {
       kind: "duplicateOpenAcrossLedgers",
       detail: `${snapshot.duplicateOpenAcrossLedgers.count} source(s) open in more than one ledger`,
     });
+  }
+  // docs/OBSERVABILITY.md §6 step 4: expectation violations recorded by the
+  // most recent `doctor` run are delivered here, not re-derived — digest
+  // reports what doctor already asserted and persisted (lib/metrics.mjs).
+  if (snapshot.metrics?.available) {
+    for (const v of snapshot.metrics.violations) {
+      broken.push({ kind: "metricExpectation", detail: `${v.describe} — observed ${JSON.stringify(v.observed)}` });
+    }
   }
 
   const firstRun = prior === null;
@@ -621,6 +665,41 @@ export function computeDiff(snapshot, prior) {
 
   const hasChange = newByWorkspace.length > 0 || closedByWorkspace.length > 0;
 
+  // ── Doctor-recorded metrics ─────────────────────────────────────────────
+  // Diff-only, same reasoning as disk/skills: a block restating "12 open, 3
+  // sidecars loaded" every morning is wallpaper within a week — the exact
+  // failure this whole file exists to avoid (see file header). Report what
+  // CHANGED since the last digest, not the standing numbers.
+  const metricLines = [];
+  if (snapshot.metrics?.available) {
+    const priorMetrics = prior?.metrics ?? null;
+    const currentValues = snapshot.metrics.latest.metrics || {};
+    if (priorMetrics && priorMetrics.values) {
+      if (priorMetrics.runId === snapshot.metrics.latest.run_id) {
+        // Same doctor run already reported last digest cycle — nothing new
+        // to say, so say nothing (not "0 change" wallpaper).
+      } else {
+        for (const key of Object.keys(currentValues)) {
+          const before = priorMetrics.values[key];
+          const after = currentValues[key];
+          if (typeof before === "number" && typeof after === "number" && before !== after) {
+            const sign = after > before ? "+" : "";
+            metricLines.push(`${key}: ${before} -> ${after} (${sign}${after - before})`);
+          }
+        }
+      }
+    } else if (!firstRun) {
+      // Metrics recording came online since the last digest with no prior
+      // baseline to diff against — state that once, the same way the skills
+      // block states its first inventory once.
+      metricLines.push(`doctor metrics online: run ${snapshot.metrics.latest.run_id}, ${Object.keys(currentValues).length} keys`);
+    }
+  } else if (snapshot.metrics?.error && !firstRun && prior?.metrics) {
+    // Metrics WAS available last digest and is not now — the R6 vanished-
+    // signal case, one level up: the whole store, not just a key.
+    metricLines.push(`!! doctor metrics no longer available: ${snapshot.metrics.error}`);
+  }
+
   // ── Skills ────────────────────────────────────────────────────────────
   // Diff-only, for the same reason disk is threshold-only: a block that
   // restates "92 skills, 36 never invoked" every morning is wallpaper within a
@@ -664,7 +743,7 @@ export function computeDiff(snapshot, prior) {
     }
   }
 
-  return { firstRun, broken, newByWorkspace, closedByWorkspace, totals, watcher: snapshot.watcher, hasChange, diskLines, skillLines };
+  return { firstRun, broken, newByWorkspace, closedByWorkspace, totals, watcher: snapshot.watcher, hasChange, diskLines, skillLines, metricLines };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -679,8 +758,16 @@ export function formatDigest(diff) {
 
   const diskLines = diff.diskLines || [];
   const skillLines = diff.skillLines || [];
+  const metricLines = diff.metricLines || [];
 
-  if (diff.broken.length === 0 && !diff.firstRun && !diff.hasChange && diskLines.length === 0 && skillLines.length === 0) {
+  if (
+    diff.broken.length === 0 &&
+    !diff.firstRun &&
+    !diff.hasChange &&
+    diskLines.length === 0 &&
+    skillLines.length === 0 &&
+    metricLines.length === 0
+  ) {
     // Quiet day. One short line, not a full report. Disk hygiene prints ZERO
     // lines here too, on purpose — see digest.mjs disk-hygiene section: a
     // digest that restates disk facts every day is the same wallpaper
@@ -716,6 +803,12 @@ export function formatDigest(diff) {
   if (skillLines.length > 0) {
     lines.push(`SKILLS:`);
     for (const l of skillLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  if (metricLines.length > 0) {
+    lines.push(`METRICS (doctor):`);
+    for (const l of metricLines) lines.push(`  ${l}`);
     lines.push("");
   }
 

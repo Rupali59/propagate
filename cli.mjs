@@ -55,6 +55,15 @@ import { loadSidecar, SidecarError } from "./lib/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
 import { buildEdgeMap } from "./lib/edges.mjs";
 import { parseDecisions, zeroTokenEntries } from "./lib/decisions.mjs";
+import {
+  METRICS_PATH,
+  EXPECTATIONS,
+  UNCALIBRATED,
+  evaluateExpectations,
+  detectVanishedKeys,
+  readLastMetricsRecord,
+  appendMetricsRecord,
+} from "./lib/metrics.mjs";
 
 /**
  * Validate cross-repo edges: load each .propagates-cross.yml, resolve every
@@ -619,7 +628,30 @@ export async function checkGraphMcpStatus(opts = {}) {
 }
 
 async function doctor() {
+  const doctorStart = Date.now();
   let problems = 0;
+  // Metrics counters (docs/OBSERVABILITY.md §6 step 1) — accumulated as the
+  // existing checks below run, not recomputed. `doctor` already gathers every
+  // one of these; this just keeps a running tally instead of throwing it away.
+  let sidecarsLoadedCount = 0;
+  let sidecarsRejectedCount = 0;
+  let sidecarsProblemsCount = 0;
+  let ledgerUnknownTypesTotal = 0;
+  let ledgerMalformedTotal = 0;
+  let rowsOpenTotal = 0;
+  let decisionsEntriesCount = 0;
+  let decisionsWithTokensCount = 0;
+  let plistWatchpathsCount = 0;
+  let stateTrackedFilesCount = 0;
+  // Detail collected for the four subjects whose sole assertion now lives in
+  // EXPECTATIONS (lib/metrics.mjs, GOTCHAS G20) — the inline check() calls
+  // that used to assert these facts were downgraded to info()/warn(), but the
+  // exact-offender detail they used to print must still reach the reader, so
+  // it's captured here and handed to evaluateExpectations() as context.
+  const ledgerUnknownTypesDetails = [];
+  const sidecarsRejectedDetails = [];
+  let decisionsPath = "";
+  let decisionsZeroEntries = [];
   function check(label, ok, detail = "") {
     if (ok) {
       console.log(`  ${GREEN}✓${RESET} ${label}${detail ? "  " + DIM + detail + RESET : ""}`);
@@ -678,7 +710,8 @@ async function doctor() {
     try {
       const raw = await readFile(STATE_PATH, "utf8");
       const parsed = JSON.parse(raw);
-      check("state.json parseable", true, `${Object.keys(parsed.mtimes || {}).length} tracked files`);
+      stateTrackedFilesCount = Object.keys(parsed.mtimes || {}).length;
+      check("state.json parseable", true, `${stateTrackedFilesCount} tracked files`);
     } catch (err) {
       check("state.json parseable", false, err.message);
     }
@@ -709,25 +742,31 @@ async function doctor() {
       try {
         const { rows, unknownTypes } = await readLedgerWithStats(ws.ledgerJsonl);
         const openCount = rows.filter((r) => r.status === "open").length;
+        rowsOpenTotal += openCount;
         check("ledger JSONL parseable", true, `${rows.length} rows, ${openCount} open`);
 
         // N1: readLedgerWithStats already counts row types the fold doesn't
         // know how to handle (e.g. hand-authored "manual" rows); readLedger
-        // and every one of its callers throw that count away. Surface it as
-        // a FAILURE naming the ledger and the offending type strings — this
-        // is "unknown to the reader", not "corrupt": a type like "manual" is
-        // a legitimate-but-unhandled kind (docs/DATA_MODEL.md), and reporting
-        // it as corruption would be inaccurate.
+        // and every one of its callers throw that count away. This used to be
+        // a per-workspace FAILURE naming the ledger and offending type
+        // strings; the assertion now lives solely in EXPECTATIONS
+        // ("ledger.unknown_types == 0", lib/metrics.mjs, GOTCHAS G20) so one
+        // bad row prints one ✗, not one per workspace it happens to live in.
+        // The path/type/count detail the old check named is preserved here
+        // and handed to that single aggregate assertion via context.
         const unknownEntries = Object.entries(unknownTypes);
         const unknownCount = unknownEntries.reduce((sum, [, n]) => sum + n, 0);
-        check(
+        ledgerUnknownTypesTotal += unknownCount;
+        if (unknownCount > 0) {
+          ledgerUnknownTypesDetails.push(
+            `${ws.ledgerJsonl}: ${unknownEntries
+              .map(([t, n]) => `"${t}"×${n}`)
+              .join(", ")} — unknown to readLedger, silently dropped by the fold (docs/DATA_MODEL.md)`,
+          );
+        }
+        info(
           "no row types unknown to the reader",
-          unknownCount === 0,
-          unknownCount
-            ? `${ws.ledgerJsonl}: ${unknownEntries
-                .map(([t, n]) => `"${t}"×${n}`)
-                .join(", ")} — unknown to readLedger, silently dropped by the fold (docs/DATA_MODEL.md)`
-            : "",
+          unknownCount ? `${unknownCount} unknown — asserted in Metrics section` : "",
         );
       } catch (err) {
         check("ledger JSONL parseable", false, err.message);
@@ -742,11 +781,13 @@ async function doctor() {
       const rel = path.relative(ws.root, sc);
       try {
         const loaded = await loadSidecar(sc);
+        sidecarsLoadedCount++;
         check(`  ${rel}`, true);
         // Per-entry problems (N9 fix): a bad downstream entry is pruned
         // rather than failing the whole sidecar, but must stay a loud
         // doctor FAILURE naming the sidecar, source key, and path — pruning
         // must not trade one silent failure for another.
+        sidecarsProblemsCount += (loaded.problems || []).length;
         for (const p of loaded.problems || []) {
           check(
             `  ${rel}: source "${p.sourceKey}" propagates_to[${p.index}]${p.path ? ` (${p.path})` : ""}`,
@@ -755,8 +796,14 @@ async function doctor() {
           );
         }
       } catch (err) {
+        sidecarsRejectedCount++;
         const msg = err instanceof SidecarError ? err.message.split("] ").pop() : err.message;
-        check(`  ${rel}`, false, msg);
+        // Assertion moved to EXPECTATIONS ("sidecars.rejected == 0",
+        // lib/metrics.mjs, GOTCHAS G20) so one bad sidecar doesn't print two
+        // ✗ lines (one here, one in Metrics). Detail preserved for that
+        // aggregate check via sidecarsRejectedDetails.
+        sidecarsRejectedDetails.push(`${ws.name}/${rel}: ${msg}`);
+        info(`  ${rel}`, `rejected — ${msg}`);
       }
     }
 
@@ -857,32 +904,28 @@ async function doctor() {
   // being caught by hand. Checks the skill's own docs/DECISIONS.md.
   try {
     const decPath = path.join(SKILL_DIR, "docs", "DECISIONS.md");
+    decisionsPath = decPath;
     if (!existsSync(decPath)) {
       console.log(`  ${DIM}(no docs/DECISIONS.md at ${decPath})${RESET}`);
     } else {
       const text = await readFile(decPath, "utf8");
-      const { entries, zero, allZero } = decisionsAttributionReport(text);
-      if (allZero) {
-        check(
-          "Affects: tokens parse",
-          false,
-          `${decPath}: all ${entries.length} entries have zero Affects tokens — N12 regression (SPEC I1)`,
-        );
-      } else {
-        check(
-          "Affects: tokens parse",
-          true,
-          `${entries.length} entries, ${entries.length - zero.length} with tokens`,
-        );
-        if (zero.length > 0) {
-          warn(
-            "some DECISIONS.md entries have zero Affects tokens",
-            `${decPath}: ${zero
-              .map((e) => `${e.date} ${e.title || "(untitled)"}`)
-              .join("; ")}`,
-          );
-        }
-      }
+      const { entries, zero } = decisionsAttributionReport(text);
+      decisionsEntriesCount = entries.length;
+      decisionsWithTokensCount = entries.length - zero.length;
+      decisionsZeroEntries = zero.map((e) => `${e.date} ${e.title || "(untitled)"}`);
+      // The count == count assertion (was: fail only when ALL entries are
+      // zero; a partial-zero file only warned) now lives solely in
+      // EXPECTATIONS ("decisions.with_tokens == decisions.entries",
+      // lib/metrics.mjs, GOTCHAS G20) — equality is the correct bar per that
+      // entry's basis, so collapsing to one mechanism also closes the gap
+      // where a partial-zero file used to only warn. This line stays
+      // informational; the try/catch below is the one thing EXPECTATIONS
+      // cannot see (a parse that throws leaves entries=0/withTokens=0, which
+      // reads as a false "0 == 0" pass) — that failure mode stays here.
+      info(
+        "Affects: tokens parse",
+        `${entries.length} entries, ${entries.length - zero.length} with tokens`,
+      );
     }
   } catch (err) {
     check("Affects: tokens parse", false, err.message);
@@ -918,12 +961,14 @@ async function doctor() {
   // zero times, every check in it trivially "passes" by not running, and
   // doctor reports healthy. That is precisely the "abandoned automation
   // reports itself healthy" failure lib/config.mjs's own comment names.
-  check(
+  // Assertion moved to EXPECTATIONS ("workspaces.discovered >= 1",
+  // lib/metrics.mjs, GOTCHAS G20) — this was an exact duplicate (same bound,
+  // same fact), so it's informational here and asserted once, in Metrics.
+  info(
     "at least one workspace discovered",
-    WORKSPACES.length > 0,
     WORKSPACES.length === 0
       ? `SEARCH_ROOTS=[${SEARCH_ROOTS.join(", ")}] — zero workspaces found; every per-workspace check below silently did not run`
-      : "",
+      : `${WORKSPACES.length} found`,
   );
   if (DISCOVERY_DEGRADED) {
     check(
@@ -948,10 +993,19 @@ async function doctor() {
   );
 
   // (a) plist WatchPaths vs currently-discovered workspace roots + docs dirs.
+  // GOTCHAS G20: this is the one EXPECTATIONS-adjacent subject that stays
+  // inline on purpose, not an oversight. This does exact set-equality
+  // (missing/extra paths named individually); EXPECTATIONS only ever held a
+  // count floor (`plist.watchpaths >= workspaces.discovered`, N14's
+  // zero-collapse regression). The floor is strictly weaker — a wrong-but-
+  // same-sized set passes it while failing here — so it was removed from
+  // EXPECTATIONS rather than kept as a second, redundant vote alongside this
+  // richer check. One fact, one assertion; this one just isn't a duplicate.
   try {
     if (existsSync(PLIST_PATH)) {
       const xml = await readFile(PLIST_PATH, "utf8");
       const actual = new Set(parsePlistWatchPaths(xml));
+      plistWatchpathsCount = actual.size;
       const expected = expectedWatchPaths(WORKSPACES);
       const missing = [...expected].filter((p) => !actual.has(p));
       const extra = [...actual].filter((p) => !expected.has(p));
@@ -1004,6 +1058,7 @@ async function doctor() {
       totalMalformed += malformed;
       if (malformed > 0) perLedger.push(`${ws.name}: ${malformed}`);
     }
+    ledgerMalformedTotal = totalMalformed;
     check(
       "no malformed ledger lines",
       totalMalformed === 0,
@@ -1042,6 +1097,81 @@ async function doctor() {
     for (const l of last) console.log(`  ${DIM}${l}${RESET}`);
   } else {
     console.log(`  ${DIM}(no log yet)${RESET}`);
+  }
+
+  console.log(`\n${BOLD}# Metrics${RESET}`);
+  // docs/OBSERVABILITY.md §6 step 1: persist what doctor already computed
+  // above instead of throwing it away. Nothing here is newly derived — every
+  // value was already gathered by a check() above; this just tallies it,
+  // asserts the calibrated expectations, and records the run.
+  {
+    const metrics = {
+      "workspaces.discovered": WORKSPACES.length,
+      "sidecars.loaded": sidecarsLoadedCount,
+      "sidecars.rejected": sidecarsRejectedCount,
+      "sidecars.problems": sidecarsProblemsCount,
+      "ledger.unknown_types": ledgerUnknownTypesTotal,
+      "ledger.malformed": ledgerMalformedTotal,
+      "rows.open": rowsOpenTotal,
+      "decisions.entries": decisionsEntriesCount,
+      "decisions.with_tokens": decisionsWithTokensCount,
+      "plist.watchpaths": plistWatchpathsCount,
+      "state.tracked_files": stateTrackedFilesCount,
+      "doctor.duration_ms": Date.now() - doctorStart,
+      // Placeholder — the real value (this run's final `problems` count,
+      // including the metrics checks below) is assigned right before
+      // appendMetricsRecord. The KEY must exist here already: the
+      // vanished-key comparison below runs before that assignment, and
+      // comparing against a metrics object that hasn't grown its own
+      // "doctor.problems" key yet would make the metric look vanished on
+      // EVERY run — a self-inflicted instance of the exact R6 failure this
+      // check exists to catch.
+      "doctor.problems": 0,
+    };
+
+    // R6: a metric key that was emitted last run and is silent this run is a
+    // violation distinct from an out-of-range value — a vanished signal is the
+    // same silent absence one level up. Read the PREVIOUS record before this
+    // run's is appended.
+    const previousRecord = await readLastMetricsRecord(METRICS_PATH);
+    const vanished = detectVanishedKeys(metrics, previousRecord?.metrics ?? null);
+    for (const key of vanished) {
+      check(
+        `metric still emitted: ${key}`,
+        false,
+        `present in the previous run (${previousRecord.run_id}, ${previousRecord.ts}), absent from this one`,
+      );
+    }
+
+    // G16: these are predictions, not targets — a violation here is real
+    // information, never something to tune away by loosening the assertion.
+    // G20: context carries the exact-offender detail the (now-informational)
+    // inline checks above used to print, so the sole assertion here is at
+    // least as informative as the two-mechanism version it replaced.
+    const violations = evaluateExpectations(metrics, EXPECTATIONS, {
+      searchRoots: SEARCH_ROOTS,
+      decisionsPath,
+      decisionsZeroEntries,
+      ledgerUnknownTypesDetails,
+      sidecarsRejectedDetails,
+    });
+    for (const v of violations) {
+      const detailPrefix = v.detail ? `${v.detail} — ` : "";
+      check(v.describe, false, `${detailPrefix}observed ${JSON.stringify(v.observed)} — ${v.basis}`);
+    }
+    if (violations.length === 0) {
+      check("all calibrated expectations hold", true, `${EXPECTATIONS.length} checked`);
+    }
+    info(
+      "uncalibrated metrics recorded, not asserted",
+      UNCALIBRATED.map((u) => u.key).join(", "),
+    );
+
+    // Recorded AFTER the checks above so doctor.problems reflects the true
+    // final count, including any violation/vanished-key checks just run.
+    metrics["doctor.problems"] = problems;
+    const record = await appendMetricsRecord(metrics, { metricsPath: METRICS_PATH });
+    info("metrics recorded", `${METRICS_PATH} (run ${record.run_id})`);
   }
 
   console.log();

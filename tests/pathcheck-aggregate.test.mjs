@@ -50,7 +50,10 @@ function runDoctor(root) {
   return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root },
+    // G10: one override moves all the paths together — doctor now writes
+    // metrics.jsonl every run, so PROPAGATE_STATE_DIR must move with
+    // PROPAGATE_SEARCH_ROOTS or this pollutes the real production file.
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root },
   });
 }
 

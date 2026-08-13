@@ -197,3 +197,19 @@ drift. v2 derives state from content, so losing the cache costs one slow run.
 
 **Do:** prefer state that is a pure function of the world plus an append-only log.
 Then "what is the state?" and "what was the state?" are the same question.
+
+### G20 · A second reporting mechanism duplicates the first unless you delete the first
+Three times in one session I added a second way to report a fact and left the first
+one running: `pathProblems` (an aggregate restating per-entry `check()` failures),
+the directory-as-downstream aggregate, and then `doctor`'s `EXPECTATIONS` table
+asserting the same five subjects an inline `check()` already asserted. The count is
+the tell every time: 4 genuinely distinct defects rendered as 5 printed problems,
+found only by reading the output and noticing the extra ✗ line, never by reasoning
+about the code in the abstract. An inflated count is not neutral — it is exactly how
+a red check becomes background noise nobody re-reads.
+
+**Do:** when a metric already gets computed and reported somewhere, adding a second
+place that reports it is a rewrite, not an addition — the old one must be deleted or
+demoted to informational (never a `✗`) in the same change. Before shipping a new
+assertion, grep for the fact it asserts; if it already has a home, that's the one
+place it gets to fail from.

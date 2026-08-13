@@ -48,12 +48,18 @@ function driftLine(id, overrides = {}) {
   });
 }
 
-/** Run `node cli.mjs doctor` as a subprocess scoped to `root` (or with no roots at all). */
-function runDoctor(root) {
+/**
+ * Run `node cli.mjs doctor` as a subprocess scoped to `root` (or with no
+ * roots at all). Sets PROPAGATE_STATE_DIR alongside PROPAGATE_SEARCH_ROOTS
+ * (GOTCHAS G10: "one override moves all the paths together") — doctor now
+ * writes metrics.jsonl every run, so without this every test invocation
+ * would append to the real production metrics.jsonl.
+ */
+function runDoctor(root, stateDir = root) {
   return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root },
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir },
   });
 }
 
@@ -110,9 +116,142 @@ test("doctor's new checks pass cleanly on a healthy ledger (no spurious failure)
     // These are the checks this round of work added/touched; assert each is
     // green regardless of what unrelated machine-specific checks (launchd,
     // heartbeat, real plist) do on the box running the test.
-    assert.match(out, /✓.*no row types unknown to the reader/);
+    //
+    // "no row types unknown to the reader" and "at least one workspace
+    // discovered" are now informational restatements (GOTCHAS G20) — the
+    // sole assertion for both moved to EXPECTATIONS, surfaced here as the
+    // "all calibrated expectations hold" green line instead of a per-line ✓.
+    assert.match(out, /·.*no row types unknown to the reader/);
+    assert.match(out, /·.*at least one workspace discovered/);
     assert.match(out, /✓.*no malformed ledger lines/);
-    assert.match(out, /✓.*at least one workspace discovered/);
+    assert.match(out, /✓.*all calibrated expectations hold/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GOTCHAS G20: doctor used to carry TWO mechanisms asserting the same fact for
+// workspaces.discovered / decisions.with_tokens / ledger.unknown_types /
+// sidecars.rejected — an inline check() AND an EXPECTATIONS entry — so one
+// real defect printed two ✗ lines (observed live: a single hand-authored
+// "manual" ledger row produced both "✗ no row types unknown to the reader"
+// and "✗ ledger.unknown_types == 0"). These tests pin the fixed shape: the
+// EXPECTATIONS entry is now the SOLE assertion for those four subjects, and
+// the previously-duplicate inline check is downgraded to an informational
+// `·` line that never turns red.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Count non-overlapping matches of `re` (with the `g` flag) in `text`. */
+function countMatches(text, re) {
+  return (text.match(re) || []).length;
+}
+
+test("G20: an unknown ledger row type produces exactly ONE ✗ line, not two", async () => {
+  const { root, jsonlPath } = await makeWorkspace([
+    driftLine("001"),
+    JSON.stringify({ type: "manual", id: "002", timestamp: new Date().toISOString(), status: "open" }),
+  ]);
+  try {
+    const result = runDoctor(root);
+    const out = result.stdout + result.stderr;
+    assert.notEqual(result.status, 0);
+    // The old inline check's label must never appear as a ✗ — only as the
+    // informational `·` restatement.
+    assert.equal(
+      countMatches(out, /✗[^\n]*no row types unknown to the reader/g),
+      0,
+      "the old per-workspace inline check must no longer fail on its own",
+    );
+    assert.match(
+      out,
+      /·[^\n]*no row types unknown to the reader/,
+      "the inline check still prints, just informationally",
+    );
+    // The sole assertion is the EXPECTATIONS entry, and it fires exactly once
+    // for this run (one workspace, one offending row) even though the
+    // per-workspace loop that gathers the count could in principle run
+    // several times.
+    assert.equal(
+      countMatches(out, /✗[^\n]*ledger\.unknown_types == 0/g),
+      1,
+      "ledger.unknown_types is asserted exactly once",
+    );
+    // Every ✗ line anywhere in the run naming "unknown" must be this single
+    // EXPECTATIONS line — i.e. 4 defects worth of checks did not become 5
+    // printed problems the way they did before G20's fix.
+    assert.equal(
+      countMatches(out, /✗[^\n]*unknown[^\n]*/gi),
+      1,
+      "exactly one ✗ line total references the unknown-row-type defect",
+    );
+    // Non-negotiable: the surviving message is at least as informative as the
+    // inline check it replaced — same ledger path, same offending type, same
+    // count.
+    assert.match(out, new RegExp(jsonlPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "names the ledger path");
+    assert.match(out, /"manual"×1/, "names the offending type and its count");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("G20: zero discovered workspaces produces exactly ONE ✗ line, not two", async () => {
+  const empty = await mkdtemp(path.join(tmpdir(), "doctor-empty-"));
+  try {
+    const result = runDoctor(empty);
+    const out = result.stdout + result.stderr;
+    assert.notEqual(result.status, 0);
+    assert.equal(
+      countMatches(out, /✗[^\n]*at least one workspace discovered/g),
+      0,
+      "the old inline check must no longer fail on its own",
+    );
+    assert.equal(
+      countMatches(out, /✗[^\n]*workspaces\.discovered >= 1/g),
+      1,
+      "workspaces.discovered is asserted exactly once, by EXPECTATIONS",
+    );
+    assert.match(out, /zero workspaces found/, "detail from the old inline check is preserved");
+  } finally {
+    await rm(empty, { recursive: true, force: true });
+  }
+});
+
+test("G20: a healthy fixture produces zero ✗ lines for any of the four sole-source subjects", async () => {
+  const { root } = await makeWorkspace([driftLine("001"), driftLine("002")]);
+  try {
+    const result = runDoctor(root);
+    const out = result.stdout + result.stderr;
+    for (const re of [
+      /✗[^\n]*workspaces\.discovered/g,
+      /✗[^\n]*decisions\.with_tokens/g,
+      /✗[^\n]*ledger\.unknown_types/g,
+      /✗[^\n]*sidecars\.rejected/g,
+    ]) {
+      assert.equal(countMatches(out, re), 0, `${re} must not fire on a clean fixture`);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("G20: plist.watchpaths stays a single inline assertion — not duplicated into EXPECTATIONS", async () => {
+  // No plist on disk at all is the simplest way to force the existing inline
+  // "plist WatchPaths matches discovered workspaces" check to fail.
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    const result = runDoctor(root);
+    const out = result.stdout + result.stderr;
+    assert.match(out, /✗[^\n]*plist WatchPaths matches discovered workspaces/);
+    // No second, EXPECTATIONS-driven ✗ mentioning plist.watchpaths anywhere
+    // in the Metrics section — it was deliberately removed from EXPECTATIONS
+    // because the inline check is strictly richer (GOTCHAS G20).
+    assert.equal(
+      countMatches(out, /✗[^\n]*plist\.watchpaths/g),
+      0,
+      "plist.watchpaths must not also be asserted by EXPECTATIONS",
+    );
+    assert.equal(countMatches(out, /✗[^\n]*plist/gi), 1, "exactly one ✗ line total references plist");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
