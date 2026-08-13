@@ -586,8 +586,19 @@ async function doctor() {
     for (const sc of sidecars) {
       const rel = path.relative(ws.root, sc);
       try {
-        await loadSidecar(sc);
+        const loaded = await loadSidecar(sc);
         check(`  ${rel}`, true);
+        // Per-entry problems (N9 fix): a bad downstream entry is pruned
+        // rather than failing the whole sidecar, but must stay a loud
+        // doctor FAILURE naming the sidecar, source key, and path — pruning
+        // must not trade one silent failure for another.
+        for (const p of loaded.problems || []) {
+          check(
+            `  ${rel}: source "${p.sourceKey}" propagates_to[${p.index}]${p.path ? ` (${p.path})` : ""}`,
+            false,
+            `pruned — ${p.message}`,
+          );
+        }
       } catch (err) {
         const msg = err instanceof SidecarError ? err.message.split("] ").pop() : err.message;
         check(`  ${rel}`, false, msg);

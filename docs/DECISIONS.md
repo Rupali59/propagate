@@ -293,3 +293,51 @@ not have to re-litigate whether the split is warranted.
 `tests/skills-create.test.mjs`, `tests/skills-lifecycle.test.mjs`,
 `tests/skills-scan.test.mjs`,
 `~/.claude/plans/okay-i-dont-think-logical-haven.md` Phase 1
+
+---
+
+## 2026-08-13: sidecar validation is per-entry — a schema constraint must not disable a file that previously worked
+
+**What:** `loadSidecar` (`lib/frontmatter.mjs`) no longer rejects an entire
+`.propagates.yml` for a schema violation confined to one downstream entry.
+When every ajv error's `instancePath` points inside a
+`/sources/<key>/propagates_to/<i>/...` entry, that entry is pruned from a
+copy of the parsed object, the copy is re-validated (never returned unless
+proven valid), and the prune is reported via a new `problems: []` field on
+the return value. Anything else — malformed YAML, `sources` not an object, a
+source missing `propagates_to` entirely, any top-level shape violation —
+stays fatal and still throws `SidecarError`, because whole-file rejection is
+the only correct response to damage that cannot be partially recovered.
+`cli.mjs doctor` surfaces every `problems[]` entry as its own FAILURE,
+naming the sidecar, the source key, and the offending path — pruning must
+not trade one silent failure for another.
+
+**Why:** the 2026-08-10 entry above ("workspace roots become explicit...")
+added `additionalProperties: false` and is the reason `SKILL.md` states
+schema must ship before any marker gains a field — reject unknown shapes
+before they're written, not after. This entry is that rule's mirror. We
+proved the failure ourselves on 2026-08-13: tightening the schema to reject
+a downstream `path` ending in `/` (the directory-as-downstream guard) turned
+`PanditPawanKaushik/SSJK-mb/.propagates.yml` from *"loads, with one path
+that does not resolve"* into *"does not load at all"* — 40 declared edges
+across 10 sources went inert, 224 `skip broken sidecar` lines in
+`watcher.log`, dark for roughly two hours (docs/ISSUES.md N9). A validator
+that can take a working file offline is a bigger outage than the defect it
+catches. Therefore: **validation is per-entry; whole-file rejection is
+reserved for structural damage that genuinely cannot be partially
+recovered.** Any future schema tightening is weighed against the sidecars
+already on disk, not just against the shape it's meant to catch.
+
+**Verified:** SSJK-mb's sidecar now loads all 10 sources with exactly 1
+problem reported (the `flows/` trailing-slash entry); its other 39 edges
+fire again. `doctor` turns the same finding into a named per-entry FAILURE
+instead of a whole-sidecar rejection, and — as a side effect of the file no
+longer being rejected outright — also surfaces the previously-hidden
+`admin/app` directory-as-downstream bug that was masked behind the total
+failure.
+
+**Affects:** propagate, PanditPawanKaushik
+**Refs:** `lib/frontmatter.mjs` (`loadSidecar`, `partitionErrors`), `cli.mjs`
+(doctor sidecar-loop), `docs/ISSUES.md` N9,
+`tests/sidecar-prune.test.mjs`,
+`~/.claude/plans/okay-i-dont-think-logical-haven.md` Phase A
