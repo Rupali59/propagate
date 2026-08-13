@@ -116,6 +116,27 @@ already swallowed, so that catch is dead code.
 `loadSidecar`, and that sidecar's edges simply stop firing. Recorded in `docs/DECISIONS.md`
 2026-08-10 as the reason schema must ship *before* any marker gains a field.
 
+**We triggered this ourselves on 2026-08-13, and it is live right now.** Tightening the schema to
+reject a `path` ending in `/` (the directory-as-downstream guard) turned
+`PanditPawanKaushik/SSJK-mb/.propagates.yml` from *"loads, with one path that does not resolve"*
+into *"does not load at all"*. Every edge in that sidecar has stopped firing. Visible in
+`watcher.log`:
+
+```
+synthesizeKindCodeEntries: skip broken sidecar .../SSJK-mb/.propagates.yml:
+  schema violation: /sources/…task-engine-v2.md/propagates_to/5/path must NOT be valid
+```
+
+Net effect is **worse than the bug it catches** — one malformed path was traded for a wholly
+disabled sidecar. The lesson generalises beyond us: N9 makes *any* schema tightening a potential
+outage for existing markers, so the rule recorded on 2026-08-10 ("schema before field") needs its
+mirror image: **a schema constraint must not be able to disable a file that previously worked.**
+
+*Fix:* validation must be per-entry, not per-file — a malformed `path` invalidates that downstream
+and reports it, while the sidecar's other edges keep firing. Rejecting the whole file makes the
+validator a bigger outage than the thing it validates. Until that lands, weigh any new constraint
+against the sidecars already on disk.
+
 *Fix:* rejected sidecars are a loud `doctor` failure naming the file and field.
 
 ### N10 · `SKILL.md` documents a launchd label that does not exist — **S1**
@@ -171,6 +192,40 @@ ledger has no way to say "this fired because the baseline was lost."
 (state living inside the plugin dir is also destroyed by a marketplace plugin update). Until then,
 **there is no safe way to run the watcher by hand** — say so wherever the manual invocation is
 documented.
+
+### N14 · `init` rewrites the real plist from a scoped run, disarming the watcher — **S1**
+The same defect as N13, in a second location, and worse because the blast radius is the whole
+machine. `PROPAGATE_SEARCH_ROOTS` scopes discovery, but `PLIST_PATH` (`lib/plist.mjs:26`) is fixed
+to `~/Library/LaunchAgents/`. `cli.mjs init` ends by calling `regeneratePlist({workspaces})` with
+whatever discovery returned, then `reloadLaunchd()`.
+
+So running `init` against a temp directory with `PROPAGATE_SEARCH_ROOTS` set — the documented way
+to try it safely — discovers 0 workspaces, writes the **real** plist with **0 WatchPaths**, and
+bootstraps it. **Reproduced live 2026-08-13**: `WatchPaths` became an empty array; the watcher
+stayed loaded but fired only on `StartInterval`, never on file events. Restored by re-running
+`regeneratePlist` against real discovery (7 workspaces, 11 paths).
+
+Compounding it: `init` regenerating and reloading launchd **at all** is a side effect
+`STATE.md` already flagged as surprising. A setup command that can silently disarm the watcher is
+the worst possible shape for that bug.
+
+*Fix:* scope `PLIST_PATH` alongside `SEARCH_ROOTS` (one `PROPAGATE_STATE_DIR` should move state,
+lock, heartbeat, and plist together); split plist regeneration out of `init` into an explicit
+`reload`; and refuse to write a plist with 0 watch roots when discovery is degraded — an empty
+plist is never a legitimate outcome.
+
+### N15 · `init` creates a marker that is not a workspace — **S2**
+`cli.mjs init` writes a template containing `sources: {}` and **no `workspace: true`**. Since
+`lib/discovery.mjs:113` promotes a marker to a ledger-owning workspace only on a strict `true`,
+the directory `init` just created is invisible to discovery. Reproduced 2026-08-13: init printed
+`✓ created …/.propagates.yml` and then `discovered 0 workspaces`, reporting both as success.
+
+So the onboarding command cannot, by itself, onboard anything. Combined with N14, running it also
+wipes the WatchPaths of every workspace that already worked.
+
+*Fix:* the template sets `workspace: true` (or `init` asks whether this is a ledger-owning root
+versus an edge-only sidecar, since both are legitimate — see A3), and init fails loudly when the
+directory it just initialised does not appear in the subsequent discovery.
 
 ### N11 · Moving a directory silently breaks every `../` edge — **S1**
 `propagates_to` paths and `sources:` keys both resolve relative to the sidecar's own directory.

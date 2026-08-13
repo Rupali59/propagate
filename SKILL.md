@@ -36,6 +36,7 @@ an automation that makes it.
 | you need the premise, and what this refuses to do | this file's identity block (canonical); `docs/SPEC.md` §1 for the evidence |
 | a row won't close after you marked it done | `docs/REFERENCE.md` § Ledger resolution |
 | something is broken, or a doctor check fails | `docs/ISSUES.md` |
+| you need to know what signal would have caught a failure | `docs/OBSERVABILITY.md` |
 | you're changing behaviour and need to know why | `docs/DECISIONS.md` |
 | you need exact paths, flags, or the install sequence | `docs/REFERENCE.md` |
 | a field on a ledger row looks unused, or you need the real (not spec'd) row shape | `docs/DATA_MODEL.md` |
