@@ -15,7 +15,8 @@
  *   node cli.mjs check ... --strict       — exit 1 (not 0) when couplings are found
  */
 
-import { existsSync, globSync } from "node:fs";
+import { existsSync, globSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -1105,7 +1106,26 @@ async function skillsLifecycleCmd(mode) {
 
 // Only dispatch when executed directly (node cli.mjs ...), NOT when a test imports
 // checkCrossRepo from this module.
-const _invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+//
+// Both sides must be realpath-resolved before comparing. `import.meta.url` is
+// already realpathed by the ESM loader, but `process.argv[1]` is the literal
+// string the caller typed -- so invoking through a symlink (e.g. a hub-visible
+// `GitHub/propagate-skill` pointing here) made the two differ, the guard go
+// false, and the CLI exit 0 having done nothing. A silent success is the exact
+// "reports itself healthy while doing nothing" failure this skill exists to catch.
+//
+// `pathToFileURL` rather than a `file://` template literal: the latter does not
+// percent-encode, so any path containing a space (`Vipin Kaushik/...`) never
+// matched either.
+const _invokedDirectly = (() => {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(argv1)).href;
+  } catch {
+    return false; // argv[1] not a resolvable path (bundled/eval) -- do not dispatch
+  }
+})();
 if (_invokedDirectly) {
   const mode = process.argv[2] || "status";
   if (mode === "status") {
