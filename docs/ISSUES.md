@@ -193,6 +193,16 @@ ledger has no way to say "this fired because the baseline was lost."
 **there is no safe way to run the watcher by hand** — say so wherever the manual invocation is
 documented.
 
+**RESOLVED 2026-08-13 (Phase B).** `PROPAGATE_STATE_DIR` (`lib/config.mjs`) relocates
+`STATE_PATH`/`LOCK_PATH`/`HEARTBEAT_PATH`/`WATCHER_LOG` (and, via N14's fix, the plist) together.
+When unset, every path resolves byte-identically to the pre-existing literal — proved by
+`tests/config-state-dir.test.mjs`'s "defaults unchanged" regression guard, which is the explicit
+test against a fifth incident of this shape. A bad `PROPAGATE_STATE_DIR` (a file, or an uncreatable
+path) logs a warning and falls back to the default; `config.mjs` never throws at module load
+(`STATE.md`'s hazard about a throw bricking watcher/CLI/UI together still holds and is now tested).
+Testing the watcher safely requires setting **both** `PROPAGATE_SEARCH_ROOTS` and
+`PROPAGATE_STATE_DIR` — documented in the code comment above `resolveStateDir()`.
+
 ### N14 · `init` rewrites the real plist from a scoped run, disarming the watcher — **S1**
 The same defect as N13, in a second location, and worse because the blast radius is the whole
 machine. `PROPAGATE_SEARCH_ROOTS` scopes discovery, but `PLIST_PATH` (`lib/plist.mjs:26`) is fixed
@@ -214,6 +224,23 @@ lock, heartbeat, and plist together); split plist regeneration out of `init` int
 `reload`; and refuse to write a plist with 0 watch roots when discovery is degraded — an empty
 plist is never a legitimate outcome.
 
+**RESOLVED 2026-08-13 (Phase B).** Three independent fixes, each closing one blast-radius path:
+1. `lib/plist.mjs`'s `PLIST_PATH` now derives from `PROPAGATE_STATE_DIR` (via `lib/config.mjs`'s
+   `STATE_DIR`) exactly like `STATE_PATH`/`LOCK_PATH`/etc — a scoped run with both env vars set
+   writes to a scoped plist path, never `~/Library/LaunchAgents/`.
+2. `regeneratePlist()` now refuses to write when `workspaces.length === 0`, returning
+   `{ ok: false, error }` instead of writing — `tests/plist-watch-roots.test.mjs` covers both the
+   refusal and the unchanged N>0 write path. This alone would have prevented the incident.
+3. `init` no longer calls `regeneratePlist`/`reloadLaunchd` at all (see N15's fix below) — the new
+   `reload` subcommand does that job, explicitly and only when asked.
+`tests/init-reload.test.mjs` proves `init` never writes a plist file even when run unscoped-of-plist
+(no `.plist` appears under a scoped `PROPAGATE_STATE_DIR`), and proves via source inspection that
+`reload`'s body — not `init`'s — calls `regeneratePlist`/`reloadLaunchd` (that half is intentionally
+not exercised end-to-end in automated tests: it is the one command that is supposed to touch real
+launchd state, and a stray registered job's `ProgramArguments` carry no environment, so a
+scoped-but-imperfectly-cleaned-up test job would run the real watcher against real production paths
+— exactly what this task's safety section forbids).
+
 ### N15 · `init` creates a marker that is not a workspace — **S2**
 `cli.mjs init` writes a template containing `sources: {}` and **no `workspace: true`**. Since
 `lib/discovery.mjs:113` promotes a marker to a ledger-owning workspace only on a strict `true`,
@@ -226,6 +253,16 @@ wipes the WatchPaths of every workspace that already worked.
 *Fix:* the template sets `workspace: true` (or `init` asks whether this is a ledger-owning root
 versus an edge-only sidecar, since both are legitimate — see A3), and init fails loudly when the
 directory it just initialised does not appear in the subsequent discovery.
+
+**RESOLVED 2026-08-13 (Phase B).** `init <dir> [--workspace|--edges-only]` — `--workspace`
+(the default, since that's what someone running `init` almost always means) writes
+`workspace: true` into the template; `--edges-only` writes today's sourceless template with no
+`workspace` key, for a downstream-only sidecar. After writing, `init` always re-runs discovery and,
+when `--workspace` was used, verifies the new root is actually present in the result — if not, it
+prints `init failed: ... not discoverable` and exits non-zero rather than reporting `✓ created`
+next to `discovered 0 workspaces` as if both were success. `tests/init-reload.test.mjs` covers both
+flags, the default, and the loud-failure path (a target deliberately outside `SEARCH_ROOTS`, so
+discovery can never see it regardless of the marker).
 
 ### N11 · Moving a directory silently breaks every `../` edge — **S1**
 `propagates_to` paths and `sources:` keys both resolve relative to the sidecar's own directory.
@@ -397,8 +434,9 @@ looks like an oversight. It took a full audit to establish it was a decision.
 - **`optional: true`** — proposed in `cross-project-capture-2026-06-09` Phase 3a so a missing
   downstream can be tolerated. **Could not confirm it ever shipped**; verify against
   `propagates.schema.json` before relying on it.
-- **`cli.mjs init` re-arms launchd as a side effect** — flagged in the skill's own `STATE.md` and
-  `DECISIONS.md` as surprising, should be split into a `reload` mode. Unfiled until now.
+- ~~**`cli.mjs init` re-arms launchd as a side effect**~~ — **RESOLVED 2026-08-13**, folded into
+  N14's fix: `init` no longer touches the plist or launchd at all; `node cli.mjs reload` is now the
+  explicit, separate command for that.
 
 ---
 
