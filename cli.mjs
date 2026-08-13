@@ -29,6 +29,11 @@
  *   node cli.mjs drain --group <correlation_id> --status <...> [...]
  *                                         — close every open row sharing that correlation_id
  *   node cli.mjs drain ... --json         — machine-readable result on either mode
+ *   node cli.mjs reconcile                — v2 derivation (READ-ONLY): derives state per
+ *                                            declared edge from content + the v2 event store;
+ *                                            writes nothing. Current workspace by default.
+ *   node cli.mjs reconcile --all          — every workspace
+ *   node cli.mjs reconcile --json         — machine-readable {generatedAt, stats, rows}
  */
 
 import { existsSync, globSync, realpathSync } from "node:fs";
@@ -54,6 +59,7 @@ import { readLedger, readLedgerWithStats, lastActivityAt, markStatus } from "./l
 import { loadSidecar, SidecarError } from "./lib/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
 import { buildEdgeMap } from "./lib/edges.mjs";
+import { reconcile, STATES } from "./lib/reconcile.mjs";
 import { parseDecisions, zeroTokenEntries } from "./lib/decisions.mjs";
 import {
   METRICS_PATH,
@@ -1769,6 +1775,50 @@ async function drainClose(args, json) {
   if (failed.length) process.exit(1);
 }
 
+/**
+ * `reconcile` — the v2 derivation (plan §3/§7). READ-ONLY: derives state
+ * from (sidecars @ working tree, the v2 event store, current content) and
+ * prints it. Writes nothing — no ledger row, no store entry, no
+ * state.json. Also *is* onboarding (plan §7's table): the first run against
+ * an empty event store is expected to report almost everything
+ * NEVER_VERIFIED, and that is the correct, honest answer, not a bug.
+ *
+ * `--all` reconciles every discovered workspace. Without it: the workspace
+ * at cwd (mirrors `status`'s scoping via `currentWorkspace()`); falls back
+ * to every workspace when cwd isn't inside one, same fallback `status` uses.
+ * `--json` prints the `{generatedAt, ...}`-enveloped machine-readable form,
+ * matching `statusJson()`'s convention.
+ */
+async function reconcileCmd() {
+  const args = process.argv.slice(3);
+  const json = args.includes("--json");
+  const showAll = args.includes("--all");
+  const cur = currentWorkspace();
+  const workspaces = showAll || !cur ? WORKSPACES : [cur];
+
+  const { rows, stats } = await reconcile(workspaces);
+
+  if (json) {
+    console.log(
+      JSON.stringify({ generatedAt: new Date().toISOString(), stats, rows }),
+    );
+    return;
+  }
+
+  console.log(`${BOLD}# reconcile${RESET}  ${DIM}(read-only derivation, writes nothing)${RESET}\n`);
+  console.log(
+    `  ${workspaces.length} workspace${workspaces.length === 1 ? "" : "s"} — ` +
+      `${stats.edges} declared edge${stats.edges === 1 ? "" : "s"} -> ${stats.expanded} expanded ` +
+      `(${stats.unresolvable} unresolvable) in ${stats.durationMs}ms\n`,
+  );
+  for (const state of STATES) {
+    const n = stats.byState[state] || 0;
+    if (n === 0) continue;
+    console.log(`  ${YELLOW}${String(n).padStart(4)}${RESET}  ${state}`);
+  }
+  console.log();
+}
+
 async function drain() {
   const args = process.argv.slice(3);
   const json = args.includes("--json");
@@ -1984,6 +2034,8 @@ if (_invokedDirectly) {
     await check();
   } else if (mode === "drain") {
     await drain();
+  } else if (mode === "reconcile") {
+    await reconcileCmd();
   } else if (mode === "skills") {
     await skills();
   } else if (mode === "skills-create") {
@@ -1992,7 +2044,7 @@ if (_invokedDirectly) {
     await skillsLifecycleCmd(mode);
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
     process.exit(2);
   }
 }
