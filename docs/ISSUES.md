@@ -151,6 +151,27 @@ non-empty file a `doctor` failure rather than a silent empty array. Add a test t
 `docs/DECISIONS.md`, not only synthetic fixtures — `tests/decisions.test.mjs` passes 4/4 today
 precisely because its fixtures use the bare form the live file never uses.
 
+### N13 · `PROPAGATE_SEARCH_ROOTS` does not scope state, so testing the watcher corrupts production — **S1**
+`lib/config.mjs:86-88` fixes `STATE_PATH`, `LOCK_PATH` and `HEARTBEAT_PATH` to `SKILL_DIR` with no
+env override, while `SEARCH_ROOTS` *is* overridable. So the documented way to exercise the watcher
+safely — point it at a temp tree — silently rewrites the real mtime baseline with the temp tree's.
+
+**Caused a live incident on 2026-08-13.** A verification run of
+`PROPAGATE_SEARCH_ROOTS=/tmp/watcher-verify node watcher.mjs` overwrote `state.json`. The next
+launchd run saw all 203 tracked files as unseen and fired **120 events (40 drift, 80 code_drift)**
+into the Vipin Kaushik ledger between 11:15:26Z and 11:18:45Z. Ruled out as the cause: no branch
+checkout in either repo since 2026-08-12, and `state.json` re-seeded to 203 entries afterward,
+consistent with a wipe-then-reseed rather than genuine drift.
+
+Every one of those 120 rows is indistinguishable from real drift — same shape, same fields. The
+ledger has no way to say "this fired because the baseline was lost."
+
+*Fix:* scope state to the search roots, or add `PROPAGATE_STATE_DIR` alongside
+`PROPAGATE_SEARCH_ROOTS` so the two move together. Relates to the deferred state-relocation item
+(state living inside the plugin dir is also destroyed by a marketplace plugin update). Until then,
+**there is no safe way to run the watcher by hand** — say so wherever the manual invocation is
+documented.
+
 ### N11 · Moving a directory silently breaks every `../` edge — **S1**
 `propagates_to` paths and `sources:` keys both resolve relative to the sidecar's own directory.
 Moving the parent breaks all of them, and `doctor` reports only a yellow "downstream missing" —
@@ -222,6 +243,24 @@ failing on exactly the case that matters most.*
 16 of VipinKaushik's 31 specs exist only on `feat/hero-v4-rebuild`. A sidecar landing with that
 branch shows unresolved paths from production's perspective, indistinguishable from N11.
 
+**Caught live, 2026-08-13 — it is worse than "sidecars".** A whole *ledger* is branch-local and
+undiscovered:
+`PanditPawanKaushik/.claude/worktrees/client-answers-propagation/docs/PROPAGATION_LEDGER.jsonl`,
+79 rows, **1 of them open**. `discoverWorkspacesSync` returns 7 workspaces and that path is not
+among them, so the row appears in no `status --all` and no `doctor` run. Discovery never descends
+into `.claude/worktrees/<name>/`.
+
+The sharpest part: `doctor`'s `duplicateOpenAcrossLedgers` assertion passes over this, because it
+cannot see the second ledger to compare against. A check whose failure case is invisible to it
+reports success either way — I1, inside the safety net built to catch I1.
+
+Found only because a data-model census walked the filesystem directly rather than asking discovery.
+See `docs/DATA_MODEL.md` §9.
+
+*Fix (superset of the sidecar case):* discovery enumerates worktrees via `git worktree list` — the
+machinery already exists in `lib/worktrees.mjs` for expanding sidecar paths — and either adopts
+worktree ledgers or reports them as unreachable. Silently not-looking is the one option I1 forbids.
+
 ### B2 · Squash merges defeat ancestry checks — **S1**
 *(was S2; re-ranked 2026-08-13 — see note above)*
 
@@ -233,17 +272,37 @@ wrong conclusion about lost work, and the skill is the natural place to document
 
 ## The commit-time gate
 
-### G1 · `check --range` interpolates argv into a shell — **S1, security**
+### G1 · `check --range` interpolates argv into a shell — **S1, security** — **RESOLVED 2026-08-13**
 `cli.mjs:923`: `` execSync(`git diff --name-only ${range}`) `` — no validation, no `execFileSync`.
 Any shell metacharacter in `--range` executes. This is a tool explicitly intended for git hooks and
 CI, i.e. for hostile-ish input.
 
-*Fix:* `execFileSync("git", ["diff", "--name-only", range])`.
+*Fix:* `gitDiffNames` now takes an argv array and runs `execFileSync("git", args, {cwd, encoding})` —
+no shell is ever spawned, so a hostile `--range` value (e.g. `x; touch ...`, `x$(...)`, `` `...` ``)
+is passed to git as one literal argument, which git rejects as an invalid revision; `check` exits 2
+with no side effect. All four call sites (`check`'s `--range`/`--staged`/default-`--changed` paths)
+converted. Verified: pre-fix, `node cli.mjs check --range 'HEAD; touch /tmp/x'` created `/tmp/x`;
+post-fix it does not (`tests/check-injection.test.mjs`, 5 tests, including a legitimate-range
+regression test proving behaviour is otherwise unchanged). The other `execSync` calls in `cli.mjs`
+(`:245`, `:446`, `:578` — `launchctl list`, `launchctl list`, `claude mcp list 2>&1`; `:934` — `git
+rev-parse --show-toplevel`) are fixed literal strings with no argv interpolation and were left as-is.
+The `docs/REFERENCE.md` pre-push-hook blocker note tied to this issue is removed — see that doc.
 
-### G2 · `--changed` is never parsed — **S2**
-`cli.mjs:907-937` reads `--strict`, `--staged`, `--range`; `--changed` is the fallthrough. So
-`check --changed`, `check --bogus`, and bare `check` are identical, and passing both `--range` and
-`--staged` silently ignores `--staged`.
+### G2 · `--changed` is a documented no-op, not a parse failure — **S3** — **corrected 2026-08-13**
+*(Originally filed as S2 "never parsed", implying `check --changed` was broken. That overstated it —
+corrected after re-reading `cli.mjs:907-937` against the actual branching.)*
+
+`cli.mjs` reads `--strict`, `--staged`, `--range`; `--changed` matches none of them and falls through
+to the `else` branch, which is *exactly* the documented `--changed` behaviour (working tree + staged
+vs `HEAD`, unioned — see the usage comment at the top of `cli.mjs`). So `check --changed` behaves
+correctly and identically to bare `check`; the flag is accepted but has no distinct code path because
+it names the default, not because parsing failed. `check --bogus` also falls through to the same
+default, which is arguably worth a warning someday, but that's unrelated to `--changed` specifically.
+Passing both `--range` and `--staged` does make `--range` win silently (branch order:
+`range` → `staged` → default) — that's the only real (S3, cosmetic) finding here.
+
+*Fix (if ever prioritized):* warn on unrecognized flags; document the `--range`-beats-`--staged`
+precedence in the usage comment. Not a correctness bug — downgraded from S2.
 
 ### G3 · The gate is documented but not installed — **S2**
 `SKILL.md` describes a pre-push hook. Nothing installs it, and no repo in the workspace has one.

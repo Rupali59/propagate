@@ -103,6 +103,13 @@ contain pipes that look like more commands than actually exist.
 | `check --range <a>..<b>` | Explicit git range (for CI or a hook). |
 | `check --staged` | Staged files only (pre-commit use). |
 | `check --strict` | Exit 1 (not 0) if any coupling is found — combine with any of the above. |
+| `check --json` | Machine-readable output: `{generatedAt, repoRoot, changedFiles, strict, exitCode, couplings}` — combine with any of the above. |
+| `drain` | **The supported close path** (added 2026-08-13; `SPEC.md` §6). Bare, it lists open rows grouped by `correlation_id`, read-only. `--all` widens to every workspace, `--json` for machine-readable output. |
+| `drain --close <id>[,<id>...]` | Close one or more rows. Requires `--status`. Ids are checked against the open set *before* any write — an unknown id is an error, never a silent no-op. |
+| `drain --group <correlation_id>` | Close every open row sharing a `correlation_id` — the same logical change seen on several branches — in one action with one reason. |
+| `drain --status <done\|wontfix\|partial>` | The transition to write. |
+| `drain --reason "<why>"` | Becomes `wontfix_reason`. **Required** when `--status wontfix`; the command refuses without it (`SPEC.md` §5). |
+| `drain --notes "<text>"` · `--closed-by <who>` | Optional notes; `closed_by` defaults to `drain` and is validated against `drain\|commit-evidence\|wontfix`. |
 | `skills` | Inventory of `~/.claude/skills` with provenance and liveness. `--json` for machine-readable output. Part of the skill-lifecycle family — see `docs/DECISIONS.md` for the split-out decision. |
 | `skills-create <kebab-name> <intent>` | Scaffold a new skill under quarantine, gated by `creationAllowed`. |
 | `skills-promote <name>` | Promote a quarantined skill. |
@@ -133,14 +140,13 @@ watcher — so `check` won't warn on a glob-declared code edge. Declare
 non-glob `kind: code` edges for files you want the commit-time gate to
 actually catch.
 
-## git pre-push hook — documented, NOT recommended for install
+## git pre-push hook
 
-⚠️ **Blocker: `docs/ISSUES.md` G1.** `cli.mjs:911` reads `range` straight from
-argv and `cli.mjs:923` template-interpolates it into a command string
-executed by `execSync` (`cli.mjs:898`). The hook below feeds `--range` from
-hook stdin — untrusted input reaching a shell string. Do not install this
-until G1 is fixed; see the follow-up engineering plan referenced in
-`docs/ISSUES.md`.
+The injection this hook used to be blocked on (`docs/ISSUES.md` G1 — `range`
+from hook stdin reaching a shell string via `execSync`) was fixed 2026-08-13:
+`gitDiffNames` now runs `execFileSync("git", [...argv])`, so no shell is ever
+spawned and a hostile `--range` value cannot execute anything. This hook is
+safe to drop in as-is.
 
 ```bash
 #!/usr/bin/env bash
@@ -160,8 +166,8 @@ exit 0
 ```
 
 Drop this at `<repo>/.git/hooks/pre-push` (or `.githooks/pre-push` if the
-repo uses `core.hooksPath`) and mark it executable, once G1 is fixed. Omit
-`--strict` for a non-blocking nudge instead of a hard gate.
+repo uses `core.hooksPath`) and mark it executable. Omit `--strict` for a
+non-blocking nudge instead of a hard gate.
 
 **CI (secondary, documented not built in v1):** the same `check --range`
 command runs unchanged in a GitHub Action once this skill (or just `cli.mjs`

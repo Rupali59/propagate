@@ -38,6 +38,7 @@ an automation that makes it.
 | something is broken, or a doctor check fails | `docs/ISSUES.md` |
 | you're changing behaviour and need to know why | `docs/DECISIONS.md` |
 | you need exact paths, flags, or the install sequence | `docs/REFERENCE.md` |
+| a field on a ledger row looks unused, or you need the real (not spec'd) row shape | `docs/DATA_MODEL.md` |
 | you want current status / what's in flight | `STATE.md` |
 | you're adding a background component | `docs/SYSTEMS.md` |
 
@@ -72,6 +73,14 @@ These are real `cli.mjs` subcommands — run them directly. Full flags in
   ```bash
   node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --changed
   ```
+- **`drain`** — the supported close path. Bare, it lists open rows grouped by
+  `correlation_id` (read-only). With `--close`/`--group` it writes the closes.
+  Requires `--reason` for a wontfix and verifies each row actually closed,
+  exiting non-zero if not. See the walkthrough under Agent workflows below.
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs drain                    # list, grouped
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs drain --group <corr-id> --status done
+  ```
 
 ### Agent workflows (not commands)
 
@@ -98,24 +107,26 @@ matching 0 files is skipped with a log warning. `kind: code` is bidirectional
 changing fires a `code_drift` row back at the doc — for non-glob entries only;
 glob `kind: code` on the code→doc direction is deferred (logged and skipped).
 
-**`drain` — walk through open ledger rows.** ⚠️ **There is no supported close
-path today.** `markStatus` (`lib/ledger.mjs:97`) has zero production callers —
-it appears only in its own definition and two test files. Nothing in
-`cli.mjs`, `watcher.mjs`, or `digest.mjs` calls it. The only mechanism that
-actually closes a row is an LLM hand-writing a node script against a ledger
-path it resolved itself (see `docs/REFERENCE.md` § Ledger resolution).
-`docs/SPEC.md` §6 already specifies `cli drain` as "new, and required" — it
-does not exist yet. See `docs/ISSUES.md` for the tracked gap.
+**`drain` — walk the human through open rows.** The *decisions* are the agent's
+job; the *writing* is `cli drain`'s (see CLI commands above). Never hand-write a
+`markStatus` call — that is how rows landed in the wrong ledger for months.
 
-The procedure, such as it is, for each open row:
+For each open row, or each correlation group:
 1. Read the source doc near the section that drifted (git log to find the
    most recent commit touching that doc).
 2. Read each downstream file.
-3. Decide with the user: apply the change, defer with a note, or mark wontfix.
-4. On apply: edit the downstream, then hand-write a `markStatus` call (see
-   `docs/REFERENCE.md`).
-5. On defer: note in the row's `notes`, leave open.
-6. On wontfix: `markStatus(rowId, "wontfix")` with a justification in notes.
+3. Decide **with the user**: apply, defer, or wontfix. Never decide alone — a
+   close asserts "I verified this downstream", which is the user's call.
+4. On apply: edit the downstream, then
+   `cli.mjs drain --close <id> --status done`.
+5. On defer: leave it open. An open row is honest.
+6. On wontfix: `--status wontfix --reason "<why>"`. The reason is required and
+   the command will refuse without it.
+
+Prefer `--group <correlation_id>` over closing ids one at a time, and pass one
+shared `--reason` for a batch. Bulk is the real workload: before the command
+existed, people recorded bulk closes by hand as counterfeit drift rows
+(`docs/DATA_MODEL.md` §6.1).
 
 **Correlation grouping matters under the premise above** — this is the
 parallel-coordination behaviour, not a nicety. When the watcher fires from a
@@ -135,13 +146,17 @@ same CLI; it is being split out. See `docs/DECISIONS.md`.
 
 ## Important Rules
 
-- **Never hardcode a ledger path.** Resolve via discovery from the workspace
-  `status` reported the row under. `markStatus` against the wrong ledger
-  silently no-ops and the row stays open.
+- **Close through `cli drain`, never by hand.** It resolves the ledger via
+  discovery and verifies the row actually closed. `markStatus` now throws on an
+  id it cannot find (so a typo is loud), but an id that happens to exist in the
+  *wrong* ledger will still misfile — and hand-built paths are how that kept
+  happening.
 - **Never rewrite a ledger row.** Append-only; migration is close-and-re-emit.
 - **Schema before field.** `propagates.schema.json` is
   `additionalProperties: false` — a sidecar gaining an undeclared field is
   rejected silently and every edge in it stops firing.
 - **Never edit a downstream automatically.**
-- **Re-run `status` after closing.** If the row is still there, you wrote to
-  the wrong ledger.
+- **A red `doctor` is doing its job.** As of 2026-08-13 it fails on unknown row
+  types and on sources open in more than one ledger — both are real, both were
+  invisible before. Fix the data or file the issue; never tune the check until
+  it passes.

@@ -12,6 +12,7 @@ one hop deeper, for when you land in `docs/` directly.
 | [`README.md`](./README.md) | This file — where do I look for X? |
 | [`REFERENCE.md`](./REFERENCE.md) | Exact paths, the complete CLI surface and flags, ledger-resolution snippet, install/disable sequence, architecture summary. |
 | [`SPEC.md`](./SPEC.md) | What's the target design? What invariants does the system claim, and what's the evidence for the premise? |
+| [`DATA_MODEL.md`](./DATA_MODEL.md) | What does a ledger row *actually* contain on disk today — the four coexisting schemas, the fold, the orphan field census, and where that diverges from `SPEC.md` §4? |
 | [`ISSUES.md`](./ISSUES.md) | What's broken, tracked, or a known gap (e.g. no `cli drain`, the pre-push injection risk)? |
 | [`DECISIONS.md`](./DECISIONS.md) | Why does it work this way — what changed, when, and what did it supersede? |
 | [`SYSTEMS.md`](./SYSTEMS.md) | What background components exist (watcher, digest), and what state are they in? |
@@ -25,5 +26,6 @@ one hop deeper, for when you land in `docs/` directly.
 | something is broken, or a doctor check fails | `ISSUES.md` |
 | you're changing behaviour and need to know why | `DECISIONS.md` |
 | you need exact paths, flags, or the install sequence | `REFERENCE.md` |
+| a field on a ledger row looks unused, or you need the real (not spec'd) row shape | `DATA_MODEL.md` |
 | you want current status / what's in flight | `../STATE.md` |
 | you're adding a background component | `SYSTEMS.md` |
