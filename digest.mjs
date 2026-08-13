@@ -37,6 +37,7 @@ import {
   SKILL_DIR,
 } from "./lib/config.mjs";
 import { readLedgerWithStats, lastActivityAt } from "./lib/ledger.mjs";
+import { reconcile, inboundRows } from "./lib/reconcile.mjs";
 import { PLIST_PATH } from "./lib/plist.mjs";
 import { notify } from "./lib/notify.mjs";
 import {
@@ -316,6 +317,48 @@ async function metricsSnapshot() {
 }
 
 /**
+ * Inbound cross-repo drift, per workspace (2026-08 plan Part 2: "the digest
+ * gains an inbound section"). A pure filter over ONE reconcile() call across
+ * every workspace — lib/reconcile.mjs's `inboundRows`, treating each
+ * discovered WORKSPACES root as the repo boundary, same as `check`'s and
+ * `reconcile --inbound`'s CLI surfaces. Only DRIFTED/DIVERGED edges are
+ * reported — an inbound edge that is still CLEAN or NEVER_VERIFIED is not
+ * something to wake up to.
+ *
+ * Distinct from the existing cross-repo decision-relay layer (cross.mjs /
+ * CROSS_LEDGER_JSONL, digest.mjs:335-ish) — that relays `flow: decision`
+ * events; this is edge drift derived by reconcile(). Different problem,
+ * different section, no overlap to dedupe (G20 doesn't apply — nothing here
+ * restates a fact another section already reports).
+ *
+ * Never fatal: same belt-and-suspenders as disk/skills/lifecycle above — a
+ * reconcile bug must not take down the only reporting channel that
+ * currently works.
+ */
+async function inboundSnapshot() {
+  try {
+    const { rows } = await reconcile(WORKSPACES);
+    const byWorkspace = [];
+    for (const ws of WORKSPACES) {
+      const drifted = inboundRows(rows, ws.root).filter((r) => r.state === "DRIFTED" || r.state === "DIVERGED");
+      if (drifted.length === 0) continue;
+      byWorkspace.push({
+        name: ws.name,
+        rows: drifted.map((r) => ({
+          edge_id: r.edge_id,
+          source: path.relative(ws.root, r.source.path),
+          downstream: r.downstream.path ? path.relative(ws.root, r.downstream.path) : "(unmatched)",
+          state: r.state,
+        })),
+      });
+    }
+    return { available: true, byWorkspace };
+  } catch (err) {
+    return { available: false, error: String(err.message || err) };
+  }
+}
+
+/**
  * Build the full snapshot the digest diffs against. Not the same object as
  * cli.mjs's statusJson() — computed independently from lib/ primitives.
  */
@@ -365,6 +408,7 @@ async function buildSnapshot(indexDb = null) {
   }
 
   const metrics = await metricsSnapshot();
+  const inbound = await inboundSnapshot();
 
   return {
     generatedAt: new Date().toISOString(),
@@ -379,6 +423,7 @@ async function buildSnapshot(indexDb = null) {
     skills,
     lifecycle,
     metrics,
+    inbound,
   };
 }
 
@@ -743,7 +788,41 @@ export function computeDiff(snapshot, prior) {
     }
   }
 
-  return { firstRun, broken, newByWorkspace, closedByWorkspace, totals, watcher: snapshot.watcher, hasChange, diskLines, skillLines, metricLines };
+  // ── Inbound cross-repo drift ────────────────────────────────────────────
+  // State-based, not diff-based — same shape as `broken`, not the
+  // appeared/disappeared diffing skills/metrics use. An inbound edge that
+  // drifted yesterday and is still drifted today is still the fact a person
+  // in that repo needs on their way to touching it; suppressing it after
+  // the first mention would be exactly the "reads healthy while actually
+  // frozen" failure this whole file exists to avoid (see file header).
+  // Renders nothing when the list is empty — a section that always prints
+  // becomes furniture (plan Part 2).
+  const inboundLines = [];
+  if (snapshot.inbound?.available) {
+    for (const ws of snapshot.inbound.byWorkspace) {
+      for (const r of ws.rows) {
+        inboundLines.push(`${ws.name}: ${r.source} → ${r.downstream}   ${r.state}`);
+      }
+    }
+  } else if (snapshot.inbound?.error && !firstRun) {
+    // Vanished-signal case (R6), one level up: the whole computation, not
+    // just a value within it.
+    inboundLines.push(`!! inbound reconciliation unavailable: ${snapshot.inbound.error}`);
+  }
+
+  return {
+    firstRun,
+    broken,
+    newByWorkspace,
+    closedByWorkspace,
+    totals,
+    watcher: snapshot.watcher,
+    hasChange,
+    diskLines,
+    skillLines,
+    metricLines,
+    inboundLines,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -759,6 +838,7 @@ export function formatDigest(diff) {
   const diskLines = diff.diskLines || [];
   const skillLines = diff.skillLines || [];
   const metricLines = diff.metricLines || [];
+  const inboundLines = diff.inboundLines || [];
 
   if (
     diff.broken.length === 0 &&
@@ -766,7 +846,8 @@ export function formatDigest(diff) {
     !diff.hasChange &&
     diskLines.length === 0 &&
     skillLines.length === 0 &&
-    metricLines.length === 0
+    metricLines.length === 0 &&
+    inboundLines.length === 0
   ) {
     // Quiet day. One short line, not a full report. Disk hygiene prints ZERO
     // lines here too, on purpose — see digest.mjs disk-hygiene section: a
@@ -809,6 +890,12 @@ export function formatDigest(diff) {
   if (metricLines.length > 0) {
     lines.push(`METRICS (doctor):`);
     for (const l of metricLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  if (inboundLines.length > 0) {
+    lines.push(`INBOUND (${inboundLines.length}) — cross-repo edges pointing at your workspaces, drifted or diverged:`);
+    for (const l of inboundLines) lines.push(`  ${l}`);
     lines.push("");
   }
 

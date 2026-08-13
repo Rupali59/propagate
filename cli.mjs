@@ -21,6 +21,9 @@
  *   node cli.mjs check --staged           — staged files only (pre-commit use)
  *   node cli.mjs check ... --strict       — exit 1 (not 0) when couplings are found
  *   node cli.mjs check ... --json         — machine-readable result (couplings + exit code)
+ *                                            Also prints inbound cross-repo drift as an
+ *                                            ADVISORY (never affects exitCode — the gate stays
+ *                                            flagged off; plan Part 2).
  *   node cli.mjs drain                    — list open rows, grouped by correlation_id (read-only)
  *   node cli.mjs drain --all              — every workspace's queue
  *   node cli.mjs drain --close <id>[,<id>...] --status <done|wontfix|partial>
@@ -51,6 +54,17 @@
  *                                            output). "glob": one header per generator, "node":
  *                                            one header per logical file (worktree coordination).
  *   node cli.mjs reconcile --json         — machine-readable {generatedAt, stats, rows, groups}
+ *   node cli.mjs reconcile --inbound      — delivery view (2026-08 plan Part 2): edges whose
+ *                                            downstream lives in the repo at cwd and whose
+ *                                            source arrives from another repo — the question
+ *                                            "has anything upstream drifted into what I'm about
+ *                                            to touch?", answered by filtering reconcile()'s own
+ *                                            rows (lib/reconcile.mjs's inboundRows), not new
+ *                                            computation. Reconciles every workspace (a
+ *                                            cross-repo edge's sidecar lives beside its SOURCE,
+ *                                            outside this repo by definition) then filters.
+ *                                            Composes with --json and --group-by. Pull-based:
+ *                                            see docs/INBOUND.md for what this does not do.
  *   node cli.mjs verify --edge <edge_id> | --node <node_id> | --glob <pattern>
  *                       [--state <STATE>] --disposition <d> [--reason "..."] [--apply] [--json]
  *                                         — v2 write side (READ+WRITE): record a verification
@@ -93,7 +107,7 @@ import { readLedger, readLedgerWithStats, lastActivityAt, markStatus } from "./l
 import { loadSidecar, SidecarError, downstreamsFor } from "./lib/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges.mjs";
-import { reconcile, STATES, groupRows } from "./lib/reconcile.mjs";
+import { reconcile, STATES, groupRows, inboundRows } from "./lib/reconcile.mjs";
 import { appendEvent, DISPOSITIONS, edgeId } from "./lib/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/bootstrap.mjs";
 import { parseDecisions, zeroTokenEntries } from "./lib/decisions.mjs";
@@ -1479,6 +1493,36 @@ export function gitDiffNames(gitArgs, repoRoot) {
   return out.split("\n").map((l) => l.trim()).filter(Boolean);
 }
 
+/**
+ * Inbound drift, advisory-only (2026-08 plan Part 2: "the pre-push moment is
+ * when the answer matters"). Reconciles every workspace and filters to the
+ * edges pointing into `repoRoot` that have actually drifted or diverged —
+ * `check`'s existing coupling gate stays exactly as it was; this is a
+ * second, independent read layered alongside it, never feeding `exitCode`.
+ * Errors are swallowed to `[]`: a reconcile bug must never turn an advisory
+ * warning into a broken commit gate.
+ */
+async function inboundAdvisory(repoRoot) {
+  try {
+    const { rows: allRows } = await reconcile(WORKSPACES);
+    return inboundRows(allRows, repoRoot).filter((r) => r.state === "DRIFTED" || r.state === "DIVERGED");
+  } catch {
+    return [];
+  }
+}
+
+function printInboundAdvisory(inbound, repoRoot) {
+  if (inbound.length === 0) return;
+  console.log(
+    `${YELLOW}⚠ ${inbound.length} inbound edge${inbound.length === 1 ? "" : "s"} from another repo drifted (advisory — does not affect this gate):${RESET}`,
+  );
+  for (const r of inbound) {
+    const relSource = path.relative(repoRoot, r.source.path);
+    const relDownstream = r.downstream.path ? path.relative(repoRoot, r.downstream.path) : "(unmatched)";
+    console.log(`  ${relSource} → ${relDownstream}   ${r.state}`);
+  }
+}
+
 async function check() {
   const args = process.argv.slice(3);
   const strict = args.includes("--strict");
@@ -1508,6 +1552,7 @@ async function check() {
   }
 
   const { exitCode, couplings } = await runCheck({ changedFiles, repoRoot, strict, json });
+  const inbound = await inboundAdvisory(repoRoot);
   if (json) {
     console.log(
       JSON.stringify({
@@ -1517,8 +1562,11 @@ async function check() {
         strict,
         exitCode,
         couplings,
+        inbound, // advisory only — never affects exitCode, see inboundAdvisory()
       }),
     );
+  } else {
+    printInboundAdvisory(inbound, repoRoot);
   }
   process.exit(exitCode);
 }
@@ -1825,16 +1873,100 @@ async function drainClose(args, json) {
  * `--json` prints the `{generatedAt, ...}`-enveloped machine-readable form,
  * matching `statusJson()`'s convention.
  */
+/**
+ * Grouped view (--group-by glob|node), shared by `reconcile` and
+ * `reconcile --inbound`: one header per group, member count + state
+ * breakdown — "1 decision, N members" instead of N rows (§5c/§3c).
+ */
+function printGroupedView(groups, ungrouped, groupBy) {
+  console.log(`${BOLD}# groups (by ${groupBy})${RESET}\n`);
+  for (const g of groups) {
+    const statesStr = Object.entries(g.states)
+      .map(([s, n]) => `${n} ${s}`)
+      .join(", ");
+    console.log(`  ${BOLD}${g.key}${RESET}  ${DIM}(${g.count} member${g.count === 1 ? "" : "s"} — ${statesStr})${RESET}`);
+  }
+  if (ungrouped.length) {
+    console.log(`  ${DIM}${ungrouped.length} edge${ungrouped.length === 1 ? "" : "s"} with no ${groupBy} to group by${RESET}`);
+  }
+  console.log();
+}
+
+/** The repo containing cwd, via `git rev-parse` — same resolution `check()` uses. Exits 2, not throws, when cwd isn't inside a repo (a CLI-boundary concern, not a library one). */
+function repoRootAtCwd() {
+  try {
+    return execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+  } catch (err) {
+    console.error(`${RED}error:${RESET} not inside a git repo (${err.message})`);
+    process.exit(2);
+  }
+}
+
+/**
+ * `reconcile --inbound` — the delivery view (2026-08 plan Part 2: "make
+ * drift that arrives from another repo visible where a person can act on
+ * it"). A pure filter over reconcile()'s own rows (lib/reconcile.mjs's
+ * `inboundRows`) — reconcile already resolves both sides' repos and carries
+ * absolute paths on both, so this is not a second computation.
+ *
+ * Reconciles EVERY discovered workspace, never just cwd's: a cross-repo
+ * edge's sidecar lives beside its SOURCE, which by construction sits
+ * outside this repo — scoping enumeration to cwd's workspace would
+ * silently miss the very edges this view exists to surface.
+ *
+ * Pull-based, on purpose: this prints on demand, in the repo you're
+ * standing in. It does not push anywhere — see docs/INBOUND.md for the
+ * limit that follows from that.
+ */
+async function reconcileInbound({ json, groupBy }) {
+  const repoRoot = repoRootAtCwd();
+
+  const { rows: allRows, stats } = await reconcile(WORKSPACES);
+  const rows = inboundRows(allRows, repoRoot);
+  const { groups, ungrouped } = groupRows(rows, groupBy);
+
+  if (json) {
+    console.log(
+      JSON.stringify({ generatedAt: new Date().toISOString(), repoRoot, stats, groupBy, groups, ungrouped, rows }),
+    );
+    return;
+  }
+
+  console.log(
+    `${BOLD}INBOUND${RESET} — edges pointing at this repo  ${DIM}(${rows.length} of ${stats.expanded} expanded edges)${RESET}\n`,
+  );
+  if (rows.length === 0) {
+    console.log(`  none — no cross-repo edge currently points into ${repoRoot}\n`);
+  } else {
+    for (const r of rows) {
+      const relSource = path.relative(repoRoot, r.source.path);
+      const relDownstream = r.downstream.path ? path.relative(repoRoot, r.downstream.path) : "(unmatched)";
+      const age = r.since ? `  ${formatAge(Date.now() - Date.parse(r.since))}` : "";
+      console.log(`  ${relSource} → ${relDownstream}   ${r.state}${age}`);
+    }
+    console.log();
+  }
+
+  if (groupBy !== "none") printGroupedView(groups, ungrouped, groupBy);
+}
+
 async function reconcileCmd() {
   const args = process.argv.slice(3);
   const json = args.includes("--json");
   const showAll = args.includes("--all");
+  const inbound = args.includes("--inbound");
   const groupByIdx = args.indexOf("--group-by");
   const groupBy = groupByIdx !== -1 ? args[groupByIdx + 1] : "none";
   if (!["glob", "node", "none"].includes(groupBy)) {
     console.error(`${RED}error:${RESET} --group-by must be one of glob|node|none (got ${JSON.stringify(groupBy)})`);
     process.exit(2);
   }
+
+  if (inbound) {
+    await reconcileInbound({ json, groupBy });
+    return;
+  }
+
   const cur = currentWorkspace();
   const workspaces = showAll || !cur ? WORKSPACES : [cur];
 
@@ -1861,23 +1993,9 @@ async function reconcileCmd() {
   }
   console.log();
 
-  // Grouped view (--group-by glob|node): one header per group, member count
-  // + state breakdown — "1 decision, N members" instead of N rows (§5c/§3c).
-  // Left out when groupBy === "none" so default output is byte-identical to
-  // before this flag existed.
-  if (groupBy !== "none") {
-    console.log(`${BOLD}# groups (by ${groupBy})${RESET}\n`);
-    for (const g of groups) {
-      const statesStr = Object.entries(g.states)
-        .map(([s, n]) => `${n} ${s}`)
-        .join(", ");
-      console.log(`  ${BOLD}${g.key}${RESET}  ${DIM}(${g.count} member${g.count === 1 ? "" : "s"} — ${statesStr})${RESET}`);
-    }
-    if (ungrouped.length) {
-      console.log(`  ${DIM}${ungrouped.length} edge${ungrouped.length === 1 ? "" : "s"} with no ${groupBy} to group by${RESET}`);
-    }
-    console.log();
-  }
+  // Grouped view (--group-by glob|node). Left out when groupBy === "none" so
+  // default output is byte-identical to before this flag existed.
+  if (groupBy !== "none") printGroupedView(groups, ungrouped, groupBy);
 }
 
 async function drain() {
@@ -2737,7 +2855,7 @@ if (_invokedDirectly) {
     await skillsLifecycleCmd(mode);
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
     process.exit(2);
   }
 }

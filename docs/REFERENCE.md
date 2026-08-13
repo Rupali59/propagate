@@ -79,10 +79,10 @@ await markStatus(ws.ledgerJsonl, "003", "done");
 await renderMarkdown(ws.ledgerJsonl, ws.ledgerMd); // re-render the sibling MD
 ```
 
-This is the same script `SKILL.md`'s `drain` procedure points at — it is the
-*only* mechanism today that closes a row (see `docs/ISSUES.md` for the
-tracked gap: there is no CLI command for this, and `markStatus` has zero
-production callers).
+**Superseded 2026-08-13.** `cli.mjs drain` is now the supported close path and
+resolves the ledger this way itself — prefer it over hand-writing this. The
+snippet stays because it documents *how* resolution works, and because the
+v1 `markStatus` path still exists; it is no longer the only mechanism.
 
 Quick sanity check after closing: re-run `status` — the row should be gone.
 If it isn't, you wrote to the wrong ledger file.
@@ -97,7 +97,8 @@ contain pipes that look like more commands than actually exist.
 |---|---|
 | `status` | List open drift rows, scoped to the workspace at cwd by default. `--all` for every workspace, `--cross` for the cross-repo ledger, `--json` for machine-readable output. |
 | `doctor` | Health check: launchd plist loaded (`launchctl list \| grep <label>`), heartbeat age (warn >1h during active periods, fail >1 day), all `.propagates.yml` sidecars pass schema validation, sidecar downstream paths resolve on disk (warn-only), `state.json` parseable with `.bak` present, ledger JSONL parseable. |
-| `init <dir>` | Scaffold an empty `.propagates.yml` at `<dir>/.propagates.yml`. Also regenerates the plist and reloads launchd as a side effect (surprising — see `docs/ISSUES.md`). |
+| `init <dir> [--workspace\|--edges-only]` | Scaffold `.propagates.yml`. `--workspace` (default) writes `workspace: true` and verifies the directory becomes discoverable, exiting non-zero if not (N15). **No longer touches the plist** — that moved to `reload` (N14). |
+| `reload` | Regenerate the plist from discovery and reload launchd. Refuses to write a plist with 0 watch roots. |
 | `check` | Commit-time drift gate. Flags below. |
 | `check --changed` | Default when no range/staged flag given: working tree + staged vs HEAD, unioned. |
 | `check --range <a>..<b>` | Explicit git range (for CI or a hook). |
@@ -139,6 +140,49 @@ deferred — `synthesizeKindCodeEntries` logs and skips them, same as the
 watcher — so `check` won't warn on a glob-declared code edge. Declare
 non-glob `kind: code` edges for files you want the commit-time gate to
 actually catch.
+
+## The inbound view — delivery for cross-repo drift (2026-08 plan Part 2)
+
+An edge crossing a repo boundary records its drift wherever it fired — in the
+event store, keyed by the edge, not by "who should hear about this." Working
+in the downstream repo, nothing told you an upstream file had changed
+underneath you; the two directions of a bidirectional cross-repo coupling
+even split across two separate ledgers, so neither side ever held the whole
+picture (measured: `Keerti`'s ledger held 0 rows for `content.ts` while
+`Keerti-portfolio`'s held 7 — same coupling, invisible from either repo
+alone).
+
+The inbound view answers one question: *"has anything upstream drifted into
+what I'm about to touch?"* It is a pure filter over `reconcile()`'s own rows
+(`lib/reconcile.mjs`'s `inboundRows` — no new computation, no second event
+store, no write into any repo):
+
+```
+inbound(repoRoot) = rows where downstream.path is under repoRoot
+                      AND source.path is NOT under repoRoot
+```
+
+Three surfaces read that same filter:
+
+- **`propagate reconcile --inbound`** — on demand, scoped to the repo
+  containing cwd. Composes with `--json` and `--group-by`.
+- **`propagate check`** — prints inbound `DRIFTED`/`DIVERGED` edges as an
+  **advisory** warning alongside its existing coupling output. It never
+  changes `check`'s exit code, `--json`'s `inbound` field included — the
+  merge gate stays flagged off on purpose (a gate people learn to bypass is
+  worse than none).
+- **The daily digest** — an `INBOUND (n)` section, rendered only when a
+  cross-repo edge has actually drifted or diverged; silent otherwise (a
+  section that always prints becomes furniture nobody reads, same failure
+  the digest's whole diff-first design exists to avoid).
+
+**What this does not do — pull-based, not push-based.** Nothing here writes
+a marker file, opens an issue, or notifies another repo. If you never work in
+the downstream repo, and never read the digest, this drift never reaches
+you — that is an accepted limit of a single-operator tool, not an oversight
+to patch later. The existing cross-repo layer (`flow: decision`,
+`CROSS_LEDGER_JSONL`) is a decision relay and solves a different problem;
+it is untouched by this view and the two should not be conflated.
 
 ## git pre-push hook
 
