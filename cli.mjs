@@ -33,7 +33,26 @@
  *                                            declared edge from content + the v2 event store;
  *                                            writes nothing. Current workspace by default.
  *   node cli.mjs reconcile --all          — every workspace
- *   node cli.mjs reconcile --json         — machine-readable {generatedAt, stats, rows}
+ *   node cli.mjs reconcile --group-by <glob|node|none>
+ *                                         — group the printed rows (default none = unchanged
+ *                                            output). "glob": one header per generator, "node":
+ *                                            one header per logical file (worktree coordination).
+ *   node cli.mjs reconcile --json         — machine-readable {generatedAt, stats, rows, groups}
+ *   node cli.mjs verify --edge <edge_id> | --node <node_id> | --glob <pattern>
+ *                       [--state <STATE>] --disposition <d> [--reason "..."] [--apply] [--json]
+ *                                         — v2 write side (READ+WRITE): record a verification
+ *                                            against the current derived state (plan §4). At
+ *                                            least one selector required; `--state` narrows
+ *                                            within it. Batch is the default — a matched glob
+ *                                            or node applies the same disposition/reason to
+ *                                            every member, one event per edge. `both-reconciled`
+ *                                            is the only disposition that may follow a DIVERGED
+ *                                            edge; everything else on DIVERGED is refused.
+ *                                            `decoupled` prints the required sidecar edit and
+ *                                            does NOT touch the file unless `--apply` is given.
+ *                                            Every write is followed by a re-reconcile that
+ *                                            confirms the edge landed in the expected state —
+ *                                            failure to confirm is a non-zero exit.
  */
 
 import { existsSync, globSync, realpathSync } from "node:fs";
@@ -55,11 +74,14 @@ import {
   SKILL_DIR,
   GRAPH_MCP_CACHE_PATH,
 } from "./lib/config.mjs";
+import YAML from "yaml";
+
 import { readLedger, readLedgerWithStats, lastActivityAt, markStatus } from "./lib/ledger.mjs";
-import { loadSidecar, SidecarError } from "./lib/frontmatter.mjs";
+import { loadSidecar, SidecarError, downstreamsFor } from "./lib/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
-import { buildEdgeMap } from "./lib/edges.mjs";
-import { reconcile, STATES } from "./lib/reconcile.mjs";
+import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges.mjs";
+import { reconcile, STATES, groupRows } from "./lib/reconcile.mjs";
+import { appendEvent, DISPOSITIONS, edgeId } from "./lib/events.mjs";
 import { parseDecisions, zeroTokenEntries } from "./lib/decisions.mjs";
 import {
   METRICS_PATH,
@@ -1793,14 +1815,21 @@ async function reconcileCmd() {
   const args = process.argv.slice(3);
   const json = args.includes("--json");
   const showAll = args.includes("--all");
+  const groupByIdx = args.indexOf("--group-by");
+  const groupBy = groupByIdx !== -1 ? args[groupByIdx + 1] : "none";
+  if (!["glob", "node", "none"].includes(groupBy)) {
+    console.error(`${RED}error:${RESET} --group-by must be one of glob|node|none (got ${JSON.stringify(groupBy)})`);
+    process.exit(2);
+  }
   const cur = currentWorkspace();
   const workspaces = showAll || !cur ? WORKSPACES : [cur];
 
   const { rows, stats } = await reconcile(workspaces);
+  const { groups, ungrouped } = groupRows(rows, groupBy);
 
   if (json) {
     console.log(
-      JSON.stringify({ generatedAt: new Date().toISOString(), stats, rows }),
+      JSON.stringify({ generatedAt: new Date().toISOString(), stats, groupBy, groups, ungrouped, rows }),
     );
     return;
   }
@@ -1817,6 +1846,24 @@ async function reconcileCmd() {
     console.log(`  ${YELLOW}${String(n).padStart(4)}${RESET}  ${state}`);
   }
   console.log();
+
+  // Grouped view (--group-by glob|node): one header per group, member count
+  // + state breakdown — "1 decision, N members" instead of N rows (§5c/§3c).
+  // Left out when groupBy === "none" so default output is byte-identical to
+  // before this flag existed.
+  if (groupBy !== "none") {
+    console.log(`${BOLD}# groups (by ${groupBy})${RESET}\n`);
+    for (const g of groups) {
+      const statesStr = Object.entries(g.states)
+        .map(([s, n]) => `${n} ${s}`)
+        .join(", ");
+      console.log(`  ${BOLD}${g.key}${RESET}  ${DIM}(${g.count} member${g.count === 1 ? "" : "s"} — ${statesStr})${RESET}`);
+    }
+    if (ungrouped.length) {
+      console.log(`  ${DIM}${ungrouped.length} edge${ungrouped.length === 1 ? "" : "s"} with no ${groupBy} to group by${RESET}`);
+    }
+    console.log();
+  }
 }
 
 async function drain() {
@@ -1826,6 +1873,463 @@ async function drain() {
     await drainClose(args, json);
   } else {
     await drainList(args, json);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// verify — the v2 write side (plan §4: dispositions against reconcile's
+// derived state, not a remembered ledger row).
+//
+// Non-interactive by design, same discipline as `drain` above: this is
+// mechanism, SKILL.md's prose is the human-facing walkthrough that calls it.
+// Batch is the default (plan: "Batch is the default, not a feature") — a
+// matched --node/--glob applies the same disposition/reason to every member,
+// one event per edge, never a composite event across edges.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A downstream `path` containing glob metacharacters is a generator, not a
+ * concrete edge — same test as lib/reconcile.mjs's (unexported) GLOB_CHARS
+ * and watcher.mjs's. Duplicated rather than imported: reconcile.mjs's
+ * internals stay reconcile.mjs's (only `groupRows` was added to its exports
+ * for this feature), matching content-id.mjs's precedent of duplicating
+ * `resolveRepo` rather than reaching into a module another lane owns. */
+const VERIFY_GLOB_CHARS = /[*?[\]]/;
+
+function parseVerifyArgs(args) {
+  const get = (flag) => {
+    const i = args.indexOf(flag);
+    return i !== -1 ? args[i + 1] : undefined;
+  };
+  return {
+    edge: get("--edge") ?? null,
+    node: get("--node") ?? null,
+    glob: get("--glob") ?? null,
+    state: get("--state") ?? null,
+    disposition: get("--disposition") ?? null,
+    reason: get("--reason"),
+    apply: args.includes("--apply"),
+    json: args.includes("--json"),
+  };
+}
+
+/**
+ * Selection (plan "THE COMMAND"): every provided selector narrows (AND, not
+ * OR) — `--state` on its own is never sufficient (enforced by the caller
+ * requiring at least one of --edge/--node/--glob), but combined with one of
+ * them it narrows further, e.g. "every member of this glob that is still
+ * DRIFTED." Exported for direct testing without a subprocess.
+ *
+ * @param {Array} rows - reconcile()'s output rows
+ * @param {{edge?: string|null, node?: string|null, glob?: string|null, state?: string|null}} sel
+ */
+export function selectVerifyRows(rows, sel) {
+  return rows.filter((r) => {
+    if (sel.edge && r.edge_id !== sel.edge) return false;
+    if (sel.node && r.node_id !== sel.node) return false;
+    if (sel.glob && r.glob !== sel.glob) return false;
+    if (sel.state && r.state !== sel.state) return false;
+    return true;
+  });
+}
+
+/**
+ * DIVERGED guard (plan "Two need CLI-level care"): `both-reconciled` is the
+ * ONLY disposition that may follow a DIVERGED edge, and it may ONLY follow a
+ * DIVERGED edge — verifying without reconciling would assert something
+ * nobody checked (both sides moved independently since the last known-good
+ * pair). Exported for direct testing.
+ *
+ * @param {string} state - the edge's current derived state
+ * @param {string} disposition
+ * @returns {string|null} a refusal message, or null when the pairing is allowed
+ */
+export function divergedGuard(state, disposition) {
+  if (state === "DIVERGED" && disposition !== "both-reconciled") {
+    return (
+      `edge is DIVERGED — both source and downstream changed independently since the last ` +
+      `verification. Only "both-reconciled" may resolve a DIVERGED edge (a human must look at ` +
+      `both sides first); nothing was verified.`
+    );
+  }
+  if (disposition === "both-reconciled" && state !== "DIVERGED") {
+    return `"both-reconciled" only applies to a DIVERGED edge; this edge is ${state}.`;
+  }
+  return null;
+}
+
+/**
+ * What state an edge must read after a successful write, per disposition
+ * (plan §4's side-effect column). Every disposition re-pins to the CURRENT
+ * content pair EXCEPT `deferred`, which never pins — so the state it was in
+ * before the write is the state it must still be in after. Exported for
+ * direct (non-subprocess) testing of the "verify-after-write" logic.
+ *
+ * @param {string} disposition
+ * @param {string} priorState - the row's state at selection time
+ */
+export function expectedStateAfter(disposition, priorState) {
+  return disposition === "deferred" ? priorState : "CLEAN";
+}
+
+/**
+ * Verify-after-write (plan, non-negotiable): re-reconcile and confirm every
+ * applied edge landed in `expectedStateAfter`. "It didn't throw" is never
+ * proof a write landed (GOTCHAS G13). Pure — takes the freshly reconciled
+ * rows and the set of writes just applied, returns confirmed/failed; no I/O,
+ * so it's directly unit-testable against a synthetic "the state didn't
+ * change" fixture without needing to race a real write.
+ *
+ * @param {Array<{edge_id: string, node_id: string, disposition: string, priorState: string, event_id: string}>} applied
+ * @param {Array} afterRows - reconcile()'s output, re-run AFTER the writes
+ * @returns {{confirmed: Array, failed: Array}}
+ */
+export function computeVerifyAfterWrite(applied, afterRows) {
+  const afterByEdgeId = new Map(afterRows.map((r) => [r.edge_id, r]));
+  const confirmed = [];
+  const failed = [];
+  for (const a of applied) {
+    const after = afterByEdgeId.get(a.edge_id);
+    const expected = expectedStateAfter(a.disposition, a.priorState);
+    if (!after) {
+      failed.push({ ...a, error: "edge vanished after write — cannot confirm" });
+    } else if (after.state !== expected) {
+      failed.push({ ...a, error: `expected state ${expected} after write, got ${after.state}` });
+    } else {
+      confirmed.push({ ...a, state: after.state });
+    }
+  }
+  return { confirmed, failed };
+}
+
+/**
+ * Find the declaring sidecar entry for a reconciled row — the (sidecarPath,
+ * sourceKey, propagates_to index) that produced `row.edge_id`. Needed only
+ * by `decoupled`, which edits the declaration rather than just the event
+ * log; every other disposition needs nothing but the row itself.
+ *
+ * Recomputes edge_id per candidate declaration (literal path, glob-as-
+ * generator, and every current glob match) and compares against
+ * `row.edge_id` — the same three shapes lib/reconcile.mjs's
+ * `expandGenerators` produces, walked independently here so this file
+ * doesn't reach into reconcile.mjs's unexported internals (only `groupRows`
+ * was added to its surface for this feature).
+ *
+ * @param {Array<{root: string}>} workspaces
+ * @param {{node_id: string, edge_id: string, source: {path: string}}} row
+ * @returns {Promise<{sidecarPath: string, sourceKey: string, index: number, why: string, declaredPath: string}|null>}
+ */
+async function locateEdgeDeclaration(workspaces, row) {
+  const workspaceRoots = workspaces.map((w) => w.root);
+  for (const ws of workspaces) {
+    const sidecarPaths = await findAllSidecarsRecursive(ws.root, workspaceRoots);
+    for (const sidecarPath of sidecarPaths) {
+      let sidecar;
+      try {
+        sidecar = await loadSidecar(sidecarPath);
+      } catch {
+        continue; // malformed sidecar: doctor's concern, same as reconcile.mjs
+      }
+      if (!sidecar || !sidecar.sources) continue;
+      const sidecarDir = path.dirname(sidecarPath);
+
+      for (const sourceKey of Object.keys(sidecar.sources)) {
+        const sourceAbs = path.resolve(sidecarDir, sourceKey);
+        if (sourceAbs !== row.source.path) continue;
+
+        const downstreams = downstreamsFor(sidecar, sourceKey);
+        for (let index = 0; index < downstreams.length; index++) {
+          const d = downstreams[index];
+          const isGlob = VERIFY_GLOB_CHARS.test(d.path);
+
+          if (!isGlob) {
+            const downstreamAbs = path.resolve(sidecarDir, d.path);
+            if (edgeId(row.node_id, downstreamAbs, d.why) === row.edge_id) {
+              return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path };
+            }
+            continue;
+          }
+
+          // Glob generator — the zero-match ("UNMATCHED") identity is keyed
+          // on the pattern text itself (lib/reconcile.mjs's unmatchedGlob
+          // row); a genuine match is keyed on the resolved concrete path.
+          if (edgeId(row.node_id, d.path, d.why) === row.edge_id) {
+            return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path };
+          }
+          let matches = [];
+          try {
+            matches = globSync(d.path, { cwd: sidecarDir }).filter((m) => !m.includes("node_modules/"));
+          } catch {
+            matches = [];
+          }
+          for (const m of matches) {
+            const downstreamAbs = path.resolve(sidecarDir, m);
+            if (edgeId(row.node_id, downstreamAbs, d.why) === row.edge_id) {
+              return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path };
+            }
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Human-readable description of the sidecar edit `decoupled` requires — printed
+ * whether or not `--apply` performs it, so the two paths never say different things. */
+function describeSidecarEdit(loc) {
+  return `remove sources.${JSON.stringify(loc.sourceKey)}.propagates_to[${loc.index}] ` +
+    `(downstream: ${loc.declaredPath}, why: ${JSON.stringify(loc.why)}) from ${loc.sidecarPath}`;
+}
+
+/**
+ * Perform the sidecar edit `decoupled --apply` requires: remove exactly the
+ * one `propagates_to` entry the declaration was located at, via `yaml`'s
+ * Document API (not parse+reserialize) so comments and formatting elsewhere
+ * in the file survive. Drops the whole `sources.<key>` entry when it was the
+ * last downstream under that source — an empty `propagates_to: []` left
+ * behind is a declaration with nothing to declare.
+ */
+async function applyDecoupledEdit(loc) {
+  const raw = await readFile(loc.sidecarPath, "utf8");
+  const doc = YAML.parseDocument(raw);
+  const seq = doc.getIn(["sources", loc.sourceKey, "propagates_to"], true);
+  if (!seq || !Array.isArray(seq.items)) {
+    throw new Error(
+      `sources.${JSON.stringify(loc.sourceKey)}.propagates_to not found (or not a sequence) in ${loc.sidecarPath} — sidecar changed since selection?`,
+    );
+  }
+  if (loc.index < 0 || loc.index >= seq.items.length) {
+    throw new Error(
+      `index ${loc.index} out of range for sources.${JSON.stringify(loc.sourceKey)}.propagates_to (${seq.items.length} entries) in ${loc.sidecarPath} — sidecar changed since selection?`,
+    );
+  }
+  seq.items.splice(loc.index, 1);
+  if (seq.items.length === 0) {
+    doc.deleteIn(["sources", loc.sourceKey]);
+  }
+  await writeFile(loc.sidecarPath, String(doc), "utf8");
+}
+
+/** `verify --disposition decoupled` — print-by-default, `--apply` to write. */
+async function runDecoupled(selected, workspaces, opts) {
+  const { apply, reason, json } = opts;
+  const results = [];
+
+  for (const row of selected) {
+    const loc = await locateEdgeDeclaration(workspaces, row);
+    if (!loc) {
+      results.push({
+        edge_id: row.edge_id,
+        node_id: row.node_id,
+        ok: false,
+        error: "could not locate this edge's declaration in any sidecar (sidecar changed since reconcile ran?)",
+      });
+      continue;
+    }
+    const edit = describeSidecarEdit(loc);
+
+    if (!apply) {
+      results.push({ edge_id: row.edge_id, node_id: row.node_id, ok: true, applied: false, edit });
+      continue;
+    }
+
+    // Sidecar edit first: it is the concrete, visible fact. If the event
+    // write below fails, "the sidecar no longer declares this" is still
+    // true and safe; the reverse order would risk the event claiming
+    // "decoupled" while the sidecar still declares the edge — exactly the
+    // disagreement the plan warns against.
+    try {
+      await applyDecoupledEdit(loc);
+    } catch (err) {
+      results.push({ edge_id: row.edge_id, node_id: row.node_id, ok: false, error: `sidecar edit failed: ${err.message}` });
+      continue;
+    }
+
+    try {
+      const payload = {
+        edge_id: row.edge_id,
+        node_id: row.node_id,
+        disposition: "decoupled",
+        by: process.env.USER || "verify",
+        observed_on_ref: row.source.ref || "working-tree",
+        source_content: row.source.contentId,
+        downstream_content: row.downstream.contentId,
+      };
+      if (reason !== undefined) payload.reason = reason;
+      const stamped = await appendEvent(payload);
+      results.push({ edge_id: row.edge_id, node_id: row.node_id, ok: true, applied: true, edit, event_id: stamped.event_id });
+    } catch (err) {
+      results.push({
+        edge_id: row.edge_id,
+        node_id: row.node_id,
+        ok: false,
+        applied: true,
+        edit,
+        error: `sidecar edit landed but the event write failed: ${err.message}`,
+      });
+    }
+  }
+
+  // Verify-after-write for the applied removals: the edge must no longer be
+  // enumerable at all — a declaration that still resolves after being
+  // "removed" is a write that didn't land.
+  if (apply) {
+    const { rows: afterRows } = await reconcile(workspaces);
+    const stillPresent = new Set(afterRows.map((r) => r.edge_id));
+    for (const r of results) {
+      if (!r.ok || !r.applied) continue;
+      if (stillPresent.has(r.edge_id)) {
+        r.ok = false;
+        r.error = "edge still present after the sidecar edit — write did not land";
+      }
+    }
+  }
+
+  const exitCode = results.some((r) => !r.ok) ? 1 : 0;
+  if (json) {
+    console.log(JSON.stringify({ generatedAt: new Date().toISOString(), disposition: "decoupled", apply, results, exitCode }));
+  } else {
+    for (const r of results) {
+      if (r.ok && r.applied) {
+        console.log(`${GREEN}✓${RESET} decoupled ${r.edge_id}  ${DIM}${r.edit}${RESET}`);
+      } else if (r.ok && !r.applied) {
+        console.log(`${YELLOW}·${RESET} would decouple ${r.edge_id}  ${DIM}${r.edit}${RESET}`);
+        console.log(`  ${DIM}(pass --apply to perform this edit)${RESET}`);
+      } else {
+        console.log(`${RED}✗${RESET} ${r.edge_id}  ${RED}${r.error}${RESET}`);
+      }
+    }
+  }
+  process.exit(exitCode);
+}
+
+/** Every disposition except `decoupled` (handled separately above): append
+ * one verification event per selected edge, then confirm the write landed. */
+async function runDispositionBatch(selected, workspaces, opts) {
+  const { disposition, reason, json } = opts;
+
+  const applied = [];
+  const refused = [];
+
+  for (const row of selected) {
+    const refusal = divergedGuard(row.state, disposition);
+    if (refusal) {
+      refused.push({ edge_id: row.edge_id, node_id: row.node_id, error: refusal });
+      continue;
+    }
+
+    const payload = {
+      edge_id: row.edge_id,
+      node_id: row.node_id,
+      disposition,
+      by: process.env.USER || "verify",
+      observed_on_ref: row.source.ref || "working-tree",
+    };
+    if (reason !== undefined) payload.reason = reason;
+    if (disposition !== "deferred") {
+      payload.source_content = row.source.contentId;
+      payload.downstream_content = row.downstream.contentId;
+    }
+
+    // lib/events.mjs's validateEvent is the one place these rules are
+    // enforced (missing reason on wontfix/baselined, deferred pinning
+    // content, etc.) — let it throw and surface `err.message` verbatim.
+    // Never re-implement the check here, never print a stack trace (GOTCHAS
+    // G20 / plan: "let it throw and print err.message").
+    let stamped;
+    try {
+      stamped = await appendEvent(payload);
+    } catch (err) {
+      refused.push({ edge_id: row.edge_id, node_id: row.node_id, error: err.message });
+      continue;
+    }
+    applied.push({
+      edge_id: row.edge_id,
+      node_id: row.node_id,
+      disposition,
+      priorState: row.state,
+      event_id: stamped.event_id,
+    });
+  }
+
+  // Verify after write (non-negotiable): a write that returned is not a
+  // write that landed. Re-reconcile ONCE for the whole batch (not per edge —
+  // same batching discipline as reconcile() itself) and confirm every
+  // applied edge reached its expected state.
+  let confirmed = [];
+  let failed = [];
+  if (applied.length > 0) {
+    const { rows: afterRows } = await reconcile(workspaces);
+    ({ confirmed, failed } = computeVerifyAfterWrite(applied, afterRows));
+  }
+
+  const exitCode = refused.length > 0 || failed.length > 0 ? 1 : 0;
+
+  if (json) {
+    console.log(
+      JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        disposition,
+        selectedCount: selected.length,
+        confirmed,
+        refused,
+        failed,
+        exitCode,
+      }),
+    );
+  } else {
+    for (const c of confirmed) {
+      console.log(`${GREEN}✓${RESET} ${c.edge_id}  ${disposition} → ${c.state}  ${DIM}(event ${c.event_id})${RESET}`);
+    }
+    for (const f of failed) {
+      console.log(`${RED}✗${RESET} ${f.edge_id}  ${RED}${f.error}${RESET}`);
+    }
+    for (const r of refused) {
+      console.log(`${RED}✗${RESET} ${r.edge_id}  ${RED}${r.error}${RESET}`);
+    }
+  }
+  process.exit(exitCode);
+}
+
+async function verifyCmd() {
+  const args = process.argv.slice(3);
+  const opts = parseVerifyArgs(args);
+
+  if (!opts.edge && !opts.node && !opts.glob) {
+    console.error(
+      `${RED}error:${RESET} at least one selector is required: --edge <edge_id> | --node <node_id> | --glob <pattern>`,
+    );
+    process.exit(2);
+  }
+  if (!opts.disposition) {
+    console.error(`${RED}error:${RESET} --disposition <${DISPOSITIONS.join("|")}> is required`);
+    process.exit(2);
+  }
+  if (!DISPOSITIONS.includes(opts.disposition)) {
+    console.error(
+      `${RED}error:${RESET} unknown disposition ${JSON.stringify(opts.disposition)}; must be one of ${DISPOSITIONS.join(" | ")}`,
+    );
+    process.exit(2);
+  }
+
+  // Selection is precise (an exact edge_id, node_id, or glob string), so
+  // `verify` always reconciles the full discovered graph rather than
+  // scoping to cwd's workspace the way `status`/`drain`/`reconcile` default
+  // to — a selector naming an edge in a different workspace must still
+  // resolve, not silently miss.
+  const workspaces = WORKSPACES;
+  const { rows } = await reconcile(workspaces);
+  const selected = selectVerifyRows(rows, opts);
+
+  if (selected.length === 0) {
+    console.error(`${RED}error:${RESET} no edges matched the given selector(s)`);
+    process.exit(1);
+  }
+
+  if (opts.disposition === "decoupled") {
+    await runDecoupled(selected, workspaces, opts);
+  } else {
+    await runDispositionBatch(selected, workspaces, opts);
   }
 }
 
@@ -2036,6 +2540,8 @@ if (_invokedDirectly) {
     await drain();
   } else if (mode === "reconcile") {
     await reconcileCmd();
+  } else if (mode === "verify") {
+    await verifyCmd();
   } else if (mode === "skills") {
     await skills();
   } else if (mode === "skills-create") {
@@ -2044,7 +2550,7 @@ if (_invokedDirectly) {
     await skillsLifecycleCmd(mode);
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
     process.exit(2);
   }
 }
