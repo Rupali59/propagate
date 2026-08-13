@@ -666,13 +666,20 @@ export async function writeDigestState(state, statePath = DIGEST_STATE_PATH) {
 export function computeDiff(snapshot, prior) {
   const broken = [];
 
-  if (snapshot.watcher.state !== "alive") {
+  // v1 watcher retired 2026-08-14 (docs/DECISIONS.md) — heartbeat staleness
+  // is no longer a failure signal. Reporting it as `broken` here would mean
+  // this digest complains forever about a component that is *supposed* to be
+  // gone (the task brief's "do not leave a line that will read dead
+  // forever"). `snapshot.watcher` is kept only as informational history (see
+  // formatDigest's watcherLine); the fact that CAN now fail is whether the
+  // replacement — reconcile(), shared by the DRIFT/INBOUND sections below —
+  // actually completed. `snapshot.drift` is undefined in older/synthetic
+  // snapshots (tests), so absence is treated as "not measured", not broken.
+  const reconcileAvailable = snapshot.drift ? snapshot.drift.available !== false : true;
+  if (!reconcileAvailable) {
     broken.push({
-      kind: "watcher",
-      detail:
-        snapshot.watcher.state === "never"
-          ? "watcher heartbeat file missing — has it ever run?"
-          : `watcher heartbeat is ${snapshot.watcher.state} (${snapshot.watcher.ageSeconds}s old)`,
+      kind: "reconcile",
+      detail: `reconcile() did not complete — the v1 watcher's replacement: ${snapshot.drift.error || "unknown error"}`,
     });
   }
   if (snapshot.degraded) {
@@ -927,7 +934,11 @@ export function computeDiff(snapshot, prior) {
     newByWorkspace,
     closedByWorkspace,
     totals,
+    // Kept only as informational history — v1 watcher retired 2026-08-14, see
+    // the `broken` computation above. Nothing downstream should treat
+    // `watcher.state` as a health signal anymore; `reconcile` is.
     watcher: snapshot.watcher,
+    reconcile: { available: reconcileAvailable, error: snapshot.drift?.error ?? null },
     hasChange,
     diskLines,
     skillLines,
@@ -943,9 +954,10 @@ export function computeDiff(snapshot, prior) {
 
 export function formatDigest(diff) {
   const lines = [];
-  const watcherLine = `watcher: ${diff.watcher.state}${
-    diff.watcher.ageSeconds !== null ? ` (${diff.watcher.ageSeconds}s)` : ""
-  }`;
+  // v1 watcher retired 2026-08-14 — this line reports the retirement plus the
+  // replacement's health (reconcile completion) instead of a heartbeat age
+  // that would otherwise climb forever and read as "dead" (task brief).
+  const watcherLine = `watcher: retired (v2 reconcile ${diff.reconcile.available ? "ok" : "FAILED"})`;
 
   const diskLines = diff.diskLines || [];
   const skillLines = diff.skillLines || [];

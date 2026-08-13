@@ -1,5 +1,30 @@
 #!/usr/bin/env node
 /**
+ * ⚠️ RETIRED 2026-08-14 — see docs/DECISIONS.md 2026-08-14 ("the v1 watcher
+ * is retired"). Do NOT re-enable this file's launchd plist, and do not run
+ * it by hand, without reading that entry in full first.
+ *
+ * Why: measured 4,420 runs / 4,384 no-ops (99.2% found nothing), and its
+ * state.json mtime baseline caused two incidents in one day (a state wipe
+ * that fired ~120 spurious drift rows, and plist overwrites — see
+ * docs/GOTCHAS.md G10/G11/G13). `reconcile` (lib/reconcile.mjs, on demand),
+ * `check` (the pre-push gate), and the daily digest's DRIFT/INBOUND sections
+ * derive drift from content instead of remembering it, and now replace this
+ * file's coverage in production. The one thing genuinely lost by retiring
+ * this file is sub-daily proactive notification — reconcile/check/digest are
+ * on-demand or once-a-day, not a ~60s background fire. See the DECISIONS.md
+ * entry for the full tradeoff.
+ *
+ * This file stays on disk as history and as the reference for what v1 did —
+ * it is not deleted. Its exported functions (processCrossRepo,
+ * __setCrossPathsForTest, etc.) are still imported directly by several
+ * tests (grep `from "../watcher.mjs"` under tests/) and that import path is
+ * unaffected. Only running it as a script (`node watcher.mjs`) is blocked —
+ * see the refusal at the bottom of this file.
+ *
+ * ---------------------------------------------------------------------------
+ * Original v1 doc comment, preserved for reference:
+ *
  * Propagation watcher — invoked by launchd WatchPaths when files in
  * monitored directories change. Stateless across invocations (state lives
  * in state.json).
@@ -741,6 +766,29 @@ async function main() {
 // imports processCrossRepo/__setCrossPathsForTest from this module.
 const _invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (_invokedDirectly) {
+  // RETIRED 2026-08-14 (see the file header and docs/DECISIONS.md 2026-08-14).
+  // Refuse loudly rather than silently writing v1 rows into ledgers nothing
+  // else maintains — a quiet no-op here would be exactly the failure class
+  // (docs/GOTCHAS.md G1/G2) this whole codebase exists to prevent.
+  // Set PROPAGATE_ALLOW_RETIRED_WATCHER=1 to override for a deliberate,
+  // one-off historical run (e.g. reproducing a pre-retirement bug) — never
+  // for routine use, and never from launchd.
+  if (process.env.PROPAGATE_ALLOW_RETIRED_WATCHER !== "1") {
+    console.error(
+      [
+        "propagate: the v1 watcher is RETIRED and refuses to run.",
+        "",
+        "Measured 4,420 runs / 4,384 no-ops (99.2% found nothing), and its",
+        "state.json mtime baseline caused two incidents in one day. `reconcile`,",
+        "`check`, and the daily digest's DRIFT/INBOUND sections replace its",
+        "coverage — see docs/DECISIONS.md 2026-08-14 before doing anything else.",
+        "",
+        "If you deliberately need a one-off historical run, re-run with",
+        "PROPAGATE_ALLOW_RETIRED_WATCHER=1 set — never from launchd, never routinely.",
+      ].join("\n"),
+    );
+    process.exit(1);
+  }
   main().catch(async (err) => {
     await log(`fatal: ${err.stack || err.message}`);
     // exit 0 so launchd doesn't disable us

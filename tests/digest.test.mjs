@@ -139,10 +139,27 @@ test("computeDiff: a row that dropped out of open (closed/wontfix) since last ru
   assert.deepEqual(diff.newByWorkspace, []);
 });
 
-test("computeDiff: watcher not alive is reported as broken, independent of ledger quietDays", () => {
+test("computeDiff: watcher retirement — a dead/stale heartbeat is NOT reported as broken", () => {
+  // v1 watcher retired 2026-08-14 (docs/DECISIONS.md): heartbeat staleness is
+  // no longer a failure signal, on purpose — the watcher is supposed to stop.
   const snapshot = baseSnapshot({ watcher: { heartbeatMs: 0, ageSeconds: 999999, state: "dead" } });
   const diff = computeDiff(snapshot, priorFrom(snapshot));
-  assert.equal(diff.broken.some((b) => b.kind === "watcher"), true);
+  assert.equal(diff.broken.some((b) => b.kind === "watcher"), false);
+  assert.equal(diff.broken.some((b) => b.kind === "reconcile"), false);
+});
+
+test("computeDiff: reconcile() failing (the watcher's replacement) IS reported as broken", () => {
+  const snapshot = baseSnapshot({ drift: { available: false, error: "boom" } });
+  const diff = computeDiff(snapshot, priorFrom(snapshot));
+  const found = diff.broken.filter((b) => b.kind === "reconcile");
+  assert.equal(found.length, 1);
+  assert.match(found[0].detail, /boom/);
+});
+
+test("computeDiff: reconcile() succeeding is not reported as broken", () => {
+  const snapshot = baseSnapshot({ drift: { available: true, sameRepo: [], outboundUnknown: [] } });
+  const diff = computeDiff(snapshot, priorFrom(snapshot));
+  assert.equal(diff.broken.some((b) => b.kind === "reconcile"), false);
 });
 
 test("computeDiff: DISCOVERY_DEGRADED true is reported as broken", () => {
@@ -186,7 +203,7 @@ test("formatDigest: no change + nothing broken emits a short single line, not a 
   const diff = computeDiff(snapshot, priorFrom(snapshot));
   const text = formatDigest(diff);
   assert.equal(text.split("\n").length, 1);
-  assert.match(text, /^propagate: no change, watcher: alive.*1 open$/);
+  assert.match(text, /^propagate: no change, watcher: retired \(v2 reconcile ok\).*1 open$/);
 });
 
 test("formatDigest: first run states explicitly that there is no prior state, and does not enumerate all open rows", () => {

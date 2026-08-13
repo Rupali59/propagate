@@ -1,6 +1,6 @@
 # propagate — State
 
-Last updated: 2026-08-13
+Last updated: 2026-08-14
 
 > Navigation: "What's the current status?" → this file. "Why did we choose X?" →
 > `docs/DECISIONS.md`. "How do I use it?" → `SKILL.md`. "Where do I start
@@ -8,14 +8,60 @@ Last updated: 2026-08-13
 
 ## What this is
 
-Doc/code drift watcher. Declares edges in `.propagates.yml` sidecars, detects
-source-file mtime changes, and appends drift rows to a per-workspace append-only
-JSONL ledger. Runs as launchd `com.tathya.propagate.watcher` on `StartInterval
-60`; a companion `com.tathya.propagate.digest` runs a daily summary (see below).
+Doc/code drift detector. Declares edges in `.propagates.yml` sidecars.
+Drift is derived from content on demand via `reconcile` (also driving
+`check` at pre-push and the daily digest's DRIFT/INBOUND sections) against
+the v2 event store — **not** discovered by a background watcher polling
+mtimes; that mechanism (`watcher.mjs`, launchd `com.tathya.propagate.watcher`,
+`StartInterval 60`) was **retired 2026-08-14** (see "Now" below and
+`docs/DECISIONS.md`). A companion `com.tathya.propagate.digest` still runs a
+daily summary (unaffected by the retirement).
 
 Own git repo, remote `Rupali59/propagate-skill`.
 
 ## Now (in flight)
+
+### 2026-08-14 — v1 watcher retired; doctor/digest report the v2 replacement's health
+
+`watcher.mjs` is retired (docs/DECISIONS.md 2026-08-14): measured 4,420 runs,
+4,384 no-ops (99.2% found nothing), and two incidents in one day traced to
+its `state.json` mtime baseline. `reconcile` (on demand), `check` (pre-push),
+and the digest's DRIFT/INBOUND sections (commit `45a5e63`) replace its
+coverage — production holds 379 baselined events in the v2 event store, so
+drift is genuinely derivable today.
+
+Code/docs side of the retirement, this pass:
+- `watcher.mjs` stays on disk (not deleted), gains a header recording the
+  retirement, and its direct-invocation path now refuses (`node watcher.mjs`
+  exits 1) unless `PROPAGATE_ALLOW_RETIRED_WATCHER=1` is explicitly set.
+  Its exported functions are still imported directly by several tests —
+  that import path is untouched.
+- `cli.mjs doctor`'s launchd/heartbeat checks are now informational only
+  (`·`, never `✗`) and explicitly labeled RETIRED; a new "v2 replacement"
+  section asserts the event store is readable + non-empty and that
+  `reconcile()` completes — these are the checks that can fail now.
+- `digest.mjs`'s `broken` check no longer trips on heartbeat staleness;
+  it trips on `reconcile()` failing to complete instead. The
+  `watcher: alive (Ns)` summary line now reads `watcher: retired (v2
+  reconcile ok|FAILED)`.
+- `SKILL.md`, `docs/REFERENCE.md`, `docs/SYSTEMS.md`, `docs/ISSUES.md`
+  (N8 moot — its only caller, `enumerateWorktrees`, lived in `watcher.mjs`;
+  N23's impact moot — `watcher.log` is no longer a live incident-response
+  source) updated in the same pass.
+- 470/470 tests pass as of 2026-08-14 (was 465: -1 removed for
+  now-intentionally-wrong behavior, +6 new — see `docs/DECISIONS.md`
+  2026-08-14 for the exact breakdown).
+
+**Explicitly NOT done here, and not claimed:** the actual
+`launchctl bootout` unloading `com.tathya.propagate.watcher` from launchd.
+That is a separate, later operational step (task constraint: no `launchctl`
+commands run as part of this change). `docs/SYSTEMS.md`'s `propagate` row
+marks `retirement_checklist_done` as `partial` for exactly this reason —
+verify with `launchctl list | grep com.tathya.propagate.watcher` before
+updating that to `done`. v1 ledger rows (152ish open across 7 workspaces +
+cross-repo, measured 2026-08-14 as 149+3) are untouched and remain readable
+via `status`/`drain` exactly as before — retiring the writer does not touch
+the reader.
 
 ### 2026-08-10 — Part A COMPLETE: discovery partition fixed, 2 → 7 workspaces
 

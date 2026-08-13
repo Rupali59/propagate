@@ -398,3 +398,72 @@ went unnoticed for three months would fire next time.
 **Affects:** propagate, Keerti, Khushboo, ManavDaehi, PanditPawanKaushik, Rishabh, Tathya, Tushar
 **Refs:** `_archive/profile-md-2026-08-13/`, `<Workspace>/persona/.propagates.yml`,
 `~/.claude/plans/okay-i-dont-think-logical-haven.md` §6
+
+---
+
+## 2026-08-14: the v1 launchd watcher is retired
+
+**What:** `watcher.mjs` (launchd `com.tathya.propagate.watcher`, `StartInterval
+60`) is retired. The file is not deleted — it carries a header recording the
+retirement and refuses to run directly (`node watcher.mjs`) unless
+`PROPAGATE_ALLOW_RETIRED_WATCHER=1` is explicitly set, so it cannot silently
+write v1 rows into ledgers nothing else maintains. `cli.mjs doctor` no longer
+reports plist-loaded / heartbeat-age as failures — both are now informational
+(`·`, never `✗`), explicitly labeled RETIRED — and instead asserts the
+replacement's health: the v2 event store is readable and non-empty, and
+`reconcile()` completes. `digest.mjs`'s `broken` check and its `watcher: ...`
+summary line follow the same rule — heartbeat staleness no longer trips
+`broken`; `reconcile()` failing to complete does. The actual launchd
+unload/disable is a separate, later step, done outside this change.
+
+**Why:** measured over the watcher's production lifetime: **4,420 runs,
+4,384 no-ops — 99.2% found nothing.** Its `state.json` mtime baseline caused
+two incidents in one day (docs/GOTCHAS.md G10/G11/G13): a state wipe that
+fired ~120 spurious rows, and repeated plist overwrites. v2 derives drift
+from content instead of remembering it (docs/GOTCHAS.md G19 "deriving beats
+remembering"), so `reconcile` answers "what has drifted" from scratch in
+~1.2s (measured: `node cli.mjs doctor`, "reconcile completes" check, this
+repo, 2026-08-14) and cannot miss a change that happened while nothing was
+watching. Replacement coverage is in place, not merely proposed: `reconcile`
+on demand, `check` at the pre-push moment, and the daily digest's DRIFT +
+INBOUND sections (commit `45a5e63`). Production holds **379 baselined
+events** in the v2 event store (`~/.propagate/events`, via `bootstrap
+--apply`), so drift is actually derivable today, not just in principle.
+
+**What is genuinely lost, not just traded:** sub-daily proactive
+notification. The watcher fired on every file event plus a 60s floor,
+regardless of whether anyone was about to look; `reconcile`/`check`/the
+digest are on-demand or once-daily. A file that drifts and is never touched
+again, and that nobody runs `reconcile` or reads the digest for, will sit
+undetected for up to a day (digest) or indefinitely (reconcile, if nobody
+ever runs it) — the watcher would eventually have caught it within
+`StartInterval`. This is an accepted tradeoff given the 99.2% no-op rate and
+the incident cost, not a claim that nothing changed.
+
+**Gotchas:** per docs/GOTCHAS.md G2 ("absence is ambiguous — make it
+attributable"), the watcher's doctor checks were changed to informational
+rather than deleted outright — a reader who notices "plist loaded" is gone
+must not be left to wonder whether that's a bug or a decision. Per G20 ("a
+second reporting mechanism duplicates the first unless you delete the
+first"), no second place was added to report plist/heartbeat state — the
+existing `check()`/`info()` call sites were converted in place, not
+duplicated. v1's reader path (`status`, `drain`, ledger reads) is untouched
+by this change — only the writer (`watcher.mjs`) and the doctor/digest
+checks that graded its health were touched. 152 (measured 2026-08-14: 149
+across the 7 discovered workspaces + 3 cross-repo) open v1 rows remain real,
+unmigrated work; retiring the writer does not touch them.
+
+**Verified:** 470/470 tests pass (was 465 before this change: -1 test
+removed for behavior that's now intentionally wrong, +6 new — 3 for
+digest's reconcile-based broken check, 1 for doctor's retirement reporting,
+2 source-inspection tests for watcher.mjs's refusal guard). `node cli.mjs doctor`:
+watcher section prints informational only (no `✗`), replacement section
+shows `event store readable — 379 event(s), 0 malformed`, `event store
+non-empty`, `reconcile completes — ~1.2s`. `node cli.mjs status --all`
+still lists the same v1 open rows it did before this change.
+
+**Affects:** propagate
+**Refs:** `watcher.mjs` (header + `_invokedDirectly` guard), `cli.mjs`
+(`doctor`'s launchd/heartbeat section + new "v2 replacement" section),
+`digest.mjs` (`computeDiff`, `formatDigest`), `tests/digest.test.mjs`,
+`tests/doctor.test.mjs`, `tests/watcher-retired.test.mjs`, commit `45a5e63`

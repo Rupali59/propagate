@@ -7,15 +7,34 @@ For "what do I do right now," go back to `SKILL.md`.
 
 ## Canonical state
 
-- Watcher script: `${CLAUDE_PLUGIN_ROOT}/watcher.mjs`
-- Worktree helpers: `${CLAUDE_PLUGIN_ROOT}/lib/worktrees.mjs`
-- launchd plists (installed, confirmed via `launchctl list` 2026-08-13):
-  `~/Library/LaunchAgents/com.tathya.propagate.watcher.plist` and
-  `~/Library/LaunchAgents/com.tathya.propagate.digest.plist`. The label is
-  owned by `lib/plist.mjs:25`:
+- Watcher script: `${CLAUDE_PLUGIN_ROOT}/watcher.mjs` — **RETIRED
+  2026-08-14** (`docs/DECISIONS.md`). Kept on disk as history; the file
+  refuses to run directly (`node watcher.mjs`) unless
+  `PROPAGATE_ALLOW_RETIRED_WATCHER=1` is explicitly set. Its exported
+  functions are still imported directly by several tests — that import path
+  is unaffected, only running it as a script is blocked. `reconcile`,
+  `check`, and the daily digest's DRIFT/INBOUND sections are the
+  replacement; see the retirement note in `SKILL.md`.
+- Worktree helpers: `${CLAUDE_PLUGIN_ROOT}/lib/worktrees.mjs` — as of
+  2026-08-14 `enumerateWorktrees`/`enumerateCanonicalRepos` (the
+  worktree-expansion path used at watcher-fire time) has **no live caller
+  left**; the watcher was its only consumer (`docs/ISSUES.md` N8). The
+  smaller `correlationKey`/`worktreeStamp` helpers are still reused for id
+  conventions elsewhere (`lib/reconcile.mjs`).
+- launchd plists (installed, confirmed via `launchctl list` 2026-08-13,
+  **before** the watcher plist's separate unload — see `docs/DECISIONS.md`
+  2026-08-14 for that step, done outside this doc's scope):
+  `~/Library/LaunchAgents/com.tathya.propagate.watcher.plist` (retired
+  component's plist — unload/disable is a separate operational step, not a
+  file-content change this repo makes) and
+  `~/Library/LaunchAgents/com.tathya.propagate.digest.plist` (still active —
+  the digest is not retired, only the watcher is). The watcher plist's label
+  is owned by `lib/plist.mjs:25`:
   `export const LABEL = process.env.PROPAGATE_LABEL || "com.tathya.propagate.watcher"` —
   override with `PROPAGATE_LABEL` if you ever rename it again, and update this
-  file and `doctor`'s checks in the same change.
+  file and `doctor`'s checks in the same change. `lib/plist.mjs` only ever
+  generated the watcher's plist — see the `reload` entry in "Complete CLI
+  surface" below for what that means now.
 - Ledger (JSONL, authoritative): **per-workspace, resolved by
   `lib/discovery.mjs` `makeWorkspaceRecord`** —
   `<workspace-root>/docs/PROPAGATION_LEDGER.jsonl` when `<root>/docs/` exists,
@@ -35,27 +54,41 @@ For "what do I do right now," go back to `SKILL.md`.
   `watcher.stderr.log`.
 - Tests: `${CLAUDE_PLUGIN_ROOT}/tests/` — run with `npm test`.
 
-## Watcher cadence (post-2026-06-08)
+## Watcher cadence (post-2026-06-08) — historical, watcher RETIRED 2026-08-14
 
-- launchd `WatchPaths` fires on changes inside watched roots (FSEvents-backed,
-  bubbles up nested file changes).
-- launchd `StartInterval: 60` guarantees a fire every 60s regardless of file
-  events. Catches deep-nested edits FSEvents might miss.
-- The watcher SKIPS `renderMarkdown` when no events fired this run — without
-  this guard, every no-drift fire would re-tick the ledger MD and
-  cascade-trigger the watcher every ~5s.
+This section describes v1 behaviour that no longer runs in production. Kept
+for anyone reading old ledger rows or debugging `watcher.mjs`'s source —
+**do not treat any of it as current operational behaviour.** See
+`docs/DECISIONS.md` 2026-08-14 for what replaced it (`reconcile` on demand,
+`check` at pre-push, the daily digest's DRIFT/INBOUND sections).
 
-## Worktree-awareness (post-2026-06-08)
+- launchd `WatchPaths` fired on changes inside watched roots (FSEvents-backed,
+  bubbling up nested file changes).
+- launchd `StartInterval: 60` guaranteed a fire every 60s regardless of file
+  events. Caught deep-nested edits FSEvents might miss.
+- The watcher SKIPPED `renderMarkdown` when no events fired that run —
+  without that guard, every no-drift fire would have re-ticked the ledger MD
+  and cascade-triggered the watcher every ~5s.
+
+## Worktree-awareness (post-2026-06-08) — the row shape is still live, the firing mechanism is not
+
+The **row shape** described here (`correlation_id`, `source_worktree`) is
+still what `status`/`drain` read and group by — it is unaffected by the
+retirement, because it describes data already on disk, not the watcher's
+runtime. What retired is the **mechanism that produced new rows this way**:
 
 - Sidecar paths stay canonical (e.g. `../VipinKaushik/lib/pricing.ts`). The
-  watcher expands at runtime via `git worktree list --porcelain` per canonical
-  repo.
-- Edits in non-canonical worktrees fire rows with
+  (retired) watcher expanded these at runtime via
+  `git worktree list --porcelain` per canonical repo; no live writer does
+  this today.
+- Historical rows from edits in non-canonical worktrees carry
   `source_worktree: {branch, commit}`.
 - All rows pointing at the same logical file across worktrees share a
-  `correlation_id` (e.g. `VipinKaushik:lib/pricing.ts`).
-- First-observation of a sibling-worktree file silently seeds `state.json`
-  without firing drift (bootstrap behaviour).
+  `correlation_id` (e.g. `VipinKaushik:lib/pricing.ts`) — `drain --group`
+  still groups on this for existing open rows.
+- First-observation of a sibling-worktree file used to silently seed
+  `state.json` without firing drift (bootstrap behaviour) — moot now that
+  nothing populates `state.json` from a live fire.
 
 ## Ledger resolution
 
@@ -98,7 +131,7 @@ contain pipes that look like more commands than actually exist.
 | `status` | List open drift rows, scoped to the workspace at cwd by default. `--all` for every workspace, `--cross` for the cross-repo ledger, `--json` for machine-readable output. |
 | `doctor` | Health check: launchd plist loaded (`launchctl list \| grep <label>`), heartbeat age (warn >1h during active periods, fail >1 day), all `.propagates.yml` sidecars pass schema validation, sidecar downstream paths resolve on disk (warn-only), `state.json` parseable with `.bak` present, ledger JSONL parseable. |
 | `init <dir> [--workspace\|--edges-only]` | Scaffold `.propagates.yml`. `--workspace` (default) writes `workspace: true` and verifies the directory becomes discoverable, exiting non-zero if not (N15). **No longer touches the plist** — that moved to `reload` (N14). |
-| `reload` | Regenerate the plist from discovery and reload launchd. Refuses to write a plist with 0 watch roots. |
+| `reload` | **Obsolete as of 2026-08-14** — its only purpose was regenerating the (now retired) watcher's plist and reloading it into launchd; `lib/plist.mjs` has never generated any other plist (grep confirms it — the digest plist is installed by a separate mechanism it never touches, see "Canonical state" above). Not removed from `cli.mjs` by this change (out of scope — no live launchd command was run to verify/enact this), but there is no remaining reason to run it. |
 | `check` | Commit-time drift gate. Flags below. |
 | `check --changed` | Default when no range/staged flag given: working tree + staged vs HEAD, unioned. |
 | `check --range <a>..<b>` | Explicit git range (for CI or a hook). |
@@ -219,45 +252,85 @@ command runs unchanged in a GitHub Action once this skill (or just `cli.mjs`
 then `node cli.mjs check --range "${{ github.event.before }}..${{ github.sha }}" --strict`.
 No CI wiring is built here; this is a pointer for when that's worth doing.
 
-## Initial install (once per machine)
+## Initial install (once per machine) — watcher steps are HISTORICAL, RETIRED 2026-08-14
+
+Steps 2–4 below install/verify the v1 watcher and no longer apply — step 3 in
+particular (`node watcher.mjs`) now **refuses to run** by design (see
+"Canonical state" above and `docs/DECISIONS.md` 2026-08-14). Kept verbatim as
+a record of what v1 install looked like; do not follow steps 2–4 for a fresh
+machine setup today. Step 1 (deps) and the digest install (unaffected by this
+retirement — the digest is still active) remain current.
 
 ```bash
-# 1. Install deps
+# 1. Install deps — still current.
 cd ${CLAUDE_PLUGIN_ROOT} && npm install
 
-# 2. Load launchd plist
+# 2. Load launchd plist — HISTORICAL. Do not run: the watcher is retired,
+#    and re-loading its plist re-arms the exact background job that was
+#    retired for cause (docs/DECISIONS.md 2026-08-14). The live unload is a
+#    separate, later operational step outside this repo's automated changes.
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tathya.propagate.watcher.plist
 launchctl list | grep com.tathya.propagate.watcher   # confirm loaded
 
-# 3. First-run smoke test
+# 3. First-run smoke test — HISTORICAL, and now actively blocked: this
+#    exits non-zero and refuses unless PROPAGATE_ALLOW_RETIRED_WATCHER=1 is
+#    set (never for routine use — see watcher.mjs's header).
 node ${CLAUDE_PLUGIN_ROOT}/watcher.mjs
 # Should print nothing to stdout but write a "run complete" line to
 # ${CLAUDE_PLUGIN_ROOT}/watcher.log
 
-# 4. Verify by touching a watched file
+# 4. Verify by touching a watched file — HISTORICAL; nothing listens for
+#    this anymore. Use `node cli.mjs reconcile` to check drift on demand
+#    instead.
 touch "$HOME/Documents/GitHub/Vipin Kaushik/docs/VIPIN.md"
 # Within ~10s, a notification should appear and a new row added to
 # Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl
 ```
 
-The digest agent installs the same way, against
-`com.tathya.propagate.digest.plist`.
+The digest agent installs independently, against
+`com.tathya.propagate.digest.plist` — **still current**, the digest is not
+retired, only the watcher is. (The "installs the same way" framing this line
+used to carry was already slightly loose before this change: `reload`/
+`lib/plist.mjs` never generated the digest's plist even when the watcher was
+live — it is, and always was, installed by a separate mechanism.)
 
-## Disable temporarily
+## Disable temporarily — watcher: superseded by full retirement; digest: still applies
+
+For the watcher, this is now moot — it is retired outright, not merely
+disabled, and the live unload is a separate operational step done outside
+this repo's automated changes (see `docs/DECISIONS.md` 2026-08-14). Kept for
+the digest, and as a record of the pre-retirement command shape:
 
 ```bash
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tathya.propagate.watcher.plist
 ```
 
-Re-enable: same `bootstrap` command as above. Ledger and sidecars persist.
+Re-enable: same `bootstrap` command as above — but re-enabling the watcher
+means re-arming a component that was retired for cause; read
+`docs/DECISIONS.md` 2026-08-14 in full before doing so. Ledger and sidecars
+persist regardless.
 
 ## Architecture summary (for future-you)
+
+v1 (historical, RETIRED 2026-08-14 — see `docs/DECISIONS.md`):
 
 - Watcher invoked per file event by launchd `WatchPaths` (no daemon process).
 - `proper-lockfile` serializes concurrent invocations.
 - 3s mtime re-verify guards against atomic-replace partial reads.
-- State + sidecars + ledger all atomic-write via temp+rename.
 - Heartbeat file is the fallback if macOS notification permission is denied.
-- JSONL is authoritative for the ledger; MD is regenerated on every change.
 
-If something breaks, check `${CLAUDE_PLUGIN_ROOT}/watcher.log` first.
+v2 (current):
+
+- `reconcile` (`lib/reconcile.mjs`) derives drift from content — git blob ids
+  on both sides of an edge plus the v2 event store (`lib/events.mjs`) — on
+  demand, not from a remembered baseline. No daemon, no background process.
+- State + sidecars + ledger all atomic-write via temp+rename (unchanged from
+  v1; still true for the v1 rows `status`/`drain` still read).
+- JSONL is authoritative for the ledger; MD is regenerated on every change
+  (unchanged).
+
+If something breaks with a v1 row or historical data, check
+`${CLAUDE_PLUGIN_ROOT}/watcher.log` first (its production content stops
+growing once the watcher plist is actually unloaded, per the separate,
+later operational step). For everything else, `node cli.mjs doctor`'s "v2
+replacement" section is the first place to look.

@@ -1,6 +1,6 @@
 ---
 name: propagate
-description: Manage the propagation ledger — drain open drift events, check watcher health, declare sidecars, init new directories. Triggers on "/propagate", "drain propagation", "what depends on this", "propagation status", or any reference to PROPAGATION_LEDGER.
+description: Manage the propagation ledger — drain open drift events, check system health (event store + reconcile — the retired watcher's replacement), declare sidecars, init new directories. Triggers on "/propagate", "drain propagation", "what depends on this", "propagation status", or any reference to PROPAGATION_LEDGER.
 ---
 
 # /propagate — Propagation skill
@@ -19,11 +19,24 @@ initiative. Every close, edit, or dismissal is a human (or an agent acting on a
 human's behalf) making the call — the ledger is a record of that decision, not
 an automation that makes it.
 
+**The v1 launchd watcher is retired (2026-08-14; `docs/DECISIONS.md`).** The
+background `com.tathya.propagate.watcher` (`StartInterval 60`) that used to
+detect drift by remembering file mtimes is gone — measured 4,420 runs, 4,384
+no-ops (99.2% found nothing), and its state baseline caused two incidents in
+one day. Drift is now derived from content, on demand: run `reconcile` (or
+let `check` / the daily digest run it for you) instead of waiting for a
+background fire. `watcher.mjs` stays on disk as history and refuses to run
+directly. The one thing this trades away is sub-daily proactive
+notification — nothing pings you mid-day anymore; see `docs/DECISIONS.md`
+2026-08-14 for the full tradeoff. `doctor` and the digest report the
+replacement's health (event store + reconcile), not the retired watcher's.
+
 ## Contract
 
 - **Only stop for:** a `drain`-style decision (apply / defer / wontfix a row),
   a `declare` edit to a `.propagates.yml` sidecar, or a genuine one-way door
-  (disabling the watcher, migrating ledger rows).
+  (migrating ledger rows, or anything touching launchd/plists — the v1
+  watcher was one such one-way door; see the retirement note below).
 - **Never stop for:** running `status`, `doctor`, or `check` — just run them
   and report what they say.
 - **Never do:** edit a downstream file automatically, rewrite a ledger row,
@@ -58,13 +71,17 @@ These are real `cli.mjs` subcommands — run them directly. Full flags in
   ```bash
   node ${CLAUDE_PLUGIN_ROOT}/cli.mjs status
   ```
-- **`doctor`** — health check: plist loaded, heartbeat age, sidecar schema
-  validity, ledger parseability.
+- **`doctor`** — health check: v2 event store readable + non-empty and
+  `reconcile` completes (the retired watcher's replacement — its plist/
+  heartbeat checks are now informational only, never a failure), sidecar
+  schema validity, ledger parseability.
   ```bash
   node ${CLAUDE_PLUGIN_ROOT}/cli.mjs doctor
   ```
-- **`init <dir>`** — scaffold an empty `.propagates.yml` at `<dir>` and add it
-  to the watcher's `WatchPaths`.
+- **`init <dir>`** — scaffold an empty `.propagates.yml` at `<dir>`. Does
+  **not** touch the plist or launchd — run `reload` after, if the watcher
+  were still live (it isn't; see the retirement note above — `reload`
+  regenerates the now-retired watcher's plist and has no live purpose today).
   ```bash
   node ${CLAUDE_PLUGIN_ROOT}/cli.mjs init <dir>
   ```
@@ -131,9 +148,11 @@ existed, people recorded bulk closes by hand as counterfeit drift rows
 (`docs/DATA_MODEL.md` §6.1).
 
 **Correlation grouping matters under the premise above** — this is the
-parallel-coordination behaviour, not a nicety. When the watcher fires from a
-non-canonical worktree, rows carry `correlation_id` (`<repo>:<path>`,
-e.g. `VipinKaushik:lib/pricing.ts`) and `source_worktree` (`{branch, commit}`).
+parallel-coordination behaviour, not a nicety. (v1 rows: when the — now
+retired — watcher fired from a non-canonical worktree, rows carried
+`correlation_id` (`<repo>:<path>`, e.g. `VipinKaushik:lib/pricing.ts`) and
+`source_worktree` (`{branch, commit}`); those rows and this grouping logic
+are unaffected by the retirement and `drain --group` still works on them.)
 Group open rows by `correlation_id` before presenting them — rows sharing an
 id are the same logical change observed on different branches. Present one
 verification prompt per group, listing every `source_worktree`, and close the

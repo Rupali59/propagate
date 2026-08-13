@@ -126,7 +126,7 @@ test("drift: no drift produces zero lines, no DRIFT heading, and still collapses
 
   const text = formatDigest(diff);
   assert.doesNotMatch(text, /DRIFT/);
-  assert.match(text, /^propagate: no change, watcher: alive.*0 open$/);
+  assert.match(text, /^propagate: no change, watcher: retired \(v2 reconcile ok\).*0 open$/);
 });
 
 test("drift: absent from the snapshot entirely (older buildSnapshot) is treated as no drift, not an error", () => {

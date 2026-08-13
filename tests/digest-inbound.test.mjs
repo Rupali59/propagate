@@ -130,7 +130,7 @@ test("inbound: quiet day (no inbound drift, nothing else changed) still collapse
   const snapshot = baseSnapshot({ inbound: { available: true, byWorkspace: [] } });
   const diff = computeDiff(snapshot, priorFrom(snapshot));
   const text = formatDigest(diff);
-  assert.match(text, /^propagate: no change, watcher: alive.*0 open$/);
+  assert.match(text, /^propagate: no change, watcher: retired \(v2 reconcile ok\).*0 open$/);
 });
 
 test("inbound: drift present is enough on its own to break the quiet-day collapse", () => {

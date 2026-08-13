@@ -147,12 +147,22 @@ automation reports itself healthy* failure this skill exists to catch." Mitigate
 
 *Fix:* zero discovered workspaces is a `doctor` failure, not a quiet pass.
 
-### N8 · Worktree enumeration swallows failure — **S1**
+### N8 · Worktree enumeration swallows failure — **S1** — **MOOT 2026-08-14 (watcher retired)**
 `lib/worktrees.mjs:181-185` — bare `catch { return []; }`, no log, no stderr. The watcher then
 falls back to canonical-only silently. `watcher.mjs:569-572` has its own logging catch, but layer 1
 already swallowed, so that catch is dead code.
 
 *Fix:* surface the failure; keep the fallback.
+
+**Moot, not fixed:** the production failure mode described above only happens inside a live
+`enumerateWorktrees()`/`enumerateCanonicalRepos()` fire — grep confirms that call path
+(`lib/worktrees.mjs:83,206`) is imported **only** by `watcher.mjs`, nowhere else in `cli.mjs`,
+`digest.mjs`, or `lib/reconcile.mjs` (the v2 replacement resolves repos differently, via
+`lib/content-id.mjs`'s `resolveRepo`). `watcher.mjs` is retired 2026-08-14 (docs/DECISIONS.md) and
+now refuses to run directly without an explicit override, so this silent-fallback path cannot fire
+in production anymore. The underlying `catch { return []; }` bug is still present in the source —
+this is not a code fix — but it has no live caller left to trigger it. Re-open if a future caller
+(e.g. a v2 worktree-aware feature) starts using `enumerateWorktrees()` again.
 
 ### N9 · Schema rejection stops a sidecar's edges silently — **S1** — **RESOLVED 2026-08-13**
 `additionalProperties: false` means a marker carrying a field the schema doesn't know is rejected by
@@ -461,7 +471,7 @@ precisely the ratio that trained people to ignore v1's queue in the first place 
 UI over expanded glob edges must group by the generating glob (the same way `correlation_id` groups
 worktree-expanded rows today), so one glob decision reads as one queue item, not N.
 
-### N23 · `WATCHER_LOG` is not test-scoped — `npm test` writes into the production log — **S2**
+### N23 · `WATCHER_LOG` is not test-scoped — `npm test` writes into the production log — **S2** — **impact moot 2026-08-14 (watcher retired)**
 Same family as N13/N14 (a scoping variable exists but isn't universally applied) — **not** already
 closed by Phase B's `PROPAGATE_STATE_DIR` work, contrary to what that work's scope might suggest.
 `PROPAGATE_STATE_DIR` *can* relocate `WATCHER_LOG` (`lib/config.mjs:143`, covered by
@@ -479,6 +489,16 @@ part of the problem: an incident investigator reading `watcher.log` cannot tell 
 already proven safe in `tests/init-reload.test.mjs`'s sandboxed acceptance test), or `watcher.mjs`'s
 directly-imported functions take an injectable logger so tests never touch the module-level
 `WATCHER_LOG` binding at all.
+
+**Impact moot, code defect not fixed:** `watcher.mjs` is retired 2026-08-14 (docs/DECISIONS.md) —
+it no longer runs under launchd, and running it directly (`node watcher.mjs`) now refuses without
+an explicit override. `watcher.log` is therefore a retired artifact: nobody reads it as a live
+incident-investigation source anymore, which was this finding's entire stated cost ("an incident
+investigator reading watcher.log cannot tell which lines are real"). The four test files still
+import `watcher.mjs`'s functions directly and still write into the real `watcher.log` during
+`npm test` — that part of the bug is technically unchanged — but with no live incident-response use
+of the file left to corrupt, the fix above is now cosmetic/optional rather than a live risk. Not
+reclassified as RESOLVED because the code itself was not touched.
 
 ---
 
@@ -733,9 +753,11 @@ Remaining, re-ordered against what actually shipped:
 7. **N19 / N20** — the 39 audit-trail-less closes and the 578 hand-authored rows are historical
    debt now that N4's close path exists going forward; a migration decision, not urgent.
 8. **N21 / N22 / N23** — lower urgency: N21/N22 are zero-instance-today/design-only, N23 is test
-   hygiene rather than a production-data risk.
+   hygiene rather than a production-data risk (and its impact is now moot post-2026-08-14 watcher
+   retirement — see N23's entry).
 
-Everything else is friction rather than error.
+Everything else is friction rather than error. **N8** dropped off this list entirely 2026-08-14 —
+moot, not fixed, once `watcher.mjs` (its only caller) was retired; see N8's entry.
 
 ## Related
 

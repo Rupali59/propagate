@@ -130,6 +130,42 @@ test("doctor's new checks pass cleanly on a healthy ledger (no spurious failure)
   }
 });
 
+test("doctor reports the retired watcher as informational only, never a failure, and asserts the v2 replacement's health instead", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    const result = runDoctor(root);
+    const out = result.stdout + result.stderr;
+
+    // The retirement section exists and is clearly labeled...
+    assert.match(out, /launchd watcher — RETIRED/);
+    // ...and neither of its two facts (plist loaded, heartbeat age) is ever
+    // printed with a ✗ — a retired component going stale must not read as
+    // broken (task brief; docs/GOTCHAS.md G2 "absence must be attributable").
+    const retiredSectionStart = out.indexOf("launchd watcher — RETIRED");
+    const replacementSectionStart = out.indexOf("v2 replacement");
+    assert.notEqual(replacementSectionStart, -1, "replacement health section must exist");
+    const retiredSection = out.slice(retiredSectionStart, replacementSectionStart);
+    assert.doesNotMatch(retiredSection, /✗/, "no ✗ inside the retired watcher section");
+    assert.match(retiredSection, /·.*plist loaded/);
+    // Scoped test env: PROPAGATE_STATE_DIR is a fresh temp dir, so there is
+    // no heartbeat file yet — that's the "heartbeat file" branch, not
+    // "heartbeat age" (which only prints once one exists). Either way it
+    // must stay informational (`·`), asserted above via retiredSection.
+    assert.match(retiredSection, /·.*heartbeat (file|age)/);
+
+    // The replacement's health is what CAN fail now: event store readable,
+    // and reconcile completes. Both checks must be present and run (not
+    // skipped) — a scoped temp workspace legitimately has zero events, so
+    // "non-empty" failing here is the check correctly doing its job, not a
+    // spurious failure like the ones this checks against.
+    assert.match(out, /event store readable/);
+    assert.match(out, /event store non-empty/);
+    assert.match(out, /reconcile completes/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GOTCHAS G20: doctor used to carry TWO mechanisms asserting the same fact for
 // workspaces.discovered / decisions.with_tokens / ledger.unknown_types /
