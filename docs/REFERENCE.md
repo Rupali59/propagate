@@ -21,15 +21,15 @@ For "what do I do right now," go back to `SKILL.md`.
   left**; the watcher was its only consumer (`docs/ISSUES.md` N8). The
   smaller `correlationKey`/`worktreeStamp` helpers are still reused for id
   conventions elsewhere (`lib/reconcile.mjs`).
-- launchd plists (installed, confirmed via `launchctl list` 2026-08-13,
-  **before** the watcher plist's separate unload — see `docs/DECISIONS.md`
-  2026-08-14 for that step, done outside this doc's scope):
-  `~/Library/LaunchAgents/com.tathya.propagate.watcher.plist` (retired
-  component's plist — unload/disable is a separate operational step, not a
-  file-content change this repo makes) and
-  `~/Library/LaunchAgents/com.tathya.propagate.digest.plist` (still active —
-  the digest is not retired, only the watcher is). The watcher plist's label
-  is owned by `lib/plist.mjs:25`:
+- launchd plists (confirmed via `launchctl list` 2026-08-14, **after** the
+  watcher's unload). Exactly one is installed now:
+  `~/Library/LaunchAgents/com.tathya.propagate.digest.plist` — the digest is
+  not retired, only the watcher is. The watcher's plist was booted out and
+  deleted 2026-08-14; the archived copy lives at
+  `docs/archive/com.tathya.propagate.watcher.plist.retired-2026-08-14` and is
+  deliberately **not** written as a `~/Library/LaunchAgents/…` path, because a
+  path in that form reads as installed and is one copy-paste from being so.
+  The retired label is still owned by `lib/plist.mjs:25`:
   `export const LABEL = process.env.PROPAGATE_LABEL || "com.tathya.propagate.watcher"` —
   override with `PROPAGATE_LABEL` if you ever rename it again, and update this
   file and `doctor`'s checks in the same change. `lib/plist.mjs` only ever
@@ -265,12 +265,14 @@ retirement — the digest is still active) remain current.
 # 1. Install deps — still current.
 cd ${CLAUDE_PLUGIN_ROOT} && npm install
 
-# 2. Load launchd plist — HISTORICAL. Do not run: the watcher is retired,
-#    and re-loading its plist re-arms the exact background job that was
-#    retired for cause (docs/DECISIONS.md 2026-08-14). The live unload is a
-#    separate, later operational step outside this repo's automated changes.
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tathya.propagate.watcher.plist
-launchctl list | grep com.tathya.propagate.watcher   # confirm loaded
+# 2. Load launchd plist — HISTORICAL, and no longer runnable as written. The
+#    watcher was booted out and its plist deleted from ~/Library/LaunchAgents
+#    on 2026-08-14. A copy is archived at
+#    docs/archive/com.tathya.propagate.watcher.plist.retired-2026-08-14, so the
+#    retirement is reversible — but restoring it re-arms a component retired
+#    for cause (docs/DECISIONS.md 2026-08-14). The commands are deliberately
+#    not reproduced in runnable form here: a copy-pasteable line is how a
+#    retired daemon comes back by accident.
 
 # 3. First-run smoke test — HISTORICAL, and now actively blocked: this
 #    exits non-zero and refuses unless PROPAGATE_ALLOW_RETIRED_WATCHER=1 is
@@ -296,19 +298,19 @@ live — it is, and always was, installed by a separate mechanism.)
 
 ## Disable temporarily — watcher: superseded by full retirement; digest: still applies
 
-For the watcher, this is now moot — it is retired outright, not merely
-disabled, and the live unload is a separate operational step done outside
-this repo's automated changes (see `docs/DECISIONS.md` 2026-08-14). Kept for
-the digest, and as a record of the pre-retirement command shape:
+For the watcher this is moot — it was retired outright rather than disabled,
+and the unload was completed 2026-08-14 (`launchctl bootout`, plist removed,
+archived under `docs/archive/`). Only the digest remains disableable:
 
 ```bash
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tathya.propagate.watcher.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.tathya.propagate.digest.plist
 ```
 
-Re-enable: same `bootstrap` command as above — but re-enabling the watcher
-means re-arming a component that was retired for cause; read
-`docs/DECISIONS.md` 2026-08-14 in full before doing so. Ledger and sidecars
-persist regardless.
+Re-enable with the matching `bootstrap`. Note the digest is now the **only**
+scheduled component and the sole proactive channel — disabling it leaves
+`reconcile` and `check` as the only ways drift ever reaches you, both of which
+require someone to ask. Ledger, sidecars and the event store persist
+regardless.
 
 ## Architecture summary (for future-you)
 

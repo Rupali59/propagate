@@ -52,13 +52,12 @@ Code/docs side of the retirement, this pass:
   now-intentionally-wrong behavior, +6 new — see `docs/DECISIONS.md`
   2026-08-14 for the exact breakdown).
 
-**Explicitly NOT done here, and not claimed:** the actual
-`launchctl bootout` unloading `com.tathya.propagate.watcher` from launchd.
-That is a separate, later operational step (task constraint: no `launchctl`
-commands run as part of this change). `docs/SYSTEMS.md`'s `propagate` row
-marks `retirement_checklist_done` as `partial` for exactly this reason —
-verify with `launchctl list | grep com.tathya.propagate.watcher` before
-updating that to `done`. v1 ledger rows (152ish open across 7 workspaces +
+**Completed 2026-08-14:** the launchd unload itself — the job was booted out,
+its plist deleted from `~/Library/LaunchAgents`, and a copy archived at
+`docs/archive/com.tathya.propagate.watcher.plist.retired-2026-08-14` so the
+retirement stays reversible. Verified afterwards: only the digest job remains
+loaded, no watcher process running, all 379 v2 events intact.
+`docs/SYSTEMS.md`'s `propagate` row is now `done`. v1 ledger rows (152ish open across 7 workspaces +
 cross-repo, measured 2026-08-14 as 149+3) are untouched and remain readable
 via `status`/`drain` exactly as before — retiring the writer does not touch
 the reader.
