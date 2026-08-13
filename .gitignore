@@ -22,6 +22,7 @@ heartbeat
 .code-review-graph/
 watcher.log
 *.log.*.gz
+graph-mcp-cache.json
 # derived index — disposable, rebuilt in <1s via `node index.mjs --rebuild`
 index.db
 index.db-journal

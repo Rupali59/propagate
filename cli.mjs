@@ -48,6 +48,7 @@ import {
   SUSPICIOUS_MARKERS,
   CROSS_LEDGER_JSONL,
   SKILL_DIR,
+  GRAPH_MCP_CACHE_PATH,
 } from "./lib/config.mjs";
 import { readLedger, readLedgerWithStats, lastActivityAt, markStatus } from "./lib/ledger.mjs";
 import { loadSidecar, SidecarError } from "./lib/frontmatter.mjs";
@@ -176,6 +177,63 @@ export function findDuplicateOpenAcrossLedgers(ledgerEntries) {
     count: dups.length,
     examples: dups.slice(0, 5).map(([abs, set]) => ({ path: abs, ledgers: [...set] })),
   };
+}
+
+/**
+ * Assign each unique sidecar (by `fs.realpathSync`) to its nearest — i.e.
+ * deepest — owning workspace, so `doctor` validates each sidecar exactly
+ * once instead of once per containing workspace.
+ *
+ * Workspace roots nest (`GitHub` ⊃ `PanditPawanKaushik` ⊃ `SSJK-mb`), and
+ * `findSidecars` recursively walks a workspace's *entire* subtree with no
+ * awareness of nested workspace boundaries — so a sidecar under `SSJK-mb`
+ * is found by all three ancestors' walks. Before this function existed,
+ * `doctor` validated (loadSidecar + downstream-path checks) whatever
+ * `findSidecars` returned for every workspace independently, so that one
+ * sidecar's defects were reported once per containing workspace. See
+ * docs/ISSUES.md A2 for the measured consequence (28 sources open in more
+ * than one ledger — all nested parent/child pairs).
+ *
+ * Keyed by realpath, not the raw path string, because symlinks and worktree
+ * checkouts make the same file reachable via more than one path — two
+ * different raw strings that are the same file must still collapse to one
+ * validation, one report.
+ *
+ * @param {Array<{root: string}>} workspaces
+ * @param {Map<string, string[]>} sidecarsByWsRoot ws.root -> absolute sidecar
+ *   paths found under it (as returned by `findSidecars(ws.root)`), one entry
+ *   per workspace — a sidecar nested under two workspace roots appears in
+ *   both entries' arrays, which is exactly the duplication being collapsed.
+ * @returns {{assignedByWsRoot: Map<string, string[]>, uniqueCount: number}}
+ *   `assignedByWsRoot` covers every workspace passed in (empty array for a
+ *   workspace assigned nothing); `uniqueCount` is the number of distinct
+ *   real files across all input sidecars — the coverage-invariant target.
+ */
+export function assignSidecarsToWorkspaces(workspaces, sidecarsByWsRoot) {
+  const byRealpath = new Map(); // realpath -> { originalPath, candidates: [ws, ...] }
+  for (const ws of workspaces) {
+    const list = sidecarsByWsRoot.get(ws.root) || [];
+    for (const sc of list) {
+      let real;
+      try {
+        real = realpathSync(sc);
+      } catch {
+        real = sc; // vanished between find and realpath — fall back to the raw path
+      }
+      if (!byRealpath.has(real)) byRealpath.set(real, { originalPath: sc, candidates: [] });
+      byRealpath.get(real).candidates.push(ws);
+    }
+  }
+
+  const assignedByWsRoot = new Map(workspaces.map((ws) => [ws.root, []]));
+  for (const { originalPath, candidates } of byRealpath.values()) {
+    // Deepest wins: the workspace whose root is the longest (most nested)
+    // among every workspace whose subtree contains this sidecar.
+    const nearest = candidates.reduce((best, ws) => (ws.root.length > best.root.length ? ws : best));
+    assignedByWsRoot.get(nearest.root).push(originalPath);
+  }
+
+  return { assignedByWsRoot, uniqueCount: byRealpath.size };
 }
 
 /** Root of the nearest ancestor workspace, or null. */
@@ -492,6 +550,74 @@ async function status() {
   }
 }
 
+/** One hour — long enough that repeat `doctor` runs in a session are free, short
+ * enough that a genuine MCP registration change is visible same-day. */
+const GRAPH_MCP_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Probe whether the `code-review-graph` MCP is registered, via `claude mcp
+ * list`. Bounded and cached — see docs/ISSUES.md N16: this shell-out was
+ * measured taking 17.8s of a ~19s `doctor` run (94%) to report a single
+ * WARNING that is known and deferred (TM-064). An unbounded synchronous
+ * subprocess inside a health check is a liveness risk, not just slow — a
+ * hung `claude` binary would hang `doctor` itself, forever, with no signal.
+ *
+ * Returns `{ status, checkedAt, fromCache, detail? }` where `status` is one
+ * of `"registered" | "not-registered" | "timeout" | "error"`. `"timeout"`
+ * and `"error"` are distinct from `"not-registered"` on purpose: "I could
+ * not look" and "I looked and it is not there" must never collapse into the
+ * same report (that distinction is this register's entire theme — see
+ * docs/ISSUES.md's root-defect section). Never returns a bare boolean and
+ * never silently maps a timeout to a pass.
+ *
+ * Result is cached to GRAPH_MCP_CACHE_PATH (respects PROPAGATE_STATE_DIR via
+ * lib/config.mjs) for GRAPH_MCP_CACHE_TTL_MS, including timeout/error
+ * outcomes — a hung `claude` binary should not cost every `doctor` run 2s
+ * for an hour either, and the cached entry still carries its own status so a
+ * cached timeout is reported as a cached timeout, not a cached pass.
+ *
+ * @param {{cachePath?: string, ttlMs?: number, now?: () => number}} [opts] test seams
+ */
+export async function checkGraphMcpStatus(opts = {}) {
+  const cachePath = opts.cachePath ?? GRAPH_MCP_CACHE_PATH;
+  const ttlMs = opts.ttlMs ?? GRAPH_MCP_CACHE_TTL_MS;
+  const now = opts.now ?? Date.now;
+
+  try {
+    if (existsSync(cachePath)) {
+      const cached = JSON.parse(await readFile(cachePath, "utf8"));
+      if (typeof cached.checkedAt === "number" && now() - cached.checkedAt < ttlMs) {
+        return { ...cached, fromCache: true };
+      }
+    }
+  } catch {
+    /* corrupt or unreadable cache -- fall through and recompute */
+  }
+
+  const runMcpList = opts.runMcpList ?? (() => execSync("claude mcp list 2>&1", { encoding: "utf8", timeout: 2000 }));
+
+  let result;
+  try {
+    const out = runMcpList();
+    result = { status: /code-review-graph/.test(out) ? "registered" : "not-registered", checkedAt: now() };
+  } catch (err) {
+    // execSync throws on nonzero exit AND on hitting `timeout` -- the timeout
+    // case is marked by `killed`/`signal` (Node kills the child with
+    // `killSignal`, default SIGTERM) and must stay distinguishable from "ran
+    // fine and said no" or "the `claude` binary errored for some other reason".
+    const timedOut = err.killed === true || err.signal === "SIGTERM" || err.code === "ETIMEDOUT";
+    result = { status: timedOut ? "timeout" : "error", checkedAt: now(), detail: err.message };
+  }
+
+  try {
+    await mkdir(path.dirname(cachePath), { recursive: true });
+    await writeFile(cachePath, JSON.stringify(result), "utf8");
+  } catch {
+    /* best-effort cache write -- a failed write must not fail the check itself */
+  }
+  return { ...result, fromCache: false };
+}
+
 async function doctor() {
   let problems = 0;
   function check(label, ok, detail = "") {
@@ -504,6 +630,15 @@ async function doctor() {
   }
   function warn(label, detail = "") {
     console.log(`  ${YELLOW}!${RESET} ${label}${detail ? "  " + DIM + detail + RESET : ""}`);
+  }
+  // Summary line for an aggregate that restates counts already reported by
+  // per-entry `check()` failures above it — informational, not a second vote.
+  // A run-level summary is useful (see docs/ISSUES.md A2's "5th problem"
+  // note); it must never double-count the same underlying defect it is
+  // summarizing. Uses a neutral marker (not ✗) precisely so it reads as
+  // "here's the tally", not "here's a new failure".
+  function info(label, detail = "") {
+    console.log(`  ${DIM}·${RESET} ${label}${detail ? "  " + DIM + detail + RESET : ""}`);
   }
 
   console.log(`${BOLD}# launchd${RESET}`);
@@ -554,6 +689,19 @@ async function doctor() {
     console.log(`  ${YELLOW}!${RESET} state.json.bak exists  ${DIM}no .bak yet (normal until watcher writes for the 2nd time)${RESET}`);
   }
 
+  // Sidecars: gather once per workspace root, then collapse duplicates.
+  // findSidecars(ws.root) walks that workspace's ENTIRE subtree with no
+  // awareness of nested workspace boundaries, so a sidecar under a nested
+  // workspace (e.g. SSJK-mb under PanditPawanKaushik under the GitHub hub)
+  // is found by every ancestor's walk. assignSidecarsToWorkspaces collapses
+  // that to one validation per unique sidecar, owned by its nearest
+  // (deepest) workspace. See docs/ISSUES.md A2.
+  const sidecarsByWsRoot = new Map();
+  for (const ws of WORKSPACES) {
+    sidecarsByWsRoot.set(ws.root, await findSidecars(ws.root));
+  }
+  const { assignedByWsRoot } = assignSidecarsToWorkspaces(WORKSPACES, sidecarsByWsRoot);
+
   for (const ws of WORKSPACES) {
     console.log(`\n${BOLD}# Workspace: ${ws.name}${RESET}`);
     check("ledger JSONL exists", existsSync(ws.ledgerJsonl));
@@ -587,8 +735,8 @@ async function doctor() {
     }
     check("ledger MD exists", existsSync(ws.ledgerMd));
 
-    // Sidecars
-    const sidecars = await findSidecars(ws.root);
+    // Sidecars — those assigned to THIS workspace as nearest owner (see above).
+    const sidecars = assignedByWsRoot.get(ws.root) || [];
     console.log(`  ${DIM}found ${sidecars.length} sidecar${sidecars.length === 1 ? "" : "s"}${RESET}`);
     for (const sc of sidecars) {
       const rel = path.relative(ws.root, sc);
@@ -670,12 +818,18 @@ async function doctor() {
       }
     }
     if (pathProblems === 0) {
+      // No per-entry failures fired above — this aggregate is the only signal,
+      // so it still counts as a real check (today's behaviour, unchanged).
       check("sidecar downstream paths resolve", true, pathWarns ? `${pathWarns} warn` : "");
     } else {
-      check(
+      // Per-entry `check()` calls above already reported and counted each
+      // directory-as-downstream failure individually. Restating the same
+      // defect here as a second `✗` would count it twice for one underlying
+      // bug (docs/ISSUES.md A2's "5th problem" note, now fixed) — so this is
+      // a summary, informational only, not a vote.
+      info(
         "sidecar downstream paths resolve",
-        false,
-        `${pathProblems} directory-as-downstream failure${pathProblems === 1 ? "" : "s"}${pathWarns ? `, ${pathWarns} warn` : ""}`,
+        `${pathProblems} directory-as-downstream failure${pathProblems === 1 ? "" : "s"} (see above)${pathWarns ? `, ${pathWarns} warn` : ""}`,
       );
     }
   }
@@ -735,17 +889,23 @@ async function doctor() {
   }
 
   console.log(`\n${BOLD}# Graph integration${RESET}`);
-  let graphMcp = false;
-  try {
-    const out = execSync("claude mcp list 2>&1", { encoding: "utf8" });
-    graphMcp = /code-review-graph/.test(out);
-  } catch {
-    /* claude CLI may not be available */
-  }
-  if (graphMcp) {
-    check("code-review-graph MCP registered", true);
-  } else {
-    console.log(`  ${YELLOW}!${RESET} code-review-graph MCP not registered  ${DIM}(V1 expected; see TM-064)${RESET}`);
+  {
+    const graphResult = await checkGraphMcpStatus();
+    const ageMin = Math.max(0, Math.round((Date.now() - graphResult.checkedAt) / 60_000));
+    const cacheNote = graphResult.fromCache ? ` (cached ${ageMin}m ago)` : "";
+    if (graphResult.status === "registered") {
+      check("code-review-graph MCP registered", true, cacheNote.trim());
+    } else if (graphResult.status === "not-registered") {
+      console.log(`  ${YELLOW}!${RESET} code-review-graph MCP not registered  ${DIM}(V1 expected; see TM-064)${cacheNote}${RESET}`);
+    } else if (graphResult.status === "timeout") {
+      // Explicit unknown state, not a pass and not a silent skip: "I could
+      // not look" must read differently from "I looked and it's fine".
+      console.log(`  ${YELLOW}!${RESET} graph integration check timed out after 2s — status unknown${DIM}${cacheNote}${RESET}`);
+    } else {
+      console.log(
+        `  ${YELLOW}!${RESET} graph integration check failed — status unknown  ${DIM}${graphResult.detail || ""}${cacheNote}${RESET}`,
+      );
+    }
   }
 
   console.log(`\n${BOLD}# Discovery integrity${RESET}`);

@@ -341,3 +341,60 @@ failure.
 (doctor sidecar-loop), `docs/ISSUES.md` N9,
 `tests/sidecar-prune.test.mjs`,
 `~/.claude/plans/okay-i-dont-think-logical-haven.md` Phase A
+
+---
+
+## 2026-08-13: v1's implicit ledger creation stays; the fix belongs to v2's bootstrap
+
+**What:** Nothing in v1 explicitly creates a ledger. It materialises on the
+first `appendFile`, and its location is *inferred* by `makeWorkspaceRecord`
+(`lib/discovery.mjs:149-174`) from whether `docs/` happened to exist at that
+moment — which is why the code carries a "never relocate a live ledger because
+a `docs/` dir later appears" guard. We are **not** fixing that in v1.
+
+**Why:** The approved v2 design abolishes per-workspace ledgers entirely —
+events move to one owned store at `$PROPAGATE_STATE_DIR`, created once and
+explicitly at bootstrap. Declaring the ledger path in each marker would mean a
+schema change to 18 live sidecars (and N9 says schema changes are how sidecars
+break) in service of a structure v2 removes. Work with a known expiry.
+
+**Gotchas:** Two real consequences stay live until v2 bootstrap lands. A freshly
+initialised workspace has **no ledger at all** until something drifts, so
+`status` and `doctor` read a path that does not yet exist. And the location
+remains an accident of directory layout at first-write time — the guard contains
+the damage but does not remove the cause.
+
+**Affects:** propagate
+**Refs:** `lib/discovery.mjs` (`makeWorkspaceRecord`), `lib/ledger.mjs:107,241`,
+`~/.claude/plans/okay-i-dont-think-logical-haven.md` §5 (bootstrap git stage)
+
+---
+
+## 2026-08-13: `persona/profile.md` deleted across all 7 workspaces
+
+**What:** Removed `profile.md` from every `<Workspace>/persona/`. All 7 were
+archived first to `~/Documents/GitHub/_archive/profile-md-2026-08-13/`. The
+`profile.yaml` sources are untouched.
+
+**Why:** Each was a *rendered* artifact whose generator no longer exists —
+`Utility/scripts/generate-personas.js` is gone; `Utility/` now contains only
+`chaukidar/`. Every copy was stale against its own source (ManavDaehi's by three
+months: yaml 2026-08-10, md 2026-05-09), **none** was declared as a downstream
+of `profile.yaml` in any sidecar, and nothing in any `CLAUDE.md` referenced one.
+A derived file with no renderer, unread for months, that still reads as
+authoritative is worse than no file — and this is the identity root, the
+highest-fan-out node in the graph.
+
+**Gotchas:** **4 of the 7 were untracked** (Keerti, Khushboo, Rishabh, Tathya),
+so `git checkout` would not restore them — hence the archive, which is the only
+copy. The 3 tracked ones (ManavDaehi, PanditPawanKaushik, Tushar) now show as
+deletions in their own repos and need committing or reverting there; that is a
+per-repo decision, not made here.
+
+If a readable view is wanted again, it should be regenerated from
+`profile.yaml` **and declared** as a `kind: code` downstream so the drift that
+went unnoticed for three months would fire next time.
+
+**Affects:** propagate, Keerti, Khushboo, ManavDaehi, PanditPawanKaushik, Rishabh, Tathya, Tushar
+**Refs:** `_archive/profile-md-2026-08-13/`, `<Workspace>/persona/.propagates.yml`,
+`~/.claude/plans/okay-i-dont-think-logical-haven.md` §6

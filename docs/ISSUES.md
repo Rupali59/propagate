@@ -274,6 +274,37 @@ Hit twice in one day: `design/` → `docs/design/` (3 paths), then the `docs/` r
 *Fix:* keep a last-seen set in `state.json`; "existed at last run, now missing" is a break, not a
 warning.
 
+### N16 · `doctor`'s graph-integration check spent 94% of the run on a known-deferred answer — **S2**
+Measured 2026-08-13 from `~/Documents/GitHub/Vipin Kaushik`:
+
+```
+claude mcp list  : 17793ms      <- 94% of doctor's ~19s
+readLedger x8    :   102ms
+launchctl list    :    69ms
+```
+
+`doctor`'s "Graph integration" section shelled out to `claude mcp list` (`cli.mjs`, synchronous
+`execSync`, no timeout) to check whether `code-review-graph` is MCP-registered. Its only possible
+output was a WARNING that is already known and already deferred: `code-review-graph MCP not
+registered (V1 expected; see TM-064)`. Every `doctor` run paid ~18 seconds, unbounded, to reconfirm a
+fact already written down.
+
+This is the same failure class the rest of this register is about, in a different shape: not a
+check that silently reports nothing, but a check whose *cost* silently exceeds the value of what it
+reports — and because `execSync` here had no `timeout`, a hung `claude` binary would hang `doctor`
+itself, indefinitely, with no distinguishing signal. **An unbounded subprocess inside a health check
+is a liveness risk, not just a slow one** — a health check must never cost more than the thing it
+checks, or the cost itself becomes the next silent-failure vector.
+
+*Fix (2026-08-13):* `checkGraphMcpStatus()` (`cli.mjs`) bounds the shell-out to a 2s `timeout` and
+caches the outcome (including timeout/error outcomes) to `GRAPH_MCP_CACHE_PATH` — inside
+`PROPAGATE_STATE_DIR` when set, via `lib/config.mjs`, same as `STATE_PATH`/`HEARTBEAT_PATH` — for one
+hour. Critically, a timeout is reported as `graph integration check timed out after 2s — status
+unknown`, a distinct `status: "timeout"` outcome that is never treated as, or printed as, a pass —
+"I could not look" must stay visibly different from "I looked and it is fine" (the theme of this
+whole register). Measured after: doctor's graph-integration section drops from ~17.8s to
+sub-millisecond on a warm cache, cold-cache cost bounded to ≤2s instead of unbounded.
+
 ---
 
 ## Ledger attribution
@@ -293,7 +324,45 @@ history must be re-pointed, and N4 makes a half-applied migration invisible.
 `hasOpenDuplicateDrift` is scoped to one file and `source` is workspace-relative. `DECISIONS.md`
 2026-08-10 states plainly that "total open stays 93" was true only at the instant of promotion, not
 a steady-state invariant. `findDuplicateOpenAcrossLedgers` (`cli.mjs:119-120`) was shipped as the
-deferral's **expiry signal** — it has since fired.
+deferral's **expiry signal** — it has since fired: 28 source paths, measured 2026-08-13 from
+`~/Documents/GitHub/Vipin Kaushik`.
+
+**Root cause, measured (2026-08-13):** all 28 are nested parent+child pairs. Zero are genuinely
+unrelated ledgers. Example: `PanditPawanKaushik/SSJK-mb/server/auth/webauthn.js` is open in both the
+`GitHub` hub ledger and the `SSJK-mb` ledger. This is not an independent defect — it is a
+**symptom of nested workspace attribution**: workspace roots nest (`GitHub` ⊃ `PanditPawanKaushik` ⊃
+`SSJK-mb`), and the watcher attributes a changed file's drift row to *every* workspace whose subtree
+contains it, not just the nearest one. A file under a child workspace gets claimed by the child AND
+every ancestor, and each fires its own row into its own ledger.
+
+The real fix is **attribution at write time**: a file belongs to its nearest (deepest) workspace, and
+only that workspace's ledger should ever receive its rows. **This has not been done.** The
+2026-08-13 doctor-dedup commit (see below) only dedupes *reporting* — the same nested-workspace
+insight applied to `doctor`'s sidecar validation, not to the watcher's ledger writes. Changing where
+the watcher writes is a live behaviour change, and it would leave the 28 existing duplicate rows
+needing a separate decision (migrate? close-and-re-emit, per A1's rule? leave as historical?). Do not
+conflate the two: reporting is deduped as of 2026-08-13; attribution is not, and `watcher.mjs` was
+not touched to produce that fix.
+
+*Consequence for `doctor`:* the sidecar **validation** side of this same nested-root pattern was
+separately measured and fixed 2026-08-13 — `doctor` was running `findSidecars` per workspace root,
+and since `findSidecars` recursively walks a workspace's entire subtree with no awareness of nested
+workspace boundaries, the same `.propagates.yml` was found (and revalidated) by every ancestor
+workspace. Measured before the fix: 43 sidecar scans for 21 unique sidecars (22 wasted, ~51%), 11
+`doctor` problems for 4 real defects. After the sidecar-dedup fix alone: 21 scans (one per unique
+sidecar, exactly), 5 problems (the 5th was `doctor`'s pre-existing habit of emitting both a per-entry
+`check()` failure AND an aggregate "sidecar downstream paths resolve" `check()` failure for the same
+directory-as-downstream defect — a double-count that only became *visible* here because `pathProblems`
+had been declared-but-never-incremented until this same 2026-08-13 session, so before that the
+aggregate could never fail and the double-count could not fire). **RESOLVED same day:** the aggregate
+now prints as an informational summary (count only, `·` marker, not `✗`) whenever per-entry failures
+already fired above it, instead of casting a second vote for the same bug — see `info()` in
+`cli.mjs`'s `doctor()`. Warnings-only runs are unchanged: with zero per-entry failures the aggregate
+still counts as the sole `check()`. Net: 4 problems for 4 real defects, matching one-`✗`-per-defect.
+`assignSidecarsToWorkspaces` (`cli.mjs`) assigns each sidecar, keyed by `fs.realpathSync`, to the
+deepest workspace whose root contains it; `doctor`'s per-workspace loop validates only what it owns.
+This is the reporting-side analogue of the write-time fix described above, and does not substitute
+for it — the ledger duplication (this section) is unchanged.
 
 ### A3 · Ledger location is pinned — **S2**
 `makeWorkspaceRecord` resolves to `<root>/docs/PROPAGATION_LEDGER.jsonl` when `docs/` exists, else
