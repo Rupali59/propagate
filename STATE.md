@@ -1,15 +1,17 @@
 # propagate — State
 
-Last updated: 2026-08-10
+Last updated: 2026-08-13
 
 > Navigation: "What's the current status?" → this file. "Why did we choose X?" →
-> `docs/DECISIONS.md`. "How do I use it?" → `SKILL.md`.
+> `docs/DECISIONS.md`. "How do I use it?" → `SKILL.md`. "Where do I start
+> reading?" → `docs/README.md`.
 
 ## What this is
 
 Doc/code drift watcher. Declares edges in `.propagates.yml` sidecars, detects
 source-file mtime changes, and appends drift rows to a per-workspace append-only
-JSONL ledger. Runs as launchd `com.rupali.propagate` on `StartInterval 60`.
+JSONL ledger. Runs as launchd `com.tathya.propagate.watcher` on `StartInterval
+60`; a companion `com.tathya.propagate.digest` runs a daily summary (see below).
 
 Own git repo, remote `Rupali59/propagate-skill`.
 
@@ -18,8 +20,9 @@ Own git repo, remote `Rupali59/propagate-skill`.
 ### 2026-08-10 — Part A COMPLETE: discovery partition fixed, 2 → 7 workspaces
 
 `workspace: true` now marks a ledger boundary explicitly; discovery always
-descends. All 7 ledger-owning dirs are discovered. **116/116 tests pass**
-(was 80; discovery had *zero* coverage before). `doctor: all green`.
+descends. All 7 ledger-owning dirs are discovered. **116/116 tests pass, as of 2026-08-10** (was 80; discovery had *zero*
+coverage before) — the full suite has grown well past that since; run `npm
+test` for the current count. `doctor: all green`.
 
 Verified end-to-end: after promotion the watcher fired and wrote two
 `code_drift` rows for `SSJK-mb/.env.example` and `server/config/index.js` into
@@ -39,7 +42,24 @@ its `quietDays` **only** from ledger content, in separate objects, so the two ca
 never be conflated again. Live proof: watcher `alive` at 36s while ManavDaehi
 reports `quietDays: 12` with 0 open — a healthy watcher on a quiet project.
 
-**Remaining:** the daily digest (Part B2) and the Systems Ledger seed records.
+**Remaining as of 2026-08-10:** the daily digest (Part B2) and the Systems
+Ledger seed records.
+
+### 2026-08-13 — Part B has landed
+
+Verified directly, not assumed: `~/Library/LaunchAgents/com.tathya.propagate.digest.plist`
+exists (mtime 2026-08-11) and `launchctl list` shows it registered (loaded,
+last exit `0`, not currently running — expected for a `StartCalendarInterval`
+job between fires). `~/.claude/DAILY.md` carries a real entry timestamped
+`2026-08-13T03:57:19Z` with live BROKEN/NEW DRIFT/CLOSED sections, and
+`~/.claude/propagate-digest-state.json` shows a matching `lastRunAt`. The
+Systems Ledger itself (`docs/SYSTEMS.md`) is populated and has been since
+2026-08-10. So: **digest build + Systems Ledger seed are both done.** What is
+*not* yet true, and shouldn't be claimed: `docs/SYSTEMS.md`'s
+`propagate-digest` row still carries a blank `adoption_date` by design — that
+field only fills after two weeks of demonstrated engagement, which as of this
+date has not been observed or measured. Landed ≠ adopted; see that row for the
+distinction.
 
 ### Historical — the bug this fixed
 
@@ -91,9 +111,13 @@ should be split into a separate `reload` mode.
 
 ## Active initiatives
 
-- **Part A** — split "edge declarations" from "ledger boundary" via an explicit
-  `workspace: true` field. 2 → 7 workspaces.
-- **Part B** — `status --all --json` + a daily digest. A web UI was designed and
-  then **cut**; see `docs/DECISIONS.md` 2026-08-10.
+- **Part A** — COMPLETE (2026-08-10). Split "edge declarations" from "ledger
+  boundary" via an explicit `workspace: true` field. 2 → 7 workspaces.
+- **Part B** — COMPLETE as of 2026-08-13. `status --all --json`, the daily
+  digest (`com.tathya.propagate.digest`), and the Systems Ledger seed
+  (`docs/SYSTEMS.md`) are all built and verifiably running. A web UI was
+  designed and then **cut**; see `docs/DECISIONS.md` 2026-08-10. Adoption of
+  the digest — as opposed to it running — is a separate, still-open question;
+  see `docs/SYSTEMS.md`'s `propagate-digest` row.
 - **Deferred** — migrating the 69 misfiled hub rows. Close-and-re-emit only,
   never rewrite.

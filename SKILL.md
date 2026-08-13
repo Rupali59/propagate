@@ -5,140 +5,82 @@ description: Manage the propagation ledger — drain open drift events, check wa
 
 # /propagate — Propagation skill
 
-Companion to the launchd watcher at `${CLAUDE_PLUGIN_ROOT}/watcher.mjs`.
-The watcher detects drift; this skill walks the human through resolving it,
-declaring new sidecars, and verifying health.
+<!-- premise:start -->
+**propagate coordinates parallel work.** Work proceeds in parallel — across
+branches and worktrees inside a repo, and across repos in the workspace — and
+parallel streams lose sight of each other. propagate declares the couplings that
+matter, watches them, and keeps an append-only ledger tied to git workflow, so
+every stream can see what moved, where, and on which branch. It never edits a
+downstream; it tells a human.
+<!-- premise:end -->
 
-**Canonical state:**
-- Watcher script: `${CLAUDE_PLUGIN_ROOT}/watcher.mjs`
-- Worktree helpers: `${CLAUDE_PLUGIN_ROOT}/lib/worktrees.mjs`
-- launchd plist: `~/Library/LaunchAgents/com.rupali.propagate.plist`
-- Ledger (JSONL, authoritative): **per-workspace, resolved by `lib/discovery.mjs` `makeWorkspaceRecord`** —
-  `<workspace-root>/docs/PROPAGATION_LEDGER.jsonl` when `<root>/docs/` exists, otherwise
-  `<workspace-root>/.propagation/ledger.jsonl`. There is NOT one global ledger. Examples:
-  `Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl` (has `docs/`), but the **GitHub hub** workspace
-  (`~/Documents/GitHub`, which any sub-project without its own registered workspace resolves to via
-  `currentWorkspace()`) has no `docs/`, so its ledger is `~/Documents/GitHub/.propagation/ledger.jsonl`.
-  ⚠️ Always resolve the ledger for the row you're closing from the SAME workspace `status`/`doctor`
-  reports it under (see the drain note below) — writing `markStatus` to a different workspace's ledger
-  silently no-ops (the row never clears).
-- Ledger (Markdown, rendered): the sibling `…/PROPAGATION_LEDGER.md` or `…/.propagation/ledger.md`.
-- Sidecars: `<workspace-root>/**/.propagates.yml` (every discovered workspace)
-- State: `${CLAUDE_PLUGIN_ROOT}/state.json` (with `.bak` rotation)
-- Heartbeat: `${CLAUDE_PLUGIN_ROOT}/heartbeat`
-- Logs: `${CLAUDE_PLUGIN_ROOT}/watcher.log`, `watcher.stdout.log`, `watcher.stderr.log`
-- Tests: `${CLAUDE_PLUGIN_ROOT}/tests/` — run with `npm test`
+**Hard non-goal:** propagate never writes to a downstream file on its own
+initiative. Every close, edit, or dismissal is a human (or an agent acting on a
+human's behalf) making the call — the ledger is a record of that decision, not
+an automation that makes it.
 
-**Watcher cadence (post-2026-06-08):**
-- launchd `WatchPaths` fires on changes inside watched roots (FSEvents-backed, bubbles up nested file changes).
-- launchd `StartInterval: 60` guarantees a fire every 60s regardless of file events. Catches deep-nested edits FSEvents might miss.
-- The watcher SKIPS `renderMarkdown` when no events fired this run — without this guard, every no-drift fire would re-tick the ledger MD and cascade-trigger the watcher every ~5s.
+## Contract
 
-**Worktree-awareness (post-2026-06-08):**
-- Sidecar paths stay canonical (e.g. `../VipinKaushik/lib/pricing.ts`). The watcher expands at runtime via `git worktree list --porcelain` per canonical repo.
-- Edits in non-canonical worktrees fire rows with `source_worktree: {branch, commit}`.
-- All rows pointing at the same logical file across worktrees share a `correlation_id` (e.g. `VipinKaushik:lib/pricing.ts`).
-- First-observation of a sibling-worktree file silently seeds state.json without firing drift (bootstrap behaviour).
+- **Only stop for:** a `drain`-style decision (apply / defer / wontfix a row),
+  a `declare` edit to a `.propagates.yml` sidecar, or a genuine one-way door
+  (disabling the watcher, migrating ledger rows).
+- **Never stop for:** running `status`, `doctor`, or `check` — just run them
+  and report what they say.
+- **Never do:** edit a downstream file automatically, rewrite a ledger row,
+  or hand-invent a ledger path instead of resolving it via discovery.
+
+## Read this first
+
+| When | Read this |
+|---|---|
+| you need the premise, and what this refuses to do | this file's identity block (canonical); `docs/SPEC.md` §1 for the evidence |
+| a row won't close after you marked it done | `docs/REFERENCE.md` § Ledger resolution |
+| something is broken, or a doctor check fails | `docs/ISSUES.md` |
+| you're changing behaviour and need to know why | `docs/DECISIONS.md` |
+| you need exact paths, flags, or the install sequence | `docs/REFERENCE.md` |
+| you want current status / what's in flight | `STATE.md` |
+| you're adding a background component | `docs/SYSTEMS.md` |
 
 ## Modes
 
 Invoke this skill with one of the modes below. Default mode if none given: `status`.
 
-### `status` — what's open
+### CLI commands
 
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/cli.mjs status          # THIS project (workspace at cwd)
-node ${CLAUDE_PLUGIN_ROOT}/cli.mjs status --all    # every workspace
-node ${CLAUDE_PLUGIN_ROOT}/cli.mjs status --cross  # cross-repo ledger
-```
+These are real `cli.mjs` subcommands — run them directly. Full flags in
+`docs/REFERENCE.md`.
 
-Lists open drift rows grouped by source doc, with row IDs. **Scoped by default** to the
-workspace containing the current directory — it won't relay other workspaces' queues.
-Open cross-repo rows whose origin lives inside this workspace are surfaced as
-"Cross-repo dependencies" (the "unless there's a dependency" case). `--all` restores the
-every-workspace view.
+- **`status`** — list open drift rows, scoped to the workspace at cwd by
+  default (`--all` for every workspace, `--cross` for the cross-repo ledger).
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs status
+  ```
+- **`doctor`** — health check: plist loaded, heartbeat age, sidecar schema
+  validity, ledger parseability.
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs doctor
+  ```
+- **`init <dir>`** — scaffold an empty `.propagates.yml` at `<dir>` and add it
+  to the watcher's `WatchPaths`.
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs init <dir>
+  ```
+- **`check`** — commit-time drift gate: for changed files, warns when a
+  declared coupling (forward or `kind: code` reverse) didn't also change.
+  `--changed` (working tree + staged vs HEAD) is the default, so the flag is
+  optional.
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --changed
+  ```
 
-### `drain` — walk through open items, apply or skip each
+### Agent workflows (not commands)
 
-For each open row in the ledger:
-1. Read the source doc near the section that drifted (use git log to find the most recent commit touching that doc)
-2. Read each downstream file
-3. Decide with the user: apply the change, defer with a note, or mark wontfix
-4. On apply: edit the downstream, then call `markStatus(rowId, "done")`
-5. On defer: note in the row's `notes`, leave open
-6. On wontfix: `markStatus(rowId, "wontfix")` with a justification in notes
+These are prose procedures an agent walks through — not `cli.mjs` subcommands.
 
-#### Worktree-aware deduplication
-
-When the watcher fires from edits in a non-canonical git worktree, rows carry:
-- `correlation_id` — `<repo-basename>:<repo-relative-path>` (e.g. `VipinKaushik:lib/pricing.ts`). All rows touching the same logical file across worktrees share this id.
-- `source_worktree` — `{branch, commit}` for the worktree where the edit happened (absent for canonical).
-- Per-downstream `worktree` stamps on entries that expanded into secondary worktrees.
-
-**Drain behaviour for correlated rows:**
-1. Group open rows by `correlation_id`. Rows sharing an id are the same logical change observed in different worktrees.
-2. Present the user with ONE verification prompt per `correlation_id`, listing every observation's `source_worktree` (so they can see "this file changed on branch X and branch Y").
-3. When the user verifies and applies the upstream change, call `markStatus` for every row in the group — drain closes them all together.
-4. If the user wants to handle worktrees independently (rare — usually you verify the canonical doc once and that closes all observations), drop into per-row mode by ignoring the grouping.
-
-Rows without `correlation_id` (workspace docs, orphan files) are handled per-row as before.
-
-Drain is a Claude-driven workflow — there is no automated drain command. The
-skill walks the human through each item using AskUserQuestion. After each
-decision, append a `status_change` record by calling the helper.
-
-⚠️ **Resolve the ledger path from the workspace the row belongs to — do NOT hardcode
-a path.** A row shown under `# <Name>` by `status` lives in THAT workspace's ledger
-(see the per-workspace rule under "Canonical state"). `markStatus` against any other
-ledger silently no-ops and the row stays open. Derive it via discovery so it always
-matches what `status` reads:
-
-```javascript
-import { markStatus, renderMarkdown } from "${CLAUDE_PLUGIN_ROOT}/lib/ledger.mjs";
-import { discoverWorkspacesSync } from "${CLAUDE_PLUGIN_ROOT}/lib/discovery.mjs";
-import { SEARCH_ROOTS } from "${CLAUDE_PLUGIN_ROOT}/lib/config.mjs";
-
-// pick the workspace whose root contains the row's source file (nearest ancestor)
-const ws = discoverWorkspacesSync(SEARCH_ROOTS)
-  .filter((w) => sourceAbsPath === w.root || sourceAbsPath.startsWith(w.root + "/"))
-  .reduce((best, w) => (w.root.length > (best?.root.length ?? -1) ? w : best), null);
-
-await markStatus(ws.ledgerJsonl, "003", "done");
-await renderMarkdown(ws.ledgerJsonl, ws.ledgerMd); // re-render the sibling MD
-```
-
-Quick sanity check after closing: re-run `status` — the row should be gone. If it
-isn't, you wrote to the wrong ledger file.
-
-### `doctor` — health check
-
-Run via the bash entry below. Reports:
-- launchd plist loaded? (`launchctl list | grep com.rupali.propagate`)
-- Heartbeat age (warn if > 1 hour during a likely-active period; fail if > 1 day)
-- All `.propagates.yml` sidecars pass schema validation
-- **Sidecar downstream paths resolve on disk** (warn-only, cross-workspace): a `prose`
-  downstream that no longer exists or a glob matching 0 files is surfaced as a yellow
-  warning; `code` downstreams are treated as declare-ahead (warn, never fail). Per-repo
-  enforcement is the repo's own pre-commit, not this cross-workspace report.
-- `state.json` parseable; `.bak` exists
-- Ledger JSONL parseable
-
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/cli.mjs doctor
-```
-
-If `propagate doctor` reports issues, fix in this order:
-1. plist not loaded → `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rupali.propagate.plist`
-2. schema violations → edit the offending `.propagates.yml` per the error message
-3. state corruption → the script handles this; just trigger a manual run: `node ${CLAUDE_PLUGIN_ROOT}/watcher.mjs`
-
-### `declare <file>` — bootstrap a sidecar (V1 manual; V2 graph-augment)
-
-For V1: open the parent directory's `.propagates.yml` (create if missing), add an
-entry under `sources:` keyed by the file's basename, list known downstreams by
-hand (no graph queries yet — deferred to V2 per TM-064).
-
-Template to append:
+**`declare <file>`** — bootstrap a sidecar. Open the parent directory's
+`.propagates.yml` (create if missing), add an entry under `sources:` keyed by
+the file's basename, list known downstreams by hand (no graph queries yet —
+deferred to V2 per TM-064):
 
 ```yaml
 sources:
@@ -149,147 +91,57 @@ sources:
         kind: prose  # or "code"
 ```
 
-**Glob downstreams:** `path` may be a glob (e.g. `style/pages/**/*.md`) to declare a
-"this shared doc feeds a whole tree" edge without hand-listing every consumer. The watcher
-fs-expands it (relative to the sidecar dir) and records one summary entry
-(`{glob_matched: N, sample: […]}`) rather than N rows. A glob that matches 0 files is
-skipped with a log warning (never recorded as a literal path).
+`path` may be a glob (e.g. `style/pages/**/*.md`) to declare a "this shared
+doc feeds a whole tree" edge without hand-listing every consumer; a glob
+matching 0 files is skipped with a log warning. `kind: code` is bidirectional
+— the doc changing fires forward (verify the code), and the code file
+changing fires a `code_drift` row back at the doc — for non-glob entries only;
+glob `kind: code` on the code→doc direction is deferred (logged and skipped).
 
-**`kind: code` is bidirectional:** the edge fires both ways — the doc changing fires
-forward (verify the code), and the code file changing now also fires a `code_drift`
-row back at the doc (verify the doc). Non-glob `kind: code` downstreams only; glob
-`kind: code` entries are log-and-skipped on the code→doc direction (deferred).
+**`drain` — walk through open ledger rows.** ⚠️ **There is no supported close
+path today.** `markStatus` (`lib/ledger.mjs:97`) has zero production callers —
+it appears only in its own definition and two test files. Nothing in
+`cli.mjs`, `watcher.mjs`, or `digest.mjs` calls it. The only mechanism that
+actually closes a row is an LLM hand-writing a node script against a ledger
+path it resolved itself (see `docs/REFERENCE.md` § Ledger resolution).
+`docs/SPEC.md` §6 already specifies `cli drain` as "new, and required" — it
+does not exist yet. See `docs/ISSUES.md` for the tracked gap.
 
-### `init <dir>` — onboard a new directory
+The procedure, such as it is, for each open row:
+1. Read the source doc near the section that drifted (git log to find the
+   most recent commit touching that doc).
+2. Read each downstream file.
+3. Decide with the user: apply the change, defer with a note, or mark wontfix.
+4. On apply: edit the downstream, then hand-write a `markStatus` call (see
+   `docs/REFERENCE.md`).
+5. On defer: note in the row's `notes`, leave open.
+6. On wontfix: `markStatus(rowId, "wontfix")` with a justification in notes.
 
-For V1: create an empty `.propagates.yml` at `<dir>/.propagates.yml` with just
-the header. Add `<dir>` to `WatchPaths` in the plist if it's not already covered
-by a parent watch. Reload the plist.
+**Correlation grouping matters under the premise above** — this is the
+parallel-coordination behaviour, not a nicety. When the watcher fires from a
+non-canonical worktree, rows carry `correlation_id` (`<repo>:<path>`,
+e.g. `VipinKaushik:lib/pricing.ts`) and `source_worktree` (`{branch, commit}`).
+Group open rows by `correlation_id` before presenting them — rows sharing an
+id are the same logical change observed on different branches. Present one
+verification prompt per group, listing every `source_worktree`, and close the
+whole group together when the user verifies. Rows without `correlation_id`
+(workspace docs, orphan files) are handled per-row.
 
-### `check` — commit-time drift gate (git pre-push / CI)
+### Out of scope
 
-The watcher fires **save-time**, on one Mac. `check` is the **commit-time**
-counterpart: given a set of changed files, it warns when one of them is
-declared coupled (via `.propagates.yml`) to a file that *didn't* also change —
-the exact gap that let #43 slip (code changed, the doc it's coupled to did
-not, nothing surfaced it until the next save-time fire on the watcher's Mac).
+The `skills-*` command family (`skills`, `skills-create`, `skills-promote`,
+`skills-demote`, `skills-reap`) is a skill-lifecycle manager riding in the
+same CLI; it is being split out. See `docs/DECISIONS.md`.
 
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --changed          # working tree + staged, vs HEAD
-node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --range <a>..<b>   # explicit range (CI)
-node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --staged           # staged only (pre-commit use)
-node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --changed --strict # exit 1 (not 0) if any coupling found
-```
+## Important Rules
 
-For each changed file, `check` looks up:
-- **forward** — is it a declared `.propagates.yml` source? → list its downstreams to re-verify.
-- **reverse** — is it a `kind: code` downstream? → list the upstream doc(s) to re-verify (the #43 case).
-- **ledger cross-ref** — does it already have an open drift row in its workspace's ledger?
-
-Output is grouped and human-readable:
-
-```
-⚠ 1 coupled file in this change:
-  lib/engine.ts → verify: SPEC.md
-```
-
-**Default = warn, exit 0.** `--strict` makes couplings a hard failure (exit 1) —
-use this in a blocking hook or a required CI check. No couplings → exit 0, no
-output.
-
-**Known limitation (documented, not a bug):** glob `kind: code` downstreams
-(e.g. `lib/**/*.ts`) are deferred — `synthesizeKindCodeEntries` logs and
-skips them, same as the watcher — so `check` won't warn on a glob-declared
-code edge. Declare non-glob `kind: code` edges for files you want the
-commit-time gate to actually catch.
-
-**git pre-push hook** (recommended install — computes the pushed range from
-the hook's stdin and calls `check` over it):
-
-```bash
-#!/usr/bin/env bash
-# .git/hooks/pre-push (chmod +x)
-remote="$1"
-zero=0000000000000000000000000000000000000000
-while read -r local_ref local_sha remote_ref remote_sha; do
-  [ "$local_sha" = "$zero" ] && continue   # branch deletion — nothing to check
-  if [ "$remote_sha" = "$zero" ]; then
-    range="$local_sha"                      # new branch — no remote base yet
-  else
-    range="$remote_sha..$local_sha"
-  fi
-  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --range "$range" --strict || exit 1
-done
-exit 0
-```
-
-Drop this at `<repo>/.git/hooks/pre-push` (or `.githooks/pre-push` if the repo
-uses `core.hooksPath`) and mark it executable. Omit `--strict` for a
-non-blocking nudge instead of a hard gate.
-
-**CI (secondary, documented not built in v1):** the same `check --range`
-command runs unchanged in a GitHub Action once this skill (or just `cli.mjs`
-+ `lib/`) is available in the runner — e.g. checkout this repo as a step, then
-`node cli.mjs check --range "${{ github.event.before }}..${{ github.sha }}" --strict`.
-No CI wiring is built here; this is a pointer for when that's worth doing.
-
-## Initial install (once per machine)
-
-```bash
-# 1. Install deps
-cd ${CLAUDE_PLUGIN_ROOT} && npm install
-
-# 2. Load launchd plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rupali.propagate.plist
-launchctl list | grep com.rupali.propagate   # confirm loaded
-
-# 3. First-run smoke test
-node ${CLAUDE_PLUGIN_ROOT}/watcher.mjs
-# Should print nothing to stdout but write a "run complete" line to
-# ${CLAUDE_PLUGIN_ROOT}/watcher.log
-
-# 4. Verify by touching a watched file
-touch "$HOME/Documents/GitHub/Vipin Kaushik/docs/VIPIN.md"
-# Within ~10s, a notification should appear and a new row added to
-# Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl
-```
-
-## Disable temporarily
-
-```bash
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.rupali.propagate.plist
-```
-
-Re-enable: same `bootstrap` command as above. Ledger and sidecars persist.
-
-## What this skill does NOT do (V1)
-
-- Graph integration. `code-review-graph` MCP is not currently registered; the
-  `concepts:` field in sidecars is schema-accepted but unused. Deferred to V2
-  (TM-064 in workspace TODOS.md).
-- ~~Code → prose drift detection~~ — **exists, two ways**: (1) `.code-canonical.yml`
-  per-workspace canonical-pairs fire a `code_drift` row when the declared code path's
-  mtime advances. (2) Every `.propagates.yml` `kind: code` downstream is now
-  **bidirectional** — a doc's `kind: code` edge previously only fired forward
-  (doc changes → verify code); code changes on that same edge now also fire a
-  `code_drift` row back at the doc (closes #43's gap: task-engine-v2.md declared a
-  `kind: code` downstream, the code changed, and nothing fired). Both sources are
-  merged and grouped by code path, so a file declared in both fires ONE row with
-  N downstream docs, not N rows. Glob `kind: code` downstreams are still deferred
-  (logged and skipped). No git post-commit hooks involved either way — same
-  mtime-watch mechanism as everything else in this skill.
-- ~~Cross-workspace propagation~~ — **now auto-discovered**: `discovery.mjs` walks
-  `~/Documents/GitHub` for `.propagates.yml` markers, so every workspace with sidecars
-  (e.g. Vipin Kaushik, PanditPawanKaushik) is watched. `lib/config.mjs` no longer hardcodes one.
-- Linux/remote dev support (macOS-only via launchd).
-
-## Architecture summary (for future-you)
-
-- Watcher invoked per file event by launchd `WatchPaths` (no daemon process)
-- `proper-lockfile` serializes concurrent invocations
-- 3s mtime re-verify guards against atomic-replace partial reads
-- State + sidecars + ledger all atomic-write via temp+rename
-- Heartbeat file is the fallback if macOS notification permission is denied
-- JSONL is authoritative for the ledger; MD is regenerated on every change
-
-If something breaks, check `${CLAUDE_PLUGIN_ROOT}/watcher.log` first.
+- **Never hardcode a ledger path.** Resolve via discovery from the workspace
+  `status` reported the row under. `markStatus` against the wrong ledger
+  silently no-ops and the row stays open.
+- **Never rewrite a ledger row.** Append-only; migration is close-and-re-emit.
+- **Schema before field.** `propagates.schema.json` is
+  `additionalProperties: false` — a sidecar gaining an undeclared field is
+  rejected silently and every edge in it stops firing.
+- **Never edit a downstream automatically.**
+- **Re-run `status` after closing.** If the row is still there, you wrote to
+  the wrong ledger.

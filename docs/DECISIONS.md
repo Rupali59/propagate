@@ -1,3 +1,5 @@
+> Entry point: [`../SKILL.md`](../SKILL.md) · Index: [`README.md`](./README.md)
+
 # propagate — Decisions
 
 Append-only. Newest last. Each entry: **What / Why / Affects / Refs.**
@@ -199,3 +201,95 @@ exactly, per-ledger. 154/154 tests. No ledger, STATE or DECISIONS file modified.
 
 **Affects:** propagate, hub
 **Refs:** `index.mjs`, `lib/index-db.mjs`, `tests/index.test.mjs`, `digest.mjs`
+
+---
+
+## 2026-08-13: the premise is parallel coordination, not doc staleness
+
+**What:** `SKILL.md`'s identity block now states the premise explicitly and
+canonically: propagate coordinates parallel work — across branches and
+worktrees inside a repo, and across repos in the workspace — by declaring the
+couplings that matter, watching them, and keeping an append-only ledger tied to
+git workflow, so every stream can see what moved, where, and on which branch.
+It never edits a downstream; it tells a human. `docs/SPEC.md` §1 quotes that
+sentence verbatim as a blockquote, under a note that `SKILL.md` is canonical
+and the copy is enforced by `tests/skill-doc.test.mjs`.
+
+**Why:** the skill previously had no stated premise anywhere, and the
+implicit one a reader would infer from the docs was staleness — "a coupled
+doc went stale, prompt someone." That reading made the cross-repo layer read
+as a peripheral, dormant subsystem (`docs/SPEC.md` §8, pre-2026-08-13 wording)
+and made `docs/ISSUES.md` B1 (sidecars are branch-local; `doctor` is not
+branch-aware) and B2 (squash merges defeat ancestry checks) read as low-grade
+noise at S2. Both readings are wrong under the coordination premise: B1/B2 are
+the exact failure mode the tool exists to prevent, and the cross-repo layer is
+the direct mechanism for the majority workload.
+
+**What this supersedes:** the implicit staleness framing. Nothing was ever
+written down as "propagate is about staleness" — there was no premise
+statement to supersede formally — but every downstream doc's tone assumed it,
+and this entry is the record that the assumption was wrong and has been
+replaced.
+
+**Evidence:** `docs/SPEC.md` §5's own measurement, run against the 19 open
+rows in the Vipin Kaushik ledger on 2026-08-13: 17 of 19 (89%) span two repos,
+where a single commit can never answer both sides. Only 2 of 19 are
+intra-repo. A staleness-of-a-doc framing has no explanation for why the
+overwhelming majority of real drift is cross-repo; a parallel-coordination
+framing predicts it directly.
+
+**Consequent doc changes, same pass:** `docs/ISSUES.md` B1/B2 re-ranked S2 →
+S1, `## Suggested order` updated in the same edit so severity and order do not
+disagree; `docs/SPEC.md` §8 sub-grouped into standing limitations vs. three
+questions the premise change raises but does not answer (detection trigger
+vs. I3, whether a row should key to `(coupling, branch)`, whether the
+cross-repo layer ships — default flipped to *ships*, call still open).
+
+**Affects:** propagate
+**Refs:** `SKILL.md`, `docs/SPEC.md` §1 §8, `docs/ISSUES.md`, `tests/skill-doc.test.mjs`,
+`~/.claude/plans/okay-i-dont-think-logical-haven.md` Phase 0
+
+---
+
+## 2026-08-13: the skill-lifecycle command family is a separate concern, split out by decision (no code moved)
+
+**What:** decided that `skills`, `skills-create`, `skills-promote`,
+`skills-demote`, `skills-reap`, their event log `SKILLS_LIFECYCLE.jsonl`, and
+`lib/skills-*.mjs` should live in their own skill, distinct from propagate's
+ledger/coupling concern. **This decision moves no code.** It records the call
+and the doc boundary only — `SKILL.md` gets one line naming the skills-*
+family as riding in the same CLI but out of scope of this skill's premise.
+
+**Why:** the skill-lifecycle family shares no premise with ledger
+propagation. Different data model (quarantine → promote → reap directory-move
+lifecycle vs. declared-coupling rows), its own append-only event log
+(`SKILLS_LIFECYCLE.jsonl`, not `PROPAGATION_LEDGER.jsonl`), no ledger rows, no
+declared couplings, no `.propagates.yml` sidecars. Bundling it under
+propagate's docs is why `docs/SPEC.md` (pre-2026-08-13) never mentioned it and
+`SKILL.md` documented it without explaining why a coupling-watcher also
+manages skill lifecycle — the honest answer being "no reason, it just landed
+in the same CLI."
+
+**Dependency to untangle before any code moves:** the skills-lifecycle code
+reuses `appendRowWithId` from `lib/ledger.mjs` for its own atomic mint+append.
+A future split has to either fork that helper or extract it to a shared
+module neither skill owns exclusively — it cannot stay as "skills-* imports
+from propagate's ledger lib" once the two are separate skills.
+
+**Tests:** `skills-create`, `skills-lifecycle`, and `skills-scan` test files
+travel with the code when it moves — they exercise the lifecycle concern, not
+the ledger.
+
+**Gotchas:** because no code moved in this pass, `cli.mjs` still dispatches
+`skills*` commands today and will continue to until the split is actually
+implemented. This entry is not a changelog for a completed migration; it is
+the record that the decision was made and why, so a future implementer does
+not have to re-litigate whether the split is warranted.
+
+**Affects:** propagate
+**Refs:** `SKILL.md`, `lib/skills-create.mjs`, `lib/skills-promote.mjs`,
+`lib/skills-demote.mjs`, `lib/skills-reap.mjs`, `lib/skills-scan.mjs`,
+`SKILLS_LIFECYCLE.jsonl`, `lib/ledger.mjs` (`appendRowWithId`),
+`tests/skills-create.test.mjs`, `tests/skills-lifecycle.test.mjs`,
+`tests/skills-scan.test.mjs`,
+`~/.claude/plans/okay-i-dont-think-logical-haven.md` Phase 1
