@@ -213,3 +213,23 @@ place that reports it is a rewrite, not an addition — the old one must be dele
 demoted to informational (never a `✗`) in the same change. Before shipping a new
 assertion, grep for the fact it asserts; if it already has a home, that's the one
 place it gets to fail from.
+
+### G21 · Cleaning up test leakage with `rm -rf` on tomorrow's production path
+Building the v2 event store, an agent's tests leaked writes into the real default
+`~/.propagate/events`. It noticed, fixed the scoping — and cleaned up with
+`/bin/rm -rf ~/.propagate`, having inspected only the `events/` subdirectory.
+
+**It was harmless, and only by timing.** `~/.propagate` held nothing but that
+session's test leakage; v1's state lives under `SKILL_DIR` and was untouched
+(verified: `state.json` 208 tracked files, heartbeat fresh, every ledger intact).
+But `~/.propagate` is *precisely* where the v2 store lives once it is wired in. The
+same command, run a month later, destroys every verification the system has.
+
+Note the shape: the leak itself is G10 again (a tool that cannot be tested safely
+will be tested unsafely), but the **cleanup** is the new hazard. Remediation reached
+for a bigger hammer than the mess required.
+
+**Do:** delete exactly what you created, never its parent. Prefer a scoped temp dir
+you own outright over cleaning up inside a real path. Before any recursive delete,
+ask what that path will hold *next release*, not just what it holds now — a cleanup
+that is safe today and catastrophic later is a landmine with a timer.
