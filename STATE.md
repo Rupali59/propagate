@@ -166,3 +166,61 @@ should be split into a separate `reload` mode.
   see `docs/SYSTEMS.md`'s `propagate-digest` row.
 - **Deferred** — migrating the 69 misfiled hub rows. Close-and-re-emit only,
   never rewrite.
+
+## TODO — a separate, hub-level mechanism: decision → document conformance
+
+**Not propagate's job. Do not build it into this skill.** Raised by Rupali
+2026-08-14 while draining the v1 backlog; recorded here because this is where
+the diagnosis lives, not because propagate should own it.
+
+**The gap, stated precisely.** propagate fires on *file change*. A decision that
+should have changed a document, but didn't, produces no signal at all — because
+nothing changed. Silence means "nothing happened", when the truth is "something
+should have happened and did not."
+
+**The instance that proved it.** `docs/DECISIONS.md:1287` (2026-07-15) records
+Vastu as **removed — a refusal, not paused**. Thirty days later
+`docs/constitution/VIPIN.md` still carried a `Vastu site visit · ₹21,000` row,
+still described the locked model as three tiers "plus Vastu", and still called it
+"(paused)".
+
+The important part, and the thing I got wrong on first reading: **the edge was
+declared the whole time.** `Vipin Kaushik/docs/.propagates.yml:10-17` has
+`constitution/VIPIN.md → ../VipinKaushik/lib/pricing.ts` as `kind: code`. It is
+not a missing coupling. It never fired because VIPIN.md was never edited after
+the decision — and it has no baseline (`NEVER_VERIFIED`), because the two files
+never co-committed inside the walk, so bootstrap could not seed it either.
+
+Note also what stayed green throughout: `PRICING-CONTENT.md → lib/pricing.ts`
+was CLEAN in both directions, verified 2026-08-14 down to `₹5,100 · $60` /
+`₹8,100 · $95`. Every declared edge was consistent. The drift was one level up,
+in the document all of them defer to, against a decision none of them watch.
+
+**Why it must be hub-level and separate.** The subject is not a file pair inside
+one workspace — it is `DECISIONS.md` (any repo) versus the documents that decision
+governs (often another repo). It needs the decision log as its input, which is
+precisely the thing every sidecar in this tree **deliberately excludes**: see
+`Vipin Kaushik/.propagates.yml`'s header ("DECISIONS.md: deliberately NOT
+declared — appends 3-5/week; declaring would flood the ledger with noise") and
+`docs/.propagates.yml`'s equivalent. Wiring decisions into propagate was already
+considered and rejected for good reason. A mechanism that reasons about
+*semantic* conformance — "does this decision still hold in the documents it
+binds?" — is a different tool with a different failure mode, and it will need
+human or model judgment where propagate deliberately uses only content hashes.
+
+**What it must not do**, learned the expensive way in this skill:
+- Never let absence read as health (G2). "No conflict found" and "not checked"
+  must be different outputs.
+- Never ship a check that cannot fail (G1). If it cannot name the input that
+  makes it fire, it is decoration.
+- Never auto-edit a governed document. Propose; a human decides (this skill's
+  hard non-goal, and it should be that one's too).
+
+**Open scope questions** — unanswered, do not assume: which decision logs are in
+scope (workspace, project, or both); whether it runs on decision-append or on a
+schedule; whether it reports per-decision or per-document; and whether it lives
+as its own skill or as a mode of an existing one.
+
+**Related:** the immediate Vastu correction in `VIPIN.md` is separate, live work
+and is Rupali's call — it touches the pricing table, the 2026-06-02
+reconciliation note, and the pending-asks row.
