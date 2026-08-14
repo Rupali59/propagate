@@ -103,7 +103,15 @@ import {
 } from "./lib/config.mjs";
 import YAML from "yaml";
 
-import { readLedger, readLedgerWithStats, lastActivityAt, markStatus } from "./lib/ledger.mjs";
+import {
+  readLedger,
+  readLedgerWithStats,
+  lastActivityAt,
+  markStatus,
+  findUnownedLedgers,
+  openCount,
+  classifyUnownedLedger,
+} from "./lib/ledger.mjs";
 import { loadSidecar, SidecarError, downstreamsFor } from "./lib/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges.mjs";
@@ -588,6 +596,70 @@ async function status() {
       }
       console.log();
     }
+  }
+
+  // `--all` means the whole project, so it must include the cross-repo ledger and
+  // a total. Before 2026-08-15 it iterated discovered workspaces only: the cross
+  // ledger was reachable via `status --cross` and read by digest.mjs, but never
+  // counted here, so `--all` reported 4 open where the tree had 8.
+  if (showAll) {
+    let crossOpen = [];
+    try {
+      crossOpen = (await readLedger(CROSS_LEDGER_JSONL)).filter((r) => r.status === "open");
+    } catch {
+      /* no cross ledger — reported as 0 below, not silently omitted */
+    }
+    console.log(`${BOLD}# Cross-repo${RESET}`);
+    if (crossOpen.length === 0) {
+      console.log(`  ${GREEN}✓ no open cross-repo rows${RESET}\n`);
+    } else {
+      console.log(`  ${YELLOW}${crossOpen.length}${RESET} open:\n`);
+      for (const r of crossOpen) {
+        console.log(
+          `    ${YELLOW}#${r.id}${RESET} [${r.direction}] ${r.origin_repo} → ${r.partner}: ${r.source}`,
+        );
+      }
+      console.log();
+    }
+
+    // Rollup. Counts are FOLDED (last status per id), never raw `open` lines —
+    // the ledger is append-only, so line-counting gave 501 where the truth was 8.
+    let wsOpen = 0;
+    let ledgerCount = 1; // cross
+    for (const ws of WORKSPACES) {
+      if (!existsSync(ws.ledgerJsonl)) continue;
+      ledgerCount++;
+      wsOpen += await openCount(ws.ledgerJsonl);
+    }
+    const ownedLedgers = [...WORKSPACES.map((w) => w.ledgerJsonl), CROSS_LEDGER_JSONL];
+    const unowned = await findUnownedLedgers(SEARCH_ROOTS, ownedLedgers);
+    const orphans = [];
+    const snapshots = [];
+    for (const p of unowned) {
+      const c = await classifyUnownedLedger(p, ownedLedgers);
+      (c.kind === "snapshot" ? snapshots : orphans).push({ p, ...c });
+    }
+    // Snapshots are branch-time copies of an owned ledger — counting their stale
+    // `open` rows would over-report exactly as badly as ignoring them under-reported.
+    const unownedOpen = orphans.reduce((n, o) => n + o.openRows, 0);
+
+    const total = wsOpen + crossOpen.length + unownedOpen;
+    console.log(
+      `${BOLD}${WORKSPACES.length} workspace${WORKSPACES.length === 1 ? "" : "s"} + cross — ${total} open across ${ledgerCount + unowned.length} ledger${ledgerCount + unowned.length === 1 ? "" : "s"}${RESET}`,
+    );
+    if (orphans.length) {
+      // Named, not hidden: these rows are real and no command can act on them.
+      console.log(
+        `  ${YELLOW}⚠ ${orphans.length} ledger file(s) owned by no workspace${RESET} ${DIM}(${unownedOpen} of the open rows above; \`doctor\` names them)${RESET}`,
+      );
+      for (const o of orphans) console.log(`    ${DIM}${o.p}${RESET}`);
+    }
+    for (const s of snapshots) {
+      console.log(
+        `  ${DIM}· branch snapshot, not counted: ${s.p} (${s.openRows} stale open row(s))${RESET}`,
+      );
+    }
+    console.log();
   }
 
   // "Unless there is a dependency": in scoped mode, surface open cross-repo rows
@@ -1176,6 +1248,35 @@ async function doctor() {
       "no unreachable workspace markers",
       unreachable.length === 0,
       unreachable.length ? unreachable.join(", ") : "",
+    );
+
+    // A ledger can be real, non-empty and owned by nobody — below the discovery
+    // depth limit, or beside a sidecar that never set `workspace: true`. Such a
+    // ledger contributes 0 to every total while looking exactly like "no drift".
+    // Report it as unreachable rather than dropping it (rule:discernment-checks §2).
+    const ownedLedgers = [...WORKSPACES.map((w) => w.ledgerJsonl), CROSS_LEDGER_JSONL];
+    const unowned = await findUnownedLedgers(SEARCH_ROOTS, ownedLedgers);
+    const orphans = [];
+    const snapshots = [];
+    for (const p of unowned) {
+      const c = await classifyUnownedLedger(p, ownedLedgers);
+      (c.kind === "snapshot" ? snapshots : orphans).push({ p, ...c });
+    }
+    // A branch-time copy of an owned ledger is not a second source of truth, and
+    // its stale `open` rows must not be counted (see classifyUnownedLedger).
+    // Still reported — invisible-but-harmless is how the original hole formed.
+    for (const s of snapshots) {
+      info(
+        "branch-snapshot ledger (not counted)",
+        `${s.p} — all ${s.ids} ids present in ${path.basename(path.dirname(path.dirname(s.of)))}'s ledger; ${s.openRows} row(s) still marked open here are stale branch state`,
+      );
+    }
+    check(
+      "no unowned ledger files",
+      orphans.length === 0,
+      orphans.length
+        ? `${orphans.length} ledger file(s) on disk that no workspace owns — their rows are invisible to status/reconcile: ${orphans.map((o) => `${o.p} (${o.openRows} open)`).join("; ")}`
+        : "",
     );
   } catch (err) {
     check("no unreachable workspace markers", false, err.message);

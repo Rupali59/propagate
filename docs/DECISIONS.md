@@ -467,3 +467,48 @@ still lists the same v1 open rows it did before this change.
 (`doctor`'s launchd/heartbeat section + new "v2 replacement" section),
 `digest.mjs` (`computeDiff`, `formatDigest`), `tests/digest.test.mjs`,
 `tests/doctor.test.mjs`, `tests/watcher-retired.test.mjs`, commit `45a5e63`
+
+---
+
+## 2026-08-15: a worktree ledger is a branch snapshot, not a workspace — classify it, do not adopt it
+
+**What:** `status --all` now includes the cross-repo ledger and prints a
+whole-project total, and `doctor` gains a `no unowned ledger files` check that
+scans the search roots for ledger files no workspace owns. An unowned ledger is
+then **classified** before it is counted: if every id in it is also present in an
+owned ledger, it is a *branch snapshot* — reported, but its rows are **not** added
+to any total. Only a genuine orphan fails the check.
+
+Branch-local worktrees will **not** be made ledger-owning workspaces, and
+`DEFAULT_MAX_DEPTH` stays at 2.
+
+**Why:** `status --all` reported **4** open where the tree had **8**. Two
+independent causes: `PROPAGATION_CROSS_LEDGER` was read by `status --cross` and
+by `digest.mjs` but never by `--all`; and a 79-row ledger sat at
+`PanditPawanKaushik/.claude/worktrees/client-answers-propagation/docs/`, invisible
+because it is below the depth limit *and* its sidecar never set `workspace: true`.
+Half the open work was missing and nothing said so — the exact failure this skill
+exists to catch, in its own tooling.
+
+Raising the depth limit was rejected: it finds today's worktree and misses
+tomorrow's, and the cost is paid on every invocation. Scanning for the artifact
+cannot be outrun by nesting, naming, or a missing flag.
+
+**Classification is the load-bearing half, and it was not in the original plan.**
+Counting the worktree's rows would have replaced under-reporting with
+over-reporting. Measured: all **40** of its ids exist in the parent workspace's
+ledger, and its single `open` row (`#039`) is already **`done`** upstream — a
+snapshot taken when the branch was cut, not a second source of truth. The honest
+whole-project figure is **7 open**, not 8 and not 4. A ledger that lives on a
+branch merges back with the branch; treating one as authoritative would let a
+stale row resurrect a closed finding (`rule:discernment-checks` §5 — compare like
+with like).
+
+**Affects:** propagate
+
+**Refs:** `cli.mjs` (status rollup, `no unowned ledger files`),
+`lib/ledger.mjs` (`findUnownedLedgers`, `openCount`, `classifyUnownedLedger`),
+`tests/whole-project-ledger.test.mjs` (4 tests: the doctor check failing *and*
+passing, disclosure in `--all`, and a fold-not-count fixture where raw `open`
+lines exceed folded open — the 501-vs-8 shape in miniature). Closes **B1** in
+`docs/ISSUES.md`.
