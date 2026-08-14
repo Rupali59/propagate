@@ -261,3 +261,108 @@ drifting from behaviour. Inner mitigations bound damage; they do not substitute 
 the guarantee on the label. When a flag threads through several layers, assert each
 link — this failed because a parameter did not reach its call site, not because
 anyone misunderstood the intent.
+
+---
+
+## On instruments — the tools you measure with
+
+Added 2026-08-14/15. Every entry below cost a wrong answer that was *published* before
+being caught, and several were caught only because a second method disagreed. The theme:
+**when a number surprises you, suspect the ruler before the data.**
+
+### G23 · `awk -F'|'` cannot parse a Markdown table, and its noise conceals real defects
+Table cells escape pipes as `\|`. `awk -F'|'` splits on those too, so column counts come
+out wrong for rows that are perfectly well-formed.
+
+Twice, one week apart. First it reported `docs/SYSTEMS.md` columns "inconsistent" when
+every row was correct. Then — after that lesson was recorded — a new row was added with an
+**unescaped shell pipe inside a `liveness_probe` command**, a genuine 10-column defect, and
+`awk` reported 9/10/11 across the table. The one real fault was indistinguishable from the
+usual false ones.
+
+**Do:** split on unescaped pipes only — `re.split(r'(?<!\\)\|', line)`. A noisy instrument
+is not merely useless; it is a hiding place.
+
+### G24 · `grep -c` exits 1 when the count is zero, so `|| fallback` fires on a valid answer
+`n=$(git cherry main "$b" | grep -c '^+' || echo "?")` prints **`0`** *and then* `?`,
+because `grep -c` returning `0` is still exit status 1. The branch table came out as
+interleaved `0` / `?` lines and had to be thrown away.
+
+**Do:** `|| true`, never `|| <fallback-value>`, after any counting grep. Related to the
+standing one: `cmd | head; echo $?` reads `head`'s status, not `cmd`'s.
+
+### G25 · `--` before a grep pattern turns every later flag into a path
+`command grep -rn -- "--accent" --include="*.md" "Vipin Kaushik"` searches **everything**,
+including `node_modules`. `--` ends option parsing, so `--include=*.md` is read as a file
+argument. Caught only because the output was 233 KB when a handful of lines was expected.
+
+**Do:** put `--include` *before* `--`, or use `-e "--accent"` for a leading-dash pattern.
+
+### G26 · `git ls-files <dir>` takes a path relative to the repo root, not to `cwd`
+A tree-wide backing audit called every Motherboard sub-service `NO-REPO` — including
+`motherboard-api` — because the path was resolved against the wrong base. The nine core
+services of the largest repo in the tree read as unbacked.
+
+**Do:** `cd "$d" && git ls-files .`, or pass a root-relative path. And when a sweep says
+something implausible about a well-known directory, distrust the sweep first.
+
+### G27 · Absence at the path a document *guessed* is not absence
+`TODOS.md` said "author `scripts/smoke/prod-smoke.sh`". `test -f` on that path failed, and
+it was reported as never built. It exists at
+`motherboard-infra/infrastructure/smoke/prod-smoke.sh`. Same error for `bootstrap.sh`,
+`deploy.sh`, and the compose core/plugins split — **four "missing" deliverables, all
+present**, inverting the finding: that backlog was not a list of undone work, it was a
+list of finished work nobody ticked.
+
+**Do:** search for the **artifact** (`find . -name "*smoke*.sh"`), never for the path a
+plan predicted. A backlog records where someone *intended* to put a file.
+
+### G28 · An append-only ledger's `open` lines are not its open rows
+A row closed later keeps its original `open` line forever. `grep -c open` across the tree
+gave **501**; folded by last-status-per-id the answer was **8** — wrong by 62×, and
+published before it was caught.
+
+**Do:** fold, never count. `readLedger` exists for this. Any figure derived by counting
+raw lines in an event log is a different quantity than the one you meant.
+
+### G29 · Reconciling plans by task-id citation under-reports in four independent ways
+`git log --grep="(T5)"` against the `(T<n>)` convention produced a table that read
+authoritative and called delivered work abandoned:
+
+- **Ranges** — `feat(hygiene): T22–T27` ships six tasks; `grep "(T25)"` finds nothing.
+- **Repo-locality** — the plan lives in `Tushar/`, the commits in `Youvan-mb`.
+- **Divergent schemes** — astroacharya uses `(Task N)`; Tushar uses `TE1-TE11`.
+- **No git trace at all** — one task landed in `~/.claude/settings.json`.
+
+Tushar's plan scored 0 of 20 and had in fact shipped completely.
+
+**And the inverse is the sharper lesson:** the two GA4 plans had the *healthiest* citation
+ratios in the tree and the most wrong premise — both targeted a GA4 property that did not
+exist, costing ten days of conversion data. **Citation density measures convention
+compliance, not delivery, and never correctness.**
+
+### G30 · Assertions against CLI output must strip ANSI first
+A test asserting `/✗\s*no unowned ledger files/` failed while the check was firing
+perfectly. Raw stdout is `\x1B[31m✗\x1B[0m no unowned ledger files` — the escape sequence
+sits between the glyph and the label. The terminal had stripped it; `spawnSync` had not.
+
+**Do:** `const plain = (s) => s.replace(/\x1B\[[0-9;]*m/g, "")` before matching. The bug
+looks like the feature is broken, which sends you to fix working code.
+
+### G31 · `find -type f` does not follow symlinks
+`Motherboard/skills/` reported **0 files**. It holds **35 symlinks** into
+`.agents/skills/`. Nearly written up as an empty directory.
+
+**Do:** `find -L` when a directory is legitimately a link farm — and note that
+`readdirSync(dir, {withFileTypes:true})` has the same shape of trap: a `Dirent` for a
+symlinked directory answers `isSymbolicLink()`, **not** `isDirectory()`.
+
+### G32 · Fixing an under-count by counting everything produces an over-count
+`status --all` reported 4 open where the tree had 8, because two ledgers were unreachable.
+The obvious fix — count them — would have been wrong: one of those ledgers is a
+**branch-time snapshot** whose 40 ids all exist in its parent, and whose single `open` row
+is already `done` upstream. Counting it moves 4 → 8 when the truth is **7**.
+
+**Do:** classify before aggregating. `rule:discernment-checks` §5 — state what the
+measurement is over, and check it is the same thing the claim is about. Two ledgers that
+both contain "id 39" are not two findings.
