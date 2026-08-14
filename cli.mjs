@@ -2914,6 +2914,71 @@ async function skillsLifecycleCmd(mode) {
   }
 }
 
+/**
+ * `backlog` — read-only aggregate view (task brief Component 2) over every
+ * STATE.md live section, TODOS.md, and docs/ISSUES.md discoverable under
+ * SEARCH_ROOTS. No migration, no edits — lib/backlog.mjs never writes
+ * anything.
+ *
+ * The load-bearing property this command must never violate: a file whose
+ * format it cannot recognise is reported as UNPARSED, never silently
+ * counted as zero open items (G2). `--json` emits the full structured
+ * result; the default view prints per-file parsed/unparsed lines plus a
+ * ranked, deduped item list.
+ */
+async function backlogCmd() {
+  const { backlog } = await import("./lib/backlog.mjs");
+  const result = backlog();
+
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`${BOLD}backlog${RESET} ${DIM}${result.generatedAt}${RESET}`);
+  console.log(
+    `  ${result.totals.stateFilesRead} STATE.md, ${result.totals.todoFilesRead} TODOS.md, ${result.totals.issueFilesRead} docs/ISSUES.md discovered`,
+  );
+  console.log();
+
+  const genericFiles = [...result.todoFiles, ...result.issueFiles];
+  for (const f of genericFiles) {
+    if (f.stub) {
+      console.log(`  ${DIM}stub${RESET}      ${f.file} ${DIM}(${f.stubReason})${RESET}`);
+    } else if (f.unparsed) {
+      console.log(`  ${RED}unparsed${RESET}  ${f.file} ${DIM}— ${f.unparsed}${RESET}`);
+    } else {
+      console.log(`  ${GREEN}parsed${RESET}    ${f.file} ${DIM}(${f.format}, ${f.parsed} total, ${f.open} open)${RESET}`);
+    }
+  }
+  for (const f of result.stateFiles) {
+    const tag = f.error ? `${RED}unparsed${RESET}  ${f.file} ${DIM}— unreadable: ${f.error}${RESET}` : `${GREEN}parsed${RESET}    ${f.file} ${DIM}(state-live-sections, ${f.items.length} open)${RESET}`;
+    console.log(`  ${tag}`);
+  }
+  console.log();
+
+  console.log(
+    `  ${BOLD}totals${RESET}: ${result.totals.parsedFiles} parsed / ${result.totals.unparsedFiles} unparsed / ${result.totals.stubFiles} stub files, ${result.totals.parsedItems} open items parsed, ${result.mergedCount} duplicate(s) merged`,
+  );
+  if (result.totals.unparsedFiles > 0) {
+    console.log(`  ${YELLOW}unparsed files never counted as zero — see file list above${RESET}`);
+  }
+  if (result.dropped.length) {
+    console.log(`  ${YELLOW}${result.dropped.length} path(s) dropped from the discovery walk${RESET} ${DIM}(bounded — see --json)${RESET}`);
+  }
+  if (result.budgetExceeded) {
+    console.log(`  ${YELLOW}discovery walk time budget exceeded — results are partial${RESET}`);
+  }
+
+  console.log();
+  console.log(`  ${BOLD}ranked (${result.ranked.length})${RESET}`);
+  for (const item of result.ranked) {
+    const pri = item.priority !== null && item.priority !== undefined ? `P${item.priority} ` : "";
+    const loc = item.sources.length > 1 ? item.sources.map((s) => `${s.file}:${s.line}`).join(", ") : `${item.file}:${item.line}`;
+    console.log(`    ${pri}${item.text}  ${DIM}${loc}${RESET}`);
+  }
+}
+
 // Only dispatch when executed directly (node cli.mjs ...), NOT when a test imports
 // checkCrossRepo from this module.
 //
@@ -2964,9 +3029,11 @@ if (_invokedDirectly) {
     await skillsCreateCmd();
   } else if (mode === "skills-promote" || mode === "skills-demote" || mode === "skills-reap") {
     await skillsLifecycleCmd(mode);
+  } else if (mode === "backlog") {
+    await backlogCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]]");
     process.exit(2);
   }
 }

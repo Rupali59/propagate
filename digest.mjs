@@ -50,6 +50,7 @@ import { rebuildIndex, latestMtimeUnderDir } from "./lib/index-db.mjs";
 import { scanSkills, probeTranscripts } from "./lib/skills-scan.mjs";
 import { readMetricsRecords, evaluateExpectations } from "./lib/metrics.mjs";
 import { inventory as buildInventory } from "./lib/inventory.mjs";
+import { readSystemsTable, pickAdoptionAsk, formatAdoptionLines } from "./lib/adoption.mjs";
 
 const HOME = os.homedir();
 const DIGEST_STATE_PATH = path.join(HOME, ".claude", "propagate-digest-state.json");
@@ -499,6 +500,16 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     inv = { available: false, error: String(err.message || err) };
   }
 
+  let adoption;
+  try {
+    adoption = adoptionSnapshot();
+  } catch (err) {
+    // Same belt-and-suspenders as disk/skills/lifecycle/inventory above: a
+    // bug in the adoption trigger must never take down the only reporting
+    // channel that currently works.
+    adoption = { available: false, error: String(err.message || err) };
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     degraded: DISCOVERY_DEGRADED,
@@ -515,6 +526,7 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     inbound,
     drift,
     inventory: inv,
+    adoption,
   };
 }
 
@@ -612,6 +624,21 @@ function inventorySnapshot() {
     droppedCount: inv.dropped.length,
     budgetExceeded: inv.budgetExceeded,
   };
+}
+
+/**
+ * The adoption trigger (task brief Component 1; lib/adoption.mjs has the
+ * full rationale). Read-only over `docs/SYSTEMS.md`; picks at most ONE row
+ * to ask about, deterministically, from the table's current content -- no
+ * new state store (G20). Wrapped in the same belt-and-suspenders try/catch
+ * as skills/lifecycle/inventory above: a bug here must never take down the
+ * only reporting channel that currently works.
+ */
+function adoptionSnapshot() {
+  const { rows, error } = readSystemsTable();
+  if (error) return { available: false, error };
+  const ask = pickAdoptionAsk(rows);
+  return { available: true, ask };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1034,6 +1061,23 @@ export function computeDiff(snapshot, prior) {
     driftLines.push(`!! drift reconciliation unavailable: ${snapshot.drift.error}`);
   }
 
+  // ── Adoption trigger (task brief Component 1) ──────────────────────────
+  // State-based, like INBOUND/DRIFT above, not diff-based: a genuine open
+  // question ("earned it? retire it? not yet?") is still the fact someone
+  // needs on their way past this digest, whether it first appeared today or
+  // a week ago -- suppressing it after one mention would defeat the entire
+  // point of building a trigger for a taboo that has never once been
+  // exercised (lib/adoption.mjs header). Renders zero lines when there is
+  // nothing to ask (task constraint: silence, never an empty section).
+  const adoptionLines = [];
+  if (snapshot.adoption?.available) {
+    if (snapshot.adoption.ask) adoptionLines.push(...formatAdoptionLines(snapshot.adoption.ask));
+  } else if (snapshot.adoption?.error && !firstRun) {
+    // Vanished-signal case (R6): the probe failed outright, never rendered
+    // as "nothing to ask" (G2).
+    adoptionLines.push(`!! adoption trigger unavailable: ${snapshot.adoption.error}`);
+  }
+
   return {
     firstRun,
     broken,
@@ -1052,6 +1096,7 @@ export function computeDiff(snapshot, prior) {
     inboundLines,
     driftLines,
     inventoryLines,
+    adoptionLines,
   };
 }
 
@@ -1072,6 +1117,7 @@ export function formatDigest(diff) {
   const inboundLines = diff.inboundLines || [];
   const driftLines = diff.driftLines || [];
   const inventoryLines = diff.inventoryLines || [];
+  const adoptionLines = diff.adoptionLines || [];
 
   if (
     diff.broken.length === 0 &&
@@ -1082,7 +1128,8 @@ export function formatDigest(diff) {
     metricLines.length === 0 &&
     inboundLines.length === 0 &&
     driftLines.length === 0 &&
-    inventoryLines.length === 0
+    inventoryLines.length === 0 &&
+    adoptionLines.length === 0
   ) {
     // Quiet day. One short line, not a full report. Disk hygiene prints ZERO
     // lines here too, on purpose — see digest.mjs disk-hygiene section: a
@@ -1125,6 +1172,12 @@ export function formatDigest(diff) {
   if (inventoryLines.length > 0) {
     lines.push(`INVENTORY (self-adoption probe) — changed since last run:`);
     for (const l of inventoryLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  if (adoptionLines.length > 0) {
+    lines.push(`ADOPTION — one question (docs/SYSTEMS.md):`);
+    for (const l of adoptionLines) lines.push(`  ${l}`);
     lines.push("");
   }
 
@@ -1305,4 +1358,5 @@ export {
   inboundSnapshot as inboundSnapshotForTest,
   driftSnapshot as driftSnapshotForTest,
   inventorySnapshot as inventorySnapshotForTest,
+  adoptionSnapshot as adoptionSnapshotForTest,
 };
