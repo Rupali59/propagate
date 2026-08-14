@@ -57,10 +57,16 @@ its plist deleted from `~/Library/LaunchAgents`, and a copy archived at
 `docs/archive/com.tathya.propagate.watcher.plist.retired-2026-08-14` so the
 retirement stays reversible. Verified afterwards: only the digest job remains
 loaded, no watcher process running, all 379 v2 events intact.
-`docs/SYSTEMS.md`'s `propagate` row is now `done`. v1 ledger rows (152ish open across 7 workspaces +
-cross-repo, measured 2026-08-14 as 149+3) are untouched and remain readable
+`docs/SYSTEMS.md`'s `propagate` row is now `done`. v1 ledger rows remain readable
 via `status`/`drain` exactly as before — retiring the writer does not touch
 the reader.
+
+> **Count correction, 2026-08-14.** This section previously said "152ish open … 149+3".
+> That was true when written and false hours later: the drain the same day closed 125 code
+> rows as `wontfix` and 17 verified, leaving **8 open** (4 workspace + 3 cross-repo + 1 in
+> the branch-local worktree ledger B1 that `status --all` cannot see). Counts in a state
+> file rot faster than anything else in it — prefer naming the command that produces the
+> number over pasting the number.
 
 ### 2026-08-10 — Part A COMPLETE: discovery partition fixed, 2 → 7 workspaces
 
@@ -138,8 +144,9 @@ mkdir+appendFile at watcher.mjs:553-558 was a no-op everywhere. Side effect:
 the plist's `WatchPaths` — which had drifted to list neither current workspace
 root — was regenerated and now matches all 7.
 
-⚠️ `cli.mjs init` re-arms launchd as a side effect. That is surprising and
-should be split into a separate `reload` mode.
+⚠️ ~~`cli.mjs init` re-arms launchd as a side effect~~ — **RESOLVED 2026-08-13 (N14)**:
+split into a separate `reload` command, and the watcher plist it regenerated no longer
+exists. Kept struck through rather than deleted: this line is why `reload` exists.
 
 ### Known hazards while editing (verified, do not rediscover)
 
@@ -153,6 +160,7 @@ should be split into a separate `reload` mode.
 - A throw at `config.mjs` module load bricks watcher, CLI and UI simultaneously.
   Discovery must never throw.
 - **Zero existing tests exercise discovery.** 80/80 green proves nothing here.
+
 
 ## Active initiatives
 
