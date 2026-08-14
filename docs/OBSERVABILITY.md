@@ -48,7 +48,7 @@ column; without it the metric is decoration.
 | `ledger.unknown_types` | gauge | **0** | N1 · a `manual` row invisible since 2026-06-20 |
 | `ledger.duplicate_ids` | gauge | **0** | N2/N3 · id 256 existed twice |
 | `ledger.rows_open_multi_ledger` | gauge | **0** | A2 · 28 live instances |
-| `ledgers.swept` / `.discovered` | gauge | **equal** | B1 · an orphaned worktree ledger, 1 open row |
+| `ledgers.swept` / `.discovered` | gauge | **equal** | B1 · an orphaned worktree ledger, 1 open row. **Resolved 2026-08-15**: `doctor`'s `no unowned ledger files` scans for the artifact instead of trusting discovery, and classifies branch snapshots so their stale rows are reported but not counted |
 | `decisions.entries` / `.with_tokens` | gauge | **equal** | N12 · 8 entries, 0 tokens, gate passing on empty |
 | `downstream.unresolved` | gauge | flat; a *jump* means a move, not decay | N11 · `../` edges break on a directory move |
 | `rows.written{writer}` | counter | `external == 0` | 87% of the ledger was hand-written |

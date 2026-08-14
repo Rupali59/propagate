@@ -48,9 +48,11 @@ Code/docs side of the retirement, this pass:
   (N8 moot — its only caller, `enumerateWorktrees`, lived in `watcher.mjs`;
   N23's impact moot — `watcher.log` is no longer a live incident-response
   source) updated in the same pass.
-- 470/470 tests pass as of 2026-08-14 (was 465: -1 removed for
+- The suite passes clean; **run `npm test` for the count** rather than reading
+  one here. On 2026-08-14 it was 470 (was 465: -1 removed for
   now-intentionally-wrong behavior, +6 new — see `docs/DECISIONS.md`
-  2026-08-14 for the exact breakdown).
+  2026-08-14 for the breakdown). It has grown since; a number in this file is
+  wrong within days, which is what hub ledger row #148 was opened about.
 
 **Completed 2026-08-14:** the launchd unload itself — the job was booted out,
 its plist deleted from `~/Library/LaunchAgents`, and a copy archived at
@@ -71,9 +73,11 @@ the reader.
 ### 2026-08-10 — Part A COMPLETE: discovery partition fixed, 2 → 7 workspaces
 
 `workspace: true` now marks a ledger boundary explicitly; discovery always
-descends. All 7 ledger-owning dirs are discovered. **116/116 tests pass, as of 2026-08-10** (was 80; discovery had *zero*
-coverage before) — the full suite has grown well past that since; run `npm
-test` for the current count. `doctor: all green`.
+descends. All ledger-owning dirs are discovered — `cli.mjs status --all` reports the
+current count, and since 2026-08-15 it also names any ledger file that no
+workspace owns rather than omitting it. Test count: **run `npm test`**; it was
+116 on 2026-08-10 (up from 80 — discovery had *zero* coverage before) and has
+grown well past that. `doctor`: one known failure, the `manual` row (N1).
 
 Verified end-to-end: after promotion the watcher fired and wrote two
 `code_drift` rows for `SSJK-mb/.env.example` and `server/config/index.js` into

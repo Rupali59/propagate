@@ -436,10 +436,20 @@ worktree ledger holds **1 open row** that `status --all` does not list and
 than one ledger" assertion, which passes here only because it cannot see the
 second ledger to compare against.
 
-This is live evidence for `ISSUES.md` **B1** (sidecars are branch-local;
+> **Updated 2026-08-15.** The invisibility is fixed, and the diagnosis above is
+> half wrong. `doctor` now scans for ledger files no workspace owns, and
+> `status --all` counts the whole project. But that ledger is **not a divergent
+> second source of truth**: all 40 of its ids exist in the parent's ledger, and
+> the `1 open row` cited above is already `done` upstream. It is a branch-time
+> snapshot, so it is reported and deliberately not counted — counting it would
+> over-report exactly as badly as ignoring it under-reported. The true
+> whole-project figure is **7 open**, not 4 and not 8.
+> See `docs/DECISIONS.md` 2026-08-15.
+
+This was live evidence for `ISSUES.md` **B1** (sidecars are branch-local;
 `doctor` is not branch-aware), re-ranked to S1 on 2026-08-13 because the
 premise is coordination of parallel work. A secondary worktree holding a
-divergent copy of its parent's ledger is precisely that case, and both the
+copy of its parent's ledger is precisely that case, and both the
 census and the tool missed it — the census because a depth-limited walk
 stopped short of `.claude/worktrees/<name>/docs/`, the tool because discovery
 never descends there at all.

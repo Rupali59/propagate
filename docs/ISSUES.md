@@ -17,11 +17,14 @@ defect wearing different clothes.
 Severity — **S1** silently wrong (you cannot tell it happened) · **S2** noisy or misleading ·
 **S3** friction.
 
-Scale as of 2026-08-13 (post-session; measured by walking `~/Documents/GitHub` and by
-`cli.mjs status --all --json`): **748 folded event rows / 167 open across the 7 ledgers discovery
-can see**, plus **1 undiscovered worktree ledger** (79 raw rows, 1 open — see B1) that is invisible
-to every check in this file. Counting raw JSONL lines instead of folded events (i.e. including
-every `status_change` transition as its own line): **1,742 rows across 8 physical ledger files**.
+Scale as of **2026-08-15** (`cli.mjs status --all`): **1,922 raw rows across 11 physical ledger
+files → 798 folded ids → 7 open**, across 9 workspaces plus the cross-repo ledger. The worktree
+ledger that B1 was opened about is now classified, not invisible (see B1).
+
+**Read that as three different numbers, because it is.** Raw `open` LINES across those files
+total **501** — the ledger is append-only, so a row closed later keeps its original `open` line
+forever. Folded by last-status-per-id the answer is **7**. Anything that greps instead of folding
+is wrong by ~70×, and has been published wrong at least once.
 18 `.propagates.yml` markers · 7 discovered workspaces · 5 project families. Counts rot; re-measure
 before trusting these past a few weeks (the prior count here — "1,460 rows / 298 open across 8
 ledgers" — was itself already stale by the time this pass started).
@@ -616,8 +619,21 @@ propagate coordinates parallel work across branches/worktrees/repos, not doc sta
 premise, branch-blindness is not noise — it is the coupling the tool exists to hold, silently
 failing on exactly the case that matters most.*
 
-### B1 · Sidecars are branch-local; `doctor` is not branch-aware — **S1**
+### B1 · Sidecars are branch-local; `doctor` is not branch-aware — **S1** — **RESOLVED 2026-08-15**
 *(was S2; re-ranked 2026-08-13 — see note above)*
+
+**Resolved, but not as stated.** `doctor` gained `no unowned ledger files`, which scans the search
+roots for the *artifact* rather than trusting discovery — depth finds today's worktree and misses
+tomorrow's. `status --all` gained the cross ledger and a whole-project rollup.
+
+**The row this issue was opened about was never real work.** All 40 ids in that worktree ledger
+exist in the parent workspace's ledger, and `#039` — its one `open` row — is already `done`
+upstream. It is a branch-time snapshot, so it is reported and deliberately **not counted**;
+counting it would have moved the whole-project figure from an under-reported 4 to an over-reported
+8, when the truth is **7**. See `docs/DECISIONS.md` 2026-08-15.
+
+The sidecar half of this issue (16 of VipinKaushik's 31 specs existing only on
+`feat/hero-v4-rebuild`) is **not** addressed by that change and remains open under B2.
 
 16 of VipinKaushik's 31 specs exist only on `feat/hero-v4-rebuild`. A sidecar landing with that
 branch shows unresolved paths from production's perspective, indistinguishable from N11.
