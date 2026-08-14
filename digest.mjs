@@ -49,6 +49,7 @@ import {
 import { rebuildIndex, latestMtimeUnderDir } from "./lib/index-db.mjs";
 import { scanSkills, probeTranscripts } from "./lib/skills-scan.mjs";
 import { readMetricsRecords, evaluateExpectations } from "./lib/metrics.mjs";
+import { inventory as buildInventory } from "./lib/inventory.mjs";
 
 const HOME = os.homedir();
 const DIGEST_STATE_PATH = path.join(HOME, ".claude", "propagate-digest-state.json");
@@ -488,6 +489,16 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
   const inbound = inboundSnapshot(reconcileResult);
   const drift = driftSnapshot(reconcileResult);
 
+  let inv;
+  try {
+    inv = inventorySnapshot();
+  } catch (err) {
+    // Same belt-and-suspenders as disk/skills/lifecycle above: a bug in the
+    // self-adoption probe must never take down the only reporting channel
+    // that currently works.
+    inv = { available: false, error: String(err.message || err) };
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     degraded: DISCOVERY_DEGRADED,
@@ -503,6 +514,7 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     metrics,
     inbound,
     drift,
+    inventory: inv,
   };
 }
 
@@ -574,6 +586,34 @@ function skillsSnapshot(indexDb) {
   };
 }
 
+/**
+ * The self-adoption probe (lib/inventory.mjs) -- skills/plugins/repos/
+ * standalone artifacts, classified with evidence. Read-only, same
+ * belt-and-suspenders contract as skillsSnapshot()/lifecycleSweep() above:
+ * a bug in the inventory probe must never take down the only reporting
+ * channel that currently works (buildSnapshot() also wraps this call site).
+ *
+ * This is the probe's self-adoption answer: if the inventory tool itself
+ * goes unused, its own digest section — driven by the same appeared/
+ * disappeared diffing as SKILLS below — reports nothing changed and, after
+ * enough quiet days, that silence is itself visible in the quiet-day line.
+ */
+function inventorySnapshot() {
+  const inv = buildInventory();
+  const ids = [];
+  for (const items of Object.values(inv.categories)) {
+    for (const item of items) ids.push({ id: item.id, status: item.status });
+  }
+  return {
+    available: true,
+    generatedAt: inv.generatedAt,
+    counts: inv.counts,
+    ids,
+    droppedCount: inv.dropped.length,
+    budgetExceeded: inv.budgetExceeded,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Digest-state persistence — a lean prior snapshot (open row ids + a few
 // fields per row) sufficient to compute the diff. Atomic write via
@@ -620,6 +660,17 @@ function toStateMetrics(metrics) {
   return { runId: metrics.latest.run_id, ts: metrics.latest.ts, values: metrics.latest.metrics };
 }
 
+/** Lean prior-inventory record: id -> status map, plus the standing counts,
+ *  enough to diff appearances/disappearances/status-transitions without
+ *  restating the full evidence strings (those are re-derived fresh each run
+ *  from lib/inventory.mjs, never carried in state). */
+function toStateInventory(inv) {
+  if (!inv || !inv.available) return null;
+  const statusById = {};
+  for (const { id, status } of inv.ids) statusById[id] = status;
+  return { counts: inv.counts, statusById };
+}
+
 function snapshotToDigestState(snapshot) {
   const workspaces = {};
   for (const ws of snapshot.workspaces) workspaces[ws.name] = toStateWorkspace(ws);
@@ -631,6 +682,7 @@ function snapshotToDigestState(snapshot) {
     disk: toStateDisk(snapshot.disk),
     skills: toStateSkills(snapshot.skills),
     metrics: toStateMetrics(snapshot.metrics),
+    inventory: toStateInventory(snapshot.inventory),
   };
 }
 
@@ -871,6 +923,60 @@ export function computeDiff(snapshot, prior) {
     }
   }
 
+  // ── Inventory (self-adoption probe) ─────────────────────────────────────
+  // Diff-only, same reasoning as SKILLS immediately above and the file
+  // header's founding lesson: a section that reprints "175 items, 34 never
+  // invoked" every morning becomes furniture. Reports status TRANSITIONS
+  // (new dormant items, items that became active), not standing totals —
+  // this is also the self-adoption answer for lib/inventory.mjs itself: if
+  // nothing about the inventory changes for weeks, this section says
+  // nothing for weeks, and that silence is legitimate signal rather than a
+  // reason to keep restating a total nobody re-reads.
+  const inventoryLines = [];
+  const invSnap = snapshot.inventory;
+  const priorInv = prior?.inventory ?? null;
+  if (invSnap?.available) {
+    if (priorInv && priorInv.statusById) {
+      const beforeIds = new Set(Object.keys(priorInv.statusById));
+      const afterIds = new Set(invSnap.ids.map((r) => r.id));
+
+      const appeared = invSnap.ids.filter((r) => !beforeIds.has(r.id));
+      const disappeared = [...beforeIds].filter((id) => !afterIds.has(id));
+      const transitioned = invSnap.ids.filter(
+        (r) => beforeIds.has(r.id) && priorInv.statusById[r.id] !== r.status,
+      );
+
+      if (appeared.length) {
+        const dormantAppeared = appeared.filter((r) => r.status === "dormant" || r.status === "installed-never-invoked");
+        if (dormantAppeared.length) {
+          inventoryLines.push(
+            `+${dormantAppeared.length} new dormant/never-invoked: ${dormantAppeared.slice(0, 6).map((r) => r.id).join(", ")}${dormantAppeared.length > 6 ? ` (+${dormantAppeared.length - 6} more)` : ""}`,
+          );
+        }
+        const otherAppeared = appeared.length - dormantAppeared.length;
+        if (otherAppeared > 0) inventoryLines.push(`+${otherAppeared} other new item(s)`);
+      }
+      if (disappeared.length) {
+        inventoryLines.push(`-${disappeared.length} removed: ${disappeared.slice(0, 6).join(", ")}${disappeared.length > 6 ? ` (+${disappeared.length - 6} more)` : ""}`);
+      }
+      for (const r of transitioned.slice(0, 10)) {
+        inventoryLines.push(`${r.id}: ${priorInv.statusById[r.id]} -> ${r.status}`);
+      }
+      if (transitioned.length > 10) inventoryLines.push(`  (+${transitioned.length - 10} more transitions)`);
+    } else if (!firstRun) {
+      // Probe came online since the last digest with no prior baseline —
+      // state that once, same idiom as the skills/metrics baseline lines.
+      inventoryLines.push(`inventory online: ${invSnap.counts.total} items across skills/plugins/repos/standalone`);
+    }
+    if (invSnap.budgetExceeded) {
+      inventoryLines.push(`!! repo walk time budget exceeded — inventory is partial this run`);
+    }
+  } else if (invSnap?.error && !firstRun && prior?.inventory) {
+    // Vanished-signal case (R6): the whole probe failed, not just a value
+    // within it.
+    inventoryLines.push(`!! inventory probe unavailable: ${invSnap.error}`);
+  }
+
   // Lifecycle events are always worth a line — they are actions the system took
   // or is waiting on, not standing facts, so they cannot become wallpaper.
   const lc = snapshot.lifecycle;
@@ -945,6 +1051,7 @@ export function computeDiff(snapshot, prior) {
     metricLines,
     inboundLines,
     driftLines,
+    inventoryLines,
   };
 }
 
@@ -964,6 +1071,7 @@ export function formatDigest(diff) {
   const metricLines = diff.metricLines || [];
   const inboundLines = diff.inboundLines || [];
   const driftLines = diff.driftLines || [];
+  const inventoryLines = diff.inventoryLines || [];
 
   if (
     diff.broken.length === 0 &&
@@ -973,7 +1081,8 @@ export function formatDigest(diff) {
     skillLines.length === 0 &&
     metricLines.length === 0 &&
     inboundLines.length === 0 &&
-    driftLines.length === 0
+    driftLines.length === 0 &&
+    inventoryLines.length === 0
   ) {
     // Quiet day. One short line, not a full report. Disk hygiene prints ZERO
     // lines here too, on purpose — see digest.mjs disk-hygiene section: a
@@ -1010,6 +1119,12 @@ export function formatDigest(diff) {
   if (skillLines.length > 0) {
     lines.push(`SKILLS:`);
     for (const l of skillLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  if (inventoryLines.length > 0) {
+    lines.push(`INVENTORY (self-adoption probe) — changed since last run:`);
+    for (const l of inventoryLines) lines.push(`  ${l}`);
     lines.push("");
   }
 
@@ -1189,4 +1304,5 @@ export {
   snapshotToDigestState as snapshotToDigestStateForTest,
   inboundSnapshot as inboundSnapshotForTest,
   driftSnapshot as driftSnapshotForTest,
+  inventorySnapshot as inventorySnapshotForTest,
 };

@@ -1100,7 +1100,16 @@ async function doctor() {
           : "",
       );
     } else {
-      check("plist WatchPaths matches discovered workspaces", false, `${PLIST_PATH} does not exist`);
+      // The watcher was retired 2026-08-14 and its plist deleted on purpose, so
+      // "no plist" is the expected state, not a fault. This check stayed armed
+      // through the retirement and failed every run afterwards — a red check for
+      // a component that no longer exists is exactly how a real red check becomes
+      // background noise (G20). Informational, never ✗; per G2 it still says
+      // *why* it is absent rather than falling silent.
+      info(
+        "plist WatchPaths — n/a",
+        `${PLIST_PATH} does not exist; the watcher was retired 2026-08-14 (docs/DECISIONS.md). Its replacement's health is asserted under "v2 replacement" below.`,
+      );
     }
   } catch (err) {
     check("plist WatchPaths matches discovered workspaces", false, err.message);
@@ -2674,6 +2683,69 @@ async function bootstrapCmd() {
 }
 
 /**
+ * `inventory` — the self-adoption probe (task brief, docs/SYSTEMS.md): what
+ * was built across skills/plugins/repos/standalone artifacts, classified into
+ * SYSTEMS.md's existing status vocabulary, each with its evidence string.
+ *
+ * Read-only by construction (lib/inventory.mjs never writes/deletes/reaps).
+ * `--emit-rows` prints paste-ready SYSTEMS.md rows to STDOUT — it does NOT
+ * append to the file. SYSTEMS.md is append-only and a human decides what
+ * lands there.
+ */
+async function inventoryCmd() {
+  const { inventory, emitRows, STATUS } = await import("./lib/inventory.mjs");
+  const inv = inventory();
+
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify(inv, null, 2));
+    return;
+  }
+
+  if (process.argv.includes("--emit-rows")) {
+    for (const row of emitRows(inv)) console.log(row);
+    return;
+  }
+
+  console.log(`${BOLD}inventory${RESET} ${DIM}${inv.generatedAt}${RESET}`);
+  console.log(`  ${DIM}${inv.probeLimits.note}${RESET}`);
+  console.log();
+
+  const order = [
+    STATUS.ACTIVE,
+    STATUS.ACTIVE_UNADOPTED,
+    STATUS.PROPOSED,
+    STATUS.DORMANT,
+    STATUS.RETIRED,
+    STATUS.INSTALLED_NEVER_INVOKED,
+    STATUS.UNKNOWN,
+  ];
+  console.log(`  ${BOLD}${inv.counts.total} items${RESET}`);
+  for (const status of order) {
+    if (!inv.counts[status]) continue;
+    const color = status === STATUS.ACTIVE ? GREEN : status === STATUS.UNKNOWN ? RED : status === STATUS.DORMANT || status === STATUS.INSTALLED_NEVER_INVOKED ? YELLOW : DIM;
+    console.log(`    ${String(inv.counts[status]).padStart(4)}  ${color}${status}${RESET}`);
+  }
+
+  for (const [name, items] of Object.entries(inv.categories)) {
+    console.log();
+    console.log(`  ${BOLD}${name}${RESET} ${DIM}(${items.length})${RESET}`);
+    const byStatus = {};
+    for (const item of items) byStatus[item.status] = (byStatus[item.status] ?? 0) + 1;
+    for (const [status, count] of Object.entries(byStatus).sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${String(count).padStart(4)}  ${status}`);
+    }
+  }
+
+  if (inv.dropped.length) {
+    console.log();
+    console.log(`  ${YELLOW}${inv.dropped.length} path(s) dropped from the repo walk${RESET} ${DIM}(bounded — see --json for the list)${RESET}`);
+  }
+  if (inv.budgetExceeded) {
+    console.log(`  ${YELLOW}repo walk time budget exceeded — results are partial${RESET}`);
+  }
+}
+
+/**
  * `skills` — inventory of ~/.claude/skills with provenance and liveness.
  *
  * Read-only by construction. It reads ~/.claude.json for the harness-maintained
@@ -2884,6 +2956,8 @@ if (_invokedDirectly) {
     await verifyCmd();
   } else if (mode === "bootstrap") {
     await bootstrapCmd();
+  } else if (mode === "inventory") {
+    await inventoryCmd();
   } else if (mode === "skills") {
     await skills();
   } else if (mode === "skills-create") {
@@ -2892,7 +2966,7 @@ if (_invokedDirectly) {
     await skillsLifecycleCmd(mode);
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]]");
     process.exit(2);
   }
 }

@@ -271,11 +271,44 @@ test("G20: a healthy fixture produces zero ✗ lines for any of the four sole-so
   }
 });
 
-test("G20: plist.watchpaths stays a single inline assertion — not duplicated into EXPECTATIONS", async () => {
-  // No plist on disk at all is the simplest way to force the existing inline
-  // "plist WatchPaths matches discovered workspaces" check to fail.
+test("a missing plist is informational, not a failure (the watcher was retired on purpose)", async () => {
+  // Changed 2026-08-14. This used to assert a ✗ here, because "no plist" was a
+  // fault. The watcher was retired and its plist deleted deliberately, so absence
+  // is now the expected state and a ✗ would be a permanent red check for a
+  // component that no longer exists (G20). Per G2 the line must still say WHY it
+  // is absent rather than vanishing.
   const { root } = await makeWorkspace([driftLine("001")]);
   try {
+    const out = runDoctor(root).stdout + runDoctor(root).stderr;
+    assert.equal(
+      countMatches(out, /✗[^\n]*plist/gi),
+      0,
+      "a missing plist must not produce a ✗ — the watcher is retired",
+    );
+    assert.match(out, /plist WatchPaths — n\/a/, "absence must still be reported, with a reason");
+    assert.match(out, /retired 2026-08-14/, "the reason must name the retirement");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("G20: plist.watchpaths stays a single inline assertion — not duplicated into EXPECTATIONS", async () => {
+  // Trigger the failure the way it can still legitimately happen: a plist that
+  // EXISTS but whose WatchPaths disagree with discovery. Using a *missing* plist
+  // (the old trigger) no longer fires, and a check that cannot be made to fail is
+  // worthless as a guard (G1) — so this plants a bad one instead of deleting the test.
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    const label = process.env.PROPAGATE_LABEL || "com.tathya.propagate.watcher";
+    await writeFile(
+      path.join(root, `${label}.plist`),
+      `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>Label</key><string>${label}</string>
+  <key>WatchPaths</key><array><string>/nonexistent/stale/path</string></array>
+</dict></plist>`,
+      "utf8",
+    );
     const result = runDoctor(root);
     const out = result.stdout + result.stderr;
     assert.match(out, /✗[^\n]*plist WatchPaths matches discovered workspaces/);
