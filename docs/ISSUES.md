@@ -759,6 +759,26 @@ Remaining, re-ordered against what actually shipped:
 Everything else is friction rather than error. **N8** dropped off this list entirely 2026-08-14 —
 moot, not fixed, once `watcher.mjs` (its only caller) was retired; see N8's entry.
 
+### N24 · `init` leaves a workspace that `doctor` immediately fails — **S2**
+
+`cli.mjs init --workspace` writes `.propagates.yml` and verifies the directory is
+*discoverable*. It does **not** create `.propagation/ledger.{jsonl,md}`, so the two
+`ledger * exists` checks fail the moment onboarding finishes.
+
+**Observed twice, identically.** Obsidian on 2026-08-14 (doctor 1 → 3), then Motherboard
+the same day (doctor 1 → 3, same two checks). Both fixed by hand.
+
+The failure mode is that `init` ends by printing `✓ verified: discoverable as a
+workspace` and `init complete.` — a success banner over a state that fails the project's
+own health check. That is the silent-no-op shape this register exists to catch, inverted:
+not a check that cannot fail, but a **success message that outranks a check that just
+did**.
+
+`.templates/NEW-PROJECT-CHECKLIST.md` §4 already documents the workaround ("verify the
+ledger files exist afterwards — `init` confirms discoverable, not complete"). Documenting
+a defect twice is not fixing it: `init` should create both ledger files, or run `doctor`
+before printing `init complete` and refuse to claim success while it fails.
+
 ## Related
 
 - `docs/SPEC.md` — the specification these fixes resolve to
