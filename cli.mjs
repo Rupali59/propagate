@@ -3230,6 +3230,54 @@ async function docsCmd() {
   for (const f of args) console.log(formatGoverned(f, whatGoverns(f, index)));
 }
 
+/**
+ * `journal --since <iso> [--until <iso>]` — what was done, and when.
+ *
+ * Explicit datetimes are required, not a convenience: a bare `--until=2026-08-15` goes
+ * through git's approxidate parser and admitted commits stamped 2026-08-15, which is one
+ * of the two bugs that moved this figure three times before it settled.
+ */
+async function journalCmd() {
+  const { journal } = await import("./lib/journal.mjs");
+  const os = await import("node:os");
+  const arg = (f) => {
+    const i = process.argv.indexOf(f);
+    return i !== -1 ? process.argv[i + 1] : null;
+  };
+  const since = arg("--since");
+  if (!since) {
+    console.error("usage: node cli.mjs journal --since <ISO datetime> [--until <ISO datetime>] [--json]");
+    console.error('example: --since 2026-08-14T00:00:00+05:30 --until 2026-08-15T00:00:00+05:30');
+    process.exit(2);
+  }
+  const until = arg("--until") ?? new Date().toISOString();
+  let out;
+  try {
+    out = journal(SEARCH_ROOTS, since, until);
+  } catch (err) {
+    console.error(String(err.message));
+    process.exit(2);
+  }
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify(out, null, 2));
+    return;
+  }
+  console.log(
+    `${BOLD}# Journal ${since} → ${until}${RESET}\n  ${YELLOW}${out.commits}${RESET} commit(s) across ${YELLOW}${out.reposWithActivity}${RESET} repo(s)  ${DIM}(${out.reposScanned} scanned)${RESET}\n`,
+  );
+  for (const r of out.byRepo) {
+    const link = r.viaSymlink ? ` ${DIM}[via symlink]${RESET}` : "";
+    // Authors are printed always, not only when there are several: a journal that reads
+    // as one person's day is wrong about who did what.
+    console.log(`  ${BOLD}${r.repo.replace(os.homedir(), "~")}${RESET}  ${r.count}${link}  ${DIM}${r.authors.join(", ")}${RESET}`);
+    for (const c of r.commits.slice(0, 4)) console.log(`      ${DIM}${c.hash}${RESET} ${c.subject.slice(0, 76)}`);
+    if (r.commits.length > 4) console.log(`      ${DIM}… ${r.commits.length - 4} more${RESET}`);
+  }
+  if (out.symlinkedRepos.length) {
+    console.log(`\n  ${DIM}${out.symlinkedRepos.length} repo(s) reached only through a symlink — invisible to \`find\` and to readdirSync().isDirectory()${RESET}`);
+  }
+}
+
 async function backlogCmd() {
   const { backlog } = await import("./lib/backlog.mjs");
   const result = backlog();
@@ -3333,13 +3381,15 @@ if (_invokedDirectly) {
     await skillsCreateCmd();
   } else if (mode === "skills-promote" || mode === "skills-demote" || mode === "skills-reap") {
     await skillsLifecycleCmd(mode);
+  } else if (mode === "journal") {
+    await journalCmd();
   } else if (mode === "docs") {
     await docsCmd();
   } else if (mode === "backlog") {
     await backlogCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
     process.exit(2);
   }
 }
