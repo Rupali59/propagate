@@ -3046,6 +3046,79 @@ async function docsCmd() {
   const index = buildAuthorityIndex(sidecars);
 
   const args = process.argv.slice(3).filter((a) => !a.startsWith("--"));
+
+  if (process.argv.includes("--kinds")) {
+    const { kindOf, proseOnlySupersession } = await import("./lib/doc-kind.mjs");
+    const { globSync } = await import("node:fs");
+    const bySource = {};
+    const byKind = {};
+    const undeclared = [];
+    let prose = 0;
+    let scanned = 0;
+    // Workspaces nest (VipinKaushik lives under "Vipin Kaushik"), so the same doc is
+    // reachable twice. Counting it twice inflated this census from 1339 to 2219.
+    const seen = new Set();
+    for (const ws of WORKSPACES) {
+      let docs = [];
+      try {
+        docs = globSync(path.join(ws.root, "**", "docs", "**", "*.md"));
+      } catch {
+        continue;
+      }
+      for (const d of docs) {
+        if (d.includes("node_modules")) continue;
+        const abs = path.resolve(d);
+        if (seen.has(abs)) continue;
+        seen.add(abs);
+        scanned++;
+        const k = kindOf(d);
+        bySource[k.source] = (bySource[k.source] ?? 0) + 1;
+        byKind[k.kind ?? "(none)"] = (byKind[k.kind ?? "(none)"] ?? 0) + 1;
+        if (k.source === "undeclared") undeclared.push(d);
+        if (proseOnlySupersession(d)) prose++;
+      }
+    }
+    console.log(`${BOLD}# Doc kinds — ${scanned} scanned${RESET}\n`);
+    for (const [k, n] of Object.entries(byKind).sort((a, b) => b[1] - a[1]))
+      console.log(`  ${String(n).padStart(4)}  ${k}`);
+    console.log(`\n  ${DIM}resolved by:${RESET} ${Object.entries(bySource).map(([k, v]) => `${k}=${v}`).join("  ")}`);
+    // The residue is where the taxonomy is wrong, so it is reported, never silent.
+    console.log(`  ${YELLOW}${undeclared.length}${RESET} undeclared — no convention matches; these need \`kind:\` frontmatter`);
+    for (const u of undeclared.slice(0, 8)) console.log(`      ${DIM}${u.replace(os.homedir(), "~")}${RESET}`);
+    if (undeclared.length > 8) console.log(`      ${DIM}… and ${undeclared.length - 8} more${RESET}`);
+    console.log(`\n  ${YELLOW}${prose}${RESET} doc(s) claim supersession in prose with no \`supersedes:\` declaration`);
+    return;
+  }
+
+  if (process.argv.includes("--superseded")) {
+    const { buildSupersessionIndex } = await import("./lib/doc-kind.mjs");
+    const { globSync } = await import("node:fs");
+    let docs = [];
+    for (const ws of WORKSPACES) {
+      try {
+        docs.push(...globSync(path.join(ws.root, "**", "docs", "**", "*.md")).filter((d) => !d.includes("node_modules")));
+      } catch { /* unreadable workspace */ }
+    }
+    const idx = buildSupersessionIndex(docs);
+    const target = args[0];
+    if (!target) {
+      console.log(`${BOLD}# Declared supersessions — ${idx.size}${RESET}`);
+      for (const [doc, by] of idx) {
+        console.log(`  ${doc.replace(os.homedir(), "~")}`);
+        for (const b of by) console.log(`    ${DIM}overruled by${RESET} ${b.by.replace(os.homedir(), "~")}${b.anchor ? ` #${b.anchor}` : ""}`);
+      }
+      if (idx.size === 0) console.log(`  ${DIM}none declared yet — run \`docs --kinds\` for the prose-only count${RESET}`);
+      return;
+    }
+    const hits = idx.get(path.resolve(target));
+    if (!hits) {
+      console.log(`${path.basename(target)}: nothing declares that it supersedes this`);
+      return;
+    }
+    for (const h of hits) console.log(`${path.basename(target)} is overruled by ${h.by}${h.anchor ? ` #${h.anchor}` : ""}`);
+    return;
+  }
+
   if (process.argv.includes("--all") || args.length === 0) {
     if (index.size === 0) {
       // Absence must be attributable: no edges declared is a different fact from
@@ -3181,7 +3254,7 @@ if (_invokedDirectly) {
     await backlogCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all|--kinds|--superseded [<doc>]]]");
     process.exit(2);
   }
 }
