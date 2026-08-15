@@ -428,3 +428,42 @@ should read as clean, and check the two answers actually differ — a check whos
 constant (every commit trailer says the same author) cannot fail *or* pass meaningfully, and
 a check whose positive case can never be observed (a subagent write in the parent's own
 transcript) is not measuring what it claims to measure at all.
+
+### G36 · `${N:-{}}` in bash appends a stray brace, silently corrupting JSON
+A lib emitted `{"component":"worker-routing",...}` that `jq` rejected. The cause was one
+default-value expansion in the emit helper:
+
+```bash
+amodels="${6:-{}}"    # WRONG -> {"x":1}}
+amodels="${6:-"{}"}"  # right -> {"x":1}
+```
+
+Bash parses the first as `${6:-{}` — default value `{` — and then treats the trailing `}` as
+an ordinary literal appended **outside** the expansion. So the brace is added *whether or not
+argument 6 was supplied*: valid input produced `{"x":1}}` and the empty case produced `{}}`.
+The bug is invisible on inspection, because the line reads exactly like the intent.
+
+It stayed hidden because the consumer was tolerant. `precommit-check.sh` only asserts
+`type == "object"`, and a downstream `jq` filter on malformed input exits non-zero, which a
+warn-only path swallows. It surfaced only when the output was piped to `jq -e` directly.
+
+**Do:** quote any brace-bearing default — `${VAR:-"{}"}` — and never trust a JSON emitter you
+have not piped through `jq -e 'type=="object"'` at least once. Related: G8, measuring through
+a pipe reads the wrong exit code, and G2 — the tolerant consumer is what made this absence
+unattributable.
+
+### G37 · A hook dispatch guarded by `[[ -x ]]` turns a missing exec bit into permanent silence
+Every check in `PanditPawanKaushik/.githooks/pre-commit` is dispatched as
+`[[ -x scripts/foo.sh ]] && bash scripts/foo.sh`. That guard is deliberate — a check that is
+absent should not break a commit. It also means a script committed **without** mode `100755`
+never runs, on any clone, forever, and says nothing while not running.
+
+The trap is that it works on the machine that wrote it: the file is executable on disk
+locally, so the author sees the check fire. `install-hooks.sh` chmods `.githooks/*` and
+**not** `scripts/*`, so nothing repairs it downstream. The check would appear installed,
+tested, and green — and be dead for every other checkout.
+
+**Do:** after adding a hook-dispatched script, assert the committed mode, not the on-disk one:
+`git ls-files -s scripts/foo.sh` must show `100755`. Set it with
+`git update-index --chmod=+x`. Same shape as G2 — the failure is silent, so the check must be
+that the thing is *installed*, not that it *ran once here*.
