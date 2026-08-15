@@ -795,6 +795,56 @@ ledger files exist afterwards — `init` confirms discoverable, not complete"). 
 a defect twice is not fixing it: `init` should create both ledger files, or run `doctor`
 before printing `init complete` and refuse to claim success while it fails.
 
+### N25 · A ledger is read from the working tree, so its state is whatever branch is checked out — **S2**
+
+`reconcile`, `status` and `verify` read ledger and source files from the **working tree**.
+The skill already knows this — every verify event records
+`observed_on_ref: row.source.ref || "working-tree"` (`cli.mjs:2468,2540`,
+`lib/bootstrap.mjs:375`) — and `lib/git-context.mjs:96,134` already resolves the current
+branch. **Nothing joins those two facts.** No command compares a ledger across refs, and
+none warns that the checked-out branch is not the repo's default.
+
+**Measured 2026-08-15, `PanditPawanKaushik/SSJK-mb`:**
+
+| Ref | `docs/PROPAGATION_LEDGER.jsonl` |
+|---|---|
+| `main` | **7 rows** |
+| `r1-dashboard-rebuild` (checked out) | **86 rows** |
+
+`status --all` reports SSJK-mb as `✓ no open drift events`. That is true of the branch and
+says nothing about `main`, which is 79 rows behind — and the output does not mention a
+branch at all. Anyone reading the project's propagation state from its default branch gets
+a different answer than the tool just gave them, with no indication the two exist.
+
+The divergence here is benign — append-only, strictly ahead, `main`'s 7 rows are
+byte-identical to the branch's first 7. That is the point: **the failure is not corruption,
+it is an unqualified answer.** A `0 open` that silently means `0 open on whatever you have
+checked out` is the same class as G2 (absence must be attributable) and the same class as
+the size-cap gate reading HEAD instead of the index (SSJK-workspace #19).
+
+**Not the same as the B1 branch-snapshot case** (`docs/DECISIONS.md` 2026-08-15), and the
+fix there does not cover it. B1 was an **unowned ledger file at another path**, caught by
+scanning search roots for the artifact. Here there is exactly one path, one workspace, one
+owner — the divergence lives inside git, not on the filesystem, so no amount of scanning
+finds it.
+
+**Options, in ascending cost:**
+1. **Qualify the output.** When `HEAD` is not the repo's default branch, append the branch
+   to the status line: `SSJK-mb [r1-dashboard-rebuild] ✓ no open drift events`. Cheapest,
+   and removes the unqualified claim, which is the actual harm.
+2. **Warn on divergence.** Compare `git show <default>:<ledger>` against the working-tree
+   copy; if they differ, say by how many rows and in which direction. Reuses the same
+   `git show` reading `scripts/hygiene/lib/size-caps.sh` already relies on.
+3. **Make the ref explicit in `status`/`reconcile`** (`--ref main`), so a whole-project
+   answer can be derived for the default branch regardless of what is checked out.
+
+(1) is a one-line honesty fix and should not wait for (2) or (3).
+
+**Live instances today:** `SSJK-mb` on `r1-dashboard-rebuild` (7 vs 86 rows), and this very
+repo — `~/.claude/skills/propagate` on `docs/premise-and-routing`, where `docs/GOTCHAS.md`
+does **not exist on `main` at all** while the branch carries 37 entries. Neither is a bug in
+the branches; both are answers that decline to name their scope.
+
 ## Related
 
 - `docs/SPEC.md` — the specification these fixes resolve to
