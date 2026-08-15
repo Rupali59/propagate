@@ -4,7 +4,9 @@
   "title": "Propagation sidecar",
   "description": "Schema for .propagates.yml sidecars. Each sidecar covers the docs/CLAUDE.mds in its directory and declares where edits propagate.",
   "type": "object",
-  "required": ["sources"],
+  "required": [
+    "sources"
+  ],
   "properties": {
     "workspace": {
       "type": "boolean",
@@ -15,13 +17,18 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["propagates_to"],
+        "required": [
+          "propagates_to"
+        ],
         "properties": {
           "propagates_to": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["path", "why"],
+              "required": [
+                "path",
+                "why"
+              ],
               "properties": {
                 "path": {
                   "type": "string",
@@ -29,7 +36,7 @@
                   "not": {
                     "pattern": "/$"
                   },
-                  "description": "Relative path from this sidecar to the downstream file. May be a glob (e.g. `style/pages/**/*.md`) — the watcher fs-expands it and records a single summary entry {glob_matched, sample}; `doctor` requires ≥1 match. Must not be empty and must not end in '/' — a bare directory is never a valid downstream (reading it as content fails with EISDIR); declare a file or a glob instead. Schema cannot detect a directory that lacks a trailing slash — that check runs at doctor/validate time against the filesystem (see `classifyDownstreamPath` in cli.mjs)."
+                  "description": "Relative path from this sidecar to the downstream file. May be a glob (e.g. `style/pages/**/*.md`) \u2014 the watcher fs-expands it and records a single summary entry {glob_matched, sample}; `doctor` requires \u22651 match. Must not be empty and must not end in '/' \u2014 a bare directory is never a valid downstream (reading it as content fails with EISDIR); declare a file or a glob instead. Schema cannot detect a directory that lacks a trailing slash \u2014 that check runs at doctor/validate time against the filesystem (see `classifyDownstreamPath` in cli.mjs)."
                 },
                 "why": {
                   "type": "string",
@@ -38,8 +45,20 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": ["prose", "code"],
+                  "enum": [
+                    "prose",
+                    "code"
+                  ],
                   "default": "prose"
+                },
+                "authority": {
+                  "type": "string",
+                  "enum": [
+                    "counsel",
+                    "spec",
+                    "reference"
+                  ],
+                  "description": "This SOURCE governs the downstream, beyond merely coupling to it. counsel = the source is the authority and its wording is not to be changed by whoever edits the downstream (legal copy, pricing); the edit-time hook BLOCKS. spec = the source defines intended behaviour; advisory. reference = useful background; advisory. Omit for an ordinary drift edge."
                 }
               },
               "additionalProperties": false
@@ -50,7 +69,9 @@
             "description": "Forward-compat: per-section concept tags for graph-augment (V2). Keys are section anchors; values are concept candidate lists.",
             "additionalProperties": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         },

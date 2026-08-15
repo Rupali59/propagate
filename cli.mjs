@@ -3027,6 +3027,51 @@ async function skillsLifecycleCmd(mode) {
  * result; the default view prints per-file parsed/unparsed lines plus a
  * ranked, deduped item list.
  */
+/**
+ * `docs` — the derive-on-demand half of doc authority.
+ *
+ *   docs <file>   what governs this file, and why
+ *   docs --all    every declared authority edge in the tree
+ *
+ * The hook (`~/.claude/hooks/doc-authority.mjs`) is the same lookup at edit time. Both
+ * render through `formatGoverned` so they can never disagree about what they found.
+ */
+async function docsCmd() {
+  const { buildAuthorityIndex, whatGoverns, formatGoverned, blocks } = await import("./lib/docs.mjs");
+  const { findAllSidecarsRecursive } = await import("./lib/edges.mjs");
+  const os = await import("node:os");
+
+  const sidecars = [];
+  for (const ws of WORKSPACES) sidecars.push(...(await findAllSidecarsRecursive(ws.root)));
+  const index = buildAuthorityIndex(sidecars);
+
+  const args = process.argv.slice(3).filter((a) => !a.startsWith("--"));
+  if (process.argv.includes("--all") || args.length === 0) {
+    if (index.size === 0) {
+      // Absence must be attributable: no edges declared is a different fact from
+      // "the scan failed" (rule:discernment-checks §2).
+      console.log(
+        `${BOLD}# Doc authority${RESET}\n  ${DIM}no edges declare \`authority:\` yet — ${sidecars.length} sidecar(s) scanned across ${WORKSPACES.length} workspace(s)${RESET}`,
+      );
+      return;
+    }
+    let blocking = 0;
+    console.log(`${BOLD}# Doc authority — ${index.size} governed file(s)${RESET}\n`);
+    for (const [downstream, hits] of [...index.entries()].sort()) {
+      for (const h of hits) {
+        if (blocks(h.authority)) blocking++;
+        const tag = blocks(h.authority) ? `${YELLOW}counsel/blocks${RESET}` : `${DIM}${h.authority}${RESET}`;
+        console.log(`  ${downstream.replace(os.homedir(), "~")}`);
+        console.log(`    ${DIM}←${RESET} ${h.source.replace(os.homedir(), "~")}  [${tag}]`);
+      }
+    }
+    console.log(`\n  ${blocking} edge(s) would block an edit; ${index.size - blocking} advisory`);
+    return;
+  }
+
+  for (const f of args) console.log(formatGoverned(f, whatGoverns(f, index)));
+}
+
 async function backlogCmd() {
   const { backlog } = await import("./lib/backlog.mjs");
   const result = backlog();
@@ -3130,11 +3175,13 @@ if (_invokedDirectly) {
     await skillsCreateCmd();
   } else if (mode === "skills-promote" || mode === "skills-demote" || mode === "skills-reap") {
     await skillsLifecycleCmd(mode);
+  } else if (mode === "docs") {
+    await docsCmd();
   } else if (mode === "backlog") {
     await backlogCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all]]");
     process.exit(2);
   }
 }
