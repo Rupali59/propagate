@@ -366,3 +366,33 @@ is already `done` upstream. Counting it moves 4 → 8 when the truth is **7**.
 **Do:** classify before aggregating. `rule:discernment-checks` §5 — state what the
 measurement is over, and check it is the same thing the claim is about. Two ledgers that
 both contain "id 39" are not two findings.
+
+### G33 · A backup in a job-scoped temp directory is not a backup
+Three pre-edit `CLAUDE.md` files were saved to `~/.claude/jobs/<id>/tmp/unversioned-backup/`
+before being rewritten, because their source directories (`Keerti/`, `Tathya/`) are not git
+repos and there was nowhere else to put them. It was flagged the same day with *"if these are
+not brought under version control soon"*. A day later both sources were still unversioned and
+that temp directory was still the only copy — and it is deleted with the job.
+
+The wording is what let it sit: **"soon" is not a deadline and "should be" is not an owner.**
+An item whose completion condition cannot be evaluated cannot be found incomplete, so it never
+appears on any list of outstanding work.
+
+**Do:** when the only copy of something lands anywhere ephemeral, either move it somewhere
+durable in the same session or write the item with a condition a later reader can *test* —
+"`Keerti/.git` exists" is checkable; "brought under version control soon" is not. Same failure
+mode as G14: the record was written correctly and still decayed, because nothing re-read it.
+
+### G34 · Relocating a risk is not resolving it, and the doc will imply otherwise
+`rupali-varga-charts/` — 30 files, no `.git` at all, called *"the highest data-loss risk in the
+tree"* by the hub `CLAUDE.md` — was moved from the top level to `Rupali/` as a personal project.
+Every reference updated, a row added where it had none. It is exactly as unbacked as before:
+`Rupali/` is a *container* of independent repos, not a repo.
+
+The hazard is that the move generates a flurry of legitimate-looking activity — commits,
+updated tables, a new row — none of which touches the actual exposure. A later reader sees a
+tidied entry and infers it was handled.
+
+**Do:** state the residual risk in the same edit that performs the move, in the entry itself,
+not only in the commit message. `rule:discernment-checks` §2 — absence must be attributable;
+so must non-resolution.
