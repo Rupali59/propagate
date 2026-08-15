@@ -163,3 +163,30 @@ test("a path resolving against the workspace root is not broken", async () => {
 test("an unreadable doc returns null — not an empty array that reads as clean", () => {
   assert.equal(brokenPathCitations(path.join(tmpdir(), "definitely-absent-xyz.md"), ["/"]), null);
 });
+
+test("table cells are OPT-IN — the default must not see them", async () => {
+  // Measured 2026-08-15 at identical scope: admitting whole-cell table paths catches the
+  // motivating case (sanskrit-texts' 11 dead Hora/ rows) for +314 tree-wide, 2008 -> 2322.
+  // An earlier note said "~50 -> 2325" — that compared a 6-project subset against the
+  // whole tree. Off by default because the 2008 baseline is itself unverified and
+  // dominated by content vaults. This test fails if either half of the trade is changed.
+  const root = await mkdtemp(path.join(tmpdir(), "dockind-tables-"));
+  const doc = path.join(root, "CLAUDE.md");
+  await writeFile(
+    doc,
+    [
+      "| text_id | Directory |",
+      "|---------|-----------|",
+      "| `bphs`  | Hora/Gone/ |",
+      "| route   | /astrology/ |", // a URL route, never a repo path
+      "| prose   | some words here |",
+    ].join("\n"),
+    "utf8",
+  );
+  assert.deepEqual(brokenPathCitations(doc, [root]), [], "default: table cells invisible");
+  assert.deepEqual(
+    brokenPathCitations(doc, [root], undefined, { tables: true }),
+    ["Hora/Gone/"],
+    "opt-in: the dead path, and NOT the URL route or the prose cell",
+  );
+});

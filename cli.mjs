@@ -3104,8 +3104,9 @@ async function docsCmd() {
         if (docs.length === 0) continue;
         let live = 0;
         let hist = 0;
+        const withTables = process.argv.includes("--tables");
         for (const d of docs) {
-          const broken = brokenPathCitations(d, [root, ws.root]) ?? [];
+          const broken = brokenPathCitations(d, [root, ws.root], undefined, { tables: withTables }) ?? [];
           if (HISTORICAL.has(kindOf(d).kind)) hist += broken.length;
           else live += broken.length;
         }
@@ -3123,10 +3124,10 @@ async function docsCmd() {
       `\n  ${DIM}"live" = every kind except state/plan/decision-log, which cite moved files by design.${RESET}`,
     );
     console.log(
-      `  ${DIM}Only backticked citations with a file extension are checked — an un-backticked${RESET}`,
+      `  ${DIM}Backticked citations only. --tables also reads whole-cell table paths: it catches${RESET}`,
     );
     console.log(
-      `  ${DIM}path in a markdown table is NOT seen (sanskrit-texts' 11 dead Hora/ rows are missed).${RESET}`,
+      `  ${DIM}sanskrit-texts' 11 dead Hora/ rows, and takes the tree-wide count ~50 -> 2325.${RESET}`,
     );
     return;
   }
@@ -3338,7 +3339,7 @@ if (_invokedDirectly) {
     await backlogCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all|--kinds|--structure|--superseded [<doc>]]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]]");
     process.exit(2);
   }
 }

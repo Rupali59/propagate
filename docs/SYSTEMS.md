@@ -114,11 +114,18 @@ module). Narrowed to extension-bearing citations, resolved against project *and*
 roots, and split by document kind — a `CHANGELOG` citing a moved file is a record, not a
 defect — the honest figure is **50 live-doc broken citations, 308 historical**.
 
-**Known blind spot, stated rather than discovered later:** only *backticked* citations are
-checked. `sanskrit-texts/CLAUDE.md` has **11 dead `Hora/` paths** in a plain markdown
+**The table-cell trade, resolved and measured.** Only *backticked* citations are checked
+by default. `sanskrit-texts/CLAUDE.md` has **11 dead `Hora/` paths** in a plain markdown
 table — every text moved under `Hora/{Jaimini,Nadi,Parashari,Prashna}/` in `1cccca6`
-(2026-08-12) — and this check sees none of them. Widening the regex to table cells
-re-imports the noise it was narrowed to remove; that trade is unresolved.
+(2026-08-12). `docs --structure --tables` catches all 11, at **+314 tree-wide
+(2008 → 2322, ~16%)** — measured at identical scope, after a first pass reported the cost
+as "+2275" by comparing a 6-project subset against the whole tree.
+
+It stays opt-in for a reason that outlives that number: **the 2008 baseline is itself
+unverified**, dominated by `PanditPawanKaushik` and `WorkTracker`, which are published
+content vaults rather than project docs — the same scope boundary `docs --kinds` still
+needs. Until that lands neither figure is actionable, and a flag is honest where a
+default would not be.
 
 `adoption_date` is blank because it is earned by a human, not asserted by its author.
 
