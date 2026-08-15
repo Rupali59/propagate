@@ -3082,6 +3082,55 @@ async function docsCmd() {
 
   const args = process.argv.slice(3).filter((a) => !a.startsWith("--"));
 
+  if (process.argv.includes("--structure")) {
+    const { kindOf, brokenPathCitations } = await import("./lib/doc-kind.mjs");
+    const { globSync } = await import("node:fs");
+    // A CHANGELOG or a dated plan citing a since-moved file is CORRECT — it is a
+    // historical record. Only live docs must resolve. Without this split the check
+    // reported 603 findings across 6 projects; with it, 50.
+    const HISTORICAL = new Set(["state", "plan", "decision-log"]);
+    console.log(`${BOLD}# Doc structure${RESET}\n`);
+    for (const ws of WORKSPACES) {
+      const projects = new Set();
+      for (const d of globSync(path.join(ws.root, "**", "docs"))) {
+        if (d.includes("node_modules")) continue;
+        projects.add(path.dirname(d));
+      }
+      for (const root of [...projects].sort()) {
+        const docs = [
+          ...globSync(path.join(root, "*.md")),
+          ...globSync(path.join(root, "docs", "**", "*.md")),
+        ].filter((d) => !d.includes("node_modules"));
+        if (docs.length === 0) continue;
+        let live = 0;
+        let hist = 0;
+        for (const d of docs) {
+          const broken = brokenPathCitations(d, [root, ws.root]) ?? [];
+          if (HISTORICAL.has(kindOf(d).kind)) hist += broken.length;
+          else live += broken.length;
+        }
+        const router = existsSync(path.join(root, "docs", "README.md"));
+        const decisions =
+          existsSync(path.join(root, "docs", "DECISIONS.md")) || existsSync(path.join(root, "DECISIONS.md"));
+        const flags = [router ? "" : "no-router", decisions ? "" : "no-DECISIONS"].filter(Boolean).join(" ");
+        const mark = live > 0 ? YELLOW : GREEN;
+        console.log(
+          `  ${mark}${String(live).padStart(4)}${RESET} broken in live docs  ${DIM}(${hist} historical, expected)${RESET}  ${root.replace(os.homedir(), "~")}${flags ? `  ${YELLOW}[${flags}]${RESET}` : ""}`,
+        );
+      }
+    }
+    console.log(
+      `\n  ${DIM}"live" = every kind except state/plan/decision-log, which cite moved files by design.${RESET}`,
+    );
+    console.log(
+      `  ${DIM}Only backticked citations with a file extension are checked — an un-backticked${RESET}`,
+    );
+    console.log(
+      `  ${DIM}path in a markdown table is NOT seen (sanskrit-texts' 11 dead Hora/ rows are missed).${RESET}`,
+    );
+    return;
+  }
+
   if (process.argv.includes("--kinds")) {
     const { kindOf, proseOnlySupersession } = await import("./lib/doc-kind.mjs");
     const { globSync } = await import("node:fs");
@@ -3289,7 +3338,7 @@ if (_invokedDirectly) {
     await backlogCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all|--kinds|--superseded [<doc>]]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all|--kinds|--structure|--superseded [<doc>]]]");
     process.exit(2);
   }
 }

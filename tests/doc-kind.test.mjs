@@ -20,6 +20,7 @@ import {
   parseSupersedes,
   proseOnlySupersession,
   buildSupersessionIndex,
+  brokenPathCitations,
   frontmatter,
   KINDS,
 } from "../lib/doc-kind.mjs";
@@ -113,4 +114,52 @@ test("frontmatter absent is not an error, and every KIND documents its lifecycle
   for (const [k, why] of Object.entries(KINDS)) {
     assert.ok(why.length > 10, `${k} must state the lifecycle it implies, not just exist`);
   }
+});
+
+test("broken-path citations: narrow by design, because the naive rule was 12x noise", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "dockind-paths-"));
+  await mkdir(path.join(root, "lib"), { recursive: true });
+  await writeFile(path.join(root, "lib", "real.ts"), "export const x = 1;\n", "utf8");
+  const doc = path.join(root, "GUIDE.md");
+  await writeFile(
+    doc,
+    [
+      "Cites a real file: `lib/real.ts`",
+      "Cites a dead file: `lib/gone.ts`",
+      "Cites a dead dir:  `lib/nowhere/`",
+      // Each of the following defeated the first version of this check, which reported
+      // 603 findings across 6 projects. None is a path.
+      "A git branch:      `feat/hero-v4-rebuild`",
+      "A git tag:         `archive/main-2026-05-22`",
+      "A CIDR block:      `0.0.0.0/0`",
+      "A module import:   `next/image`",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const broken = brokenPathCitations(doc, [root]);
+  assert.deepEqual(
+    broken.sort(),
+    ["lib/gone.ts", "lib/nowhere/"],
+    "must catch the two dead paths and NONE of the branch/tag/CIDR/module lookalikes",
+  );
+});
+
+test("a path resolving against the workspace root is not broken", async () => {
+  // `docs/constitution/VIPIN.md` is correct from the WORKSPACE root and absent from the
+  // project root. Resolving against only one of them called 9 such citations broken.
+  const ws = await mkdtemp(path.join(tmpdir(), "dockind-ws-"));
+  const proj = path.join(ws, "project");
+  await mkdir(path.join(ws, "docs"), { recursive: true });
+  await mkdir(proj, { recursive: true });
+  await writeFile(path.join(ws, "docs", "VIPIN.md"), "# constitution\n", "utf8");
+  const doc = path.join(proj, "CLAUDE.md");
+  await writeFile(doc, "See `docs/VIPIN.md`\n", "utf8");
+
+  assert.deepEqual(brokenPathCitations(doc, [proj, ws]), [], "workspace-root resolution must count");
+  assert.deepEqual(brokenPathCitations(doc, [proj]), ["docs/VIPIN.md"], "and without it, it reads as broken");
+});
+
+test("an unreadable doc returns null — not an empty array that reads as clean", () => {
+  assert.equal(brokenPathCitations(path.join(tmpdir(), "definitely-absent-xyz.md"), ["/"]), null);
 });

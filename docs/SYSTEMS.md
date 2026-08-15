@@ -64,6 +64,7 @@ Columns:
 | `disabled-plugins` | plugin set | dormant | — | `settings.json` `enabledPlugins` | `python3 -c "import json,os;d=json.load(open(os.path.expanduser('~/.claude/settings.json')))['enabledPlugins'];print(sum(1 for v in d.values() if not v),'of',len(d))"` → **28 of 48 disabled but retained** | 2026-08-14 | n/a | n/a |
 | `obsidian-collect` | launchd agent (bash → Python, 22:00 daily) | active | superseded_by: `obsidian-journal` (proposed) | `~/Library/LaunchAgents/com.tathya.obsidian.collect.plist` (**loaded**); `Rupali/Obsidian/Scripts/bash/daily_auto_collect.sh`; in-repo template `Scripts/config/com.obsidian.dailycollect.plist` (**not** the loaded label) | `python3 -c "import json;rows=[json.loads(l) for l in open('…/Scripts/logs/collection_history.jsonl')];print(sum(1 for r in rows if (r['collectors'].get('github') or {}).get('commits',0)>0),'of',len(rows),'runs saw a commit')"` → **0 of 50**. Evidence preserved at `docs/archive/obsidian-collection_history.2026-05-23_2026-08-13.jsonl` — the source file is untracked and gitignored in its own repo (`.gitignore:23`, 0 commits), so retiring the collector would otherwise destroy the only copy and make this row's own claim unverifiable. Not broken: it queries `/search/commits`, which indexes default branches only, while the work is on feature branches (`collectors/github.py:86,91`) | 2026-08-14 | n/a | **handed over** — retirement specified in `Rupali/Obsidian/HANDOVER-2026-08-14.md`, executed by that repo. Hazard until then: `setup_automation.sh:8` hardcodes a different label, so `install` would add a SECOND agent on the same schedule |
 | `worktracker-diary` | launchd agent (bash → bun, **23:00 daily**) | active | supersedes: `obsidian-collect` *in practice* — see note | `~/Library/LaunchAgents/com.tathya.diary.collect.plist` (**loaded**); `Tathya/WorkTracker/scripts/diary/daily.sh`; vault target `Tathya/WorkTracker/scripts/sync-manifest.json` → `../../Rupali/Obsidian` | `tail -3 "$(ls -1t ~/.work-diary/logs/daily-*.log \| head -1)"` → ends `===== daily diary done =====`. Writes `Rupali/Obsidian/Calendar/<Y>/<Month>/<DD-MM-YYYY>.md`, commits `diary: auto-update`, pushes, triggers CI → Quartz. Has locking, pre-flight abort on a dirty vault, gc and vault backups | 2026-08-15 | — *not earned* | n/a |
+| `doc-structure` | CLI surface + PreToolUse hook + 2 calibrated expectations | active | supersedes: nothing — this is new | `lib/docs.mjs` (authority index, coverage) · `lib/doc-kind.mjs` (kind, supersession, broken-path citations) · `~/.claude/hooks/doc-authority.mjs` (registered in `settings.json`, `Edit\|Write`) · `cli.mjs docs [--all\|--kinds\|--structure\|--superseded]` | `node cli.mjs docs --structure` → per-project broken-citation counts; `docs --kinds` → the census; `doctor` asserts `docs.supersession_prose_only <= 107` (a ratchet) and `docs.supersedes_unresolvable == 0`. Hook proof: an Edit on a `counsel`-governed file exits 2 — verified on `VipinKaushik/app/(site)/privacy/page.tsx`, which exited 0 before the edge was declared | 2026-08-15 | — *not earned* | n/a |
 | `obsidian-quartz-sync` | GitHub Actions workflow | active | — | `Rupali/Obsidian/.github/workflows/trigger-quartz-sync.yml` | `gh run list --workflow trigger-quartz-sync.yml -L 1`; fires on push to `Calendar/**`, `Notes/**`, `Vault.md` | 2026-08-14 | — *not earned* | n/a |
 | `obsidian-worktracker-notify` | GitHub Actions workflow | active | — | `Rupali/Obsidian/.github/workflows/notify-worktracker.yml` | `gh run list --workflow notify-worktracker.yml -L 1`; fires on `Calendar/**`, `Notes/**` — **note: does NOT watch `Vault.md`, unlike its quartz sibling.** That divergence is the declared edge in `Rupali/Obsidian/.propagates.yml` | 2026-08-14 | — *not earned* | n/a |
 | `obsidian-journal` | CLI + digest section (**proposed, not built**) | proposed | supersedes: `obsidian-collect` | planned `propagate/lib/journal.mjs` and a `journal` subcommand (**not yet registered** — deliberately not written as a runnable invocation, so the docs never name a command a reader cannot run); sink `Rupali/Obsidian/Calendar/<YYYY>/<Month>/<DD-MM-YYYY>.md` | **No probe — the command does not exist yet.** Acceptance test when built: a `journal` subcommand must report **95** local commits across **21** repos for 2026-08-14 — the day `obsidian-collect` reported as 0 and `worktracker-diary` reported as 35 across 3 (figure corrected 2026-08-15; the earlier **40** was a partial count taken before every repo was enumerated). This row is `proposed`; it is a commitment, not a component. (Written first as a runnable invocation, which `tests/skill-doc.test.mjs` correctly rejected — docs must not name commands that are not registered.) | 2026-08-14 | n/a | n/a |
@@ -92,6 +93,34 @@ across 3 repos**; the tree actually saw **95 across 21**. The three it captured 
 precisely those with 0–2 unpushed commits — it reports pushed default-branch activity and
 so inherits the exact blindness that killed `obsidian-collect`, including the hub repo,
 which has no remote at all.
+
+
+### `doc-structure` — why it exists, and what it deliberately does not measure
+
+Built 2026-08-15 after a concrete failure: `app/(site)/privacy/page.tsx` was rewritten
+without reading `docs/content/legal/PRIVACY-CONTENT.md`, the counsel-owned spec that
+governs it and that **supersedes** the decision used as authority instead. The edit was
+reverted. The propagation edge for that pair was *already declared*, and its `why` already
+described the exact failure — propagate is derive-on-demand, and nobody ran it before
+editing. The missing thing was a trigger, not a declaration.
+
+**Three numbers, and each was wrong before it was right.** The doc census first reported
+2219 docs against a true 1339 (nested workspaces double-counted). The prose-only
+supersession baseline was predicted at ~75 and is 107 — the prediction counted *lines*
+across 2 roots, the checker counts *files* across all workspaces. Broken-path citations
+first reported **603 across 6 projects**; sampling showed `feat/hero-v4-rebuild` (a
+branch), `archive/main-2026-05-22` (a tag), `0.0.0.0/0` (a CIDR) and `next/image` (a
+module). Narrowed to extension-bearing citations, resolved against project *and* workspace
+roots, and split by document kind — a `CHANGELOG` citing a moved file is a record, not a
+defect — the honest figure is **50 live-doc broken citations, 308 historical**.
+
+**Known blind spot, stated rather than discovered later:** only *backticked* citations are
+checked. `sanskrit-texts/CLAUDE.md` has **11 dead `Hora/` paths** in a plain markdown
+table — every text moved under `Hora/{Jaimini,Nadi,Parashari,Prashna}/` in `1cccca6`
+(2026-08-12) — and this check sees none of them. Widening the regex to table cells
+re-imports the noise it was narrowed to remove; that trade is unresolved.
+
+`adoption_date` is blank because it is earned by a human, not asserted by its author.
 
 ## Notes on this seed
 
