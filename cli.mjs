@@ -82,11 +82,13 @@
  *                                            failure to confirm is a non-zero exit.
  */
 
-import { existsSync, globSync, realpathSync } from "node:fs";
+import { existsSync, globSync, realpathSync, readdirSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
+import { homedir as _homedir } from "node:os";
+const HOME_DIR = _homedir();
 import { execSync, execFileSync } from "node:child_process";
 
 import {
@@ -1249,6 +1251,41 @@ async function doctor() {
       unreachable.length === 0,
       unreachable.length ? unreachable.join(", ") : "",
     );
+
+    // Discovery walks with readdirSync().filter(e => e.isDirectory()), and a Dirent for a
+    // SYMLINKED directory answers isSymbolicLink() instead — so the walk never descends
+    // into one. Today that costs nothing: the only symlinked dir in a search root is
+    // `propagate-skill` -> this repo, which carries no `.propagates.yml` and has never
+    // asked to be a workspace. But a symlinked repo that DID declare one would be dropped
+    // in silence, and silence is what let 14 commits/day go uncounted for two days.
+    // Report what was not descended into; do not fail on it (rule:discernment-checks §2).
+    try {
+      const skipped = [];
+      for (const root of SEARCH_ROOTS) {
+        let entries = [];
+        try {
+          entries = readdirSync(root, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const e of entries) {
+          if (!e.isSymbolicLink()) continue;
+          const full = path.join(root, e.name);
+          try {
+            if (!statSync(full).isDirectory()) continue;
+          } catch {
+            continue; // broken link — not a workspace question
+          }
+          const marker = existsSync(path.join(full, ".propagates.yml"));
+          skipped.push(`${full.replace(HOME_DIR, "~")}${marker ? "  ** declares .propagates.yml and is being IGNORED **" : " (no marker — nothing lost)"}`);
+        }
+      }
+      if (skipped.length) {
+        info("symlinked dirs not descended into", skipped.join("; "));
+      }
+    } catch {
+      /* reporting must never break doctor */
+    }
 
     // A ledger can be real, non-empty and owned by nobody — below the discovery
     // depth limit, or beside a sidecar that never set `workspace: true`. Such a

@@ -109,3 +109,32 @@ test("attribution is carried per repo — a count alone is wrong about who did w
     "16 of one repo's commits on 2026-08-15 were a different session; the record must show that",
   );
 });
+
+test("doctor names a symlinked dir it did not descend into, and escalates if it has a marker", async () => {
+  // spawnSync, not execFileSync: doctor exits non-zero whenever it finds a problem, and
+  // a fixture always will. execFileSync throws on that and discards the output we need.
+  const { spawnSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const root = await mkdtemp(path.join(tmpdir(), "journal-doctorlink-"));
+  const real = path.join(root, "elsewhere", "a-workspace");
+  await mkdir(path.join(real, "docs"), { recursive: true });
+  await writeFile(path.join(real, ".propagates.yml"), "workspace: true\nsources: {}\n", "utf8");
+  await writeFile(path.join(real, "docs", "PROPAGATION_LEDGER.jsonl"), "", "utf8");
+
+  const searchRoot = path.join(root, "tree");
+  await mkdir(searchRoot, { recursive: true });
+  await symlink(real, path.join(searchRoot, "linked-ws"));
+
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "cli.mjs");
+  const res = spawnSync(process.execPath, [cli, "doctor"], {
+    cwd: searchRoot,
+    encoding: "utf8",
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: searchRoot },
+  });
+  const out = (res.stdout + res.stderr).replace(/\x1B\[[0-9;]*m/g, "");
+
+  assert.match(out, /symlinked dirs not descended into/, "must name what it skipped, not skip it silently");
+  // A symlinked dir carrying a marker is a workspace being ignored — the message has to
+  // say so, because "listed" and "listed as a problem" are different facts.
+  assert.match(out, /IGNORED/, "a symlinked dir WITH .propagates.yml must be called out, not merely listed");
+});

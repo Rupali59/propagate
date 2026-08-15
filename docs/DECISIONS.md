@@ -512,3 +512,49 @@ with like).
 passing, disclosure in `--all`, and a fold-not-count fixture where raw `open`
 lines exceed folded open — the 501-vs-8 shape in miniature). Closes **B1** in
 `docs/ISSUES.md`.
+
+---
+
+## 2026-08-15: discovery does not follow symlinks — now by report, not by accident
+
+**What:** `discoverWorkspacesSync` continues to skip symlinked directories. It is not
+changed. Instead `doctor` gains an `info` line naming every symlinked directory in a
+search root that it did not descend into, and **escalating** any that carries a
+`.propagates.yml` — those are workspaces being ignored.
+
+`propagate journal` takes the opposite decision deliberately: it **does** follow symlinks
+(`lib/journal.mjs` `enumerateRepos`, cycle-safe via realpath). The two answer different
+questions, and conflating them is what caused the error below.
+
+**Why.** `~/Documents/GitHub/propagate-skill` is a symlink to this repo. `discovery.mjs`
+filters on `e.isDirectory()`, and a `Dirent` for a symlinked directory answers
+`isSymbolicLink()` instead — so the walk never descends. The same is true of
+`find -name .git`, which every sweep in the 2026-08-15 session used.
+
+The cost was not hypothetical. The day's activity was reported as **95 commits across 21
+repos**; `propagate-skill`'s 14 commits were invisible. Corrected to 109/22, then — after
+a second, unrelated bug in the date window — to **118/24**, confirmed by two independent
+implementations before anything was rewritten.
+
+**Why not simply follow symlinks in discovery too.** Two reasons, and the first is
+narrower than it first appeared:
+
+1. `propagate-skill` carries **no `.propagates.yml`**. It never asked to be a workspace,
+   so discovery would find nothing there even if it descended. "Propagate cannot see its
+   own repository" was the wrong framing; nothing is currently lost.
+2. The skill directory is deliberately outside `SEARCH_ROOTS` (`lib/config.mjs:162`,
+   "to avoid discovery/feedback"). The symlink puts it back inside one. Making discovery
+   follow links would re-create exactly the feedback the config avoids — the tool
+   watching its own ledger writes.
+
+**What was actually wrong** was that the exclusion happened *by accident of `Dirent`
+semantics*, so a symlinked directory that DID declare a workspace would be dropped in
+silence. That is now reported. Absence must be attributable
+(`rule:discernment-checks` §2); an undocumented accident is not a decision.
+
+**Affects:** propagate
+
+**Refs:** `cli.mjs` (doctor symlink reporting), `lib/journal.mjs` (`enumerateRepos`),
+`tests/journal.test.mjs` (7 tests: symlink found, absent without the link, cycle
+terminates, doctor names it, doctor escalates a marker-bearing link, bare dates rejected,
+attribution carried). GOTCHAS **G31**.
