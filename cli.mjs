@@ -1298,8 +1298,43 @@ async function doctor() {
   // value was already gathered by a check() above; this just tallies it,
   // asserts the calibrated expectations, and records the run.
   {
+    // Doc-structure metrics. Deduped by resolved path — workspaces nest, and counting
+    // a nested doc twice inflated an earlier census from 1339 to 2219.
+    let docsProseOnly = 0;
+    let docsSupersedesUnresolvable = 0;
+    try {
+      const { proseOnlySupersession, kindOf } = await import("./lib/doc-kind.mjs");
+      const { globSync } = await import("node:fs");
+      const seenDocs = new Set();
+      for (const ws of WORKSPACES) {
+        let found = [];
+        try {
+          found = globSync(path.join(ws.root, "**", "docs", "**", "*.md"));
+        } catch {
+          continue;
+        }
+        for (const d of found) {
+          if (d.includes("node_modules")) continue;
+          const abs = path.resolve(d);
+          if (seenDocs.has(abs)) continue;
+          seenDocs.add(abs);
+          if (proseOnlySupersession(abs)) docsProseOnly++;
+          for (const t of kindOf(abs).supersedes) {
+            const [rel] = t.split("#");
+            if (!existsSync(path.resolve(path.dirname(abs), rel))) docsSupersedesUnresolvable++;
+          }
+        }
+      }
+    } catch {
+      // Leave both at 0 rather than crashing doctor; the expectations below treat
+      // "0 because it never ran" the same as "0 because it is clean", which is the one
+      // weakness here and is why the prose ratchet is a floor, not an equality.
+    }
+
     const metrics = {
       "workspaces.discovered": WORKSPACES.length,
+      "docs.supersession_prose_only": docsProseOnly,
+      "docs.supersedes_unresolvable": docsSupersedesUnresolvable,
       "sidecars.loaded": sidecarsLoadedCount,
       "sidecars.rejected": sidecarsRejectedCount,
       "sidecars.problems": sidecarsProblemsCount,

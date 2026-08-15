@@ -231,11 +231,21 @@ test("evaluateExpectations: a missing detail() context degrades to an empty stri
 // check. That check stayed inline and is exercised in tests/doctor.test.mjs,
 // not here.
 
-test("EXPECTATIONS table has exactly the four checks that are sole-source assertions (no invented extras, no plist.watchpaths)", () => {
-  assert.equal(EXPECTATIONS.length, 4);
+test("EXPECTATIONS table holds only sole-source assertions (no invented extras, no plist.watchpaths)", () => {
+  // The list is enumerated rather than counted so that ADDING an expectation is a
+  // deliberate edit here, with a reason, instead of a number quietly incrementing.
+  //
+  // 2026-08-15: +2 doc-structure entries. Both are sole-source (nothing else asserts
+  // them), both carry a dated basis, and both have a constructed failing input in
+  // tests/doc-expectations.test.mjs — the bar this guard exists to enforce. The
+  // prose-only one is a RATCHET (<=107) rather than an equality, because asserting 0
+  // would print 107 findings on day one and a wall of expected failures is where a real
+  // one hides (G23).
   const keys = EXPECTATIONS.map((e) => e.key).sort();
   assert.deepEqual(keys, [
     "decisions.with_tokens",
+    "docs.supersedes_unresolvable",
+    "docs.supersession_prose_only",
     "ledger.unknown_types",
     "sidecars.rejected",
     "workspaces.discovered",
