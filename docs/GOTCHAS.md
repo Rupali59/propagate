@@ -396,3 +396,35 @@ tidied entry and infers it was handled.
 **Do:** state the residual risk in the same edit that performs the move, in the entry itself,
 not only in the commit message. `rule:discernment-checks` §2 — absence must be attributable;
 so must non-resolution.
+
+### G35 · The commit trailer records who committed, not who authored
+`rule:model-routing` says Opus plans, Sonnet/Haiku executes an approved plan. Building a
+pre-commit reminder for it, the obvious first design was "flag commits whose trailer says
+Opus but whose diff was actually written by a subagent." That signal has zero discriminating
+power: every commit in a PanditPawanKaushik session reads `Co-Authored-By: Claude Opus 5`,
+because the parent always performs the commit — including `f42b3db`, which **Sonnet wrote**.
+A trailer-based check would flag correctly-delegated work and pass undelegated work
+identically. It is uncorrelated with the thing it claims to measure.
+
+The second trap was worse: subagent turns are **invisible to the parent transcript**.
+`isSidechain` is `false` for every one of the 8,997 message records the parent transcript
+carries this session — not mostly false, **always** false, because subagent turns live in
+separate task files the parent never sees. Control test: `THEME_CAPABILITIES.md`, written by
+a Sonnet subagent, is absent from the parent's main-loop `Write`/`Edit` set while 40+ sibling
+files the parent wrote directly are present. So a hook reading only the parent transcript can
+never *positively* attribute a file to a subagent — there is no record of that write to point
+at.
+
+The signal that actually varies is the inverted one: the parent transcript reliably records
+which files the **main loop** wrote. A staged file *not* in that set was written by something
+else — a subagent, a script, or a human — which is exactly the information `rule:model-routing`
+needs, read backwards. `scripts/hygiene/lib/worker-routing.sh` reports that set (plus the
+count of `Agent` dispatches) and `scripts/check-worker-routing.sh` (pre-commit, warn-only)
+compares it against staged files.
+
+**Do:** before building a check, confirm the signal it reads actually **varies** with the
+thing being measured. Feed it the case that should read as a violation and the case that
+should read as clean, and check the two answers actually differ — a check whose input is
+constant (every commit trailer says the same author) cannot fail *or* pass meaningfully, and
+a check whose positive case can never be observed (a subagent write in the parent's own
+transcript) is not measuring what it claims to measure at all.
