@@ -851,3 +851,67 @@ the branches; both are answers that decline to name their scope.
 - `Vipin Kaushik/docs/plans/2026-08-13-propagation-issues.md` — the incident narrative this register
   supersedes
 - `docs/DECISIONS.md` — six 2026-08-10 entries that constrain any fix
+
+### N26 · A stale rendered `PROPAGATION_LEDGER.md` can be committed beside a correct `.jsonl`, and nothing detects it — **S1**
+
+**Symptom.** Committed ledger markdown shows rows as `open` that the authoritative JSONL
+records as `wontfix` or `done`. A reader of the `.md` sees a large open backlog that does
+not exist.
+
+**Measured 2026-08-16**, by re-rendering each ledger from its own JSONL and diffing:
+
+| Repo | committed `.md` shows | JSONL fold |
+|---|---|---|
+| `Vipin Kaushik` | 19 open | 0 |
+| `PanditPawanKaushik` | 14 open | 0 |
+| `Keerti/Keerti-portfolio` | 12 open | 0 |
+
+`propagate status` simultaneously reported **3 open across 12 ledgers** — the tool was
+right; 45 rows of committed markdown were wrong.
+
+**Why it is S1.** Nothing announces it. The `.md` header even says "JSONL store is
+authoritative — this file is rendered", which reads as reassurance and suppresses
+suspicion (G40). `doctor` checks that the ledger JSONL exists and parses; it does **not**
+check that the `.md` agrees with it.
+
+**Root cause.** Nothing re-renders on `drain` / `verify`, and nothing gates the commit.
+In `Vipin Kaushik` the stale `.md` and correct `.jsonl` were committed together in
+`7282c6e` — row 291 carries a `drift` row (open, 2026-06-30) and a `status_change`
+(wontfix, 2026-08-13); the fold is `wontfix` and the committed `.md` said `open`.
+
+**Contributing defect.** The rendered header is a *relative* date —
+`**Last entry: today.**`. It becomes false with the passage of time alone, so every
+committed `.md` is guaranteed to differ from a fresh render regardless of content. That
+churn also trains readers to dismiss ledger diffs as noise, which is how the row-status
+drift stayed invisible.
+
+**Fix candidates.** (a) `drain` and `verify` re-render the affected `.md` after writing.
+(b) A `doctor` check asserting each `.md` matches a fresh render of its `.jsonl` — this
+is the one that would have caught it, and it can fail, per G1. (c) Render an absolute
+date, or omit the freshness line from the file and leave it to `status`.
+
+### N27 · `verify` writes on first invocation while `bootstrap` is dry-run by default — **S2**
+
+**Symptom.** Two adjacent commands with opposite safety postures and no signal about it.
+`bootstrap` requires `--apply` to write and prints `dry run — pass --apply to write N
+events`. `verify` writes immediately: there is no `--apply`, no dry-run, and no
+confirmation. Its only output is a success line and an event ID.
+
+**Misleading in the source too.** The bootstrap block in `cli.mjs` is commented
+"Dry-run by default; `--apply` writes, **same posture as verify --apply**", which asserts
+a gate on `verify` that does not exist.
+
+**Instance, 2026-08-16.** An operator invoked `verify --edge <id> --disposition
+no-change-needed` on three edges believing it a dry run, and re-baselined all three. The
+dispositions were correct and verified, so no data was harmed — but the belief was wrong,
+and the same mistake with a wrong disposition writes an unearned CLEAN into the event
+store. Since events are append-only, that is corrected by another event, never removed.
+
+**Why S2 and not S1.** It is not silent: event IDs are printed and `reconcile` shows the
+new state immediately. The defect is the misleading asymmetry, not invisibility.
+
+**Fix candidates.** (a) Accept `--apply` on `verify` and dry-run without it, matching
+`bootstrap`. (b) If writing-by-default is intended, say so in the command's own output
+(`writing N events — verify has no dry-run`) and correct the `cli.mjs` comment. (c) At
+minimum, document the asymmetry in `SKILL.md`, where the two commands are listed
+together with no hint that they differ.

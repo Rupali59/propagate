@@ -467,3 +467,86 @@ tested, and green — and be dead for every other checkout.
 `git ls-files -s scripts/foo.sh` must show `100755`. Set it with
 `git update-index --chmod=+x`. Same shape as G2 — the failure is silent, so the check must be
 that the thing is *installed*, not that it *ran once here*.
+
+---
+
+## On operating this tool as an agent
+
+Added 2026-08-16 from a session that registered two new workspaces, verified 13 edges
+and made four measurement errors doing it. Every entry here cost a wrong statement to
+the user before it was caught.
+
+### G38 · `drain` is for ledger rows; derived states need `verify`
+`reconcile` derives REVERSED / DRIFTED / DIVERGED / NEVER_VERIFIED from the event store
+by comparing content hashes. **None of those are ledger rows.** So the obvious first
+move — `cli drain` — is the wrong tool, and it does not say so.
+
+Instance: three edges in `Keerti-portfolio` sat REVERSED. `cli drain` reported
+`✓ no open rows` and exited 0. That reads as *nothing to do*, when three edges needed a
+human decision. The right command was
+`verify --edge <id> --disposition <d>`.
+
+**Do:** `drain` closes rows a watcher wrote. `verify` re-baselines edges `reconcile`
+derived. If `status`/`drain` say clean but `reconcile` shows non-CLEAN states, believe
+`reconcile` — they are answering different questions.
+
+### G39 · `verify` writes immediately; `bootstrap` is dry by default
+The two sit side by side in `SKILL.md` and have **opposite** safety postures.
+`bootstrap` needs `--apply` to write. `verify` writes on the first invocation, with no
+`--apply` and no dry-run flag. `cli.mjs`'s own bootstrap comment reads "same posture as
+verify --apply", which implies a gate that does not exist.
+
+Instance: a run labelled "DRY RUN" in the transcript emitted three event IDs and
+re-baselined three edges. The disposition happened to be correct, so nothing was
+damaged — the claim of safety was wrong, not the write.
+
+**Do:** treat every `verify` as a write. Decide the disposition *before* invoking, never
+"run it to see what it would do". See N27.
+
+### G40 · A rendered artifact committed beside its source drifts, and its own disclaimer hides it
+`PROPAGATION_LEDGER.md` says "JSONL store is authoritative — this file is rendered."
+That line reads as reassurance and functions as camouflage: it explains away any
+discrepancy instead of prompting a re-render.
+
+Instance: **45 rows across three repos** rendered as `open` in committed markdown that
+the JSONL records as drained — 19 in `Vipin Kaushik`, 14 in `PanditPawanKaushik`, 12 in
+`Keerti-portfolio`. Meanwhile `propagate status` reported **3 open across 12 ledgers**.
+In `Vipin Kaushik` the stale `.md` and the correct `.jsonl` were committed together in
+one commit (`7282c6e`), so the render simply was not re-run before committing.
+
+**Do:** re-render after any drain or verify, in the same commit
+(`renderMarkdown(jsonl, md)` from `lib/ledger.mjs`). Never read a committed `.md` as
+current state — ask `status` or `reconcile`. See N26.
+
+### G41 · `baselined` is not `verified`, and most edges can never be baselined
+`bootstrap` writes disposition `baselined` with reason `baseline-from-git: co-committed
+at <sha>`. The tool is careful about this and prints "disposition \"baselined\" — never
+\"verified\"". The evidence is only *these two files were committed together once* — not
+*a human read both ends*.
+
+Instance: of 101 NEVER_VERIFIED edges, `bootstrap --apply` baselined **12**. Of the
+remaining 89, **69 are ineligible-cross-repo** — co-commit evidence needs one git
+history, and an edge from `Keerti/CLAUDE.md` to the hub's `CLAUDE.md` spans two repos.
+Those can only reach CLEAN when someone reads both ends and runs `verify`.
+
+**Do:** do not treat a large NEVER_VERIFIED count as a bootstrap backlog. Most of it is
+structurally un-bootstrappable. Read both ends and use `no-change-needed` (or the right
+disposition) — that is a stronger claim and the only one available cross-repo.
+
+### G42 · The instrument fails more often than the data — four shapes in one session
+Every one of these produced a confident wrong statement before being caught. They are
+listed together because the fix is the same: measure a second way before reporting.
+
+| What was reported | Truth | The flaw |
+|---|---|---|
+| "Keerti has no ledger" | it has one | `find -maxdepth 3`; the ledger is at depth 4 |
+| a workspace list missing `Vipin Kaushik` | it is a workspace | unquoted `$f` in `for` word-split on the space; loop exited 2 |
+| "9 case studies" (doc says 6, so doc is wrong) | **6, the doc was right** | `grep -c "slug:"` counted matches outside the array |
+| "2 placeholders in design-content.ts" | **1** | `grep -c '"#"'` counted the comment *explaining* the placeholder |
+| `reconcile --json` rows all had `status: None` | field is `state` | guessed the field name; the filter matched nothing and dumped all 20 rows |
+
+**Do:** for counts, parse the artifact rather than grepping its text
+(`node -p "require('./package.json').dependencies.next"`, or walk to the array's closing
+bracket). For paths, use `find -print0` with `while IFS= read -r -d ''`. For JSON, print
+the keys before filtering on one. Extends G15 — that entry is about grepping for
+*concepts*; this is about grepping to *count*.
