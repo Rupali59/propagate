@@ -550,3 +550,17 @@ listed together because the fix is the same: measure a second way before reporti
 bracket). For paths, use `find -print0` with `while IFS= read -r -d ''`. For JSON, print
 the keys before filtering on one. Extends G15 — that entry is about grepping for
 *concepts*; this is about grepping to *count*.
+
+### G43 · `check --changed` does not see untracked files, and says nothing about it
+
+Observed 2026-08-17. A brand-new `docs/GOTCHAS.md` with a correctly declared edge
+produced **empty output** from `check --changed`. The declaration was fine; the file was
+untracked, and `--changed` compares working tree + staged against HEAD.
+
+The failure mode is the one this whole tool exists to prevent: **empty output read as
+"no couplings" when it meant "not looking"**. The first instinct is to doubt the
+declaration and start editing a sidecar that was already correct.
+
+`git add` the file and it fires immediately. Worth an explicit line in the output —
+*"N untracked file(s) not examined"* — because absence must be attributable (G2), and
+this is precisely a silent zero.

@@ -179,6 +179,46 @@ exists. Kept struck through rather than deleted: this line is why `reload` exist
 - **Deferred** — migrating the 69 misfiled hub rows. Close-and-re-emit only,
   never rewrite.
 
+## TODO — every project carries `docs/GOTCHAS.md`
+
+Requested 2026-08-17. `rule:every-project-carries-gotchas` is written and active; this is
+the propagate-side work to make it a mechanism rather than a convention.
+
+**Adoption today, measured:** 3 of 43 `CLAUDE.md` files carry a gotchas-style section
+(all under the name *"Things that will bite you"*), and **1** project has a real
+`docs/GOTCHAS.md` — `Keerti/keerti-job-radar`, created as the worked example. This
+skill's own `docs/GOTCHAS.md` (~40 entries) is the model and propagated nowhere for
+months.
+
+**Note the first measurement of this said 0 of 22.** It was the ugrep/`.gitignore` trap
+(`rule:discernment-checks` §4) — treat any adoption count here as a floor until
+re-measured with `find` + a real reader.
+
+Done:
+- Hub `.propagates.yml` declares `rules/discernment-checks.md → */docs/GOTCHAS.md` and
+  one level deeper, so a globally-learned hazard fires drift at every project that has
+  one. A glob matching 0 files is skipped with a warning, so this reports adoption
+  rather than assuming it.
+- `keerti-job-radar` declares `docs/GOTCHAS.md → CLAUDE.md`, and the edge is verified to
+  fire.
+
+Still to do:
+1. **`init` should scaffold `docs/GOTCHAS.md`** alongside the sidecar, with the three
+   headings and the "name what it cost" instruction. A convention that must be
+   remembered is a convention that decays.
+2. **A `doctor` check for the three-file set** — `STATE.md`, `docs/DECISIONS.md`,
+   `docs/GOTCHAS.md`. As a **ratchet, not an equality**: 1 of 43 today, so asserting the
+   full set would print 42 findings on day one and noise is a hiding place (G23). Fail
+   only on the count *dropping*.
+3. **Decide whether the 3 files using `## Things that will bite you` should be
+   converted or left.** They are the pattern working under a different name; converting
+   them is cheap, but per `rule:skill-routing`'s lesson, convert the *whole* section
+   rather than only the part that matched a fingerprint.
+4. **G43 above** — `check --changed` silently ignores untracked files, which made this
+   very edge look broken when it was not.
+
+---
+
 ## TODO — a separate, hub-level mechanism: decision → document conformance
 
 **Not propagate's job. Do not build it into this skill.** Raised by Rupali
