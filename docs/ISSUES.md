@@ -915,3 +915,26 @@ new state immediately. The defect is the misleading asymmetry, not invisibility.
 (`writing N events — verify has no dry-run`) and correct the `cli.mjs` comment. (c) At
 minimum, document the asymmetry in `SKILL.md`, where the two commands are listed
 together with no hint that they differ.
+
+## N28 · S3 · `supersession_prose_only` cannot tell "I supersede X" from "I was superseded"
+
+**Observed 2026-08-17**, `Keerti/keerti-job-radar`. The ratchet grew 107 → 109. Both new
+files are `CLAUDE.md` and `STATE.md`, and neither claims to supersede anything — they
+*announce that they themselves are superseded*, with a banner at the top pointing at the
+replacement:
+
+> **The Chrome extension here is superseded (D13).** The live product is the Claude
+> Cowork skill in `cowork-skill/`.
+
+That is the metric's own stated goal achieved — *"the superseded doc never learns it was
+overruled"* — and it is counted as a violation, because the check greps for the word
+rather than the direction.
+
+**Not tuned, not gamed.** Rewording to dodge the grep would make the docs worse, and
+raising the baseline is forbidden by the metric's own basis. Recorded so the next person
+seeing 109 knows two of them are the check misreading a doc that did the right thing.
+
+**Possible fix:** distinguish the direction — a doc saying *"is superseded by"* /
+*"superseded (D-n)"* is the passive form and should either count separately or want a
+`superseded_by:` declaration, which does not currently exist as a field.
+
