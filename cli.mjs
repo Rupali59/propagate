@@ -2070,10 +2070,40 @@ function drainRowSummary(r) {
 }
 
 /** Workspaces to operate over: current workspace at cwd, unless --all or cwd matches none. */
+/**
+ * Which ledgers `drain` may read and close.
+ *
+ * The cross-repo ledger is included under `--cross` and `--all`. It is not a
+ * workspace — it lives at SEARCH_ROOTS[0], outside any of them — so returning
+ * WORKSPACES alone made cross rows openable but never closable.
+ *
+ * That was not theoretical. PanditPawanKaushik/docs/DECISIONS.md 2026-08-15
+ * records three cross rows whose relays were verified done by reading the
+ * partner repo, and which `drain --close` and `drain --all --close` both
+ * refused with "row id(s) not found (or not open) in scope". The rows stayed
+ * open for want of scope, and hand-editing the ledger is forbidden by this
+ * skill's own rule — so there was no supported way out at all.
+ *
+ * `--all` includes it because an "all" that silently omits a whole store is the
+ * same class of lie this command exists to stop telling. Plain `drain` stays
+ * the workspace queue: widening the default would surprise in the other
+ * direction, and tests/drain-cross.test.mjs pins both halves.
+ */
 function drainScope(args) {
   const showAll = args.includes("--all");
+  const wantCross = args.includes("--cross") || showAll;
   const cur = currentWorkspace();
-  return showAll || !cur ? WORKSPACES : [cur];
+  const base = showAll || !cur ? WORKSPACES : [cur];
+  const scope = args.includes("--cross") && !showAll ? [] : [...base];
+  if (wantCross) {
+    scope.push({
+      name: "cross-repo",
+      root: SEARCH_ROOTS[0],
+      ledgerJsonl: CROSS_LEDGER_JSONL,
+      isCross: true,
+    });
+  }
+  return scope;
 }
 
 async function drainList(args, json) {
