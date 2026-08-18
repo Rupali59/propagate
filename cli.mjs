@@ -502,6 +502,55 @@ async function ledgerJsonBlock(jsonlPath) {
   };
 }
 
+/**
+ * Bucket reconcile's rows into the four numbers `status` leads with.
+ *
+ * Every edge lands in exactly one bucket and the buckets sum to the total —
+ * asserted in tests/status-coverage.test.mjs, because a bucket that silently
+ * drops a state is how a real row stayed invisible for two months (ISSUES N1).
+ * An unrecognised state is therefore COUNTED as unevaluable and named, never
+ * skipped: a state we do not understand is not a pass.
+ *
+ * `ok` is deliberately strict — it requires full coverage, not merely the
+ * absence of known problems. The defect this replaces was `✓ no open drift
+ * events`, which a tree nobody had ever verified printed just as readily as a
+ * fully-checked one. Full coverage is achievable rather than aspirational
+ * (PanditPawanKaushik drove CLEAN 380 -> 516 in one pass), and a missing tick
+ * costs nothing: `status` has no red state and exits 0 either way.
+ */
+const ACTIONABLE_STATES = ["DRIFTED", "REVERSED", "DIVERGED"];
+const UNEVALUABLE_STATES = ["NOT_PRESENT_ON_REF", "UNRESOLVABLE", "UNMATCHED"];
+
+function coverageFrom(rows) {
+  const byState = {};
+  let verified = 0, actionable = 0, never_verified = 0, cannot_evaluate = 0;
+  const unknown_states = {};
+  for (const r of rows) {
+    const s = r.state;
+    byState[s] = (byState[s] || 0) + 1;
+    if (s === "CLEAN") verified++;
+    else if (s === "NEVER_VERIFIED") never_verified++;
+    else if (ACTIONABLE_STATES.includes(s)) actionable++;
+    else if (UNEVALUABLE_STATES.includes(s)) cannot_evaluate++;
+    else {
+      // Not silently dropped. Counted where it cannot be mistaken for clean.
+      cannot_evaluate++;
+      unknown_states[s] = (unknown_states[s] || 0) + 1;
+    }
+  }
+  const edges = rows.length;
+  return {
+    edges, verified, actionable, never_verified, cannot_evaluate,
+    byState, unknown_states,
+    ok: edges > 0 && actionable === 0 && cannot_evaluate === 0 && never_verified === 0,
+  };
+}
+
+function relToWs(ws, abs) {
+  if (!abs) return "(unresolved)";
+  return abs.startsWith(ws.root) ? abs.slice(ws.root.length).replace(/^\//, "") : abs;
+}
+
 async function statusJson() {
   const watcher = await watcherJsonBlock();
   const workspaces = [];
@@ -523,6 +572,11 @@ async function statusJson() {
     nestedUnder: null,
     ...crossLedgerBlock,
   };
+  // Derived state, not ledger rows. The v1 ledger is frozen history; the
+  // question "is anything wrong" is answered by reconcile against content.
+  const { rows: reconcileRows } = await reconcile(WORKSPACES);
+  const cov = coverageFrom(reconcileRows);
+
   return {
     generatedAt: new Date().toISOString(),
     degraded: DISCOVERY_DEGRADED,
@@ -530,6 +584,7 @@ async function statusJson() {
     watcher,
     workspaces,
     cross,
+    ...cov,
   };
 }
 
@@ -561,10 +616,59 @@ async function status() {
       console.log(`  ${DIM}(no ledger file yet)${RESET}\n`);
       continue;
     }
+    // ── derived state first ────────────────────────────────────────────────
+    // The v1 ledger below is FROZEN history. "Is anything wrong" is answered by
+    // reconcile against current content, and the coverage counts print on every
+    // run so a verdict can never be read without the sample it rests on.
+    const { rows: recRows } = await reconcile([ws]);
+    const cov = coverageFrom(recRows);
+    console.log(
+      `  ${cov.edges} edges · ${cov.verified} verified · ` +
+        `${cov.never_verified} never verified · ${cov.actionable} need attention` +
+        (cov.ok ? `  ${GREEN}✓${RESET}` : ""),
+    );
+
+    if (cov.actionable > 0) {
+      const act = recRows.filter((r) => ACTIONABLE_STATES.includes(r.state));
+      console.log(`\n  ${YELLOW}needs attention (${act.length})${RESET}`);
+      for (const r of act.slice(0, 10)) {
+        const src = relToWs(ws, r.source?.path);
+        const dst = relToWs(ws, r.downstream?.path);
+        console.log(`    ${r.state.padEnd(9)} ${src} → ${dst}`);
+      }
+      if (act.length > 10) {
+        console.log(`    ${DIM}… and ${act.length - 10} more — \`graph\` prints the fix order${RESET}`);
+      }
+    }
+    if (cov.cannot_evaluate > 0) {
+      // Never folded into clean: this is a question we failed to answer.
+      const un = recRows.filter((r) => !ACTIONABLE_STATES.includes(r.state)
+        && r.state !== "CLEAN" && r.state !== "NEVER_VERIFIED");
+      console.log(`\n  ${YELLOW}cannot evaluate (${un.length})${RESET} ${DIM}— not a pass${RESET}`);
+      for (const r of un.slice(0, 5)) {
+        console.log(`    ${r.state.padEnd(19)} ${relToWs(ws, r.source?.path)}`);
+      }
+      if (Object.keys(cov.unknown_states).length) {
+        console.log(`    ${YELLOW}unrecognised state(s): ${Object.keys(cov.unknown_states).join(", ")}${RESET}`);
+      }
+    }
+    if (cov.never_verified > 0) {
+      console.log(
+        `\n  ${DIM}never verified (${cov.never_verified}) — a baseline gap, not drift. ` +
+          `\`bootstrap\` to triage.${RESET}`,
+      );
+    }
+
+    // ── v1, as history ─────────────────────────────────────────────────────
     const rows = await readLedger(ws.ledgerJsonl);
     const open = rows.filter((r) => r.status === "open");
     if (open.length === 0) {
-      console.log(`  ${GREEN}✓ no open drift events${RESET}\n`);
+      if (rows.length) {
+        console.log(
+          `\n  ${DIM}frozen: ${rows.length} v1 events, all closed — history, not a worklist${RESET}`,
+        );
+      }
+      console.log("");
       continue;
     }
     const bySource = new Map();
