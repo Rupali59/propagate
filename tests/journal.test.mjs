@@ -21,6 +21,7 @@ import { mkdtemp, mkdir, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { enumerateRepos, commitsIn, journal } from "../lib/journal.mjs";
+import { plain } from "./helpers/plain.mjs";
 
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -110,7 +111,7 @@ test("attribution is carried per repo — a count alone is wrong about who did w
   );
 });
 
-test("doctor names a symlinked dir it did not descend into, and escalates if it has a marker", async () => {
+test("a markered symlink is FOLLOWED and becomes a workspace; doctor still names every link it saw", async () => {
   // spawnSync, not execFileSync: doctor exits non-zero whenever it finds a problem, and
   // a fixture always will. execFileSync throws on that and discards the output we need.
   const { spawnSync } = await import("node:child_process");
@@ -131,10 +132,52 @@ test("doctor names a symlinked dir it did not descend into, and escalates if it 
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: searchRoot },
   });
-  const out = (res.stdout + res.stderr).replace(/\x1B\[[0-9;]*m/g, "");
+  const out = plain(res.stdout + res.stderr);
 
-  assert.match(out, /symlinked dirs not descended into/, "must name what it skipped, not skip it silently");
-  // A symlinked dir carrying a marker is a workspace being ignored — the message has to
-  // say so, because "listed" and "listed as a problem" are different facts.
-  assert.match(out, /IGNORED/, "a symlinked dir WITH .propagates.yml must be called out, not merely listed");
+  // CONTRACT CHANGED 2026-08-17 (N29). A symlinked dir carrying a marker is now
+  // DESCENDED by both walks — lib/discovery.mjs's listDirs and lib/edges.mjs's
+  // findAllSidecarsRecursive. Before, it was skipped in silence: five edges declared
+  // behind the hub's `propagate-skill` link moved the expanded edge count 711 -> 711,
+  // and the skill that exists to catch undeclared couplings could not declare its own.
+  //
+  // This test previously asserted the OPPOSITE — that such a link is reported as
+  // IGNORED. That assertion was correct until the walk changed and is kept here in
+  // inverted form, because the strongest evidence the fix works is the fixture that
+  // used to prove it did not.
+
+  // 1. the marker was honoured: the linked dir is a real workspace now
+  assert.match(out, /# Workspace: linked-ws/, "a markered symlink must be discovered as a workspace");
+
+  // 2. links are still enumerated — following one does not excuse silence about it
+  assert.match(out, /symlinked dirs seen/, "must still name every link it saw (G2: absence is attributable)");
+  assert.match(out, /followed, N29/, "and say that a markered link was followed, not merely that it exists");
+
+  // 3. the old claim must be gone, not just unasserted
+  assert.doesNotMatch(out, /IGNORED/, "a markered link is no longer ignored; the old message would now be false");
+});
+
+test("an UNMARKERED symlink is still not descended, and is still named", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const root = await mkdtemp(path.join(tmpdir(), "journal-nomarker-"));
+  const real = path.join(root, "elsewhere", "plain-dir");
+  await mkdir(real, { recursive: true });
+  await writeFile(path.join(real, "README.md"), "no marker here\n", "utf8");
+
+  const searchRoot = path.join(root, "tree");
+  await mkdir(searchRoot, { recursive: true });
+  await symlink(real, path.join(searchRoot, "linked-plain"));
+
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "cli.mjs");
+  const res = spawnSync(process.execPath, [cli, "doctor"], {
+    cwd: searchRoot, encoding: "utf8",
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: searchRoot },
+  });
+  const out = plain(res.stdout + res.stderr);
+
+  // FAILING INPUT: drop the `existsSync(.propagates.yml)` guard from listDirs and this
+  // link gets walked too — which is how following symlinks by default invites cycles
+  // and duplicate workspaces. The marker is the opt-in, and this is the test of that.
+  assert.match(out, /no marker — nothing lost/, "an unmarkered link must be named as skipped");
+  assert.doesNotMatch(out, /# Workspace: linked-plain/, "and must NOT become a workspace");
 });

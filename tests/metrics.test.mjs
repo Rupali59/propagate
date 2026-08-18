@@ -45,6 +45,12 @@ function cleanMetrics(overrides = {}) {
     "sidecars.problems": 0,
     "ledger.unknown_types": 0,
     "ledger.malformed": 0,
+    // 2026-08-17: the graph metrics are 0-when-clean and NULL when the
+    // derivation did not run, so a clean fixture must state 0 explicitly.
+    // Omitting them would leave them undefined, which the expectations
+    // deliberately treat as a violation — see the null-attribution test below.
+    "graph.cycles": 0,
+    "graph.duplicate_pairs": 0,
     "rows.open": 5,
     "decisions.entries": 2,
     "decisions.with_tokens": 2,
@@ -125,6 +131,32 @@ test("evaluateExpectations: clean metrics produce zero violations", () => {
   assert.deepEqual(violations, []);
 });
 
+test("graph.cycles fires on a real cycle, with the pair named", () => {
+  const violations = evaluateExpectations(cleanMetrics({ "graph.cycles": 1 }), undefined, {
+    graphCycleMembers: ["a/spec.md <-> b/spec.md"],
+  });
+  const hit = violations.find((v) => v.key === "graph.cycles");
+  assert.ok(hit, "the cycle expectation fires");
+  assert.equal(hit.observed, 1);
+  assert.match(hit.detail, /a\/spec\.md <-> b\/spec\.md/, "a bare count is not actionable — name the members");
+});
+
+test("a graph metric that did NOT run reads as a violation, not as clean", () => {
+  // The whole point of null-instead-of-0 (rule:discernment-checks §2). If the
+  // derivation never ran, "0 cycles" would be an assertion about a graph
+  // nobody built.
+  //
+  // FAILING INPUT: initialise graphCycles to 0 instead of null in doctor —
+  // this test then goes green while asserting nothing, which is why the detail
+  // string is asserted too, not just the violation's presence.
+  for (const absent of [null, undefined]) {
+    const violations = evaluateExpectations(cleanMetrics({ "graph.cycles": absent }));
+    const hit = violations.find((v) => v.key === "graph.cycles");
+    assert.ok(hit, `an absent derivation (${absent}) must violate, never pass`);
+    assert.match(hit.detail, /did not run/, "and must say WHY it is absent");
+  }
+});
+
 test("evaluateExpectations: workspaces.discovered < 1 violates N7's expectation", () => {
   const violations = evaluateExpectations(cleanMetrics({ "workspaces.discovered": 0 }));
   const hit = violations.find((v) => v.key === "workspaces.discovered");
@@ -167,7 +199,7 @@ test("evaluateExpectations: sidecars.rejected > 0 violates N9's expectation", ()
 // plist.watchpaths staying single-sourced via the inline check.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("evaluateExpectations: a metrics object violating all four EXPECTATIONS at once returns exactly one violation per key", () => {
+test("evaluateExpectations: a metrics object violating every equality EXPECTATIONS entry at once returns exactly one violation per key", () => {
   const violations = evaluateExpectations(
     cleanMetrics({
       "workspaces.discovered": 0,
@@ -175,12 +207,17 @@ test("evaluateExpectations: a metrics object violating all four EXPECTATIONS at 
       "decisions.with_tokens": 0,
       "ledger.unknown_types": 3,
       "sidecars.rejected": 2,
+      // 2026-08-17: +2 graph entries.
+      "graph.cycles": 1,
+      "graph.duplicate_pairs": 1,
     }),
   );
-  assert.equal(violations.length, 4, "exactly one violation per EXPECTATIONS entry — no duplicates, none missed");
+  assert.equal(violations.length, 6, "exactly one violation per EXPECTATIONS entry — no duplicates, none missed");
   const keys = violations.map((v) => v.key).sort();
   assert.deepEqual(keys, [
     "decisions.with_tokens",
+    "graph.cycles",
+    "graph.duplicate_pairs",
     "ledger.unknown_types",
     "sidecars.rejected",
     "workspaces.discovered",
@@ -192,7 +229,7 @@ test("evaluateExpectations: detail() carries the exact-offender context, matchin
     searchRoots: ["/tmp/root-a", "/tmp/root-b"],
     decisionsPath: "/tmp/docs/DECISIONS.md",
     decisionsZeroEntries: ["2026-08-02 missing tokens"],
-    ledgerUnknownTypesDetails: ['/tmp/ws/docs/PROPAGATION_LEDGER.jsonl: "manual"×1 — unknown to readLedger'],
+    ledgerUnknownTypesDetails: ['/tmp/ws/docs/PROPAGATION_LEDGER.jsonl: "not-a-real-type"×1 — unknown to readLedger'],
     sidecarsRejectedDetails: ["ws/.propagates.yml: trailing slash not allowed"],
   };
   const violations = evaluateExpectations(
@@ -212,7 +249,7 @@ test("evaluateExpectations: detail() carries the exact-offender context, matchin
   assert.match(byKey["decisions.with_tokens"].detail, /DECISIONS\.md/);
   assert.match(byKey["decisions.with_tokens"].detail, /missing tokens/);
   assert.match(byKey["ledger.unknown_types"].detail, /PROPAGATION_LEDGER\.jsonl/);
-  assert.match(byKey["ledger.unknown_types"].detail, /"manual"×1/);
+  assert.match(byKey["ledger.unknown_types"].detail, /"not-a-real-type"×1/);
   assert.match(byKey["sidecars.rejected"].detail, /trailing slash not allowed/);
 });
 
@@ -241,11 +278,21 @@ test("EXPECTATIONS table holds only sole-source assertions (no invented extras, 
   // prose-only one is a RATCHET (<=107) rather than an equality, because asserting 0
   // would print 107 findings on day one and a wall of expected failures is where a real
   // one hides (G23).
+  //
+  // 2026-08-17: +2 graph-structure entries. Both are sole-source — doctor
+  // deliberately does NOT also carry an inline check() for either (that would
+  // be the G20 double-print), and the graph derivation shares the existing
+  // "reconcile completes" check rather than adding a label of its own. Both
+  // have a constructed failing input in tests/graph.test.mjs (the X<->Y cycle
+  // fixture and the twice-declared pair) and a dated basis naming the real
+  // instance found on the tree the day they landed.
   const keys = EXPECTATIONS.map((e) => e.key).sort();
   assert.deepEqual(keys, [
     "decisions.with_tokens",
     "docs.supersedes_unresolvable",
     "docs.supersession_prose_only",
+    "graph.cycles",
+    "graph.duplicate_pairs",
     "ledger.unknown_types",
     "sidecars.rejected",
     "workspaces.discovered",

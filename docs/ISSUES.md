@@ -64,6 +64,31 @@ every drain path **since 2026-06-20**. Type counts in that file: `drift 215`, `s
 fails on any non-zero entry, and a separate check (`cli.mjs:995-1013`) sums `malformed` across all
 ledgers and fails the same way. Landed in `60db5c6`.
 
+**Follow-up 2026-08-18 — the detection was resolved; the surviving row was not.** N1 fixed the
+*reporting*, so from 2026-08-13 `doctor` failed continuously on the one real instance: the
+`manual` row still on line 470. A standing red trains people to ignore the block (see the
+propagation plan's E2), so the row itself is now handled — `readLedgerWithStats` recognises
+`type: "manual"` as a **terminal-only** type and returns it in a separate `manual` array.
+
+**It is deliberately NOT folded into `drifts`, and that is the load-bearing part.** Because
+N2 (below) left `id 256` duplicated, admitting the row to the drift map would let it and the
+real `drift` row overwrite each other by file order — converting an invisible row into a
+corrupted one. Regression test: `tests/ledger-activity.test.mjs`, *"a `manual` row is known, is
+NOT folded as drift, and is returned separately"*. It exercises **both** file orderings on
+purpose: with the manual row first the drift row wins anyway and the bug is invisible, so a
+first-order-only fixture is a check that cannot fail — the first draft of that test made
+exactly this mistake and was caught by mutating the fold.
+
+The four tests that had used `manual` as their stand-in for "an unknown type"
+(`doctor.test.mjs`, `index.test.mjs`, `ledger-activity.test.mjs`, `metrics.test.mjs`) now use
+`"not-a-real-type"`, so N1's detection is still exercised at full strength.
+
+**N2 is unaffected.** Its *mechanism* was resolved on 2026-08-13 (the watcher uses
+`appendRowWithId`, so no new collisions can be minted), but the **data artifact it left
+behind persists**: `id 256` is still duplicated in the Vipin Kaushik ledger and the
+`status_change` at line 507 is still ambiguous by construction. Nothing here resolves that,
+and it cannot be resolved by editing — the store is append-only.
+
 ### N2 · `nextId` is check-then-act racy **and** type-blind — **S1** — **RESOLVED 2026-08-13**
 `lib/ledger.mjs:244-251` computes `max+1` over *visible* rows with no lock. `appendRowWithId`
 (`:144-161`) exists precisely to fix this race and its docstring says so — but `watcher.mjs:227`
@@ -890,7 +915,23 @@ drift stayed invisible.
 is the one that would have caught it, and it can fail, per G1. (c) Render an absolute
 date, or omit the freshness line from the file and leave it to `status`.
 
-### N27 · `verify` writes on first invocation while `bootstrap` is dry-run by default — **S2**
+### N27 · `verify` writes on first invocation while `bootstrap` is dry-run by default — **RESOLVED 2026-08-17**
+
+> **Fixed by candidate (a).** `--apply` now gates the event write for every
+> disposition, not just `decoupled`; without it `verify` prints what it would write,
+> runs the real validator so predicted refusals match actual ones, and touches
+> nothing. `cli.mjs`'s misleading header comment is corrected and `SKILL.md` states
+> the posture under Important Rules. Regression cover:
+> `tests/verify-ordering.test.mjs` snapshots the event store byte-for-byte around
+> every non-writing path — the word "would" in the output is never trusted.
+>
+> **It was filed on 2026-08-16 and hit again on 2026-08-17**, this time for 11 events
+> and 3 falsely-closed worklist items, by a session that had read neither this entry
+> nor the code. That is the cost of an S2 that stays open: the second instance was
+> more expensive than the first, and the entry that would have prevented it existed
+> the whole time. See `docs/GOTCHAS.md` G44 and the DECISIONS entry of 2026-08-17.
+
+**Original report follows.**
 
 **Symptom.** Two adjacent commands with opposite safety postures and no signal about it.
 `bootstrap` requires `--apply` to write and prints `dry run — pass --apply to write N
@@ -938,3 +979,196 @@ seeing 109 knows two of them are the check misreading a doc that did the right t
 *"superseded (D-n)"* is the passive form and should either count separately or want a
 `superseded_by:` declaration, which does not currently exist as a field.
 
+
+---
+
+## N29 · ~~S2~~ · **RESOLVED 2026-08-17** · propagate cannot declare its own couplings
+
+> **Fixed by candidate (b): markered symlinks are now descended.** A symlinked
+> directory is followed when — and only when — it carries a `.propagates.yml`.
+> The marker is the opt-in, so the tree's incidental symlinks behave exactly as
+> before. Cycle safety is a realpath-keyed visited set in each walk.
+>
+> **It had to be fixed in TWO walks, and fixing one proved nothing.**
+> `lib/discovery.mjs`'s `listDirs` finds WORKSPACES; `lib/edges.mjs`'s
+> `findAllSidecarsRecursive` finds SIDECARS. After the first fix the expanded
+> edge count was still **711 → 711** and `doctor` still said IGNORED. Only the
+> second made it real: **711 → 720**, with 9 edges and 12 of the skill's own
+> files in the graph.
+>
+> Also fixed: `doctor`'s line still read `** declares .propagates.yml and is
+> being IGNORED **` after the behaviour changed — a check asserting the opposite
+> of what the code does. Now `(declares .propagates.yml — followed, N29)`.
+>
+> **Regression cover:** `tests/journal.test.mjs`. The test that asserted IGNORED
+> is inverted in place — a markered link must become a workspace, and the old
+> message must be **absent** — plus a new test that an UNMARKERED link is still
+> skipped and still named. Following links by default is what invites cycles and
+> duplicate workspaces; the marker is the entire safety argument, so it needs its
+> own test.
+>
+> **Known limit, not fixed:** `check --changed` is repo-scoped. The skill is its
+> own git repo, so running `check` from the hub cannot see its diffs. The edges
+> are live in `reconcile`/`graph` regardless, since those derive from content.
+
+**Original report follows.**
+
+**Symptom.** The skill that exists to catch undeclared couplings has none of its
+own, and cannot be given any. `~/.claude/skills/propagate` is outside
+`SEARCH_ROOTS` (`~/Documents/GitHub`). The one path from the hub is
+`~/Documents/GitHub/propagate-skill`, a symlink — and `lib/discovery.mjs` uses
+`readdirSync(parent, { withFileTypes: true })`, where a symlinked directory
+reports `isDirectory() === false`, so it is never descended.
+
+**Confirmed by construction, 2026-08-17.** A `.propagates.yml` was written into
+the skill dir declaring five edges (`lib/graph.mjs` → `SKILL.md` and
+`docs/DECISIONS.md`; `lib/metrics.mjs` → `docs/OBSERVABILITY.md` and
+`docs/GOTCHAS.md`; `lib/events.mjs` → `docs/DATA_MODEL.md`). Edge count before
+and after: **711 and 711.** Not one of the five was read. The file was removed
+rather than left in place — a declaration nothing reads is the exact
+"looks machine-checked and is not" failure this project is about, and leaving it
+would have been worse than having none.
+
+**`doctor` already catches this, and is too quiet about it.** With the marker
+present the symlink line escalates from `(no marker — nothing lost)` to
+`** declares .propagates.yml and is being IGNORED **`. That check works and
+found this immediately — but it is an `info()`, so it does not fail the run. A
+marker-bearing symlink means declared edges are silently dead; that is a
+problem, not a note.
+
+**Why this was invisible until now.** `status` and `check` are per-edge and
+report on what discovery found. `graph` reports the whole workspace, so a
+workspace with zero edges in it is visible for the first time.
+
+**Fix candidates.** (a) Promote the doctor line from `info()` to a failing
+`check()` when a marker is present — smallest change, and it makes the gap
+impossible to forget. (b) Descend symlinked directories that carry a marker,
+with a realpath-based visited set for cycles (the journal walker already
+solved cycle termination — see DECISIONS 2026-08-16 and `lib/journal.mjs`).
+(c) Add the skill dir to `SEARCH_ROOTS`. (b) is the general fix and the one
+that would let any out-of-tree tool declare edges; (a) should land regardless,
+since it is the check that stops this being rediscovered a third time.
+
+**Deferred sidecar.** The five declarations are drafted and correct; they need
+(b) or (c) before they do anything. They are saved at
+**`docs/deferred/own-sidecar.yml`** — not re-derived when this is fixed, and no longer
+in a session scratch directory, which is where they spent their first hour and would
+have been deleted along with the job (`rule:delegation-criteria` §5: verify every path
+a handover cites, *before* writing it).
+
+The measurement behind the 1-of-45 adoption figure is kept beside it at
+`docs/deferred/gotchas-census.mjs`, so a future coverage ratchet has a derivation to
+build on instead of a number quoted in prose.
+
+---
+
+## N30 · S2 · `ledger.unknown_types` cannot be cleared without a disambiguation strategy
+
+**Filed 2026-08-17** during a whole-tree ledger sync, as a handover: the fix is
+skill code, and the session doing the sync was scoped to the projects.
+
+`doctor` fails on `ledger.unknown_types == 0`, naming one row:
+
+```
+/Users/rupali.b/Documents/GitHub/Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl
+  "manual" × 1
+```
+
+It is line 470, id `256`, `"type": "manual"`, `"status": "wontfix"`, timestamped
+2026-06-20 (the `Campaigner/` → `marketing-intel/` rename).
+
+**There is no data fix.** `readLedgerWithStats` (`lib/ledger.mjs:283-313`) folds only
+`status_change`, `drift` and `code_drift`; anything else falls to the `else` at
+`:309-312`, which *counts* the row and drops it. The row's `status` is therefore never
+read, so its already being `wontfix` is irrelevant — `drain` cannot see it, and
+`SKILL.md` forbids rewriting a ledger row ("append-only; migration is close-and-re-emit").
+
+**The obvious fix has a live collision.** Folding `manual` into the `drift` branch at
+`:305` is one line, but **id `256` exists twice in that file** — line 470 (`manual`) and
+line 474 (`drift`, source `docs/MEASUREMENT.md`) — and `drifts` is a `Map` keyed by `id`.
+Folding naively makes one row silently overwrite the other, and the `status_change` at
+line 507 then lands on whichever survives. That trades one silent wrongness for another.
+
+**So this needs, together:** a disambiguation strategy (composite key, or a legacy-type
+allowlist that folds to a distinct namespace), **and a test pinning which row wins** —
+per `rule:safety-flag-needs-a-test`, asserting the *fold output*, not that the type is
+recognised.
+
+**It also sits against `SKILL.md`'s own rule** — "a red `doctor` is doing its job … never
+tune the check until it passes." Teaching the reader a type it has been silently dropping
+since 2026-06-20 (that is N1's whole cost) is arguably making the instrument honest rather
+than tuning it, but it is close enough to the line to be a human call, not an agent's.
+
+## N31 · S2 · `renderMarkdown` has no live caller, and would regress the tree if called
+
+**Filed 2026-08-17**, same handover.
+
+`renderMarkdown` is defined at `lib/ledger.mjs:391`. Verified callers, whole tree:
+`watcher.mjs:499`, `:554`, `:699` — **retired 2026-08-14, refuses to run** — and
+`tests/ledger-render-staleness.test.mjs`. **`cli.mjs` never imports it.** `drain`'s close
+loop calls `markStatus` then re-reads to verify the close landed, and stops; `verify`
+writes v2 events and has no `.md` to render at all.
+
+**Two documents prescribe it anyway.** `docs/GOTCHAS.md` G40's **Do:** says re-render
+after any drain or verify, in the same commit, naming `renderMarkdown(jsonl, md)`; and
+`docs/REFERENCE.md:102-112` shows a hand-written `markStatus` + `renderMarkdown` snippet
+that `SKILL.md` simultaneously forbids ("close through `cli drain`, never by hand").
+N26 fix candidate (a) — "`drain` and `verify` re-render the affected `.md` after writing"
+— is unimplemented.
+
+**And calling it today would make things worse.** `lib/ledger.mjs:401-415` still emits,
+verbatim, `**Last entry: today.** Watcher healthy.` and ``Append-only. Watcher writes
+drift rows; `/propagate drain` marks them done.`` Both false since 2026-08-14. Running it
+would overwrite the two hand-written frozen-render banners in
+`ManavDaehi/docs/PROPAGATION_LEDGER.md` and
+`ManavDaehi/Manav-portfolio/docs/PROPAGATION_LEDGER.md` (commit `589c10a`), which are
+currently the *most* honest ledger renders in the tree. The relative-date tripwire also
+means the body differs from any committed copy on the passage of time alone, so the
+idempotence guard at `:456-463` rewrites it about once a day forever.
+
+**Measured 2026-08-17** — N26's 45 stale `open` rows are gone; do not "fix" that by
+re-rendering:
+
+| file | `\| open \|` rows |
+|---|---|
+| `Vipin Kaushik/docs/PROPAGATION_LEDGER.md` | 0 |
+| `PanditPawanKaushik/docs/PROPAGATION_LEDGER.md` | 0 |
+| `Keerti/Keerti-portfolio/docs/PROPAGATION_LEDGER.md` | 0 |
+| `ManavDaehi/docs/PROPAGATION_LEDGER.md` | 5 (frozen historical render, banner says so) |
+
+**Decide one of two, do not leave it as is:** (a) fix the three false lines, drop the
+relative-date tripwire, and wire it into `drain`; or (b) retire `renderMarkdown`, delete
+G40's prescription and `REFERENCE.md`'s snippet, and adopt ManavDaehi's frozen-banner
+pattern everywhere. The present state — a renderer nobody calls, that would lie if
+called, named by a gotcha as the remedy — is the worst of the three options.
+
+## Smaller findings from the same 2026-08-17 sync
+
+Recorded here rather than as separate issues; each is a docs/code disagreement, not a bug.
+
+1. **`UNMATCHED` is `ACTIONABLE` in code and "do not fix" in data.** `lib/graph.mjs:52`
+   puts `UNMATCHED` in `ACTIONABLE`, so `graph` lists edge `07d914bc`
+   (`rules/discernment-checks.md → */docs/GOTCHAS.md`) as work — while
+   `~/Documents/GitHub/.propagates.yml:38-61` documents it as a deliberate 0-of-N adoption
+   gauge: *"Do NOT delete it to make the worklist green."* It blocks nothing (it is not in
+   `UNSETTLED`, `:44`), so the honest resolution is an exemption in `isActionable`, or a
+   distinct state. Until then every green run reads as 1-of-N remaining forever.
+2. **G46 mis-describes the duplicate pair it records.** G46 and `lib/metrics.mjs:157-160`
+   say `brand-system.md → components/README.md` was "declared twice with two restatements
+   of the same reason". It was actually an **explicit path subsumed by a glob**
+   (`website/components/**/*.md`) in the same source block. The distinction is
+   operational: decoupling the wrong one of the two would have taken 26 edges with it.
+   Resolved 2026-08-17 by decoupling the explicit entry.
+3. **`docs/REFERENCE.md`'s `doctor` row is stale** — it still describes the pre-2026-08-14
+   check set (launchd plist loaded, heartbeat age as a failure), with no mention of the v2
+   event-store/reconcile checks or the `lib/metrics.mjs` expectations that actually fail.
+4. **The `graph-integration` doctor check times out at 2s** on an `execSync("claude mcp
+   list")`, and reports "status unknown". That is correct behaviour and should stay — but
+   note `claude mcp list` health-checks ~30 remote servers and is documented in
+   `rule:tool-priority` as taking tens of seconds, so the check can essentially never pass.
+   **Do not fix this by raising the timeout**: a check that cannot distinguish "no
+   integration" from "did not answer in time" is the G2 shape this project exists to avoid.
+5. **`docs/LIFECYCLE.md` still lists N29 under "Machine — do first"**, though N29's own
+   heading in this file reads **RESOLVED 2026-08-17**. Verified the same day:
+   `~/.claude/skills/propagate/.propagates.yml` exists and `reconcile --all` resolves 9
+   edges under it. The backlog table is the stale copy, not the issue.

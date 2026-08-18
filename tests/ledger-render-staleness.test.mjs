@@ -4,7 +4,9 @@
  * The MD header carries a time-derived tripwire ("Last entry: N days ago").
  * The watcher used to skip re-rendering unless that workspace produced new
  * events, so a ledger that went silent froze its banner at whatever it last
- * said — a ledger dead for weeks kept reporting "Watcher healthy". The alarm
+ * said — a ledger dead for weeks kept reporting "Watcher healthy" (that wording was
+ * removed 2026-08-18 when the v1 watcher it named had been retired for four days).
+ * The alarm
  * was only updatable by the thing it was meant to detect.
  *
  * Fix: render on every fire, and make renderMarkdown itself idempotent so it
@@ -71,11 +73,19 @@ test("a stale ledger re-renders its banner even with no new events (F2)", async 
     /Last entry: 45 days ago/,
     "banner must reflect real age",
   );
-  assert.match(content, /Watcher may be dead/, "over-30d must trip the warning");
+  assert.match(content, /⚠️/, "over-30d must trip the warning");
+  assert.match(
+    content,
+    /propagate doctor/,
+    "the warning must name the command that diagnoses it",
+  );
+  // The v1 watcher was retired 2026-08-14; the renderer advertised it anyway, and
+  // `doctor` could not see the contradiction because this text is generated. A stale
+  // ledger is still worth flagging — it just is not evidence about a watcher.
   assert.doesNotMatch(
     content,
-    /Watcher healthy/,
-    "a 45-day-old ledger must never report healthy",
+    /Watcher/i,
+    "the rendered ledger must not name the retired v1 watcher",
   );
 });
 
@@ -92,11 +102,13 @@ test("banner updates when age crosses a boundary, without new ledger rows", asyn
 
   const wrote = await renderMarkdown(jsonl, md);
   assert.equal(wrote, true, "a changed banner must be written through");
+  const staleContent = await readFile(md, "utf8");
   assert.match(
-    await readFile(md, "utf8"),
-    /Watcher may be dead/,
+    staleContent,
+    /⚠️.*31 days ago/s,
     "banner must go stale on its own — this is the bug that let a dead ledger claim health",
   );
+  assert.doesNotMatch(staleContent, /Watcher/i, "must not name the retired v1 watcher");
 });
 
 test("render recreates a deleted MD file", async () => {

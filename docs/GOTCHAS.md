@@ -89,6 +89,9 @@ a liveness risk, not merely slow.
 unknown**, rather than fabricating an answer to avoid re-paying the cost.
 
 ### G8 · Measuring through a pipe reads the wrong exit code
+**Delivered as** `~/.claude/gotchas-global.md` G-C, which was written 2026-08-17 as a
+duplicate of this entry before the audit noticed. One hazard, two files: the trigger
+lives there because the hazard is not propagate-specific; this entry keeps the incident.
 `cmd 2>&1 | tail -2; echo $?` reports `tail`'s status. I briefly believed a failed
 close was exiting 0 — a phantom bug that would have sent someone hunting.
 
@@ -118,6 +121,7 @@ safely using the documented method.
 manual run, and the docs must say so.
 
 ### G11 · Zero is never a legitimate output for a destructive write
+**Guarded by:** `lib/plist.mjs:128-133` refuses to write a plist with 0 watch roots, citing N14.
 `regeneratePlist` cheerfully wrote a plist with **0 watch roots** over a working one,
 because discovery legitimately found 0 workspaces in a temp tree.
 
@@ -125,6 +129,7 @@ because discovery legitimately found 0 workspaces in a temp tree.
 incident entirely.
 
 ### G12 · A default that moves loses state silently
+**Guarded by:** `tests/config-state-dir.test.mjs` — the unset-case test this entry asks for.
 Adding `PROPAGATE_STATE_DIR` was safe; accidentally relocating `state.json`'s
 *default* would have lost the mtime baseline and re-fired every file as
 first-observation — the same incident, at full scale, caused by its own fix.
@@ -192,6 +197,8 @@ nothing).
 The workaround describes the missing feature precisely.
 
 ### G19 · Deriving beats remembering
+**General form:** `rule:delegation-criteria` §2, which loads every session. Kept here
+for the v1/v2 instance below; do not restate the rule.
 v1 remembers state in one mutable file; losing it does not lose drift, it **invents**
 drift. v2 derives state from content, so losing the cache costs one slow run.
 
@@ -284,6 +291,9 @@ usual false ones.
 is not merely useless; it is a hiding place.
 
 ### G24 · `grep -c` exits 1 when the count is zero, so `|| fallback` fires on a valid answer
+**Delivered as** `~/.claude/gotchas-global.md` G-E — the hazard is a shell/git
+fact, not propagate's, and the guard cannot reach this file from a normal working
+directory. One trigger, one place; this entry keeps the incident.
 `n=$(git cherry main "$b" | grep -c '^+' || echo "?")` prints **`0`** *and then* `?`,
 because `grep -c` returning `0` is still exit status 1. The branch table came out as
 interleaved `0` / `?` lines and had to be thrown away.
@@ -292,6 +302,9 @@ interleaved `0` / `?` lines and had to be thrown away.
 standing one: `cmd | head; echo $?` reads `head`'s status, not `cmd`'s.
 
 ### G25 · `--` before a grep pattern turns every later flag into a path
+**Delivered as** `~/.claude/gotchas-global.md` G-F — the hazard is a shell/git
+fact, not propagate's, and the guard cannot reach this file from a normal working
+directory. One trigger, one place; this entry keeps the incident.
 `command grep -rn -- "--accent" --include="*.md" "Vipin Kaushik"` searches **everything**,
 including `node_modules`. `--` ends option parsing, so `--include=*.md` is read as a file
 argument. Caught only because the output was 233 KB when a handful of lines was expected.
@@ -299,6 +312,9 @@ argument. Caught only because the output was 233 KB when a handful of lines was 
 **Do:** put `--include` *before* `--`, or use `-e "--accent"` for a leading-dash pattern.
 
 ### G26 · `git ls-files <dir>` takes a path relative to the repo root, not to `cwd`
+**Delivered as** `~/.claude/gotchas-global.md` G-G — the hazard is a shell/git
+fact, not propagate's, and the guard cannot reach this file from a normal working
+directory. One trigger, one place; this entry keeps the incident.
 A tree-wide backing audit called every Motherboard sub-service `NO-REPO` — including
 `motherboard-api` — because the path was resolved against the wrong base. The nine core
 services of the largest repo in the tree read as unbacked.
@@ -318,6 +334,7 @@ list of finished work nobody ticked.
 plan predicted. A backlog records where someone *intended* to put a file.
 
 ### G28 · An append-only ledger's `open` lines are not its open rows
+**Guarded by:** `readLedgerWithStats` is the fold; every `doctor` metric reads folded rows.
 A row closed later keeps its original `open` line forever. `grep -c open` across the tree
 gave **501**; folded by last-status-per-id the answer was **8** — wrong by 62×, and
 published before it was caught.
@@ -430,6 +447,9 @@ a check whose positive case can never be observed (a subagent write in the paren
 transcript) is not measuring what it claims to measure at all.
 
 ### G36 · `${N:-{}}` in bash appends a stray brace, silently corrupting JSON
+**Delivered as** `~/.claude/gotchas-global.md` G-H — the hazard is a shell/git
+fact, not propagate's, and the guard cannot reach this file from a normal working
+directory. One trigger, one place; this entry keeps the incident.
 A lib emitted `{"component":"worker-routing",...}` that `jq` rejected. The cause was one
 default-value expansion in the emit helper:
 
@@ -491,6 +511,12 @@ derived. If `status`/`drain` say clean but `reconcile` shows non-CLEAN states, b
 `reconcile` — they are answering different questions.
 
 ### G39 · `verify` writes immediately; `bootstrap` is dry by default
+> **SUPERSEDED 2026-08-17 by G44.** `--apply` now gates every disposition and the dry
+> run executes the real validator, so a predicted refusal matches an actual one. The
+> `**Do:**` below was correct until then and is now the **opposite** of correct — the
+> dry run is how you preview. Retained for the incident, not the advice.
+> **General form:** `rule:safety-flag-needs-a-test`.
+
 The two sit side by side in `SKILL.md` and have **opposite** safety postures.
 `bootstrap` needs `--apply` to write. `verify` writes on the first invocation, with no
 `--apply` and no dry-run flag. `cli.mjs`'s own bootstrap comment reads "same posture as
@@ -519,6 +545,7 @@ one commit (`7282c6e`), so the render simply was not re-run before committing.
 current state — ask `status` or `reconcile`. See N26.
 
 ### G41 · `baselined` is not `verified`, and most edges can never be baselined
+**Guarded by:** `bootstrap` prints the distinction in its own output.
 `bootstrap` writes disposition `baselined` with reason `baseline-from-git: co-committed
 at <sha>`. The tool is careful about this and prints "disposition \"baselined\" — never
 \"verified\"". The evidence is only *these two files were committed together once* — not
@@ -534,6 +561,9 @@ structurally un-bootstrappable. Read both ends and use `no-change-needed` (or th
 disposition) — that is a stronger claim and the only one available cross-repo.
 
 ### G42 · The instrument fails more often than the data — four shapes in one session
+**General form:** `rule:discernment-checks` §4, which carries 15 rows to this entry's 7
+and loads every session. This table is the propagate-local subset — two copies of one
+list is G20 exactly, so add new instruments to the rule, not here.
 Every one of these produced a confident wrong statement before being caught. They are
 listed together because the fix is the same: measure a second way before reporting.
 
@@ -564,3 +594,86 @@ declaration and start editing a sidecar that was already correct.
 `git add` the file and it fires immediately. Worth an explicit line in the output —
 *"N untracked file(s) not examined"* — because absence must be attributable (G2), and
 this is precisely a silent zero.
+
+---
+
+## On the graph layer (added 2026-08-17)
+
+### G44 · A flag that means "write" in one code path and nothing in another
+**General form:** `rule:safety-flag-needs-a-test` — written 2026-08-17, after this was
+the third instance. **Guarded by:** the `if (!apply)` branch in `runDispositionBatch`
+and `tests/verify-ordering.test.mjs`, which snapshots the store byte-for-byte.
+`verify --apply` gated **only** the `decoupled` sidecar edit. The other seven
+dispositions wrote their event the moment the command was invoked, and
+`cli.mjs`'s header comment — *"does NOT touch the file unless `--apply` is
+given"* — was true of the sidecar and false of the event store.
+
+A session read it the second way and ran the ordering guard's own eight-case
+behaviour matrix without `--apply`, to check exit codes. **Cost: 11 events
+appended to the production store asserting verifications nobody performed, 3
+real worklist items silently closed, the worklist reading 21 instead of 24, and
+a deliberate one-time violation of append-only to remove them.**
+
+The fix was to make `--apply` mean the same thing everywhere. The lesson is
+narrower and worse: *the comment was accurate about the thing it was next to*.
+Read a flag's guard at the call site that performs the side effect you care
+about, not at the one the docs happen to describe.
+
+Corollary now enforced by `tests/verify-ordering.test.mjs`: a dry run must be
+asserted by **snapshotting the store before and after**, never by trusting the
+word "would" in the output.
+
+### G45 · Out-depth and layer-from-root are mirror images, and only one is a fix order
+"How far can I get from here" (out-depth) and "how far is the furthest root from
+me" (layering) look interchangeable on a chain and disagree the moment a node
+has two inbound paths. On `A→B`, `A→C`, `C→B`, out-depth makes B a sink at 0;
+the correct layer is 2, because B must sit below **every** source.
+
+The exploratory pass that produced this project's baseline numbers measured
+out-depth. Reusing that code for the worklist would have ordered `B` before `C`
+and produced exactly the false-CLEAN the ordering guard exists to prevent.
+Cost: caught in review, but the depth histogram in the plan is out-depth and the
+one in `graph` is not — they are different numbers and both are correct.
+
+### G46 · A graph of 561 nodes is not a picture
+PanditPawanKaushik owns 477 of 711 edges, and four single nodes have out-degree
+79, 65, 59 and 58. Any force-directed layout of that is a hairball: it renders,
+it looks impressive, and it answers no question anyone has.
+
+What works: condense to workspaces first (~11 boxes, 11 genuinely
+cross-workspace edges), expand one on demand into layered columns, and bundle
+any fan-out above 20 into a single collapsible node. Decide the aggregation
+before the layout, not after.
+
+Related: a duplicate declaration is invisible until you count edges two ways.
+711 edge records over 710 distinct `(from, to)` pairs found
+`brand-system.md → components/README.md` declared twice with two restatements of
+the same reason — two edge ids over one coupling, each verified separately, so
+closing one leaves the other open forever.
+
+### G47 · A hub document cannot be settled one inbound edge at a time
+`Keerti/CLAUDE.md` has 4 inbound edges. `keerti-job-radar/CLAUDE.md` has 3.
+Edit either to satisfy one of them and **every other inbound edge re-arms as
+REVERSED**, because the downstream moved and those sources did not.
+
+Working the 2026-08-17 worklist hit this three times in one session. Each time
+the fix looked complete, the worklist grew instead of shrinking, and the newly
+red edges were ones that had been CLEAN a minute earlier — armed by the fix, not
+by any drift.
+
+**The procedure that works:** for an interior node, gather *all* its inbound
+sources first, make *every* edit to that node in one pass, then settle all N
+inbound edges together. Only then move to its outbound edges. `graph --node
+<path>` prints exactly this set (`in: N`), which is what it is for.
+
+This is not a defect — re-arming is correct, and it is the same property that
+makes a fix cascade honestly. It is a *sequencing* fact, and it is invisible
+per-edge: nothing in a single `verify` tells you the node you are about to edit
+has three other suitors.
+
+Related: editing an edge's own `why` mints a **different `edge_id`**
+(`sha8(node_id, downstream, why)`), so the old edge disappears and a new
+NEVER_VERIFIED one takes its place. On 2026-08-17 that silently laundered a
+DIVERGED edge off the worklist — the state was not resolved, the edge was
+re-identified. Same mechanism retires 10 edges' history whenever a file is
+renamed. If you rewrite a `why`, expect to re-verify, and say so in the reason.

@@ -89,7 +89,7 @@ test("a malformed ledger line lands in ledger_unknown rather than breaking the b
     [
       JSON.stringify({ type: "drift", id: "001", source: "a.md", status: "open", timestamp: "2026-01-01T00:00:00.000Z" }),
       "{not valid json,,,",
-      JSON.stringify({ type: "manual", id: "999", change: "hand-authored note" }),
+      JSON.stringify({ type: "not-a-real-type", id: "999", change: "hand-authored note" }),
     ].join("\n") + "\n",
     "utf8",
   );
@@ -100,14 +100,14 @@ test("a malformed ledger line lands in ledger_unknown rather than breaking the b
   const raw = result.db.prepare("SELECT * FROM ledger_unknown ORDER BY line_no").all();
   result.db.close();
 
-  assert.equal(raw.length, 2, "both the malformed line and the manual-typed row land in ledger_unknown");
+  assert.equal(raw.length, 2, "both the malformed line and the unknown-typed row land in ledger_unknown");
   assert.equal(raw[0].raw_type, "(malformed)");
-  assert.equal(raw[1].raw_type, "manual");
+  assert.equal(raw[1].raw_type, "not-a-real-type");
   assert.equal(raw[1].raw_id, "999");
   // the well-formed drift row still made it into ledger_row despite the
   // malformed line elsewhere in the same file
   assert.equal(result.counts.ledger_row, 1);
-  assert.ok(unknownRows.some((r) => r.raw_type === "manual"));
+  assert.ok(unknownRows.some((r) => r.raw_type === "not-a-real-type"));
 });
 
 test("a decision with multiple Affects targets produces multiple decision_affects rows", async () => {

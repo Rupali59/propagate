@@ -97,7 +97,7 @@ test("verify --edge — each disposition writes one correctly-shaped event", asy
       assert.ok(row, `row for ${d} must exist`);
       assert.equal(row.state, "NEVER_VERIFIED");
 
-      const argv = ["verify", "--edge", row.edge_id, "--disposition", d, "--json"];
+      const argv = ["verify", "--edge", row.edge_id, "--disposition", d, "--apply", "--json"];
       if (d === "wontfix" || d === "baselined") argv.push("--reason", `${d} reason`);
       const r = runCli(argv, env);
       assert.equal(r.status, 0, `verify --disposition ${d} failed: ${r.stderr}\n${r.stdout}`);
@@ -146,7 +146,7 @@ sources:
     assert.ok(rows.every((r) => r.node_id === nodeId));
 
     const r = runCli(
-      ["verify", "--node", nodeId, "--disposition", "no-change-needed", "--reason", "reviewed both", "--json"],
+      ["verify", "--node", nodeId, "--disposition", "no-change-needed", "--reason", "reviewed both", "--apply", "--json"],
       env,
     );
     assert.equal(r.status, 0, `verify --node failed: ${r.stderr}\n${r.stdout}`);
@@ -185,7 +185,7 @@ sources:
     assert.equal(matchedRows.length, 2);
 
     const r = runCli(
-      ["verify", "--glob", "sub/*.md", "--disposition", "no-change-needed", "--reason", "reviewed all matches", "--json"],
+      ["verify", "--glob", "sub/*.md", "--disposition", "no-change-needed", "--reason", "reviewed all matches", "--apply", "--json"],
       env,
     );
     assert.equal(r.status, 0, `verify --glob failed: ${r.stderr}\n${r.stdout}`);
@@ -233,8 +233,8 @@ sources:
     // Pin dst-clean.txt's pairing so it starts CLEAN; leave the other NEVER_VERIFIED,
     // then move the source so the un-pinned one can't confuse the picture, and pin+drift
     // the "drifted" one so it reads DRIFTED distinctly from NEVER_VERIFIED.
-    runCli(["verify", "--edge", cleanRow.edge_id, "--disposition", "propagated", "--json"], env);
-    runCli(["verify", "--edge", drift1Row.edge_id, "--disposition", "propagated", "--json"], env);
+    runCli(["verify", "--edge", cleanRow.edge_id, "--disposition", "propagated", "--apply", "--json"], env);
+    runCli(["verify", "--edge", drift1Row.edge_id, "--disposition", "propagated", "--apply", "--json"], env);
     await writeFile(path.join(ws, "src.txt"), "src v2\n");
 
     before = runReconcileJson(env);
@@ -254,7 +254,7 @@ sources:
     assert.equal(driftRow2.state, "DIVERGED");
 
     const r = runCli(
-      ["verify", "--node", nodeId, "--state", "DRIFTED", "--disposition", "propagated", "--json"],
+      ["verify", "--node", nodeId, "--state", "DRIFTED", "--disposition", "propagated", "--apply", "--json"],
       env,
     );
     assert.equal(r.status, 0, `verify --node --state failed: ${r.stderr}\n${r.stdout}`);
@@ -291,7 +291,7 @@ sources:
 
     let rows = runReconcileJson(env);
     let row = rowFor(rows, path.join(ws, "src.txt"));
-    runCli(["verify", "--edge", row.edge_id, "--disposition", "propagated", "--json"], env);
+    runCli(["verify", "--edge", row.edge_id, "--disposition", "propagated", "--apply", "--json"], env);
 
     await writeFile(path.join(ws, "src.txt"), "src v2\n");
     await writeFile(path.join(ws, "dst.txt"), "dst v2\n");
@@ -299,7 +299,7 @@ sources:
     row = rowFor(rows, path.join(ws, "src.txt"));
     assert.equal(row.state, "DIVERGED");
 
-    const refused = runCli(["verify", "--edge", row.edge_id, "--disposition", "propagated", "--reason", "x", "--json"], env);
+    const refused = runCli(["verify", "--edge", row.edge_id, "--disposition", "propagated", "--reason", "x", "--apply", "--json"], env);
     assert.equal(refused.status, 1, "refusing a DIVERGED edge must exit non-zero");
     const parsedRefused = JSON.parse(refused.stdout.trim());
     assert.equal(parsedRefused.confirmed.length, 0);
@@ -311,7 +311,7 @@ sources:
     assert.equal(rowFor(rowsAfterRefusal, path.join(ws, "src.txt")).state, "DIVERGED", "a refused write must not change state");
 
     const allowed = runCli(
-      ["verify", "--edge", row.edge_id, "--disposition", "both-reconciled", "--reason", "reviewed both sides", "--json"],
+      ["verify", "--edge", row.edge_id, "--disposition", "both-reconciled", "--reason", "reviewed both sides", "--apply", "--json"],
       env,
     );
     assert.equal(allowed.status, 0, `both-reconciled on a DIVERGED edge must succeed: ${allowed.stderr}\n${allowed.stdout}`);
@@ -324,7 +324,7 @@ sources:
     const cleanRow = rowFor(rowsAfter, path.join(ws, "src.txt"));
     assert.equal(cleanRow.state, "CLEAN");
     const misapplied = runCli(
-      ["verify", "--edge", cleanRow.edge_id, "--disposition", "both-reconciled", "--reason", "x", "--json"],
+      ["verify", "--edge", cleanRow.edge_id, "--disposition", "both-reconciled", "--reason", "x", "--apply", "--json"],
       env,
     );
     assert.equal(misapplied.status, 1);
@@ -358,7 +358,7 @@ sources:
     const rows = runReconcileJson(env);
     const row = rowFor(rows, path.join(ws, "src.txt"));
 
-    const r = runCli(["verify", "--edge", row.edge_id, "--disposition", "wontfix", "--json"], env);
+    const r = runCli(["verify", "--edge", row.edge_id, "--disposition", "wontfix", "--apply", "--json"], env);
     assert.equal(r.status, 1);
     const parsed = JSON.parse(r.stdout.trim());
     assert.equal(parsed.confirmed.length, 0);
@@ -598,7 +598,7 @@ sources:
     const rows = runReconcileJson(env);
     const row = rowFor(rows, path.join(ws, "src.txt"));
 
-    const r = runCli(["verify", "--edge", row.edge_id, "--disposition", "no-change-needed", "--json"], env);
+    const r = runCli(["verify", "--edge", row.edge_id, "--disposition", "no-change-needed", "--apply", "--json"], env);
     assert.equal(r.status, 0);
     const parsed = JSON.parse(r.stdout.trim());
     assert.ok(typeof parsed.generatedAt === "string" && !Number.isNaN(Date.parse(parsed.generatedAt)));

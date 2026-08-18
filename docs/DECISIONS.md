@@ -558,3 +558,292 @@ silence. That is now reported. Absence must be attributable
 `tests/journal.test.mjs` (7 tests: symlink found, absent without the link, cycle
 terminates, doctor names it, doctor escalates a marker-bearing link, bare dates rejected,
 attribution carried). GOTCHAS **G31**.
+
+---
+
+## 2026-08-17: propagate has a DAG; ordering is derived from it, and `verify` is dry-run by default
+
+**What:** Three changes that arrive together because they are one idea.
+
+1. **`lib/graph.mjs`** derives a graph from `reconcile()`'s rows: Tarjan SCC,
+   condensation, longest-path-from-root layering, Kahn topological order,
+   `blockedBy` (transitive unsettled ancestors of an edge's source) and
+   `fixOrder` (the root→leaf worklist). Pure — rows in, graph out, no I/O.
+   `propagate graph` exposes it as text, `--json`, `--node <path>`, and
+   `--html <path>` (a self-contained page, `lib/graph-html.mjs`).
+2. **`verify` gained an ordering guard.** Verifying an edge whose SOURCE is
+   itself an unsettled downstream pins content against a source nobody has
+   confirmed. That now warns, names every blocking upstream edge, and exits 3
+   unless `--out-of-order` is passed. `deferred` and `decoupled` are exempt by
+   construction; `wontfix` and `baselined` are not, because both pin.
+3. **`verify` is dry-run by default for every disposition.** `--apply` now
+   gates the event write, not just the `decoupled` sidecar edit.
+
+**Why:** Measured on the tree the day this landed: 561 nodes, 711 edges over 710
+distinct pairs, 67 roots, 461 leaves, 33 interior, depth 4 — and **4 of the 23
+non-CLEAN edges had a source that was itself a dirty downstream.** Nothing could
+see that, because every consumer treated each edge as an independent fact.
+
+(3) is not a feature, it is an incident report. Before this change `--apply`
+gated only `decoupled`, and `cli.mjs`'s own header said "does NOT touch the file
+unless `--apply` is given" — true of the sidecar, false of the event store. A
+session read it the second way, ran the guard's behaviour matrix without
+`--apply`, and appended **11 events asserting verifications nobody performed**;
+three real worklist items closed themselves and the worklist read 21 instead of
+24. The events were removed (see below) and the flag now means what every other
+command in this CLI means by it. A verification is a claim a human is making; it
+must never be the default side effect of asking a question.
+
+**Append-only was deliberately broken once.** The 11 events were the contiguous
+tail of `~/.propagate/events/2026-08.jsonl` and were truncated rather than
+compensated, because no disposition means "the last one was wrong" — leaving
+them would have stood 9 false verifications permanently, and re-arming those
+edges would have required waiting for their content to change. Backup at
+`~/.propagate/2026-08.jsonl.pre-truncate-2026-08-17`, 869 → 858 lines, worklist
+restored to 24. Recorded here rather than done quietly, per
+`rule:discernment-checks` §2: an unrecorded deletion from an append-only store is
+indistinguishable from corruption.
+
+**Two doctor expectations added**, both sole-source and both with a real
+instance on the tree: `graph.cycles == 0` (one mutually-declared pair of SSJK-mb
+plan specs) and `graph.duplicate_pairs == 0` (`brand-system.md →
+components/README.md` declared twice, two edge ids over one coupling — 711
+records over 710 pairs). The graph derivation shares the existing
+`reconcile completes` check rather than adding a label of its own, so it adds no
+new G1 debt to `tests/doctor-check-coverage.test.mjs`. When reconcile fails both
+metrics are **null**, never 0 — a 0 would assert "no cycles" about a graph
+nobody built.
+
+**Layering is longest-path-from-root, not out-depth.** The exploratory pass that
+produced the baseline measured out-depth, which is the mirror image: on `A→B`,
+`A→C`, `C→B` it puts B at 0 where the correct layer is 2. A fix order needs "a
+node may only be verified once every inbound edge is settled".
+
+**Affects:** propagate
+
+**Refs:** `lib/graph.mjs`, `lib/graph-html.mjs`, `cli.mjs` (`graphCmd`, the
+guard in `verifyCmd`, `buildEventPayload`, the dry-run branch in
+`runDispositionBatch`, graph metrics in `doctor`), `lib/metrics.mjs`
+(`graph.cycles`, `graph.duplicate_pairs`), `lib/events.mjs`
+(`dryValidateEvent`), `lib/reconcile.mjs` (rows now carry `kind` and `why`).
+Tests: `tests/graph.test.mjs` (22), `tests/graph-html.test.mjs` (13),
+`tests/verify-ordering.test.mjs` (9). GOTCHAS **G44**, **G45**, **G46**.
+
+---
+
+## 2026-08-17: gotchas get a disposition, not just an entry — and the general form goes where it loads
+
+**What:** `docs/GOTCHAS.md`'s 29 prose-only entries were each given one of five
+dispositions, recorded in `docs/AUDIT-2026-08.md`: **RETIRE** (no longer true),
+**PROMOTE** (the general form belongs in `~/.claude/rules/`), **ELIMINATE**
+(change the design), **DETECT** (a check that fails when present), **DELIVER**
+(a `**Trigger:**` for `gotcha-guard`). `DELIVER` is the fallback, reached only
+after the first four are rejected in writing.
+
+Shipped this pass: G39 superseded in place; `rule:safety-flag-needs-a-test`
+written; G30/G38/G43 eliminated with tests; G8/G24/G25/G26/G36 delivered as
+`gotchas-global.md` G-C/G-E/G-F/G-G/G-H; five COVERED entries given a
+`**Guarded by:**` line; G19 and G42 reduced to pointers at the rules that already
+generalise them.
+
+**Why:** the corpus held **the same hazard at three levels of abstraction with
+the general form unenforced**. G22 ("a safety flag is a claim, and claims need a
+test", 2026-08-14, `digest --dry-run` ran an armed deletion) generalises N27
+(filed 08-16, not fixed) which generalises G44 (08-17, 11 spurious events and 3
+falsely-closed edges). `rules/_TODO.md` had backlogged the general form as
+`safety-flag-needs-a-test` **on the day of the first incident**. Three days
+between backlogged and written is what the other two instances cost.
+
+**Where the general form lives is the decision.** A project `GOTCHAS.md` loads
+when someone opens it; `~/.claude/rules/` loads every session via
+`load-rules.mjs`. So a hazard with a general form moves to `rules/` and the
+gotcha keeps the *incident* — the cost, the wrong theory held first, and the
+signal that was visible at the time. Restating is forbidden either way; the
+gotcha gets a one-line pointer up.
+
+**RETIRE supersedes, never deletes.** `GOTCHAS.md` says "never delete one because
+it feels obvious now". G39 is not obvious-now, it is **wrong** now — its `Do:`
+advised against the dry run that is now the correct way to preview. Superseded in
+place with the original beneath, because the incident outlives the advice.
+
+**Four corrections found while auditing**, each an instance of the thing being
+audited:
+
+1. **Citation is not coverage.** The 29 came from matching `\bG\d+\b` across the
+   source; seven entries were already guarded or already promoted, so the real
+   figure was **22**. `rule:discernment-checks` §5.
+2. **Two of the audit's own probes were false positives** — "drain points at
+   verify" matched unrelated JSDoc, "ANSI helper is shared" matched two inline
+   copies. Both caught by re-reading, not re-grepping. That is G42 firing inside
+   the audit of G42.
+3. **`rule:every-project-carries-gotchas`'s fingerprint contained the bare
+   literal `docs/GOTCHAS.md`**, so `_check.mjs` reported any project that *cites*
+   its own gotchas file as restating the rule — **the check punished adoption.**
+   Narrowed; the false positive is gone and the fingerprint still matches its own
+   body.
+4. **The four shell/git triggers were first added to propagate's own
+   `GOTCHAS.md`, where the guard can never reach them** — it walks *up* from cwd
+   and `~/.claude/skills/propagate/` is not on the path from anywhere anyone
+   works. Moved to `gotchas-global.md`, which was already the stated rationale
+   one entry earlier for G8.
+
+**Also:** `drain`'s no-rows message now names `graph`/`verify` when derived edges
+are unsettled, and reuses `graph.mjs`'s `isActionable` rather than re-deriving
+"not CLEAN" — the hand-rolled filter said 23 where `graph` said 21, and two
+commands disagreeing about what needs work is worse than either being wrong.
+
+**Affects:** propagate
+
+**Refs:** `docs/AUDIT-2026-08.md` (the disposition table),
+`~/Documents/GitHub/rules/safety-flag-needs-a-test.md`, `rules/_TODO.md` (row
+struck), `~/.claude/gotchas-global.md` G-E–G-H, `tests/helpers/plain.mjs`,
+`tests/audit-conversions.test.mjs` (8 tests, both ELIMINATE conversions
+mutation-proven red for their stated reason). GOTCHAS **G39** superseded.
+Not done this pass: the G33 and G37 DETECT checks, and `absence-claims-need-state-and-branch` (G27) is mapped but unwritten.
+
+---
+
+## 2026-08-17: a symlink that declares a marker is walked; the lifecycle is written down
+
+**What:** two changes that arrived together because the second exposed the first.
+
+1. **`docs/LIFECYCLE.md`** — the hazard machine (RECORDED → RETIRE / PROMOTE /
+   ELIMINATE / DETECT / DELIVER), its composition with the edge machine, the
+   three kinds of work (instance / mechanism / **machine**), and the two ordered
+   lanes the backlog divides into. It restates neither state list: `STATES` lives
+   in `lib/reconcile.mjs`, `DISPOSITIONS` in `lib/events.mjs`.
+
+2. **N29 fixed by candidate (b)** — `listDirs` (`lib/discovery.mjs`) and
+   `findAllSidecarsRecursive` (`lib/edges.mjs`) now descend a symlinked directory
+   **when it carries a `.propagates.yml`**, with a realpath-keyed visited set per
+   walk.
+
+**Why (2) followed from (1):** LIFECYCLE.md's subject is three files —
+`reconcile.mjs`, `events.mjs`, `skills-lifecycle.mjs` — any of which can silently
+falsify it. That is precisely the drift the document warns about, and it could
+not be declared, because the skill sits outside `SEARCH_ROOTS` and the only path
+in is a symlink neither walk would follow.
+
+**The marker is the opt-in, and that is the whole safety argument.** Following
+links by default invites cycles and duplicate workspaces. Requiring a
+`.propagates.yml` means the ~dozen incidental symlinks in the tree behave exactly
+as before, and a link that declares one is asking to be walked. Verified: the
+skill did **not** become an 8th ledger-owning workspace (it is an edge-only
+marker), workspace count stayed 11, and `no unowned ledger files` stayed green.
+
+**Fixing one walk proved nothing.** After `discovery.mjs` alone the expanded edge
+count was still **711 → 711** and `doctor` still reported IGNORED. Two
+independent walks existed for two different jobs — workspaces and sidecars — and
+only fixing both made it real: **711 → 720**, 9 edges, 12 of the skill's own
+files in the graph. The verification is what caught it; the change looked
+complete after the first edit.
+
+**Three stale assertions found by making the change:**
+
+- `doctor` still printed `** declares .propagates.yml and is being IGNORED **`
+  when the link was, by then, being followed.
+- `tests/journal.test.mjs` asserted that same message. Inverted in place rather
+  than deleted — the fixture that used to prove the gap is the strongest
+  evidence the fix works — and joined by a new test that an unmarkered link is
+  still skipped.
+- `gotchas-global.md` G-C's trigger used `[^|]*`, which matches newlines, so a
+  `$?` three commands later fired it. Narrowed to `[^|\n]{0,40}`; the true
+  positive still fires and the multi-line false positive is silent. **Second
+  false-positive trigger of the day** — the first was
+  `every-project-carries-gotchas`'s fingerprint punishing adoption.
+
+**Known limit, recorded not fixed:** `check --changed` is repo-scoped, and the
+skill is its own git repo, so `check` run from the hub cannot see its diffs. The
+edges are live in `reconcile`/`graph` regardless, because those derive from
+content rather than from git.
+
+**Affects:** propagate
+
+**Refs:** `docs/LIFECYCLE.md`, `lib/discovery.mjs` (`MARKER`, `listDirs`,
+walk cycle guard), `lib/edges.mjs` (`findAllSidecarsRecursive` symlink branch),
+`cli.mjs` (doctor symlink line), `.propagates.yml` (restored from
+`docs/deferred/own-sidecar.yml`, plus LIFECYCLE and AUDIT edges),
+`tests/journal.test.mjs` (2 tests). `docs/ISSUES.md` **N29** resolved.
+
+---
+
+## 2026-08-17: a background monitor lands three days after one was retired — and why that is not a reversal
+
+**What:** `propagate monitor` — a launchd agent (`com.tathya.propagate.monitor`,
+`WatchPaths` on discovered workspace roots, `ThrottleInterval` 300,
+`StartInterval` 1800) that runs `reconcile`, notifies on anything actionable, and
+writes **no drift anywhere**. Generated by `monitor --install`; **not loaded** —
+arming it is a separate human step.
+
+**Why this is not the retired watcher.** The v1 watcher was retired 2026-08-14 on
+measured grounds: 4,420 runs, 4,384 no-ops (99.2%), and a `state.json` mtime
+baseline that caused two incidents in one day — a wipe that fired ~120 spurious
+rows. The retirement entry is explicit that it cost something real: *"What is
+genuinely lost, not just traded: sub-daily proactive notification."* This closes
+that gap without restoring the mechanism, and the whole argument is one property:
+
+| | v1 watcher | monitor |
+|---|---|---|
+| Detection | diff against a remembered mtime baseline | `reconcile`, derived from content |
+| A missed trigger | **information gone** — it had to *catch* the change | costs nothing; derive later |
+| Corrupt state | **invents drift** | one duplicate notification |
+| Writes | drift rows → a queue to drain | telemetry only |
+
+**v1 was harmful because it had to catch the moment.** A stateless derivation has
+no moment to catch, which is what makes the same trigger mechanism safe.
+
+**The no-op ratio will be just as bad, and that is fine.** 48 runs/day against
+v1's 1,440 minimum, each ~770ms. What damned 4,384 no-ops was not waste — it was
+that each touched mutable state that could invent drift. A no-op here reads files
+and exits.
+
+**The one thing it remembers is what it TOLD you**, keyed on the content triple
+`(edge_id, source_content, downstream_content)` — the same key
+`knownGoodPairs()` uses. That choice is load-bearing: mtime-keyed memory going
+wrong invents drift; content-keyed memory going wrong costs exactly one duplicate
+notification, because the key is derived from the bytes it describes. Measured in
+`tests/monitor.test.mjs`, not asserted.
+
+**A separate label, deliberately.** `lib/plist.mjs`'s `LABEL` still defaults to
+the retired watcher's name. Generating through `regeneratePlist` would have
+written over the retired job's plist, resurrected its label, and broken `doctor`'s
+retired-watcher assertions — three bad outcomes from one convenience. The monitor
+gets `writeMonitorPlist`, its own label and path, and reuses only the WatchPaths
+derivation and the N14 zero-watch-root refusal.
+
+**`WatchPaths` alone is not enough, and the plist already said so.**
+`lib/plist.mjs` records that WatchPaths fires only on direct-child changes, which
+is exactly why v1 carried `StartInterval 60`. A floor is still required; it is
+1800s rather than 60s, and a missed trigger no longer costs anything.
+
+**Liveness distinguishes three states or it is not a probe:** never ran (no log),
+ran and found nothing (`notified=0`), ran and told you (`notified>0`). `doctor`
+reports it as **informational**, because "generated but not armed" is the expected
+state and must not read as broken. `docs/SYSTEMS.md`'s `adoption_date` is BLANK
+until a notification it sent resolves an edge sooner than the daily digest would
+have — firing is not helping, and that is the distinction the v1 watcher failed.
+
+**Affects:** propagate
+
+**Refs:** `lib/monitor.mjs`, `cli.mjs` (`monitorCmd`, `--dry-run`, `--install`,
+the doctor liveness probe), `lib/plist.mjs` (`writeMonitorPlist`,
+`watchPathsFor`, `MONITOR_LABEL`), `tests/monitor.test.mjs` (13 tests; three
+mutations — keying on `edge_id` alone, notifying on `NEVER_VERIFIED`, logging only
+when notified — each red for its stated reason). `docs/SYSTEMS.md` row added.
+
+### Correction, same day: the cost figure was measured warm
+
+`~770ms` above describes an **interactive** run with a warm filesystem cache. The
+first production run under launchd was **5088ms** for 724 edges — 6.4x — because
+launchd gives a bare environment and nothing is cached. Re-measured at the same
+moment for comparison: 792ms and 798ms interactively.
+
+So the daily budget is **48 × ~5s ≈ 4 minutes of CPU**, not the ~37 seconds this
+entry originally claimed. Still modest against the retired watcher's 1,440
+runs/day, and the argument for the design is unchanged — but the number was
+wrong by 6.4x and quoted in three files, so it is corrected rather than left to
+be re-derived by someone who trusts it.
+
+`rule:discernment-checks` §4: a figure measured under conditions that differ from
+production is a different quantity than the one being claimed. The honest form
+names both and says which is which.

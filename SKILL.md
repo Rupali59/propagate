@@ -56,6 +56,7 @@ replacement's health (event store + reconcile), not the retired watcher's.
 | a field on a ledger row looks unused, or you need the real (not spec'd) row shape | `docs/DATA_MODEL.md` |
 | you want current status / what's in flight | `STATE.md` |
 | you're adding a background component | `docs/SYSTEMS.md` |
+| you're dividing this work up, or asking what state a hazard is in and how it leaves | `docs/LIFECYCLE.md` |
 
 ## Modes
 
@@ -92,6 +93,22 @@ These are real `cli.mjs` subcommands — run them directly. Full flags in
   ```bash
   node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --changed
   ```
+- **`graph`** — the DAG over the declared couplings, derived from `reconcile`.
+  Read-only. Leads with the **fix order**: every actionable edge sorted by its
+  source's layer, so working top to bottom never pins a downstream against a
+  source that is itself unsettled. Also names the structural defects a
+  per-edge view cannot see — cycles, the same pair declared twice, globs
+  matching nothing.
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs graph                      # this workspace
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs graph --all                # every workspace
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs graph --node <path>        # upstream + downstream of one file
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs graph --all --html out.html  # self-contained page
+  ```
+  `NEVER_VERIFIED` edges are excluded from the worklist by default
+  (`--include-unverified` to show them) — they are a baseline gap, not
+  movement. They still count as unsettled when deciding what blocks what, and
+  the excluded count is always printed.
 - **`drain`** — the supported close path. Bare, it lists open rows grouped by
   `correlation_id` (read-only). With `--close`/`--group` it writes the closes.
   Requires `--reason` for a wontfix and verifies each row actually closed,
@@ -167,6 +184,18 @@ same CLI; it is being split out. See `docs/DECISIONS.md`.
 
 ## Important Rules
 
+- **`verify` is dry-run by default. `--apply` writes.** This holds for every
+  disposition, not just `decoupled`. Before 2026-08-17 it gated only the
+  `decoupled` sidecar edit and the other seven wrote on invocation — which cost
+  11 events asserting verifications nobody performed (`docs/GOTCHAS.md` G44).
+  The preview runs the real validator, so a refusal shown in the dry run is a
+  refusal `--apply` would also give.
+- **Fix root-to-leaf.** Verifying an edge whose source is itself an unsettled
+  downstream pins content against a source nobody has confirmed. `verify`
+  refuses with exit 3 and names every blocking upstream; `--out-of-order`
+  overrides when you mean it. `deferred` and `decoupled` are exempt (neither
+  pins); `wontfix` and `baselined` are **not**. `graph` prints the whole
+  worklist already ordered.
 - **Close through `cli drain`, never by hand.** It resolves the ledger via
   discovery and verifies the row actually closed. `markStatus` now throws on an
   id it cannot find (so a typo is loud), but an id that happens to exist in the

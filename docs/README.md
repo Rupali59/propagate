@@ -16,6 +16,8 @@ one hop deeper, for when you land in `docs/` directly.
 | [`ISSUES.md`](./ISSUES.md) | What's broken, tracked, or a known gap (e.g. no `cli drain`, the pre-push injection risk)? |
 | [`DECISIONS.md`](./DECISIONS.md) | Why does it work this way — what changed, when, and what did it supersede? |
 | [`SYSTEMS.md`](./SYSTEMS.md) | What background components exist (watcher, digest), and what state are they in? |
+| [`LIFECYCLE.md`](./LIFECYCLE.md) | What state is a hazard in, how does it leave that state, and how does this work divide into lanes? The hazard machine and how it composes with the edge machine. |
+| [`AUDIT-2026-08.md`](./AUDIT-2026-08.md) | Which gotchas can stop being things anyone has to remember — the disposition table, and the citation-vs-coverage correction. |
 
 ## Routing table (situations, not topics)
 

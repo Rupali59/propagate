@@ -1,0 +1,61 @@
+# propagate's own couplings.
+#
+# Reachable from the hub via the `propagate-skill` -> ~/.claude/skills/propagate
+# symlink, exactly as the rules layer is reached via `rules` -> ~/.claude/rules.
+# Until this file existed, `doctor` reported that symlink as "no marker —
+# nothing lost", which was true only because nothing had been declared: the
+# skill that exists to catch undeclared couplings had none of its own.
+#
+# That is `rule:adversarial-review-reads-the-ledger`'s exact finding — a green
+# propagate on an undeclared tree means "not looking", not "clean" — and the
+# 2026-08-17 graph work is what made it visible, because `graph` reports the
+# whole workspace and this one had zero edges in it.
+#
+# NOT a `workspace: true` marker: this directory must not own a ledger. It is an
+# edge-only marker, so its drift is reported into the hub's ledger rather than
+# creating an eighth workspace-root ledger for a directory that is not a
+# workspace.
+
+sources:
+  lib/graph.mjs:
+    propagates_to:
+      - path: SKILL.md
+        why: >-
+          SKILL.md documents `graph`'s worklist semantics — that NEVER_VERIFIED is
+          excluded by default but still blocks, and that the fix order is by source
+          layer. Those are properties of fixOrder/blockedBy, not prose. If the
+          derivation changes, the promise in SKILL.md is the thing that goes stale.
+        kind: code
+      - path: docs/DECISIONS.md
+        why: >-
+          The 2026-08-17 entry states layering is longest-path-from-root and that
+          cycles are condensed rather than dropped. Both are decisions the code has
+          to keep; if the code stops keeping one, the record is wrong rather than
+          merely out of date.
+        kind: code
+
+  lib/metrics.mjs:
+    propagates_to:
+      - path: docs/OBSERVABILITY.md
+        why: >-
+          OBSERVABILITY.md §1 is the table of what is measured and what range is
+          expected. EXPECTATIONS is the executable form of that table; an entry
+          added or recalibrated in one and not the other is the "looks
+          machine-checked and is not" failure.
+        kind: code
+      - path: docs/GOTCHAS.md
+        why: >-
+          Every EXPECTATIONS entry's `basis` cites a dated incident, and the long
+          form of those incidents lives in GOTCHAS. A threshold whose story is only
+          in the code gets re-litigated the first time someone disagrees with it.
+        kind: prose
+
+  lib/events.mjs:
+    propagates_to:
+      - path: docs/DATA_MODEL.md
+        why: >-
+          DATA_MODEL.md describes the record shapes on disk. events.mjs owns the v2
+          shape and its validation rules (which dispositions pin content, which
+          require a reason). DATA_MODEL.md is currently descriptive of v1 only —
+          this edge is what should fire when that gap is closed.
+        kind: code

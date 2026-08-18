@@ -31,7 +31,8 @@ const CLI_PATH = path.join(SKILL_DIR, "cli.mjs");
 
 /** Strip ANSI so assertions match the text, not the colour codes around it.
  * `✗ label` is really `\x1B[31m✗\x1B[0m label` on a TTY-less pipe too. */
-const plain = (s) => s.replace(/\x1B\[[0-9;]*m/g, "");
+// GOTCHAS G30 — one implementation, in tests/helpers/plain.mjs
+const { plain } = await import("./helpers/plain.mjs");
 
 function run(root, args) {
   return spawnSync(process.execPath, [CLI_PATH, ...args], {

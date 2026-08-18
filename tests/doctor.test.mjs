@@ -66,14 +66,14 @@ function runDoctor(root, stateDir = root) {
 test("doctor fails when a ledger contains an unknown row type, and names the type (N1)", async () => {
   const { root, jsonlPath } = await makeWorkspace([
     driftLine("001"),
-    JSON.stringify({ type: "manual", id: "002", timestamp: new Date().toISOString(), status: "open" }),
+    JSON.stringify({ type: "not-a-real-type", id: "002", timestamp: new Date().toISOString(), status: "open" }),
   ]);
   try {
     const result = runDoctor(root);
     const out = result.stdout + result.stderr;
     assert.notEqual(result.status, 0, "doctor must exit non-zero when an unknown row type is present");
     assert.match(out, /no row types unknown to the reader/);
-    assert.match(out, /"manual"/, "output names the offending type string");
+    assert.match(out, /"not-a-real-type"/, "output names the offending type string");
     assert.match(out, new RegExp(jsonlPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "output names the ledger");
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -171,7 +171,7 @@ test("doctor reports the retired watcher as informational only, never a failure,
 // workspaces.discovered / decisions.with_tokens / ledger.unknown_types /
 // sidecars.rejected — an inline check() AND an EXPECTATIONS entry — so one
 // real defect printed two ✗ lines (observed live: a single hand-authored
-// "manual" ledger row produced both "✗ no row types unknown to the reader"
+// An unknown-typed ledger row produced both "✗ no row types unknown to the reader"
 // and "✗ ledger.unknown_types == 0"). These tests pin the fixed shape: the
 // EXPECTATIONS entry is now the SOLE assertion for those four subjects, and
 // the previously-duplicate inline check is downgraded to an informational
@@ -186,7 +186,7 @@ function countMatches(text, re) {
 test("G20: an unknown ledger row type produces exactly ONE ✗ line, not two", async () => {
   const { root, jsonlPath } = await makeWorkspace([
     driftLine("001"),
-    JSON.stringify({ type: "manual", id: "002", timestamp: new Date().toISOString(), status: "open" }),
+    JSON.stringify({ type: "not-a-real-type", id: "002", timestamp: new Date().toISOString(), status: "open" }),
   ]);
   try {
     const result = runDoctor(root);
@@ -225,7 +225,7 @@ test("G20: an unknown ledger row type produces exactly ONE ✗ line, not two", a
     // inline check it replaced — same ledger path, same offending type, same
     // count.
     assert.match(out, new RegExp(jsonlPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "names the ledger path");
-    assert.match(out, /"manual"×1/, "names the offending type and its count");
+    assert.match(out, /"not-a-real-type"×1/, "names the offending type and its count");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

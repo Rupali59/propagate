@@ -190,3 +190,34 @@ test("table cells are OPT-IN — the default must not see them", async () => {
     "opt-in: the dead path, and NOT the URL route or the prose cell",
   );
 });
+
+test("proseOnlySupersession ignores the archival FILENAME, but still catches a prose claim", async () => {
+  // `docs/conventions/STATE_MANAGEMENT.md` mandates the archival name
+  // `<name>-superseded-<date>.md`. Before the stripPaths() fix, following that
+  // convention — and every doc that correctly linked to an archived file — counted
+  // as claiming supersession in prose. Measured 2026-08-18: archiving 14 plans and
+  // updating their cross-links pushed docs.supersession_prose_only 107 -> 108,
+  // entirely from filenames. The workspace convention and the ratchet were on a
+  // collision course, and the tempting fixes were both wrong: raise the baseline
+  // (the metric forbids it) or mangle correct links to dodge a regex.
+  const dir = await mkdtemp(path.join(tmpdir(), "dockind-"));
+
+  const cases = [
+    ["inline-code path", "See `docs/archive/thing-superseded-2026-06-21.md` for the audit.", false],
+    ["markdown link", "See [the audit](docs/archive/x-superseded-2026-06-21.md).", false],
+    ["bare path", "Moved to docs/archive/x-superseded-2026-06-21.md today.", false],
+    ["bare filename", "Renamed to x-superseded-2026-06-21.md today.", false],
+    ["prose claim", "This supersedes the 2026-06-14 Vipin lock.", true],
+    ["prose claim, capitalised", "Supersedes the earlier posture.", true],
+    // The one that matters most: a real claim on the SAME line as a filename must
+    // still fire. Stripping paths must not become a blanket amnesty.
+    ["claim beside a path", "This supersedes `docs/archive/x-superseded-2026-06-21.md`.", true],
+  ];
+
+  for (const [label, line, shouldFire] of cases) {
+    const f = path.join(dir, `${label.replace(/\W+/g, "-")}.md`);
+    await writeFile(f, `# probe\n\n${line}\n`);
+    const got = proseOnlySupersession(f) !== null;
+    assert.equal(got, shouldFire, `${label}: expected fires=${shouldFire}, got ${got} — line: ${line}`);
+  }
+});

@@ -21,14 +21,22 @@ const byKey = (k) => {
 
 test("prose-only supersession ratchet holds at baseline, and FAILS when it grows", () => {
   const e = byKey("docs.supersession_prose_only");
-  assert.equal(e.assert({ "docs.supersession_prose_only": 107 }), true, "baseline must hold");
+  // Baseline lowered 107 -> 105 on 2026-08-18 after lib/doc-kind.mjs stopped counting
+  // the archival FILENAME mandated by STATE_MANAGEMENT.md §88-93. Lowering is explicitly
+  // sanctioned by the expectation's own rule; raising is not.
+  assert.equal(e.assert({ "docs.supersession_prose_only": 105 }), true, "baseline must hold");
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 108 }),
+    e.assert({ "docs.supersession_prose_only": 106 }),
     false,
     "one more prose-only supersession must fail the run — this is the whole point of a ratchet",
   );
+  assert.equal(
+    e.assert({ "docs.supersession_prose_only": 107 }),
+    false,
+    "the OLD baseline must now fail — otherwise lowering the ratchet did nothing",
+  );
   assert.equal(e.assert({ "docs.supersession_prose_only": 90 }), true, "shrinking must hold");
-  assert.match(e.detail({ "docs.supersession_prose_only": 108 }), /GREW/);
+  assert.match(e.detail({ "docs.supersession_prose_only": 106 }), /GREW/);
 });
 
 test("unresolvable supersedes target fails — a declaration that lies is worse than prose", () => {

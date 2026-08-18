@@ -76,7 +76,12 @@
  *                                            is the only disposition that may follow a DIVERGED
  *                                            edge; everything else on DIVERGED is refused.
  *                                            `decoupled` prints the required sidecar edit and
- *                                            does NOT touch the file unless `--apply` is given.
+ *                                            DRY RUN BY DEFAULT for every disposition: prints what
+ *                                            it would write and touches neither the event store nor
+ *                                            any sidecar unless `--apply` is given. (Before
+ *                                            2026-08-17 `--apply` gated only the `decoupled`
+ *                                            sidecar edit and the other seven dispositions wrote
+ *                                            immediately — see docs/GOTCHAS.md.)
  *                                            Every write is followed by a re-reconcile that
  *                                            confirms the edge landed in the expected state —
  *                                            failure to confirm is a non-zero exit.
@@ -473,7 +478,7 @@ async function ledgerJsonBlock(jsonlPath) {
   const exists = existsSync(jsonlPath);
   const { rows, malformed, unknownTypes } = exists
     ? await readLedgerWithStats(jsonlPath)
-    : { rows: [], malformed: 0, unknownTypes: {} };
+    : { rows: [], malformed: 0, unknownTypes: {}, manual: [] };
   const open = rows.filter((r) => r.status === "open");
   const done = rows.filter((r) => r.status === "done");
   const wontfix = rows.filter((r) => r.status === "wontfix");
@@ -853,12 +858,47 @@ async function doctor() {
   } catch (err) {
     check("event store readable", false, err.message);
   }
+  // The rows are kept, not discarded: the graph metrics below derive from this
+  // same pass. Running reconcile twice in one doctor would double its cost and
+  // could report two different trees if a file moved between the calls.
+  let doctorReconcileRows = null;
   try {
     const reconcileStart = Date.now();
-    await reconcile(WORKSPACES);
+    ({ rows: doctorReconcileRows } = await reconcile(WORKSPACES));
     check("reconcile completes", true, `${Date.now() - reconcileStart}ms`);
   } catch (err) {
     check("reconcile completes", false, err.message);
+  }
+
+  // ── monitor liveness ──────────────────────────────────────────────────────
+  // Three states, not two. "Never ran" and "ran and found nothing" are different
+  // facts and must not share an output (rule:discernment-checks §2) — that
+  // conflation is how a zombie LaunchAgent wrote 37 MB of stderr for six weeks
+  // before anyone noticed it was still loaded.
+  //
+  // Deliberately INFORMATIONAL, never a failure: the monitor is generated but
+  // not armed by default, so "not installed" is the expected state and must not
+  // read as broken. It becomes worth escalating only once someone loads it.
+  try {
+    const { MONITOR_LOG } = await import("./lib/monitor.mjs");
+    if (!existsSync(MONITOR_LOG)) {
+      info("monitor", "never run — no ~/.propagate/monitor.log (expected until `monitor --install` is armed)");
+    } else {
+      const runs = (await readFile(MONITOR_LOG, "utf8")).split("\n").filter(Boolean);
+      const last = runs[runs.length - 1] || "";
+      const notified = runs.filter((l) => /notified=[1-9]/.test(l)).length;
+      const errored = runs.filter((l) => / error=/.test(l)).length;
+      info(
+        "monitor",
+        `${runs.length} run(s), ${notified} that notified, ${errored} that could not look — last: ${last.slice(0, 80)}`,
+      );
+    }
+  } catch (err) {
+    // info, not check: adding a check() label means adding a failing-case test
+    // for it (tests/doctor-check-coverage.test.mjs), and a log that cannot be
+    // read is not a doctor failure — the monitor is generated, not armed, so
+    // "no log" is the expected state. Still named, never swallowed.
+    info("monitor", `liveness log unreadable: ${err.message}`);
   }
 
   console.log(`\n${BOLD}# State${RESET}`);
@@ -1277,11 +1317,18 @@ async function doctor() {
             continue; // broken link — not a workspace question
           }
           const marker = existsSync(path.join(full, ".propagates.yml"));
-          skipped.push(`${full.replace(HOME_DIR, "~")}${marker ? "  ** declares .propagates.yml and is being IGNORED **" : " (no marker — nothing lost)"}`);
+          // N29 fixed 2026-08-17: a MARKERED symlink is now descended by both
+          // walks (lib/discovery.mjs's listDirs and lib/edges.mjs's
+          // findAllSidecarsRecursive). So a marker means "followed", not
+          // "ignored" — this line asserted the opposite for as long as the fix
+          // took to land, which is the class of defect the fix was about.
+          skipped.push(
+            `${full.replace(HOME_DIR, "~")}${marker ? "  (declares .propagates.yml — followed, N29)" : " (no marker — nothing lost)"}`,
+          );
         }
       }
       if (skipped.length) {
-        info("symlinked dirs not descended into", skipped.join("; "));
+        info("symlinked dirs seen", skipped.join("; "));
       }
     } catch {
       /* reporting must never break doctor */
@@ -1368,8 +1415,41 @@ async function doctor() {
       // weakness here and is why the prose ratchet is a floor, not an equality.
     }
 
+    // Graph shape. Derived here rather than in the loop above because it needs
+    // the whole reconcile pass, and it is the only metric that can fail for a
+    // structural reason (a cycle) rather than a content one. A failure that
+    // reports "1 cycle" without naming the pair is not actionable, so the
+    // members are carried into the detail via graphCycleMembers.
+    // NOT its own check(): a graph failure is a reconcile failure, and
+    // "reconcile completes" above already owns that. Adding a second label
+    // would have meant a second check nothing could make fail — the exact G1
+    // debt tests/doctor-check-coverage.test.mjs exists to stop growing.
+    //
+    // When the rows are unavailable the metrics stay NULL, never 0. A 0 here
+    // would assert "no cycles" on a derivation that never ran, which is the
+    // silent-pass failure of rule:discernment-checks §2. null fails the
+    // equality assertions below and says why.
+    let graphCycles = null;
+    let graphDuplicatePairs = null;
+    const graphCycleMembers = [];
+    const graphDuplicateDetails = [];
+    if (doctorReconcileRows) {
+      const { buildGraph } = await import("./lib/graph.mjs");
+      const g = buildGraph(doctorReconcileRows, { workspaceRoots: WORKSPACES.map((w) => w.root) });
+      graphCycles = g.stats.cycles;
+      graphDuplicatePairs = g.stats.duplicatePairs;
+      for (const c of g.sccs) graphCycleMembers.push(c.map(shortPath).join(" <-> "));
+      for (const d of g.duplicatePairs) {
+        graphDuplicateDetails.push(
+          `${shortPath(d.from)} -> ${shortPath(d.to)} (${d.edges.map((e) => e.edge_id).join(", ")})`,
+        );
+      }
+    }
+
     const metrics = {
       "workspaces.discovered": WORKSPACES.length,
+      "graph.cycles": graphCycles,
+      "graph.duplicate_pairs": graphDuplicatePairs,
       "docs.supersession_prose_only": docsProseOnly,
       "docs.supersedes_unresolvable": docsSupersedesUnresolvable,
       "sidecars.loaded": sidecarsLoadedCount,
@@ -1419,6 +1499,8 @@ async function doctor() {
       decisionsZeroEntries,
       ledgerUnknownTypesDetails,
       sidecarsRejectedDetails,
+      graphCycleMembers,
+      graphDuplicateDetails,
     });
     for (const v of violations) {
       const detailPrefix = v.detail ? `${v.detail} — ` : "";
@@ -1770,6 +1852,19 @@ async function check() {
     changedFiles = [...new Set([...workingTree, ...cached])];
   }
 
+  // Untracked files are invisible to every mode above — `git diff` compares
+  // against the index and HEAD, and a file git has never seen is in neither.
+  //
+  // GOTCHAS G43: a brand-new `docs/GOTCHAS.md` with a correctly declared edge
+  // produced EMPTY output from `check --changed`. The declaration was fine; the
+  // file was untracked. Empty output for "your edge is fine" and empty output
+  // for "I could not see your file" were the same output — a silent zero (G2).
+  //
+  // Counted and reported, never silently included: adding them would change what
+  // `--changed` means, and the honest fix for a silent zero is to say the number
+  // out loud, not to quietly enlarge the set.
+  const untracked = range || staged ? [] : gitDiffNames(["ls-files", "--others", "--exclude-standard"], repoRoot);
+
   const { exitCode, couplings } = await runCheck({ changedFiles, repoRoot, strict, json });
   const inbound = await inboundAdvisory(repoRoot);
   if (json) {
@@ -1778,6 +1873,7 @@ async function check() {
         generatedAt: new Date().toISOString(),
         repoRoot,
         changedFiles,
+        untracked, // G43 — reported, never folded into changedFiles
         strict,
         exitCode,
         couplings,
@@ -1785,6 +1881,15 @@ async function check() {
       }),
     );
   } else {
+    if (untracked.length > 0) {
+      console.log(
+        `${YELLOW}${untracked.length} untracked file(s) not examined${RESET} ` +
+          `${DIM}— \`git diff\` cannot see them. \`git add\` and re-run if one of these ` +
+          `declares or is declared by an edge.${RESET}`,
+      );
+      for (const f of untracked.slice(0, 5)) console.log(`  ${DIM}${f}${RESET}`);
+      if (untracked.length > 5) console.log(`  ${DIM}… and ${untracked.length - 5} more${RESET}`);
+    }
     printInboundAdvisory(inbound, repoRoot);
   }
   process.exit(exitCode);
@@ -1895,7 +2000,34 @@ async function drainList(args, json) {
     console.log(`${BOLD}# ${ws.name}${RESET}`);
     const rows = await openRowsForWorkspace(ws);
     if (rows.length === 0) {
-      console.log(`  ${GREEN}✓ no open rows${RESET}\n`);
+      console.log(`  ${GREEN}✓ no open rows${RESET}`);
+      // GOTCHAS G38: `drain` handles v1 LEDGER ROWS. `reconcile` derives
+      // DRIFTED / REVERSED / DIVERGED / NEVER_VERIFIED from content hashes, and
+      // none of those are ledger rows — so "no open rows" is true and, read
+      // alone, badly misleading. The entry's whole complaint was "it does not
+      // say so"; an operator reached for drain, got a green tick, and concluded
+      // there was nothing to do while three edges sat unresolved.
+      try {
+        const { rows: derived } = await reconcile([ws]);
+        // Reuse graph.mjs's ACTIONABLE set rather than re-deriving "not CLEAN".
+        // A hand-rolled filter here counted NOT_PRESENT_ON_REF and reported 23
+        // where `graph` reported 21 — two commands disagreeing about what needs
+        // work, which is worse than either number being slightly wrong.
+        const { isActionable } = await import("./lib/graph.mjs");
+        const unsettled = derived.filter((r) => isActionable(r.state));
+        if (unsettled.length > 0) {
+          console.log(
+            `  ${YELLOW}but ${unsettled.length} derived edge(s) are not CLEAN${RESET} ` +
+              `${DIM}— those are not ledger rows and drain cannot close them.${RESET}`,
+          );
+          console.log(`  ${DIM}Use ${RESET}${BOLD}propagate graph${RESET}${DIM} for the ordered worklist, then ${RESET}${BOLD}verify --apply${RESET}${DIM}.${RESET}`);
+        }
+      } catch {
+        // A reconcile failure must not break the ledger listing; doctor owns
+        // that check. Silence here would be a silent zero, so say it.
+        console.log(`  ${DIM}(could not derive edge states — run \`propagate doctor\`)${RESET}`);
+      }
+      console.log();
       continue;
     }
     const { groups, ungrouped } = groupOpenRows(rows);
@@ -2260,6 +2392,7 @@ function parseVerifyArgs(args) {
     reason: get("--reason"),
     apply: args.includes("--apply"),
     json: args.includes("--json"),
+    outOfOrder: args.includes("--out-of-order"),
   };
 }
 
@@ -2556,8 +2689,83 @@ async function runDecoupled(selected, workspaces, opts) {
 
 /** Every disposition except `decoupled` (handled separately above): append
  * one verification event per selected edge, then confirm the write landed. */
+/**
+ * The event payload for one row. ONE definition, shared by the dry run and the
+ * write — if these two ever built different payloads, the preview would be a
+ * description of something that never happens.
+ */
+function buildEventPayload(row, disposition, reason) {
+  const payload = {
+    edge_id: row.edge_id,
+    node_id: row.node_id,
+    disposition,
+    by: process.env.USER || "verify",
+    observed_on_ref: row.source.ref || "working-tree",
+  };
+  if (reason !== undefined) payload.reason = reason;
+  if (disposition !== "deferred") {
+    payload.source_content = row.source.contentId;
+    payload.downstream_content = row.downstream.contentId;
+  }
+  return payload;
+}
+
 async function runDispositionBatch(selected, workspaces, opts) {
-  const { disposition, reason, json } = opts;
+  const { disposition, reason, json, apply } = opts;
+
+  // ── dry run by default ────────────────────────────────────────────────────
+  //
+  // Until 2026-08-17 `--apply` gated ONLY the `decoupled` path (which edits a
+  // sidecar file); every other disposition wrote its event the moment the
+  // command was invoked. cli.mjs's own header said "does NOT touch the file
+  // unless --apply is given", which is true of the sidecar and false of the
+  // event store — and a session read it the second way, ran the guard matrix
+  // without --apply, and appended 11 events that asserted verifications
+  // nobody had performed. Three real worklist items closed themselves.
+  //
+  // A verification is a claim a human is making. It must not be the default
+  // side effect of asking a question. See docs/GOTCHAS.md and the
+  // DECISIONS.md entry of the same date.
+  if (!apply) {
+    // Build the REAL payload and run the REAL validator. Previewing a
+    // simplified shape would let the dry run promise a write that `--apply`
+    // then refuses (e.g. wontfix with no --reason).
+    const { dryValidateEvent } = await import("./lib/events.mjs");
+    const preview = selected.map((row) => {
+      const payload = buildEventPayload(row, disposition, reason);
+      return {
+        edge_id: row.edge_id,
+        node_id: row.node_id,
+        disposition,
+        priorState: row.state,
+        refusal: divergedGuard(row.state, disposition) || dryValidateEvent(payload) || null,
+      };
+    });
+    if (json) {
+      console.log(
+        JSON.stringify(
+          { generatedAt: new Date().toISOString(), disposition, apply: false, wouldWrite: preview },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+    const writable = preview.filter((p) => !p.refusal);
+    console.log(
+      `${BOLD}would write ${writable.length} event(s)${RESET} ${DIM}— nothing has been written${RESET}`,
+    );
+    for (const p of preview) {
+      if (p.refusal) {
+        console.log(`  ${RED}refused${RESET}  ${p.edge_id}  ${DIM}${p.refusal}${RESET}`);
+      } else {
+        console.log(`  ${p.edge_id}  ${disposition}  ${DIM}${p.priorState} -> (re-derived after write)${RESET}`);
+        console.log(`           ${DIM}${shortPath(p.node_id)}${RESET}`);
+      }
+    }
+    console.log(`\n  ${DIM}pass ${RESET}${BOLD}--apply${RESET}${DIM} to write these to the event store${RESET}`);
+    return;
+  }
 
   const applied = [];
   const refused = [];
@@ -2569,18 +2777,7 @@ async function runDispositionBatch(selected, workspaces, opts) {
       continue;
     }
 
-    const payload = {
-      edge_id: row.edge_id,
-      node_id: row.node_id,
-      disposition,
-      by: process.env.USER || "verify",
-      observed_on_ref: row.source.ref || "working-tree",
-    };
-    if (reason !== undefined) payload.reason = reason;
-    if (disposition !== "deferred") {
-      payload.source_content = row.source.contentId;
-      payload.downstream_content = row.downstream.contentId;
-    }
+    const payload = buildEventPayload(row, disposition, reason);
 
     // lib/events.mjs's validateEvent is the one place these rules are
     // enforced (missing reason on wontfix/baselined, deferred pinning
@@ -2675,6 +2872,89 @@ async function verifyCmd() {
   if (selected.length === 0) {
     console.error(`${RED}error:${RESET} no edges matched the given selector(s)`);
     process.exit(1);
+  }
+
+  // ── ordering guard ────────────────────────────────────────────────────────
+  //
+  // A verification asserts "these two blobs are consistent." If the SOURCE is
+  // itself an unsettled downstream, that assertion is about a source nobody
+  // has confirmed — and the resulting `propagated` event then reads as CLEAN
+  // forever. Measured 2026-08-17: 4 of the 23 non-CLEAN edges sat in exactly
+  // that position, and nothing could see it.
+  //
+  // Warn-with-override rather than hard block: a deferred or wontfix ancestor
+  // would otherwise wall off its entire subtree permanently, and the close is
+  // the human's call (SKILL.md's "never decide alone" cuts both ways).
+  //
+  // Exempt by construction:
+  //   deferred   — pins nothing; validateEvent in lib/events.mjs refuses
+  //                content on it, so there is no pair to pin wrongly.
+  //   decoupled  — removes the edge; removal cannot be out of order.
+  // NOT exempt: wontfix and baselined both pin, and a baseline against an
+  // unverified source is precisely the claim `validateEvent` already refuses
+  // to let masquerade as a verification.
+  const GUARD_EXEMPT = new Set(["deferred", "decoupled"]);
+  if (!GUARD_EXEMPT.has(opts.disposition) && !opts.outOfOrder) {
+    const { buildGraph, blockedBy } = await import("./lib/graph.mjs");
+    const graph = buildGraph(rows, { workspaceRoots: workspaces.map((w) => w.root) });
+
+    const offenders = [];
+    for (const r of selected) {
+      const blockers = blockedBy(graph, r.edge_id);
+      if (blockers.length) offenders.push({ row: r, blockers });
+    }
+
+    if (offenders.length) {
+      if (opts.json) {
+        console.log(
+          JSON.stringify(
+            {
+              error: "out-of-order",
+              disposition: opts.disposition,
+              offenders: offenders.map((o) => ({
+                edge_id: o.row.edge_id,
+                node_id: o.row.node_id,
+                source: o.row.source.path,
+                downstream: o.row.downstream.path,
+                blockedBy: o.blockers,
+              })),
+              override: "--out-of-order",
+            },
+            null,
+            2,
+          ),
+        );
+        process.exit(3);
+      }
+      // Group by SOURCE: selecting by --node or --glob routinely picks several
+      // edges that share one source, and printing that source's identical
+      // upstream list once per edge buries the signal in its own repetition.
+      const bySource = new Map();
+      for (const o of offenders) {
+        const key = o.row.source.path;
+        if (!bySource.has(key)) bySource.set(key, { blockers: o.blockers, targets: [] });
+        bySource.get(key).targets.push(o.row.downstream.path);
+      }
+
+      console.error(`${YELLOW}! OUT OF ORDER${RESET}`);
+      for (const [source, { blockers, targets }] of bySource) {
+        console.error(`  ${shortPath(source)} is itself ${blockers[0].state}`);
+        console.error(`  upstream:`);
+        for (const b of blockers) {
+          console.error(
+            `    ${shortPath(b.from)} -> ${shortPath(b.to)}  ${DIM}(edge ${b.edge_id}, ${b.state})${RESET}`,
+          );
+        }
+        console.error(`  ${DIM}would pin: ${targets.map(shortPath).join(", ")}${RESET}`);
+      }
+      console.error(
+        `\n  Verifying now pins ${offenders.length === 1 ? "that downstream" : "those downstreams"} against a ` +
+          `source that is not yet correct.`,
+      );
+      console.error(`  Fix upstream first, or pass ${BOLD}--out-of-order${RESET}.`);
+      console.error(`  ${DIM}\`propagate graph\` prints the whole worklist in dependency order.${RESET}`);
+      process.exit(3);
+    }
   }
 
   if (opts.disposition === "decoupled") {
@@ -3368,6 +3648,277 @@ async function backlogCmd() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// monitor — proactive notification, without the baseline that damned v1.
+//
+// The v1 watcher diffed against a remembered mtime baseline: it had to CATCH
+// the change, and a corrupt baseline invented drift (~120 spurious rows from one
+// state wipe). This detects nothing — it runs the same stateless `reconcile` the
+// rest of the CLI uses, so a missed or coalesced trigger costs nothing and no run
+// can invent anything.
+//
+// It writes NO drift. Not to a ledger, not to the event store. The only mutable
+// thing is a record of what it has already told you, keyed on the content triple
+// — see lib/monitor.mjs for why that key and not mtimes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function monitorCmd() {
+  const args = process.argv.slice(3);
+  const dryRun = args.includes("--dry-run");
+  const json = args.includes("--json");
+  const started = Date.now();
+
+  const mon = await import("./lib/monitor.mjs");
+  const { notify } = await import("./lib/notify.mjs");
+
+  // --install generates the plist FILE and stops. Loading it is a separate,
+  // deliberate step — touching launchd is a one-way door and stays the human's,
+  // per SKILL.md's contract.
+  if (args.includes("--install")) {
+    const { writeMonitorPlist, MONITOR_LABEL } = await import("./lib/plist.mjs");
+    const res = await writeMonitorPlist({ workspaces: WORKSPACES });
+    if (!res.ok) {
+      console.error(`${RED}refused:${RESET} ${res.error}`);
+      process.exit(2);
+    }
+    console.log(`${GREEN}wrote${RESET} ${res.path}`);
+    console.log(`  ${DIM}${res.watchPaths.length} watch path(s)${RESET}`);
+    console.log(`\n  ${BOLD}Not loaded.${RESET} ${DIM}To arm it:${RESET}`);
+    console.log(`    launchctl bootstrap gui/$(id -u) ${JSON.stringify(res.path)}`);
+    console.log(`  ${DIM}To disarm:${RESET}`);
+    console.log(`    launchctl bootout gui/$(id -u)/${MONITOR_LABEL}`);
+    return;
+  }
+
+  let rows = [];
+  let err = null;
+  try {
+    ({ rows } = await reconcile(WORKSPACES));
+  } catch (e) {
+    err = String(e && e.message);
+  }
+
+  // A reconcile failure is logged as a run that could not answer — never as a
+  // quiet run. "Found nothing" and "could not look" must not share an output
+  // (rule:discernment-checks §2).
+  if (err) {
+    await mon.logRun({ rows: 0, actionable: 0, notified: 0, suppressed: 0, ms: Date.now() - started, error: err });
+    console.error(`${RED}monitor: reconcile failed:${RESET} ${err}`);
+    process.exit(1);
+  }
+
+  const already = await mon.readNotified();
+  const { toNotify, suppressed, actionable } = mon.selectToNotify(rows, already);
+  const { title, body } = mon.formatNotification(toNotify, { root: SEARCH_ROOTS[0] });
+
+  if (!dryRun && toNotify.length > 0) {
+    await notify(title, body, { group: "propagate-monitor" });
+    await mon.recordNotified(toNotify);
+  }
+
+  const stats = {
+    rows: rows.length,
+    actionable: actionable.length,
+    notified: dryRun ? 0 : toNotify.length,
+    suppressed: suppressed.length,
+    ms: Date.now() - started,
+  };
+  if (!dryRun) await mon.logRun(stats);
+
+  if (json) {
+    console.log(JSON.stringify({ generatedAt: new Date().toISOString(), dryRun, ...stats, would: toNotify.map((r) => ({ edge_id: r.edge_id, state: r.state, source: r.source.path, downstream: r.downstream.path })) }, null, 2));
+    return;
+  }
+
+  if (toNotify.length === 0) {
+    console.log(
+      `${GREEN}nothing new${RESET} ${DIM}— ${actionable.length} actionable, all already notified (${stats.ms}ms)${RESET}`,
+    );
+    return;
+  }
+  console.log(`${BOLD}${dryRun ? "would notify" : "notified"}: ${title}${RESET}`);
+  for (const line of body.split("\n")) console.log(`  ${line}`);
+  if (suppressed.length) {
+    console.log(`  ${DIM}(${suppressed.length} already notified, unchanged since)${RESET}`);
+  }
+  if (dryRun) console.log(`\n  ${DIM}--dry-run: nothing sent, nothing recorded${RESET}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// graph — the DAG over the declared couplings (plan: okay-pln-these-out-zany-rain).
+//
+// READ-ONLY, like `reconcile`, and built entirely on top of it: `reconcile()`
+// already answers "what state is each edge in", and lib/graph.mjs answers "how
+// are those edges connected, and in what order must they be worked".
+//
+// The text output leads with the same fix order the HTML page leads with, on
+// purpose — a terminal and a page that disagree about the worklist is worse
+// than having only one of them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Shared by graphCmd and the verify ordering guard, so both see one graph. */
+async function loadGraph(workspaces) {
+  const { buildGraph } = await import("./lib/graph.mjs");
+  const { rows, stats } = await reconcile(workspaces);
+  return { graph: buildGraph(rows, { workspaceRoots: workspaces.map((w) => w.root) }), rows, stats };
+}
+
+function shortPath(p) {
+  if (!p) return "(none)";
+  const root = SEARCH_ROOTS[0];
+  return root && p.startsWith(root + "/") ? p.slice(root.length + 1) : p;
+}
+
+async function graphCmd() {
+  const args = process.argv.slice(3);
+  const json = args.includes("--json");
+  const showAll = args.includes("--all");
+  const includeUnverified = args.includes("--include-unverified");
+  const htmlIdx = args.indexOf("--html");
+  const htmlPath = htmlIdx !== -1 ? args[htmlIdx + 1] : null;
+  const nodeIdx = args.indexOf("--node");
+  const nodeSel = nodeIdx !== -1 ? args[nodeIdx + 1] : null;
+
+  if (htmlIdx !== -1 && (!htmlPath || htmlPath.startsWith("--"))) {
+    console.error(`${RED}error:${RESET} --html requires a destination path`);
+    process.exit(2);
+  }
+
+  const cur = currentWorkspace();
+  const workspaces = showAll || !cur ? WORKSPACES : [cur];
+
+  const { graph } = await loadGraph(workspaces);
+  const { fixOrder, neighbourhood } = await import("./lib/graph.mjs");
+  const order = fixOrder(graph, { includeUnverified });
+
+  // ── --node: ancestors and descendants of one file ────────────────────────
+  if (nodeSel) {
+    const match = [...graph.nodes.keys()].filter(
+      (p) => p === nodeSel || p.endsWith("/" + nodeSel) || shortPath(p) === nodeSel,
+    );
+    if (match.length === 0) {
+      console.error(`${RED}error:${RESET} no node matched ${JSON.stringify(nodeSel)}`);
+      process.exit(1);
+    }
+    if (match.length > 1) {
+      console.error(`${RED}error:${RESET} ${match.length} nodes matched ${JSON.stringify(nodeSel)} — be more specific:`);
+      for (const m of match.slice(0, 10)) console.error(`  ${shortPath(m)}`);
+      process.exit(2);
+    }
+    const target = match[0];
+    const n = neighbourhood(graph, target);
+    if (json) {
+      console.log(JSON.stringify({ node: target, ...graph.nodes.get(target), ...n }, null, 2));
+      return;
+    }
+    const meta = graph.nodes.get(target);
+    console.log(`${BOLD}${shortPath(target)}${RESET}`);
+    console.log(
+      `  ${DIM}workspace ${meta.workspace} · layer ${meta.layer} · in ${meta.inDeg} · out ${meta.outDeg}${RESET}`,
+    );
+    console.log(`\n  ${BOLD}upstream (${n.ancestors.length})${RESET} ${DIM}— changing any of these can reach this file${RESET}`);
+    for (const a of n.ancestors.sort()) console.log(`    ${shortPath(a)}`);
+    if (!n.ancestors.length) console.log(`    ${DIM}none — this is a root${RESET}`);
+    console.log(`\n  ${BOLD}downstream (${n.descendants.length})${RESET} ${DIM}— changing this file can reach these${RESET}`);
+    for (const d of n.descendants.sort()) console.log(`    ${shortPath(d)}`);
+    if (!n.descendants.length) console.log(`    ${DIM}none — this is a leaf${RESET}`);
+    return;
+  }
+
+  // ── --html ───────────────────────────────────────────────────────────────
+  if (htmlPath) {
+    const { renderGraphHtml } = await import("./lib/graph-html.mjs");
+    const { writeFile } = await import("node:fs/promises");
+    const html = renderGraphHtml(graph, order, { root: SEARCH_ROOTS[0] });
+    await writeFile(htmlPath, html, "utf8");
+    const kb = (Buffer.byteLength(html, "utf8") / 1024).toFixed(0);
+    console.log(`${GREEN}wrote${RESET} ${htmlPath} ${DIM}(${kb} KB, self-contained)${RESET}`);
+    console.log(
+      `  ${DIM}${graph.stats.nodes} nodes · ${graph.stats.edges} edges · ${order.items.length} on the worklist${RESET}`,
+    );
+    return;
+  }
+
+  // ── --json ───────────────────────────────────────────────────────────────
+  if (json) {
+    console.log(
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          stats: graph.stats,
+          roots: graph.roots,
+          leaves: graph.leaves,
+          interior: graph.interior,
+          sccs: graph.sccs,
+          duplicatePairs: graph.duplicatePairs,
+          unmatched: graph.unmatched,
+          layers: Object.fromEntries(graph.layers),
+          topoOrder: graph.topoOrder,
+          fixOrder: order.items,
+          excludedUnverified: order.excludedUnverified,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  // ── text ─────────────────────────────────────────────────────────────────
+  const s = graph.stats;
+  console.log(`${BOLD}# graph${RESET}  ${DIM}(read-only derivation over reconcile)${RESET}\n`);
+  console.log(
+    `  ${s.nodes} nodes · ${s.edges} edges · ${s.roots} roots · ${s.leaves} leaves · ` +
+      `${s.interior} interior · depth ${s.maxDepth}`,
+  );
+
+  // Structural defects, each named rather than counted — a bare "1 cycle" is
+  // not actionable (GOTCHAS: absence and presence must both be attributable).
+  if (s.cycles) {
+    console.log(`\n  ${RED}${s.cycles} cycle(s)${RESET} ${DIM}— no canonical direction, so no fix order exists${RESET}`);
+    for (const c of graph.sccs) for (const m of c) console.log(`    ${shortPath(m)}`);
+  }
+  if (s.duplicatePairs) {
+    console.log(`\n  ${RED}${s.duplicatePairs} duplicate declaration(s)${RESET} ${DIM}— same pair, two edge ids${RESET}`);
+    for (const d of graph.duplicatePairs) {
+      console.log(`    ${shortPath(d.from)} -> ${shortPath(d.to)}`);
+      for (const e of d.edges) console.log(`      ${DIM}${e.edge_id} — ${e.why || "(no why)"}${RESET}`);
+    }
+  }
+  if (graph.unmatched.length) {
+    console.log(`\n  ${YELLOW}${graph.unmatched.length} declaration(s) with no downstream${RESET}`);
+    for (const u of graph.unmatched) {
+      console.log(
+        `    ${shortPath(u.from)} ${u.selfEdge ? "(declared on itself)" : `-> ${u.glob} ${DIM}(matches 0 files)${RESET}`}`,
+      );
+    }
+  }
+
+  console.log(`\n  ${BOLD}fix order${RESET} ${DIM}— root to leaf; working top-down never pins against an unsettled source${RESET}`);
+  if (!order.items.length) {
+    console.log(`    ${GREEN}nothing actionable${RESET}`);
+  }
+  for (const [i, it] of order.items.entries()) {
+    const target = it.to ? shortPath(it.to) : `(glob ${it.glob})`;
+    const blocked = it.blockedBy.length
+      ? `  ${RED}BLOCKED by ${it.blockedBy.length}${RESET}`
+      : "";
+    console.log(
+      `    ${String(i + 1).padStart(2)}. ${DIM}L${it.layer}${RESET} ${it.state.padEnd(10)} ` +
+        `${shortPath(it.from)} -> ${target}${blocked}`,
+    );
+    for (const b of it.blockedBy) {
+      console.log(`        ${DIM}^ ${shortPath(b.from)} -> ${shortPath(b.to)} is ${b.state}${RESET}`);
+    }
+  }
+  if (order.excludedUnverified) {
+    console.log(
+      `\n  ${DIM}${order.excludedUnverified} NEVER_VERIFIED edge(s) excluded from the worklist ` +
+        `(--include-unverified to show). They still count as unsettled when deciding what blocks what.${RESET}`,
+    );
+  }
+}
+
 // Only dispatch when executed directly (node cli.mjs ...), NOT when a test imports
 // checkCrossRepo from this module.
 //
@@ -3424,9 +3975,13 @@ if (_invokedDirectly) {
     await docsCmd();
   } else if (mode === "backlog") {
     await backlogCmd();
+  } else if (mode === "graph") {
+    await graphCmd();
+  } else if (mode === "monitor") {
+    await monitorCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
     process.exit(2);
   }
 }

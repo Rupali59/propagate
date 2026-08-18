@@ -294,7 +294,7 @@ test("readLedgerWithStats counts malformed lines and unknown types", async () =>
   const jsonl = path.join(dir, "mixed.jsonl");
   const lines = [
     JSON.stringify({ type: "drift", id: "001", status: "open", timestamp: "2026-01-01T00:00:00.000Z" }),
-    JSON.stringify({ type: "manual", id: "256", source: "workspace-event", timestamp: "2026-01-02T00:00:00.000Z" }),
+    JSON.stringify({ type: "not-a-real-type", id: "256", source: "workspace-event", timestamp: "2026-01-02T00:00:00.000Z" }),
     JSON.stringify({ type: "wontfix-bulk", id: "999", timestamp: "2026-01-03T00:00:00.000Z" }),
     '{"type":"drift","id":"broken",', // malformed
     JSON.stringify({ type: "status_change", id: "001", status: "done", timestamp: "2026-01-04T00:00:00.000Z" }),
@@ -303,9 +303,50 @@ test("readLedgerWithStats counts malformed lines and unknown types", async () =>
 
   const stats = await readLedgerWithStats(jsonl);
   assert.equal(stats.malformed, 1);
-  assert.deepEqual(stats.unknownTypes, { manual: 1, "wontfix-bulk": 1 });
+  assert.deepEqual(stats.unknownTypes, { "not-a-real-type": 1, "wontfix-bulk": 1 });
   assert.equal(stats.rows.length, 1);
   assert.equal(stats.rows[0].status, "done");
+});
+
+test("a `manual` row is known, is NOT folded as drift, and is returned separately", async () => {
+  // Regression for docs/ISSUES.md N1 + N2. `manual` is a terminal-only
+  // hand-authored annotation. Two things must hold at once, and the second
+  // is the one that is easy to get wrong:
+  //
+  //   1. It must NOT count as an unknown type (N1 — it was invisible to
+  //      readLedger for two months, and doctor now fails on unknown types).
+  //   2. It must NOT enter the drift fold. The real instance shares id "256"
+  //      with a genuine `drift` row (N2), so admitting it would let the two
+  //      overwrite each other by file order — turning an invisible row into
+  //      a corrupted one. This fixture reproduces that exact id collision.
+  // BOTH orders are exercised deliberately. With the manual row FIRST the
+  // drift row overwrites it and the bug is invisible — that ordering alone
+  // is a check that cannot fail (rule:discernment-checks §1), and the first
+  // draft of this test made exactly that mistake. The manual-LAST ordering
+  // is the one that silently destroys a real open drift row.
+  const manualRow = { type: "manual", id: "256", source: "workspace-event", status: "wontfix", change: "renamed a project", timestamp: "2026-01-01T00:00:00.000Z" };
+  const driftRow = { type: "drift", id: "256", source: "docs/MEASUREMENT.md", status: "open", timestamp: "2026-01-02T00:00:00.000Z" };
+
+  for (const [label, lines] of [
+    ["manual first", [manualRow, driftRow]],
+    ["manual last", [driftRow, manualRow]],
+  ]) {
+    const dir = await mkdtemp(path.join(tmpdir(), "ledactivity-"));
+    const jsonl = path.join(dir, "manual.jsonl");
+    await writeFile(jsonl, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+    const stats = await readLedgerWithStats(jsonl);
+
+    assert.deepEqual(stats.unknownTypes, {}, `${label}: \`manual\` must not count as unknown (N1)`);
+    assert.equal(stats.manual.length, 1, `${label}: the manual row is returned separately`);
+    assert.equal(stats.manual[0].source, "workspace-event", `${label}: manual row intact`);
+
+    // The colliding drift row survives intact and is the only folded row,
+    // regardless of which came first in the file.
+    assert.equal(stats.rows.length, 1, `${label}: only the drift row folds`);
+    assert.equal(stats.rows[0].source, "docs/MEASUREMENT.md", `${label}: the manual row did not overwrite the drift row (N2)`);
+    assert.equal(stats.rows[0].status, "open", `${label}: the open drift row is still open`);
+  }
 });
 
 test("readLedgerWithStats on a healthy file reports zero malformed and no unknown types", async () => {
