@@ -29,19 +29,19 @@ test("prose-only supersession ratchet holds at baseline, and FAILS when it grows
   // This test is the coupling alarm for that value, and it worked: the 105 -> 103 change
   // landed in lib/metrics.mjs without touching this file and turned the suite red on the
   // next run. Move both together, always.
-  assert.equal(e.assert({ "docs.supersession_prose_only": 103 }), true, "baseline must hold");
+  assert.equal(e.assert({ "docs.supersession_prose_only": 101 }), true, "baseline must hold");
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 104 }),
+    e.assert({ "docs.supersession_prose_only": 102 }),
     false,
     "one more prose-only supersession must fail the run — this is the whole point of a ratchet",
   );
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 105 }),
+    e.assert({ "docs.supersession_prose_only": 103 }),
     false,
     "the OLD baseline must now fail — otherwise lowering the ratchet did nothing",
   );
   assert.equal(e.assert({ "docs.supersession_prose_only": 90 }), true, "shrinking must hold");
-  assert.match(e.detail({ "docs.supersession_prose_only": 104 }), /GREW/);
+  assert.match(e.detail({ "docs.supersession_prose_only": 102 }), /GREW/);
 });
 
 test("unresolvable supersedes target fails — a declaration that lies is worse than prose", () => {

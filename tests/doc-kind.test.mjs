@@ -221,3 +221,66 @@ test("proseOnlySupersession ignores the archival FILENAME, but still catches a p
     assert.equal(got, shouldFire, `${label}: expected fires=${shouldFire}, got ${got} — line: ${line}`);
   }
 });
+
+/**
+ * Fenced code blocks are samples, not claims.
+ *
+ * The detector greps `/supersede/i` per line, and `stripPaths()` removes inline code,
+ * link targets and path-like tokens — but nothing removed a ``` block. So a TOML comment,
+ * a JSON key, or a shell example counted exactly like an assertion about the document.
+ *
+ * Measured 2026-08-19: 4 of 105 flagged docs were fenced content, including
+ * `"superseded": 0` in daemon-GENERATED output (editing it is pointless; it regenerates)
+ * and a TOML comment. Documenting the metric tripped its own ratchet while the row for it
+ * was being written — which is the sense in which the check could not reach zero.
+ */
+test("a claim inside a fenced block is a sample, not a claim", async () => {
+  const root = await tree();
+  const p = path.join(root, "docs/plans/2026-06-20-fenced.md");
+  await writeFile(
+    p,
+    "# Doc\n\nOrdinary prose here.\n\n```toml\n# the accept is SUPERSEDED and the dep returns\n```\n\n```json\n{ \"superseded\": 0 }\n```\n",
+    "utf8",
+  );
+  assert.equal(
+    proseOnlySupersession(p),
+    null,
+    "fenced TOML/JSON must not count — a code sample asserts nothing about this document",
+  );
+});
+
+test("a real claim OUTSIDE a fence still counts when the doc also has fences", async () => {
+  // The other half. A fix that silences fenced content must not silence the document.
+  const root = await tree();
+  const p = path.join(root, "docs/plans/2026-06-20-mixed.md");
+  await writeFile(
+    p,
+    "# Doc\n\nSupersedes the 2026-06-14 lock.\n\n```sh\necho superseded\n```\n",
+    "utf8",
+  );
+  const hit = proseOnlySupersession(p);
+  assert.ok(hit, "the prose claim must still be flagged");
+  assert.equal(hit.hits.length, 1, "exactly one hit — the prose line, not the shell example");
+  assert.match(hit.hits[0].text, /Supersedes the 2026-06-14/);
+});
+
+test("an UNTERMINATED fence must not swallow the rest of the file", async () => {
+  // Fail-safe, same shape the HYGIENE_RENDER strip needed: a missing closing fence is a
+  // typo, and a typo must not silently disable the check for everything below it.
+  const root = await tree();
+  const p = path.join(root, "docs/plans/2026-06-20-unterminated.md");
+  await writeFile(p, "# Doc\n\n```sh\necho hi\n\nSupersedes the 2026-06-14 lock.\n", "utf8");
+  const hit = proseOnlySupersession(p);
+  assert.ok(hit, "an unterminated fence must fall back to scanning, never to silence");
+  assert.match(hit.hits[0].text, /Supersedes the 2026-06-14/);
+});
+
+test("a doc with no fences counts exactly as before", async () => {
+  // The regression guard: this is the overwhelmingly common case and must not move.
+  const root = await tree();
+  const p = path.join(root, "docs/plans/2026-06-20-plain.md");
+  await writeFile(p, "# Doc\n\nSupersedes the lock.\nAnd supersedes another thing.\n", "utf8");
+  const hit = proseOnlySupersession(p);
+  assert.ok(hit);
+  assert.equal(hit.hits.length, 2, "both prose lines still count");
+});
