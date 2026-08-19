@@ -252,6 +252,48 @@ command runs unchanged in a GitHub Action once this skill (or just `cli.mjs`
 then `node cli.mjs check --range "${{ github.event.before }}..${{ github.sha }}" --strict`.
 No CI wiring is built here; this is a pointer for when that's worth doing.
 
+## Install (current) — `setup`
+
+Two commands on a fresh machine:
+
+```bash
+cd <skill-dir> && npm install
+node cli.mjs setup                      # probes common layouts
+node cli.mjs setup --roots ~/path/to/code   # or say where your repos live
+```
+
+`setup` writes `~/.propagate/config.yml` (override the location with
+`PROPAGATE_STATE_DIR`), then **re-reads that file and runs discovery over what it
+says** — verifying the artifact, not the intent. It exits non-zero unless discovery
+finds at least one workspace, so an install that does not work cannot report that it
+does. That is the whole point of the command: the failure it exists to prevent is
+`status` printing nothing and exiting 0 on a machine where nothing is configured.
+
+Four outcomes, each naming its own fix, because they need different ones:
+
+| `reason` | Means | Fix |
+|---|---|---|
+| `ok` | ≥1 workspace discovered | — |
+| `no-roots` | nothing given and no common layout exists | re-run with `--roots` |
+| `roots-missing` | the configured path does not exist | config error — `setup --force --roots <dir>` |
+| `no-markers` | roots exist, no `.propagates.yml` beneath them | onboarding — `init <dir> --workspace` |
+| `markers-rejected` | markers found, none yielded a workspace | sidecar schema / missing `workspace: true` — run `doctor` |
+
+Re-running is safe and never clobbers an existing `config.yml`; `--force`
+regenerates it. `--json` emits the same result machine-readably.
+
+**Precedence is env > `config.yml` > built-in default.** `PROPAGATE_SEARCH_ROOTS`
+in your shell still wins over the file, so `setup` cannot silently change
+behaviour that already works on a machine that exports it.
+
+**Scheduling is optional.** `setup` records the platform default (`launchd` on
+macOS, `none` elsewhere). `none` is supported, not degraded — the v1 watcher is
+retired and `reconcile` derives drift from content on demand; without a scheduler
+you lose proactive notification and nothing else.
+
+Distinct from two neighbouring verbs, deliberately: `init <dir>` scaffolds **one**
+sidecar, `bootstrap` baselines **edges**, `setup` configures **the machine**.
+
 ## Initial install (once per machine) — watcher steps are HISTORICAL, RETIRED 2026-08-14
 
 Steps 2–4 below install/verify the v1 watcher and no longer apply — step 3 in

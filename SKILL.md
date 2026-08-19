@@ -79,7 +79,17 @@ These are real `cli.mjs` subcommands — run them directly. Full flags in
   ```bash
   node ${CLAUDE_PLUGIN_ROOT}/cli.mjs doctor
   ```
-- **`init <dir>`** — scaffold an empty `.propagates.yml` at `<dir>`. Does
+- **`setup`** — install-time bootstrap, once per machine. Writes
+  `~/.propagate/config.yml`, then re-reads it and verifies discovery finds ≥1
+  workspace — **exiting non-zero if not**, because an install that reports success
+  while finding nothing is the exact failure this skill exists to catch. Safe to
+  re-run; never clobbers without `--force`. Full table of outcomes and their fixes:
+  `docs/REFERENCE.md` § Install.
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs setup [--roots <dir>[:<dir>]] [--force] [--json]
+  ```
+- **`init <dir>`** — scaffold an empty `.propagates.yml` at `<dir>`. Configures one
+  directory, not the machine — see `setup` above for the latter. Does
   **not** touch the plist or launchd — run `reload` after, if the watcher
   were still live (it isn't; see the retirement note above — `reload`
   regenerates the now-retired watcher's plist and has no live purpose today).

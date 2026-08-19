@@ -23,7 +23,10 @@ Own git repo, remote `Rupali59/propagate-skill`.
 
 - [`docs/plans/2026-08-19-portability-and-rules.md`](docs/plans/2026-08-19-portability-and-rules.md)
   — **ACTIVE.** Make the skill installable on any machine against any repo set, absorb the
-  global-rules lifecycle, and conform to `superpowers:writing-skills`. Phase 0 done; 1-6 pending.
+  global-rules lifecycle, and conform to `superpowers:writing-skills`. Phases 0-1, 3-4 done;
+  2 (de-personalise literals), 5 (rules lifecycle) and 6 (skill-creation conformance) pending.
+  Installing is now two commands — `npm install` then `propagate setup`, which refuses to
+  report success unless discovery finds a workspace (`docs/REFERENCE.md` § Install).
 
 Plans live in `docs/plans/`, not `~/.claude/plans/` — session scratch rots, and `lib/graph.mjs`
 carried a citation to an overwritten one for weeks.

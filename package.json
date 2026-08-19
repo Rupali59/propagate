@@ -3,15 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "File-watcher + ledger for prose-to-prose / prose-to-code propagation across the Vipin Kaushik workspace. See SKILL.md.",
+  "description": "Declare, watch and record the couplings between files that must move together \u2014 across branches, worktrees and repos. Append-only ledger; never edits a downstream. See SKILL.md.",
   "main": "watcher.mjs",
+  "bin": {
+    "propagate": "cli.mjs"
+  },
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "watcher": "node watcher.mjs",
     "smoke": "node watcher.mjs --smoke",
-    "test": "node --test 'tests/*.test.mjs'"
+    "test": "node --test 'tests/*.test.mjs'",
+    "setup": "node cli.mjs setup"
   },
   "dependencies": {
     "ajv": "^8.17.1",

@@ -6,8 +6,14 @@
 > contents were later overwritten by an unrelated design. A dangling citation in a tool whose
 > thesis is traceability. Plans that govern this repo live here and are linked from `STATE.md`.
 >
-> **Status:** ACTIVE — Phases 0-3 complete. Phases 4 (init), 5 (rules lifecycle) and 6
-> (skill-creation conformance) pending.
+> **Status:** ACTIVE — Phases 0-1 and 3-4 complete. Phases 2 (de-personalise literals),
+> 5 (rules lifecycle) and 6 (skill-creation conformance) pending.
+>
+> **Phase 4 landed as `setup`, not `init`.** Both `init` (scaffolds one sidecar) and
+> `bootstrap` (baselines edges) were already taken; overloading either with "configure the
+> whole install" would have made the dangerous reading the plausible one, in a CLI whose own
+> GOTCHAS record a flag meaning different things in adjacent subcommands (G44) at a cost of 11
+> spurious events. Bare `init` now names `setup` instead of printing usage into a void.
 > Retire by editing this file's status line; do not delete.
 
 # Make propagate portable, own the global-rules lifecycle, and conform to skill-creation guidelines
