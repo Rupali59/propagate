@@ -8,7 +8,12 @@ import yaml from "yaml";
 import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, realpathSync } from "node:fs";
 import { loadCrossRepoSync, resolveTarget, resolvePartner, __setPartnerRootsForTest, discoverCrossReposSync, crossCorrelationId } from "../lib/cross-repo.mjs";
 
-const SKILL = path.join(os.homedir(), ".claude", "skills", "propagate");
+import { fileURLToPath } from "node:url";
+// Derived from this file's own location, not from ~/.claude/skills/propagate.
+// The hardcoded form defeated SKILL_DIR and made the suite unrunnable from a
+// worktree, a clone, or a marketplace install — the exact portability bug the
+// code it tests had already been fixed for.
+const SKILL = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("cross schema + allowlist files exist and are valid", () => {
   const schemaPath = path.join(SKILL, "propagates-cross.schema.json");
@@ -26,7 +31,13 @@ test("cross schema + allowlist files exist and are valid", () => {
   // unknown top-level key rejected
   assert.equal(validate({ nope: [] }), false);
   const allow = yaml.parse(readFileSync(allowPath, "utf8"));
-  assert.ok(Array.isArray(allow.partner_roots) && allow.partner_roots.length >= 2, "partner_roots present (>=2)");
+  // `partner_roots` must be a LIST, and may be empty. It used to assert `>= 2`, which
+  // is not a property of the shipped file — it was asserting that the author's three
+  // repo roots were still checked in. An empty allowlist is the correct default: it
+  // permits no cross-repo edge, so a fresh install cannot fire one it was never
+  // configured for. The real list lives in $PROPAGATE_STATE_DIR/cross-allow.yml,
+  // which lib/config.mjs prefers (covered in tests/portability-literals.test.mjs).
+  assert.ok(Array.isArray(allow.partner_roots), "partner_roots is a list");
   assert.ok(Array.isArray(allow.contract_files) && allow.contract_files.length > 0);
 });
 

@@ -1,9 +1,20 @@
 # Two allowlists that bound every cross-repo edge. Realpath-checked at load AND fire.
 # partner_roots: absolute repo roots an edge target may resolve into. Nothing else.
-partner_roots:
-  - ~/Documents/GitHub/Motherboard
-  - ~/Documents/GitHub/Tathya
-  - ~/Documents/GitHub/PanditPawanKaushik/SSJK-mb
+partner_roots: []
+# ^ EMPTY BY DEFAULT, and that is the safe default: an empty allowlist permits no
+# cross-repo edge, so a fresh install cannot fire one it was never configured for.
+#
+# This file SHIPS with the skill, so anything listed here reaches every machine.
+# It used to carry three of the author's absolute repo roots — paths that resolve
+# nowhere else, in the very file whose job is to BOUND what a cross edge may reach.
+#
+# Put your real list in $PROPAGATE_STATE_DIR/cross-allow.yml (default
+# ~/.propagate/cross-allow.yml); lib/config.mjs prefers it over this one whenever it
+# exists. Example:
+#
+#   partner_roots:
+#     - ~/code/some-service
+#     - ~/code/some-other-repo
 # contract_files: glob suffixes a cross edge target may match (the "major" filter).
 contract_files:
   - "motherboard.json"

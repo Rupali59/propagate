@@ -6,8 +6,19 @@
 > contents were later overwritten by an unrelated design. A dangling citation in a tool whose
 > thesis is traceability. Plans that govern this repo live here and are linked from `STATE.md`.
 >
-> **Status:** ACTIVE — Phases 0-1 and 3-4 complete. Phases 2 (de-personalise literals),
-> 5 (rules lifecycle) and 6 (skill-creation conformance) pending.
+> **Status:** ACTIVE — Phases 0-4 complete. Phases 5 (rules lifecycle) and 6
+> (skill-creation conformance) pending.
+>
+> **Phase 2 was mostly already closed by Phase 1b.** Of its 12 rows, `INTEGRATIONS`
+> (marketplaceDir, portsFile, telegramDir, notifier), `LIFECYCLE_LOG`, `SKILL_DIR` in
+> the init template, digest's roots and cache paths, and the orphaned plist were all
+> handled earlier or deleted. Six real items remained, and one of them was not on the
+> list: **the `.gstack-backup` skip list existed in two copies that had already
+> diverged** — `lib/refs.mjs` pinned two timestamped directories from one machine that
+> `lib/discovery.mjs` had dropped. Two copies of one list, silently disagreeing,
+> inside the tool built to detect exactly that. Now one prefix-matched export, which
+> also fixes why the literals existed: a timestamped backup dir has a different name
+> on every machine, so no list of exact names can ever be complete.
 >
 > **Phase 4 landed as `setup`, not `init`.** Both `init` (scaffolds one sidecar) and
 > `bootstrap` (baselines edges) were already taken; overloading either with "configure the

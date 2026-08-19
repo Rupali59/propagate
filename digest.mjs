@@ -34,8 +34,7 @@ import {
   SUSPICIOUS_MARKERS,
   CROSS_LEDGER_JSONL,
   SEARCH_ROOTS,
-  SKILL_DIR,
-} from "./lib/config.mjs";
+  SKILL_DIR, INTEGRATIONS } from "./lib/config.mjs";
 import { readLedgerWithStats, lastActivityAt } from "./lib/ledger.mjs";
 import { reconcile, inboundRows, toNodeId } from "./lib/reconcile.mjs";
 import { PLIST_PATH } from "./lib/plist.mjs";
@@ -1280,7 +1279,11 @@ export function formatDigest(diff) {
  * is explicit and testable.
  */
 async function resolveTelegramDelivery() {
-  const skillDir = path.join(HOME, ".claude", "skills", "telegram");
+  // INTEGRATIONS.telegramDir, not a path rebuilt from HOME: the integration already
+  // existed for exactly this, and rebuilding it here meant PROPAGATE_TELEGRAM_DIR
+  // configured the value nobody read.
+  const skillDir = INTEGRATIONS.telegramDir;
+  if (!skillDir) return null;
   if (!existsSync(skillDir)) return null;
   const skillMdPath = path.join(skillDir, "SKILL.md");
   if (!existsSync(skillMdPath)) return null;
