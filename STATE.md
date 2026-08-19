@@ -19,6 +19,15 @@ daily summary (unaffected by the retirement).
 
 Own git repo, remote `Rupali59/propagate-skill`.
 
+## Linked plans
+
+- [`docs/plans/2026-08-19-portability-and-rules.md`](docs/plans/2026-08-19-portability-and-rules.md)
+  — **ACTIVE.** Make the skill installable on any machine against any repo set, absorb the
+  global-rules lifecycle, and conform to `superpowers:writing-skills`. Phase 0 done; 1-6 pending.
+
+Plans live in `docs/plans/`, not `~/.claude/plans/` — session scratch rots, and `lib/graph.mjs`
+carried a citation to an overwritten one for weeks.
+
 ## Now (in flight)
 
 ### 2026-08-14 — v1 watcher retired; doctor/digest report the v2 replacement's health
