@@ -190,3 +190,31 @@ test("frontmatter is parsed as YAML, so escaped fingerprints survive", async () 
   }
 });
 
+test("worktree checkouts are excluded from the scan, and the exclusion is reported", async () => {
+  // A worktree's CLAUDE.md is the SAME FILE seen twice — its canonical path is already
+  // scanned — so counting it inflates the finding count with work that duplicates
+  // other work. Worse for a DETACHED-HEAD worktree, which is what
+  // Motherboard/.claude/worktrees/hardcore-villani-778ff0 is: it sits on no branch, so
+  // an edit there can never merge anywhere. The finding is real and the work it implies
+  // cannot land.
+  //
+  // It only surfaced when Phase 5 revived the plan-mode-3-files detector, which had
+  // been dead since it was written.
+  //
+  // Reported, not silently dropped: a scan that quietly narrows its own scope reads as
+  // "covered everything" when it did not.
+  const { findCandidateFiles } = await import("../lib/rules-check.mjs");
+  const f = fixture();
+  try {
+    f.claudeMd("real", "# canonical\n");
+    f.claudeMd(path.join(".worktrees", "some-branch"), "# a checkout\n");
+    f.claudeMd(path.join(".claude", "worktrees", "detached-abc123"), "# another checkout\n");
+    const r = findCandidateFiles([f.tree]);
+    assert.equal(r.files.length, 1, `only the canonical file, got:\n  ${r.files.join("\n  ")}`);
+    assert.ok(r.files[0].includes("real"), "and it is the canonical one");
+    assert.equal(r.excludedWorktrees, 2, "both checkouts counted and reported, not silently dropped");
+  } finally {
+    f.cleanup();
+  }
+});
+

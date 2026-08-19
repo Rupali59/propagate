@@ -1813,7 +1813,13 @@ async function rulesCmd() {
 
   const byRule = {};
   for (const f of res.findings) (byRule[f.rule] ??= []).push(f);
-  console.log(`\n  ${res.rules.length} active rules · ${res.filesScanned} CLAUDE.md scanned\n`);
+  console.log(
+    `\n  ${res.rules.length} active rules · ${res.filesScanned} CLAUDE.md scanned` +
+      (res.excludedWorktrees
+        ? `  ${DIM}(${res.excludedWorktrees} worktree checkout${res.excludedWorktrees === 1 ? "" : "s"} excluded — same file, already scanned at its canonical path)${RESET}`
+        : "") +
+      `\n`,
+  );
   for (const [id, fs] of Object.entries(byRule).sort((a, b) => b[1].length - a[1].length)) {
     console.log(`  rule:${id} — restated in ${fs.length} file(s)`);
     for (const f of fs) console.log(`     ${f.file.replace(HOME_DIR, "~")}:${f.hits.slice(0, 3).join(",")}`);

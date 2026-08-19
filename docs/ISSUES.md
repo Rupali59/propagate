@@ -1277,7 +1277,7 @@ the stability test pass — that converts the alarm into a rubber stamp.
 
 ---
 
-### N34 · 15 rule restatements across 13 CLAUDE.md files, 13 of them previously invisible — **S2** — **OPEN**
+### N34 · Rule restatements — 15 reported, 7 real, 0 remaining — **S2** — **RESOLVED 2026-08-19**
 
 **Filed 2026-08-19**, by `rules check` the first time it could actually see.
 
@@ -1308,7 +1308,43 @@ concurrent uncommitted work; converting them is its own change under
 records is that the count was never 2 — the detector was blind, and the number it
 reported was the number it could see.
 
-**Next:** convert each restatement to a `rule:<id>` pointer, or declare
-`overrides: <id>` with a reason where the deviation is genuine. Re-run
-`propagate rules check` to confirm; the run exits 0 only at zero restatements.
+**RESOLVED 2026-08-19 — and 15 was the instrument again, not the tree.** Reading all
+fifteen sites before touching any of them found **7 genuine restatements, not 15**. Two
+separate over-counts, both now fixed:
+
+**The `nextjs-dev-server-port` fingerprint matched the helper script's NAME.** It was
+`next-dev\.sh|PORT_DEFAULTS|hardcode.{0,20}-p 3000`, so every project documenting its own
+dev command was flagged — `Manav-portfolio:12`, `marketing-intel:30`,
+`VipinKaushik-mb:37`, `Keerti-portfolio:37`, `SSJK-mb:43`, `astroacharya:114`, and the
+hub's own repo-map row at `CLAUDE.md:46`. A project stating its port and its script is
+**describing compliance**, which is what a project `CLAUDE.md` is for; only a file
+asserting the *general pattern* is restating. Tightened to require the generalised claim:
+**8 files → 1**, and that 1 was the real one. Verified in both directions — the selftest
+still passes (the fingerprint matches its own body via `PORT_DEFAULTS`), and a scratch
+file carrying the generalised sentence is still flagged. A fingerprint narrowed until it
+matches nothing is the failure this whole mechanism exists to catch.
+
+**Worktree checkouts were counted as independent files.**
+`Motherboard/.claude/worktrees/hardcore-villani-778ff0/CLAUDE.md` is a **detached-HEAD**
+checkout — on no branch, so an edit there could never merge. The finding was real and the
+work it implied could not land. `findCandidateFiles` now skips `worktrees`/`.worktrees`
+and **reports the count** rather than silently narrowing its own scope.
+
+**The 7 genuine restatements, all converted** (edited, not committed — these trees carry
+concurrent work):
+
+| Rule | File | Kept |
+|---|---|---|
+| `plan-mode-3-files` | hub `CLAUDE.md`, `Motherboard/CLAUDE.md`, `Tathya/CLAUDE.md` | — |
+| `skill-routing` | `Khushboo/CLAUDE.md`, `Rishabh/CLAUDE.md` | whole 12-row table replaced; the canonical rule has **21** rows, so readers gain 9 routes |
+| `nextjs-dev-server-port` | `PanditPawanKaushik/CLAUDE.md:62` | the workspace's `dev:legacy`/`start:legacy` fallbacks |
+| `state-and-decisions` | `PanditPawanKaushik/CLAUDE.md:45` | local paths, the `Affects:` tag rule, `scripts/decisions-check.sh` |
+
+`propagate rules check` now reports **0 restatements, exit 0** — the first time it has
+been able to say that truthfully, since three of its detectors were dead until Phase 5 and
+one was over-broad until now.
+
+**Both skill-routing copies were NARROWER than the canonical rule**, which is the argument
+for pointers rather than copies, restated by evidence: the copy drifts by losing content,
+silently, and nobody notices because the copy still looks complete.
 
