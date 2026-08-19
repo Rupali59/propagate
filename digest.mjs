@@ -64,7 +64,10 @@ const DAILY_MD_PATH = path.join(HOME, ".claude", "DAILY.md");
 // that proved this: du said -35.5 GiB, df moved ~2 GiB).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const GITHUB_ROOT = path.join(HOME, "Documents", "GitHub");
+// Was path.join(HOME, "Documents", "GitHub") — so the digest ignored
+// PROPAGATE_SEARCH_ROOTS entirely and, on any other layout, discovered zero
+// projects while reporting a healthy run.
+const GITHUB_ROOT = SEARCH_ROOTS[0];
 const DISK_DATA_VOLUME = "/System/Volumes/Data";
 const DISK_BUDGET_MS = 25000;
 const SIX_WEEKS_MS = 6 * 7 * 24 * 60 * 60 * 1000;
