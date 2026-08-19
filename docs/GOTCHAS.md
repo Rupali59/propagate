@@ -748,8 +748,18 @@ then binary detection — and only reading the bytes in node settled it. Caught 
 publishing, and only because the number was too surprising to accept.
 
 **Do:** write `\u0000`, six ASCII characters, in source. Runtime-identical, and the
-file stays text. `tests/no-literal-nul.test.mjs` asserts this across every tracked
-non-vendor file, so a new composite key cannot reintroduce it.
+file stays text. `tests/no-literal-nul.test.mjs` asserts this across every non-vendor
+file, so a new composite key cannot reintroduce it.
+
+**The guard failed to catch itself, and that is the sharpest part of this entry.**
+`tests/no-literal-nul.test.mjs` was written with two literal NULs in its own
+docstring — the same mistake it exists to catch, made while writing the catcher. It
+ran **green**, and the full suite reported 696 pass. It went red only after `git add`,
+because it enumerated `git ls-files`, which lists **tracked** files only. A guard that
+cannot see a file until someone stages it is blind at precisely the moment a new file
+is written, which is when the mistake gets made. Fixed by
+`git ls-files --cached --others --exclude-standard`, and proved by dropping an
+untracked offender in `lib/` and watching it fail. Same shape as G48.
 
 **Do not** "fix" it by removing the separator. `${a}${b}` collides: `a/b` + `c` and
 `a` + `b/c` produce the same key, which for the duplicate-pair index and the edge-id
