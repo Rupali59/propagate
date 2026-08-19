@@ -6,7 +6,8 @@
 > contents were later overwritten by an unrelated design. A dangling citation in a tool whose
 > thesis is traceability. Plans that govern this repo live here and are linked from `STATE.md`.
 >
-> **Status:** ACTIVE — Phase 0 complete (this file). Phases 1-6 pending.
+> **Status:** ACTIVE — Phases 0-3 complete. Phases 4 (init), 5 (rules lifecycle) and 6
+> (skill-creation conformance) pending.
 > Retire by editing this file's status line; do not delete.
 
 # Make propagate portable, own the global-rules lifecycle, and conform to skill-creation guidelines
