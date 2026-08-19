@@ -218,3 +218,40 @@ test("worktree checkouts are excluded from the scan, and the exclusion is report
   }
 });
 
+test("ruleCoverage reports, per rule, how many files match and how many reference it", async () => {
+  // WHY THIS EXISTS (docs/ISSUES.md N35). `selftest` proves a fingerprint matches its
+  // own rule body — which is written in that rule's own house style. It does NOT prove
+  // the fingerprint can fire on how the claim is written in the WILD.
+  //
+  // Proven instance: `never-commit-unless-asked` was `[Nn]ever commit unless` and
+  // matched ZERO files, while passing selftest, because the rule body bolds the whole
+  // sentence and every real restatement bolds only `**Never commit**` — the `**` breaks
+  // the contiguous match. It had never fired, and "never fired" is indistinguishable
+  // from "nothing to find" in the output.
+  //
+  // So: report matched AND referenced per rule. A rule at 0/0 is not proof of a broken
+  // fingerprint — it may genuinely have no restatements — but it is an UNKNOWN, and an
+  // unknown must not render as a clean result.
+  const { ruleCoverage } = await import("../lib/rules-check.mjs");
+  const f = fixture();
+  try {
+    f.rule("fires-here", "a distinctive claim");
+    f.rule("pointed-at", "some other claim");
+    f.rule("silent-rule", "nothing says this anywhere");
+    f.claudeMd("a", "# A\nWe restate a distinctive claim inline.\n");
+    f.claudeMd("b", "# B\nSee rule:pointed-at for this.\n");
+
+    const cov = ruleCoverage({ rulesDir: f.rulesDir, roots: [f.tree] });
+    const by = Object.fromEntries(cov.map((c) => [c.id, c]));
+    assert.equal(by["fires-here"].matched, 1, "one file restates it");
+    assert.equal(by["pointed-at"].referenced, 1, "one file points at it");
+    assert.equal(by["silent-rule"].matched, 0);
+    assert.equal(by["silent-rule"].referenced, 0);
+    assert.equal(by["silent-rule"].status, "unexercised", "0/0 must be named, not left blank");
+    assert.equal(by["pointed-at"].status, "adopted");
+    assert.equal(by["fires-here"].status, "firing");
+  } finally {
+    f.cleanup();
+  }
+});
+

@@ -1348,3 +1348,47 @@ one was over-broad until now.
 for pointers rather than copies, restated by evidence: the copy drifts by losing content,
 silently, and nobody notices because the copy still looks complete.
 
+---
+
+### N35 · `selftest` proves self-match, not wild-match — 7 rules are unexercised — **S2** — **OPEN**
+
+**Filed 2026-08-19**, found while widening `never-commit-unless-asked`.
+
+`selftest` asserts every fingerprint matches **its own rule body**. That body is written
+in the rule's own house style, so the check says nothing about whether the fingerprint
+can fire on how the claim is written **in the wild** — and those differ in exactly the
+way that matters.
+
+**The proven instance.** `never-commit-unless-asked` was `[Nn]ever commit unless`. It
+matched **zero files across 47 CLAUDE.md**, while passing selftest, because the rule
+body bolds the whole sentence (`**Never commit unless explicitly asked.**`) and every
+real restatement bolds only the first half (`- **Never commit** unless explicitly
+asked`). Two `*` characters, and the detector had never fired since it was written.
+`overrideRe` already tolerates exactly this markup, for exactly this reason — the
+tolerance existed and was not applied here.
+
+Fixed for that rule: markup-tolerant, still anchored on `unless|without` so
+`Rupali/Obsidian/CLAUDE.md`'s "Never commit `Scripts/config/…json`" — a project fact
+about one file, not a restatement — stays excluded. 0 files → 2, both converted.
+
+**The open part: 7 of 16 rules are `unexercised`** — fingerprint matches nothing AND
+nothing references them:
+
+`adversarial-review-reads-the-ledger`, `browser-only-when-asked`, `delegation-criteria`,
+`discernment-checks`, `every-project-carries-gotchas`, `model-routing`,
+`no-waiting-on-deploys`, `safety-flag-needs-a-test`.
+
+**This is NOT a claim that those fingerprints are broken.** Several are recent, and a
+rule with genuinely nothing restating it produces the identical output. That is the
+whole problem: **unknown and clean are indistinguishable**, which is the failure this
+skill exists to catch, sitting in its own newest component.
+
+`propagate rules list` now prints restated/referenced/status per rule and names the
+unexercised count, so the unknown is at least visible. Making it *decidable* needs a
+per-rule probe — a known-positive sample of how each claim is actually phrased — which
+is judgment work, one rule at a time, and is what this issue tracks.
+
+**Do not "fix" this by widening fingerprints speculatively.** The opposite error is
+already recorded: `nextjs-dev-server-port` matched the helper script's name and produced
+7 false positives (N34). Widen only against a real sample.
+

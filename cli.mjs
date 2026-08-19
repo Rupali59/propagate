@@ -1749,9 +1749,30 @@ async function rulesCmd() {
       console.log(`${DIM}a rule needs \`id\` and \`fingerprint\` in frontmatter; without them it is inert by construction.${RESET}`);
       process.exit(2);
     }
+    const { ruleCoverage } = await import("./lib/rules-check.mjs");
+    const globalMd = path.join(HOME_DIR, ".claude", "CLAUDE.md");
+    const cov = Object.fromEntries(
+      ruleCoverage({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS, extra: [globalMd] }).map((c) => [c.id, c]),
+    );
     console.log(`\n  ${rules.length} active rule(s) in ${RULES_DIR.replace(HOME_DIR, "~")}\n`);
+    console.log(`  ${"rule".padEnd(36)} ${"scope".padEnd(8)} restated  referenced  status`);
     for (const r of rules.sort((a, b) => a.id.localeCompare(b.id))) {
-      console.log(`  ${r.id.padEnd(36)} ${DIM}${r.scope || "?"}${RESET}`);
+      const c = cov[r.id] ?? { matched: 0, referenced: 0, status: "unexercised" };
+      // `unexercised` means the fingerprint matched nothing AND nothing points at the
+      // rule. That is an UNKNOWN, not a pass: a fingerprint that cannot fire on real
+      // phrasing looks exactly like a tree with nothing to find (N35).
+      const mark = c.status === "unexercised" ? `${YELLOW}unexercised${RESET}` : `${DIM}${c.status}${RESET}`;
+      console.log(
+        `  ${r.id.padEnd(36)} ${DIM}${(r.scope || "?").padEnd(8)}${RESET} ${String(c.matched).padStart(8)}  ${String(c.referenced).padStart(10)}  ${mark}`,
+      );
+    }
+    const unexercised = Object.values(cov).filter((c) => c.status === "unexercised").length;
+    if (unexercised) {
+      console.log(
+        `\n  ${YELLOW}${unexercised} rule(s) unexercised${RESET} ${DIM}— fingerprint matched nothing and nothing references them.\n` +
+          `  Not proof of a broken fingerprint: a rule with genuinely nothing restating it looks the same.\n` +
+          `  It is an UNKNOWN, and an unknown must not read as a clean result. See docs/ISSUES.md N35.${RESET}`,
+      );
     }
     return;
   }
