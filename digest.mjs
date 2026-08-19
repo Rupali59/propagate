@@ -22,7 +22,7 @@
  */
 
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
@@ -125,32 +125,50 @@ function safeDuKb(target) {
   }
 }
 
-/** Newest mtime (ms) of any file under dir, skipping node_modules/.next/.git. Null on failure. */
+/**
+ * Newest mtime (ms) of any file under dir, skipping node_modules/.next/.git.
+ * Null when the directory is missing; never throws.
+ *
+ * Was `find … -exec stat -f %m {} +`. `-f` is BSD stat; GNU spells it `-c %Y`, so the
+ * whole pipeline threw on Linux and this returned null — indistinguishable from "no files
+ * here". The digest then read as "nothing to report" rather than "could not measure",
+ * which is the attributable-absence failure (G2). A pure walk also removes a spawn, which
+ * is the measured cost in this codebase (G6), and survives a PATH without `find` at all.
+ */
 function safeNewestMtimeMs(dir, timeoutMs) {
   if (!existsSync(dir)) return null;
-  try {
-    const out = execFileSync(
-      "find",
-      [
-        dir,
-        "-maxdepth", "6",
-        "-type", "f",
-        "-not", "-path", "*/node_modules/*",
-        "-not", "-path", "*/.next/*",
-        "-not", "-path", "*/.git/*",
-        "-exec", "stat", "-f", "%m", "{}", "+",
-      ],
-      { encoding: "utf8", timeout: Math.max(500, timeoutMs) },
-    );
-    let max = 0;
-    for (const line of out.trim().split("\n")) {
-      const n = parseInt(line, 10);
-      if (Number.isFinite(n) && n > max) max = n;
+  const SKIP = new Set(["node_modules", ".next", ".git"]);
+  const deadline = Date.now() + Math.max(500, timeoutMs || 0);
+  let max = 0;
+  const walk = (d, depth) => {
+    if (depth > 6 || Date.now() > deadline) return;
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return; // unreadable subtree is not a reason to abandon the rest
     }
-    return max > 0 ? max * 1000 : null;
+    for (const e of entries) {
+      if (Date.now() > deadline) return;
+      if (e.isDirectory()) {
+        if (SKIP.has(e.name)) continue;
+        walk(path.join(d, e.name), depth + 1);
+      } else if (e.isFile()) {
+        try {
+          const m = statSync(path.join(d, e.name)).mtimeMs;
+          if (m > max) max = m;
+        } catch {
+          // vanished between readdir and stat; skip it
+        }
+      }
+    }
+  };
+  try {
+    walk(dir, 0);
   } catch {
     return null;
   }
+  return max > 0 ? max : null;
 }
 
 /** package.json dirs at depth<=3 under GITHUB_ROOT, excluding node_modules. Empty array on failure. */
@@ -1375,4 +1393,5 @@ export {
   driftSnapshot as driftSnapshotForTest,
   inventorySnapshot as inventorySnapshotForTest,
   adoptionSnapshot as adoptionSnapshotForTest,
+  safeNewestMtimeMs as safeNewestMtimeMsForTest,
 };

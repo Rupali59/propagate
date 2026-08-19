@@ -103,6 +103,8 @@ import {
   WATCHER_LOG,
   SEARCH_ROOTS,
   SEARCH_ROOTS_DIAGNOSTIC,
+  SCHEDULER,
+  LAUNCHD_ACTIVE,
   searchRootsExplain,
   DISCOVERY_DEGRADED,
   SUSPICIOUS_MARKERS,
@@ -445,12 +447,18 @@ async function watcherJsonBlock() {
       ageSeconds = Math.floor((Date.now() - ts) / 1000);
     }
   }
+  // Only ask launchd when launchd is the configured scheduler AND this is macOS.
+  // Elsewhere the answer is "not configured", which is a different fact from "not
+  // loaded" — and shelling out to a binary that cannot exist is how an optional
+  // component starts reading as a broken one.
   let launchdLoaded = false;
-  try {
-    const out = execSync("launchctl list", { encoding: "utf8" });
-    launchdLoaded = out.split("\n").some((l) => l.includes(LAUNCHD_LABEL));
-  } catch {
-    launchdLoaded = false;
+  if (LAUNCHD_ACTIVE) {
+    try {
+      const out = execSync("launchctl list", { encoding: "utf8" });
+      launchdLoaded = out.split("\n").some((l) => l.includes(LAUNCHD_LABEL));
+    } catch {
+      launchdLoaded = false;
+    }
   }
   let trackedFiles = 0;
   if (existsSync(STATE_PATH)) {
@@ -935,12 +943,22 @@ async function doctor() {
   console.log(`${BOLD}# launchd watcher — RETIRED 2026-08-14${RESET}`);
   console.log(`  ${DIM}resolved label: ${LAUNCHD_LABEL}${RESET}`);
   console.log(`  ${DIM}see docs/DECISIONS.md 2026-08-14 for why; these are informational, never a failure${RESET}`);
-  try {
-    const out = execSync("launchctl list", { encoding: "utf8" });
-    const loaded = out.split("\n").some((l) => l.includes(LAUNCHD_LABEL));
-    info("plist loaded", loaded ? "yes — unloading is a separate, later step; loaded is not a failure here" : "no — unloaded (expected once retirement is complete)");
-  } catch (err) {
-    info("launchctl unreachable", err.message);
+  if (!LAUNCHD_ACTIVE) {
+    info(
+      "scheduler",
+      `${SCHEDULER} — launchd not consulted. ` +
+        (SCHEDULER === "none"
+          ? "Nothing is scheduled; `reconcile` derives drift on demand in ~1.2s, so this is a supported configuration, not a gap."
+          : `${SCHEDULER} is declarable but not implemented — scheduled runs will not happen.`),
+    );
+  } else {
+    try {
+      const out = execSync("launchctl list", { encoding: "utf8" });
+      const loaded = out.split("\n").some((l) => l.includes(LAUNCHD_LABEL));
+      info("plist loaded", loaded ? "yes — unloading is a separate, later step; loaded is not a failure here" : "no — unloaded (expected once retirement is complete)");
+    } catch (err) {
+      info("launchctl unreachable", err.message);
+    }
   }
 
   if (existsSync(HEARTBEAT_PATH)) {
