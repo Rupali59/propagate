@@ -701,7 +701,7 @@ property on others, and is exempt from it.
 **Cost, measured:** `docs.supersession_prose_only` was added to `EXPECTATIONS`
 with a threshold and a dated `basis`, and **4 of 8 expectations turned out to be
 absent from `docs/OBSERVABILITY.md` §1** — the table that edge exists to keep in
-sync. The number moved 107 → 105 → 103 across three sessions and the doc never
+sync. The number moved 107 → 105 → 103 → 101 across three sessions and the doc never
 learned any of it.
 
 **Signal:** you can describe the failure fluently in a comment. Prose about a

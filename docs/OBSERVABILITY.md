@@ -46,7 +46,8 @@ column; without it the metric is decoration.
 > Note the row below avoids the bare word for its own metric on purpose. The detector
 > greps `/supersede/i` per line and cannot tell a claim ("this replaces X") from a
 > description of the check itself — so documenting the metric tripped its own ratchet,
-> 103 -> 104, on the commit that added this table row. Rewording a non-claim is not
+> 103 -> 104, on the commit that added this table row (the detector later stopped counting
+> fenced blocks, taking it 105 -> 101). Rewording a non-claim is not
 > gaming the number; rewording an actual claim would be.
 
 | Metric | Type | Expectation (the alert) | Catches |
@@ -63,7 +64,7 @@ column; without it the metric is decoration.
 | `graph.cycles` | gauge | **== 0** | a mutually-declared pair has no fix order — verify either side and the other re-arms |
 | `graph.duplicate_pairs` | gauge | **== 0** | one coupling declared twice gets two edge_ids; close one and the other stays open forever |
 | `docs.supersedes_unresolvable` | gauge | **== 0** | a `supersedes:` naming a path that does not exist looks machine-checked and is not |
-| `docs.supersession_prose_only` | gauge | **≤ 103**, ratchet — must not grow | a claim made only in prose is one-way: the overruled doc never learns it was replaced |
+| `docs.supersession_prose_only` | gauge | **≤ 101**, ratchet — must not grow | a claim made only in prose is one-way: the overruled doc never learns it was replaced |
 | `ledger.unknown_types` | gauge | **0** | N1 · a `manual` row invisible since 2026-06-20 |
 | `ledger.duplicate_ids` | gauge | **0** | N2/N3 · id 256 existed twice |
 | `ledger.rows_open_multi_ledger` | gauge | **0** | A2 · 28 live instances |
