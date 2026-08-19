@@ -1275,3 +1275,40 @@ Guarded by `tests/no-literal-nul.test.mjs` across every tracked non-vendor file,
 future composite key cannot reintroduce it. Do NOT re-capture the frozen ids to make
 the stability test pass — that converts the alarm into a rubber stamp.
 
+---
+
+### N34 · 15 rule restatements across 13 CLAUDE.md files, 13 of them previously invisible — **S2** — **OPEN**
+
+**Filed 2026-08-19**, by `rules check` the first time it could actually see.
+
+Three of the sixteen live rules had **dead detectors**: `nextjs-dev-server-port`,
+`plan-mode-3-files` and `state-and-decisions` all declare fingerprints containing a
+backslash escape, and the old frontmatter parser stripped quotes without unescaping,
+so `"STATE\\.md"` reached the regex engine as `STATE\\.md` — matching a literal
+backslash, therefore nothing. The old selftest passed all three because it tested the
+fingerprint against the whole file, whose frontmatter contains the fingerprint text.
+
+With a real YAML parse the count goes **2 → 15 restatements across 13 files**:
+
+| Rule | Files |
+|---|---|
+| `nextjs-dev-server-port` | 8 |
+| `plan-mode-3-files` | 4 |
+| `skill-routing` | 2 |
+| `state-and-decisions` | 1 |
+
+Two spot-checked by hand and both true positives:
+`PanditPawanKaushik/CLAUDE.md:45` restates STATE.md/daily-open with zero
+`rule:state-and-decisions` references, and `Tathya/CLAUDE.md:31` restates the 3+-files
+plan-mode rule.
+
+**Not fixed here, deliberately.** These are 13 files across many repos, several with
+concurrent uncommitted work; converting them is its own change under
+`rule:plan-mode-3-files` and `rule:never-commit-unless-asked`. What this issue
+records is that the count was never 2 — the detector was blind, and the number it
+reported was the number it could see.
+
+**Next:** convert each restatement to a `rule:<id>` pointer, or declare
+`overrides: <id>` with a reason where the deviation is genuine. Re-run
+`propagate rules check` to confirm; the run exits 0 only at zero restatements.
+

@@ -6,8 +6,15 @@
 > contents were later overwritten by an unrelated design. A dangling citation in a tool whose
 > thesis is traceability. Plans that govern this repo live here and are linked from `STATE.md`.
 >
-> **Status:** ACTIVE — Phases 0-4 complete. Phases 5 (rules lifecycle) and 6
-> (skill-creation conformance) pending.
+> **Status:** ACTIVE — Phases 0-5 complete. Phase 6 (skill-creation conformance)
+> pending.
+>
+> **Phase 5 found a dead detector, not just a misplaced one.** Three of the sixteen
+> rules had fingerprints that could never fire, because frontmatter was parsed with a
+> line regex that stripped quotes without unescaping. Fixing it took the restatement
+> count from 2 to 15 across 13 files (docs/ISSUES.md N34). The `hooks/load-rules.mjs`
+> row is **deliberately not done**: shipping a second copy of a hook that already
+> works would create exactly the duplication this phase removed.
 >
 > **Phase 2 was mostly already closed by Phase 1b.** Of its 12 rows, `INTEGRATIONS`
 > (marketplaceDir, portsFile, telegramDir, notifier), `LIFECYCLE_LOG`, `SKILL_DIR` in

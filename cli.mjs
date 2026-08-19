@@ -7,6 +7,11 @@
  *   node cli.mjs status --all   — every workspace's queue
  *   node cli.mjs status --cross — the cross-repo ledger
  *   node cli.mjs doctor         — health check
+ *   node cli.mjs rules <list|check|selftest|promote> [--json]
+ *                                            — canonical-rules lifecycle: which CLAUDE.md files
+ *                                              RESTATE a rule instead of referencing it. `check`
+ *                                              exits non-zero when it scanned NOTHING, not only
+ *                                              when it found something.
  *   node cli.mjs setup [--roots <a>[:<b>]] [--force] [--json]
  *                                            — install-time bootstrap: write ~/.propagate/config.yml
  *                                              and REFUSE to report success unless discovery then
@@ -116,6 +121,7 @@ import {
   CROSS_LEDGER_JSONL,
   SKILL_DIR,
   GRAPH_MCP_CACHE_PATH,
+  RULES_DIR,
   CONFIG_PATH,
   MAX_DEPTH,
 } from "./lib/config.mjs";
@@ -1672,6 +1678,107 @@ async function doctor() {
     console.log(`${RED}${BOLD}doctor: ${problems} problem${problems === 1 ? "" : "s"} found${RESET}`);
     process.exit(1);
   }
+}
+
+/**
+ * `rules <list|check|selftest|promote>` — the canonical-rules lifecycle (Phase 5).
+ *
+ * Absorbed from the standalone `rules/_check.mjs`; lib/rules-check.mjs carries the
+ * rationale and the four defects fixed in the move. The command exists because the
+ * detector ran on manual invocation only (docs/SYSTEMS.md classed it
+ * active-unadopted) — a mechanism nothing calls is a mechanism that decays.
+ */
+async function rulesCmd() {
+  const sub = process.argv[3] || "check";
+  const args = process.argv.slice(4);
+  const asJson = args.includes("--json");
+  const { checkRules, selftest, loadRules } = await import("./lib/rules-check.mjs");
+
+  if (sub === "list") {
+    const rules = loadRules(RULES_DIR);
+    if (asJson) return void console.log(JSON.stringify(rules.map(({ __file, ...r }) => r), null, 2));
+    if (!rules.length) {
+      console.log(`${YELLOW}no rules${RESET} in ${RULES_DIR}`);
+      console.log(`${DIM}a rule needs \`id\` and \`fingerprint\` in frontmatter; without them it is inert by construction.${RESET}`);
+      process.exit(2);
+    }
+    console.log(`\n  ${rules.length} active rule(s) in ${RULES_DIR.replace(HOME_DIR, "~")}\n`);
+    for (const r of rules.sort((a, b) => a.id.localeCompare(b.id))) {
+      console.log(`  ${r.id.padEnd(36)} ${DIM}${r.scope || "?"}${RESET}`);
+    }
+    return;
+  }
+
+  if (sub === "selftest") {
+    const res = selftest({ rulesDir: RULES_DIR });
+    if (asJson) return void console.log(JSON.stringify(res, null, 2));
+    for (const c of res.checks) {
+      const label = c.kind === "fingerprint" ? `${c.id.padEnd(32)} fingerprint fires on its own body` : `override ${String(c.want).padEnd(5)} ${c.why}`;
+      console.log(`  ${c.pass ? GREEN + "✓" + RESET : RED + "✗" + RESET} ${label}`);
+    }
+    console.log(
+      res.pass
+        ? `\n  ${GREEN}selftest PASS${RESET} — every fingerprint can fire; override detection fires and refuses near-misses`
+        : `\n  ${RED}selftest FAIL${RESET} — ${res.failures.join("; ")}`,
+    );
+    process.exit(res.pass ? 0 : 1);
+  }
+
+  if (sub === "promote") {
+    console.log(`${YELLOW}not implemented${RESET} — \`rules promote\` is declared in the Phase 5 plan and not built.`);
+    console.log(`${DIM}Saying so is the point: docs/LIFECYCLE.md defines PROMOTE, and a command that${RESET}`);
+    console.log(`${DIM}silently did nothing would be worse than one that admits the gap. Write the rule${RESET}`);
+    console.log(`${DIM}file by hand in ${RULES_DIR.replace(HOME_DIR, "~")}, then run \`rules selftest\`.${RESET}`);
+    process.exit(2);
+  }
+
+  if (sub !== "check") {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs rules <list|check|selftest|promote> [--json]`);
+    process.exit(2);
+  }
+
+  // The global CLAUDE.md is the rules' former home, so it legitimately contains every
+  // fingerprint. Scanned for overrides, excluded from findings — same carve-out the
+  // original made, kept because removing it would report 16 false restatements.
+  const globalMd = path.join(HOME_DIR, ".claude", "CLAUDE.md");
+  const res = checkRules({
+    rulesDir: RULES_DIR,
+    roots: SEARCH_ROOTS,
+    extra: [globalMd],
+    exclude: [globalMd],
+  });
+  if (asJson) {
+    console.log(JSON.stringify({ ...res, findings: res.findings.map(({ lines, ...f }) => f) }, null, 2));
+    process.exit(res.exitCode);
+  }
+
+  if (res.diagnostic !== "ok") {
+    // Never render "nothing scanned" as "nothing wrong" — the defect this absorb fixed.
+    const why = {
+      "no-rules": `no rules found in ${RULES_DIR.replace(HOME_DIR, "~")}`,
+      "roots-missing": `configured root(s) do not exist: ${res.missing.join(", ")}`,
+      "no-files-scanned": `roots exist but contain no CLAUDE.md — nothing was checked`,
+    }[res.diagnostic];
+    console.log(`\n  ${RED}rules check did not run:${RESET} ${why}`);
+    console.log(`  ${DIM}This is NOT a clean result. Run \`propagate setup\` if the roots are wrong.${RESET}\n`);
+    process.exit(res.exitCode);
+  }
+
+  const byRule = {};
+  for (const f of res.findings) (byRule[f.rule] ??= []).push(f);
+  console.log(`\n  ${res.rules.length} active rules · ${res.filesScanned} CLAUDE.md scanned\n`);
+  for (const [id, fs] of Object.entries(byRule).sort((a, b) => b[1].length - a[1].length)) {
+    console.log(`  rule:${id} — restated in ${fs.length} file(s)`);
+    for (const f of fs) console.log(`     ${f.file.replace(HOME_DIR, "~")}:${f.hits.slice(0, 3).join(",")}`);
+  }
+  if (res.overrides.length) {
+    console.log(`\n  ${DIM}declared deviations (not drift — ${res.overrides.length}):${RESET}`);
+    for (const o of res.overrides) console.log(`     ${o.file.replace(HOME_DIR, "~")}:${o.line}  overrides: ${o.rule}`);
+  }
+  console.log(
+    `\n  ${res.findings.length} restatement(s) across ${new Set(res.findings.map((f) => f.file)).size} file(s)\n`,
+  );
+  process.exit(res.exitCode);
 }
 
 /**
@@ -4388,6 +4495,8 @@ if (_invokedDirectly) {
     await status();
   } else if (mode === "doctor") {
     await doctor();
+  } else if (mode === "rules") {
+    await rulesCmd();
   } else if (mode === "setup") {
     await setupCmd(process.argv.slice(3));
   } else if (mode === "init") {

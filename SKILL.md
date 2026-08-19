@@ -79,6 +79,16 @@ These are real `cli.mjs` subcommands — run them directly. Full flags in
   ```bash
   node ${CLAUDE_PLUGIN_ROOT}/cli.mjs doctor
   ```
+- **`rules <list|check|selftest|promote>`** — the canonical-rules lifecycle. `check`
+  finds `CLAUDE.md` files that RESTATE a rule instead of referencing it as
+  `rule:<id>`; a declared `overrides: <id>` is printed but never failed, because the
+  point of the escape hatch is that divergence stays visible. **`check` exits non-zero
+  when it scanned NOTHING**, not only when it found something — "no files scanned" is
+  not a clean result. `selftest` proves every fingerprint can fire against its rule's
+  own body.
+  ```bash
+  node ${CLAUDE_PLUGIN_ROOT}/cli.mjs rules check
+  ```
 - **`setup`** — install-time bootstrap, once per machine. Writes
   `~/.propagate/config.yml`, then re-reads it and verifies discovery finds ≥1
   workspace — **exiting non-zero if not**, because an install that reports success
