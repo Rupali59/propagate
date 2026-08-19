@@ -99,9 +99,17 @@ test("every launchd label named in the docs is installed", (t) => {
   //
   // Prose that merely MENTIONS a label is allowed on purpose. The docs have to
   // be able to describe the bug (ISSUES.md N10 is literally the sentence
-  // "SKILL.md says com.rupali.propagate") and to flag the stale committed
+  // "SKILL.md says com.rupali.propagate") and to flag the stale
   // com.rupali.propagate-digest.plist (SYSTEMS.md). A check that forbids naming
   // a wrong value is a check that forbids reporting it.
+  //
+  // That plist was DELETED 2026-08-19. It was committed with /Users/rupali.b and
+  // /opt/homebrew/bin/node baked in, under a label (com.rupali.propagate-digest)
+  // that does not match the job actually loaded on this machine
+  // (com.tathya.propagate.digest, installed from ~/Library/LaunchAgents). It was
+  // a stale artifact shipping a personal path to every install, referenced by no
+  // code. Generating the digest plist the way lib/plist.mjs already generates the
+  // monitor one is Phase 3 — see docs/plans/2026-08-19-portability-and-rules.md.
   const unknown = [];
   for (const file of docFiles()) {
     read(file)

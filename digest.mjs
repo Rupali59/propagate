@@ -73,16 +73,29 @@ const DISK_BUDGET_MS = 25000;
 const SIX_WEEKS_MS = 6 * 7 * 24 * 60 * 60 * 1000;
 const KB_PER_GB = 1024 * 1024;
 
+// Cross-platform caches first, then the macOS ~/Library ones. Every entry is
+// existence-checked downstream, so a path that is wrong for the platform is
+// harmless — but listing five ~/Library paths unconditionally made the disk
+// section read as "nothing to reclaim" on Linux rather than "not applicable".
 const CACHE_PATHS = [
   path.join(HOME, ".cache", "uv"),
   path.join(HOME, ".npm"),
-  path.join(HOME, "Library", "pnpm"),
-  path.join(HOME, "Library", "Caches", "ms-playwright"),
   path.join(HOME, ".cache", "puppeteer"),
   path.join(HOME, ".bun"),
-  path.join(HOME, "Library", "Caches", "Homebrew"),
-  path.join(HOME, "Library", "Caches", "pip"),
-  path.join(HOME, "Library", "Caches", "go-build"),
+  ...(process.platform === "darwin"
+    ? [
+        path.join(HOME, "Library", "pnpm"),
+        path.join(HOME, "Library", "Caches", "ms-playwright"),
+        path.join(HOME, "Library", "Caches", "Homebrew"),
+        path.join(HOME, "Library", "Caches", "pip"),
+        path.join(HOME, "Library", "Caches", "go-build"),
+      ]
+    : [
+        path.join(HOME, ".cache", "pnpm"),
+        path.join(HOME, ".cache", "ms-playwright"),
+        path.join(HOME, ".cache", "pip"),
+        path.join(HOME, ".cache", "go-build"),
+      ]),
 ];
 
 /** `df -k <path>` -> { availKb, usedPct }, or null on any failure. */

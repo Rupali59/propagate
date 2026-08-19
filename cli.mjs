@@ -1701,9 +1701,9 @@ async function init(targetDir, flags = []) {
 # on ${new Date().toISOString().slice(0, 10)}.
 #
 # Declare source-of-truth files and their downstreams. Drift is derived on
-# demand — run \`node ~/.claude/skills/propagate/cli.mjs reconcile\` to check
+# demand — run \`node ${SKILL_DIR}/cli.mjs reconcile\` to check
 # whether a declared source has moved out of sync with its downstream(s).
-# Walk through open v1 rows via \`node ~/.claude/skills/propagate/cli.mjs status\`.
+# Walk through open v1 rows via \`node ${SKILL_DIR}/cli.mjs status\`.
 #
 # Example:
 #   sources:
