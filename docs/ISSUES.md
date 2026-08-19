@@ -1228,3 +1228,50 @@ the symlink is what makes it findable, mirroring `tests/journal.test.mjs:44-63`.
 
 **Related:** GOTCHAS **G48** (an enforcement point that does not watch itself) — this was the
 fourth instance in that entry, and is now the first one closed.
+
+---
+
+### N33 · Three `lib/*.mjs` carry a literal NUL byte and are invisible to code search — **S2** — **RESOLVED 2026-08-19**
+
+**Filed 2026-08-19.**
+
+`lib/events.mjs:120`, `lib/frontmatter.mjs:128,152` and `lib/graph.mjs:344` each build
+a composite map key with a NUL separator, written as a **raw byte** rather than the
+`\u0000` escape. The separator is correct and must stay (see G49 — removing it makes
+`a/b`+`c` and `a`+`b/c` collide, a correctness bug in the edge-id hash and the
+duplicate-pair index). The raw byte is the defect.
+
+Effect: the `grep` shim passes `-I`, so all three files are skipped **silently, exit
+1** — identical output to "the symbol is not in this file". Plain `grep -n` prints
+`Binary file … matches` and suppresses the lines. `file` calls them `data`.
+
+**Severity S2, not S3.** These are not obscure files: `events.mjs` owns the edge-id
+derivation and `graph.mjs` owns the worklist. Every code search over this repo — by a
+person or an agent — has been silently missing them, and on 2026-08-19 that nearly
+produced the published claim that `graph.mjs` does not implement `fixOrder`.
+
+**Fix:** replace each literal NUL with the six-character escape `\u0000`.
+Runtime-identical — same string, same hash, same keys — so no behaviour changes and
+no baseline moves. Guard with `tests/no-literal-nul.test.mjs` asserting no tracked
+non-vendor file contains byte 0, so the next composite key cannot reintroduce it.
+
+**Verification that the fix is a no-op at runtime:** hash the three key-building
+expressions before and after and assert equality, rather than trusting that an escape
+"obviously" produces the same bytes. `lib/events.mjs`'s edge ids are persisted in the
+append-only event store; if that derivation moved, every existing event would orphan.
+That is the load-bearing check, and it is the reason this is not a blind sed.
+
+**RESOLVED 2026-08-19.** `tests/edge-id-stability.test.mjs` was written and confirmed
+GREEN *before* the edit, freezing three edge ids captured from the running pre-fix
+code (`3340074a`, `dab23bf6`, `39cf8b39`) plus two collision assertions proving the
+separator still separates. The rewrite ran on bytes, never on a decoded string, and
+aborted unless each file grew by exactly 5 bytes per NUL and contained none after:
+`events.mjs` 14030→14040 (2), `frontmatter.mjs` 7090→7100 (2), `graph.mjs`
+18557→18562 (1). All three ids unchanged. The original symptom is gone — `grep -c
+fixOrder lib/graph.mjs` now returns 3 where it returned nothing, and `file` reports
+UTF-8 text for all three. 696 pass, 0 fail.
+
+Guarded by `tests/no-literal-nul.test.mjs` across every tracked non-vendor file, so a
+future composite key cannot reintroduce it. Do NOT re-capture the frozen ids to make
+the stability test pass — that converts the alarm into a rubber stamp.
+

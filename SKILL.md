@@ -118,7 +118,7 @@ These are real `cli.mjs` subcommands — run them directly. Full flags in
   `NEVER_VERIFIED` edges are excluded from the worklist by default
   (`--include-unverified` to show them) — they are a baseline gap, not
   movement. They still count as unsettled when deciding what blocks what, and
-  the excluded count is always printed.
+  the excluded count is printed whenever any were excluded.
 - **`drain`** — the supported close path. Bare, it lists open rows grouped by
   `correlation_id` (read-only). With `--close`/`--group` it writes the closes.
   Requires `--reason` for a wontfix and verifies each row actually closed,

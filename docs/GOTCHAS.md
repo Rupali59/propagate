@@ -710,3 +710,48 @@ hazard is not a check for it, and the fluency is what makes it feel handled.
 **Do:** when you build a check, run it against the thing that built it. The
 question is not "does this work" but "does this watch me". Installing a gate
 across a fleet is the moment to ask whether the fleet includes the toolchain.
+
+---
+
+### G49 · A deliberate NUL separator makes the whole file invisible to code search
+
+`` `${a}\u0000${b}` `` is the correct way to build a composite map key — NUL is the
+one byte that cannot occur in a path, so it is the only separator that cannot
+collide. Three files here use it and all three are right to:
+
+| File | Key |
+|---|---|
+| `lib/events.mjs:120` | `` `${nodeId}<NUL>${downstreamPath}<NUL>${why}` `` — the edge-id hash |
+| `lib/frontmatter.mjs:128,152` | `` `${p.sourceKey}<NUL>${p.index}` `` |
+| `lib/graph.mjs:344` | `` `${e.from}<NUL>${e.to}` `` — the duplicate-pair index |
+
+**The hazard is writing it as a raw byte instead of the `\u0000` escape.** One NUL
+makes the file "binary" to every search tool in this environment:
+
+- the `grep` shim passes `-I` (skip binary) — **no output, exit 1, no warning**,
+  indistinguishable from "that symbol is not in this file";
+- plain `grep -n` prints `Binary file … matches` and suppresses every matching line;
+- `file` reports `data`.
+
+Node does not care, the module loads, and the suite is green — so nothing else
+signals it. Global counterpart: `~/.claude/gotchas-global.md` G-A, second mechanism.
+
+**Signal:** a symbol you are certain exists returns zero matches. That certainty is
+the tell; do not resolve it by doubting yourself.
+
+**Cost:** 2026-08-19, while verifying the `lib/graph.mjs → SKILL.md` coupling. `grep`
+found `fixOrder` in `lib/graph-html.mjs` and **not** in `lib/graph.mjs`, which
+*exports* it. The next step was reporting that graph.mjs had lost its worklist
+implementation. Three wrong theories preceded the right one — gitignore, ugrep's
+`--ignore-files` (the already-documented mechanism, which was the confident guess),
+then binary detection — and only reading the bytes in node settled it. Caught before
+publishing, and only because the number was too surprising to accept.
+
+**Do:** write `\u0000`, six ASCII characters, in source. Runtime-identical, and the
+file stays text. `tests/no-literal-nul.test.mjs` asserts this across every tracked
+non-vendor file, so a new composite key cannot reintroduce it.
+
+**Do not** "fix" it by removing the separator. `${a}${b}` collides: `a/b` + `c` and
+`a` + `b/c` produce the same key, which for the duplicate-pair index and the edge-id
+hash is a correctness bug, not a style one.
+
