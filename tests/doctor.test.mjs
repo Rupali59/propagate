@@ -102,7 +102,12 @@ test("doctor fails when zero workspaces are discovered, not silently pass (N7)",
     const out = result.stdout + result.stderr;
     assert.notEqual(result.status, 0, "zero discovered workspaces must fail doctor, not report healthy");
     assert.match(out, /at least one workspace discovered/);
-    assert.match(out, /zero workspaces found/);
+    // Contract, not phrasing: name the condition AND the action. This asserted the
+    // literal "zero workspaces found" until 2026-08-19, which made it go red when the
+    // message was improved to distinguish a missing root from an unmarked one — a test
+    // that forbids its subject from getting better.
+    assert.match(out, /contains no workspace|search root/i, "must name the condition");
+    assert.match(out, /\.propagates\.yml|run `init`/, "must name the action");
   } finally {
     await rm(empty, { recursive: true, force: true });
   }
@@ -247,7 +252,14 @@ test("G20: zero discovered workspaces produces exactly ONE ✗ line, not two", a
       1,
       "workspaces.discovered is asserted exactly once, by EXPECTATIONS",
     );
-    assert.match(out, /zero workspaces found/, "detail from the old inline check is preserved");
+    // The point of this assertion is that EXPECTATIONS' detail and the inline check
+    // describe the same state in the same words (G20), not that any particular
+    // sentence survives. Both now render config.searchRootsExplain().
+    assert.match(
+      out,
+      /contains no workspace|search root/i,
+      "detail from the old inline check is preserved (same wording, both sites)",
+    );
   } finally {
     await rm(empty, { recursive: true, force: true });
   }

@@ -102,6 +102,8 @@ import {
   HEARTBEAT_PATH,
   WATCHER_LOG,
   SEARCH_ROOTS,
+  SEARCH_ROOTS_DIAGNOSTIC,
+  searchRootsExplain,
   DISCOVERY_DEGRADED,
   SUSPICIOUS_MARKERS,
   CROSS_LEDGER_JSONL,
@@ -589,6 +591,16 @@ async function statusJson() {
 }
 
 async function status() {
+  // A fresh machine used to reach the end of this function having printed
+  // NOTHING, and exit 0 — indistinguishable from a clean tree, which is the
+  // failure this skill exists to catch (lib/config.mjs:33-38 predicted it).
+  // Non-zero exit, because "I found nothing because I was pointed nowhere" is
+  // not a healthy state and must not be scriptable as one.
+  if (SEARCH_ROOTS_DIAGNOSTIC !== "ok" && !process.argv.includes("--json")) {
+    console.error(`${RED}✗ no workspaces${RESET} — ${searchRootsExplain()}`);
+    process.exitCode = 1;
+    return;
+  }
   if (process.argv.includes("--json")) {
     const obj = await statusJson();
     console.log(JSON.stringify(obj));
@@ -1268,7 +1280,7 @@ async function doctor() {
   info(
     "at least one workspace discovered",
     WORKSPACES.length === 0
-      ? `SEARCH_ROOTS=[${SEARCH_ROOTS.join(", ")}] — zero workspaces found; every per-workspace check below silently did not run`
+      ? `${searchRootsExplain()} — every per-workspace check below silently did not run`
       : `${WORKSPACES.length} found`,
   );
   if (DISCOVERY_DEGRADED) {
@@ -1599,6 +1611,7 @@ async function doctor() {
     // least as informative as the two-mechanism version it replaced.
     const violations = evaluateExpectations(metrics, EXPECTATIONS, {
       searchRoots: SEARCH_ROOTS,
+      searchRootsExplain: WORKSPACES.length === 0 ? searchRootsExplain() : null,
       decisionsPath,
       decisionsZeroEntries,
       ledgerUnknownTypesDetails,
