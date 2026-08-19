@@ -1,0 +1,16 @@
+#!/bin/sh
+# propagate's own drift gate.
+#
+# Could not fire until N32 was fixed (2026-08-19): `check` derived repoRoot from
+# `git rev-parse --show-toplevel` (the REAL path) while discovery reaches this repo
+# through ~/Documents/GitHub/propagate-skill, so nothing matched and the gate was
+# silently dead. It was installed, proven inert, and REMOVED the same day rather
+# than left as decoration (GOTCHAS G1) — this is the re-install, and it closes the
+# fourth instance in G48: an enforcement point that did not watch itself.
+#
+# Warn-only, exit 0: a declared coupling is information, and the answer is often
+# "no change needed". Bypass: PROPAGATE_SKIP=1 git commit ...
+if [ -z "${PROPAGATE_SKIP:-}" ]; then
+  node "$(git rev-parse --show-toplevel)/cli.mjs" check --staged || true
+fi
+exit 0

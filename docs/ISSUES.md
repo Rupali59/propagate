@@ -1173,7 +1173,7 @@ Recorded here rather than as separate issues; each is a docs/code disagreement, 
    `~/.claude/skills/propagate/.propagates.yml` exists and `reconcile --all` resolves 9
    edges under it. The backlog table is the stale copy, not the issue.
 
-### N32 · `check` cannot gate a repo that has a sidecar but is not a workspace root — **S1**
+### N32 · `check` cannot gate a repo that has a sidecar but is not a workspace root — **S1** — **RESOLVED 2026-08-19**
 
 **`check` silently matched nothing in this very repo, and would in any repo shaped like it.**
 Discovery works, the edges are evaluated by `reconcile`, `graph` lists them — only the
@@ -1215,5 +1215,16 @@ symlink map from discovery and consult it as a fallback.
 removed rather than left as decoration (GOTCHAS G1). The seven Vipin Kaushik repos are
 unaffected — verified: `marketing-intel` still warns correctly.
 
-**Related:** GOTCHAS **G48** (an enforcement point that does not watch itself) — this is the
-fourth instance in that entry.
+**Resolved 2026-08-19.** `resolveChangedFile` now translates real -> link as a fallback:
+when the lexical match fails it realpaths the changed file and, for each workspace, checks the
+symlinked children of that root (depth 1, cached) for one whose target contains it, then rewrites
+the prefix and retries. That produces `propagate-skill/lib/metrics.mjs` — exactly the key
+`buildEdgeMap` emits. Depth 1 is deliberate: every symlinked repo here is an immediate child of a
+search root, and a deeper scan would cost syscalls on every unmatched file for a case nobody has.
+
+The gate is re-installed in this repo and verified firing on the same command that printed nothing.
+Covered by two tests in `tests/check.test.mjs` — the symlink case **and** a negative control proving
+the symlink is what makes it findable, mirroring `tests/journal.test.mjs:44-63`.
+
+**Related:** GOTCHAS **G48** (an enforcement point that does not watch itself) — this was the
+fourth instance in that entry, and is now the first one closed.

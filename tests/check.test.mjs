@@ -10,7 +10,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -200,4 +200,65 @@ test("resolveChangedFile: nearest-ancestor wins for nested workspaces (F4)", asy
 test("resolveChangedFile: path outside every workspace returns null", () => {
   const resolved = resolveChangedFile("/no/such/workspace/file.md", []);
   assert.equal(resolved, null);
+});
+
+/**
+ * N32 — `check` must gate a repo reached through a symlink.
+ *
+ * Everything except `check` stays inside the sidecar's own LEXICAL namespace:
+ * reconcile does `path.resolve(sidecarDir, sourceKey)` where sidecarDir came from a walk
+ * that follows markered symlinks by their link path. `check` is the only caller that
+ * injects an externally-supplied root — `git rev-parse --show-toplevel`, which always
+ * reports the REAL path — so the lexical prefix match found nothing and dropped it
+ * silently. Measured 2026-08-19 in this repo: `check --staged` on a declared source
+ * printed nothing and exited 0 while its two edges sat DRIFTED through six commits.
+ *
+ * Realpath-on-both-sides does NOT fix this and must not be reintroduced: the workspace
+ * root is not the symlink — the FILE is reachable only through one. See docs/ISSUES.md N32,
+ * which records both failed attempts.
+ */
+test("N32 — a coupling under a symlinked dir is found when repoRoot is the REAL path", async () => {
+  const ws = await makeWorkspace("chk-symlink-");
+
+  // The real repo lives outside the workspace; only a symlink puts it inside.
+  const outside = await mkdtemp(path.join(tmpdir(), "chk-symlink-real-"));
+  await mkdir(path.join(outside, "lib"), { recursive: true });
+  await writeFile(path.join(outside, "lib", "thing.mjs"), "export const x = 1;");
+  await writeFile(path.join(outside, "SPEC.md"), "spec v1");
+  await writeFile(
+    path.join(outside, ".propagates.yml"),
+    "sources:\n  lib/thing.mjs:\n    propagates_to:\n      - path: SPEC.md\n        why: the spec documents this module\n        kind: code\n",
+  );
+  await symlink(outside, path.join(ws.root, "linked-repo"));
+
+  // What git would hand `check`: the REAL path, never the link.
+  const couplings = await computeCouplings(["lib/thing.mjs"], outside, [ws]);
+
+  assert.equal(
+    couplings.length,
+    1,
+    "a declared source under a symlinked dir must be gated — this returned [] before N32 was fixed",
+  );
+  //  is workspace-relative and MUST go through the link namespace — that is the
+  // whole fix.  is also exactly the key buildEdgeMap produces.
+  assert.equal(couplings[0].file, path.join("linked-repo", "lib", "thing.mjs"));
+  assert.deepEqual(couplings[0].coupled, [path.join("linked-repo", "SPEC.md")]);
+});
+
+test("N32 negative control — without the symlink there is nothing to find", async () => {
+  // Proves the fix, not the platform. If this also passed, the test above would be
+  // passing for some reason other than symlink resolution.
+  const ws = await makeWorkspace("chk-nolink-");
+  const outside = await mkdtemp(path.join(tmpdir(), "chk-nolink-real-"));
+  await mkdir(path.join(outside, "lib"), { recursive: true });
+  await writeFile(path.join(outside, "lib", "thing.mjs"), "export const x = 1;");
+  await writeFile(path.join(outside, "SPEC.md"), "spec v1");
+  await writeFile(
+    path.join(outside, ".propagates.yml"),
+    "sources:\n  lib/thing.mjs:\n    propagates_to:\n      - path: SPEC.md\n        why: the spec documents this module\n        kind: code\n",
+  );
+  // no symlink into ws.root
+
+  const couplings = await computeCouplings(["lib/thing.mjs"], outside, [ws]);
+  assert.deepEqual(couplings, [], "an unlinked outside repo is genuinely out of scope");
 });

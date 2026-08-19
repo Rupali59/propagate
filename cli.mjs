@@ -1799,13 +1799,73 @@ async function reload() {
  * @param {Array} workspaces
  * @returns {{workspace: object, rel: string} | null}
  */
+/**
+ * Symlinked children of a workspace root, as {link, real}. Cached per root.
+ *
+ * Depth 1 only, and deliberately: this exists to translate ONE path back into the
+ * workspace's namespace, not to re-walk the tree. Every symlinked repo in this ecosystem
+ * is an immediate child of a search root (`propagate-skill`, `rules`), and a deeper scan
+ * on a fallback path would cost syscalls on every unmatched file to buy a case nobody has.
+ */
+const _wsLinkCache = new Map();
+function workspaceLinks(root) {
+  if (_wsLinkCache.has(root)) return _wsLinkCache.get(root);
+  const links = [];
+  try {
+    for (const e of readdirSync(root, { withFileTypes: true })) {
+      if (!e.isSymbolicLink()) continue;
+      const link = path.join(root, e.name);
+      try {
+        links.push({ link, real: realpathSync(link) });
+      } catch {
+        // dangling link — not a match, not an error
+      }
+    }
+  } catch {
+    // unreadable root: no links, never a throw
+  }
+  _wsLinkCache.set(root, links);
+  return links;
+}
+
 export function resolveChangedFile(absPath, workspaces = WORKSPACES) {
-  const matches = workspaces.filter(
-    (ws) => absPath === ws.root || absPath.startsWith(ws.root + path.sep),
-  );
-  if (matches.length === 0) return null;
-  const ws = matches.reduce((best, w) => (w.root.length > best.root.length ? w : best));
-  return { workspace: ws, rel: path.relative(ws.root, absPath) };
+  const under = (root, p) => p === root || p.startsWith(root + path.sep);
+  const pick = (ms, base, p) => {
+    const ws = ms.reduce((best, w) => (w.root.length > best.root.length ? w : best));
+    return { workspace: ws, rel: path.relative(base(ws), p) };
+  };
+
+  const matches = workspaces.filter((ws) => under(ws.root, absPath));
+  if (matches.length > 0) return pick(matches, (ws) => ws.root, absPath);
+
+  // N32. Everything except `check` stays in the sidecar's LEXICAL namespace — reconcile
+  // resolves sources against a sidecarDir that came from a walk following markered
+  // symlinks by their LINK path. `check` is the only caller that injects an external root
+  // (`git rev-parse --show-toplevel`), which always reports the REAL path. So a repo
+  // reached through a symlink matched nothing here and was dropped silently at the call
+  // site — discovery worked, reconcile and graph listed its edges, and only the
+  // commit-time gate was dead. In this repo that hid two DRIFTED edges across six commits.
+  //
+  // The fix translates real -> link, which is the direction that works. Realpath on BOTH
+  // sides does not and must not be reintroduced: the workspace root is not the symlink,
+  // the file is reachable only through one. lib/reconcile.mjs:431 already realpaths both
+  // sides, which is why the inbound advisory functioned while the gate did not.
+  let realChanged;
+  try {
+    realChanged = realpathSync(absPath);
+  } catch {
+    return null; // deleted file: no realpath, not a match
+  }
+  for (const ws of workspaces) {
+    for (const { link, real } of workspaceLinks(ws.root)) {
+      if (!under(real, realChanged)) continue;
+      const viaLink = path.join(link, path.relative(real, realChanged));
+      if (under(ws.root, viaLink)) {
+        return { workspace: ws, rel: path.relative(ws.root, viaLink) };
+      }
+    }
+  }
+  return null;
 }
 
 /**
