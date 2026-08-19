@@ -6,8 +6,16 @@
 > contents were later overwritten by an unrelated design. A dangling citation in a tool whose
 > thesis is traceability. Plans that govern this repo live here and are linked from `STATE.md`.
 >
-> **Status:** ACTIVE — Phases 0-5 complete. Phase 6 (skill-creation conformance)
-> pending.
+> **Status:** COMPLETE — Phases 0-6 done.
+>
+> **Phase 6's baseline falsified this plan's own prediction.** 6b predicted the fresh
+> agent would "never find PROPAGATE_SEARCH_ROOTS and declare success on zero
+> workspaces". Phases 1-4 had already fixed that: the agent found `setup`, ran it, and
+> it worked. The real gap was different and only a baseline could have found it —
+> `bootstrap` appeared **zero** times in SKILL.md as a command, so a fresh install
+> landed on a red `doctor` with no documented way forward. It also surfaced two checks
+> that fail every machine but this one (G50), one of them a regression Phase 2
+> introduced four commits earlier.
 >
 > **Phase 5 found a dead detector, not just a misplaced one.** Three of the sixteen
 > rules had fingerprints that could never fire, because frontmatter was parsed with a

@@ -22,7 +22,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -150,3 +150,78 @@ test("a configured, marked workspace is discovered — the guard must not fire o
     "a root containing a workspace: true marker must be discovered",
   );
 });
+
+test("doctor does not fail a fresh machine over the RETIRED watcher's state.json", () => {
+  // Found by the Phase 6 baseline (a fresh-context agent installing from SKILL.md
+  // alone): on a new machine `doctor` exits 1 partly on `✗ state.json exists`, with
+  // NO reason printed. The only writer of that file is watcher.mjs, which was retired
+  // 2026-08-14 and now refuses to run — so the file will never be created, and the
+  // check can never pass on any machine installed after that date.
+  //
+  // It passes on the author's machine only because a FOSSIL is still on disk, dated
+  // the day of the retirement. A check that is green by leftover and red everywhere
+  // else is measuring the wrong thing.
+  //
+  // tests/doctor-check-coverage.test.mjs recorded the suspicion on 2026-08-14 —
+  // "may be removable rather than testable. Verify before writing fixtures" — and
+  // this is that verification. Contradicting the documented posture directly:
+  // "doctor and the digest report the replacement's health (event store + reconcile),
+  // not the retired watcher's".
+  //
+  // NOTE ON THE ASSERTION ITSELF. The first version matched /✗ state\.json exists/ and
+  // PASSED against the broken code — doctor prints `\x1b[31m✗\x1b[0m state.json exists`,
+  // so the reset sequence sits between the mark and the label and the literal never
+  // occurs. A test that cannot fail is worse than no test (GOTCHAS G1); strip ANSI
+  // first, then assert.
+  const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+  const r = runIsolated(["doctor"]);
+  const plain = strip(r.stdout);
+  assert.doesNotMatch(
+    plain,
+    /✗ state\.json exists/,
+    "a fresh machine must not be FAILED for a retired component's artifact",
+  );
+  // Not merely deleted: the absence still has to be attributable, so it must still
+  // be reported — as information, with the reason.
+  assert.match(plain, /state\.json/, "the state must still be named, just not as a failure");
+});
+
+test("an UNCONFIGURED cross-repo allowlist is not a doctor failure", () => {
+  // A REGRESSION I INTRODUCED IN PHASE 2, found by the Phase 6 GREEN baseline.
+  //
+  // Phase 2 emptied the SHIPPED cross-allow.yml, correctly: an empty allowlist permits
+  // no cross-repo edge, so a fresh install cannot fire one it was never configured
+  // for. But doctor then reported the resulting "N outside-allowlist" as a FAILURE, so
+  // every fresh machine with real repos got `✗ cross-repo edges resolve` and exit 1 —
+  // for not having configured an optional feature. Before Phase 2 it passed only
+  // because the author's three repo roots shipped inside the file.
+  //
+  // The distinction that matters, and the one the check was missing:
+  //   allowlist EMPTY   + edges outside it -> NOT CONFIGURED. Informational.
+  //   allowlist present + edges outside it -> a real failure: a declared edge reaches
+  //                                          past the bound someone set.
+  // Emptiness is a state to report, not a verdict to fail. Same shape as the retired
+  // watcher's state.json above.
+  const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+  const home = mkdtempSync(path.join(tmpdir(), "propagate-xallow-"));
+  try {
+    const env = { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") };
+    // Real roots: the failure needs actual repos carrying cross edges to appear at all.
+    const roots = path.join(process.env.HOME, "Documents", "GitHub");
+    const run = (args) => {
+      const r = spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8" });
+      return strip(`${r.stdout ?? ""}${r.stderr ?? ""}`);
+    };
+    run(["setup", "--roots", roots]);
+    const out = run(["doctor"]);
+    assert.doesNotMatch(
+      out,
+      /✗ cross-repo edges resolve/,
+      "an unconfigured allowlist must not FAIL a fresh install",
+    );
+    assert.match(out, /allowlist/i, "but it must still say the allowlist is unconfigured");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+

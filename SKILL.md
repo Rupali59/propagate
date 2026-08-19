@@ -1,6 +1,6 @@
 ---
 name: propagate
-description: Manage the propagation ledger — drain open drift events, check system health (event store + reconcile — the retired watcher's replacement), declare sidecars, init new directories. Triggers on "/propagate", "drain propagation", "what depends on this", "propagation status", or any reference to PROPAGATION_LEDGER.
+description: Use when a change to one file needs to reach files that must move with it — across branches, worktrees, or repos. Triggers on "/propagate", "propagation status", "drain propagation", "what depends on this", "did anything drift", "what did I forget to update", a red or unexplained propagate check, or any reference to PROPAGATION_LEDGER or a .propagates.yml sidecar.
 ---
 
 # /propagate — Propagation skill
@@ -30,6 +30,29 @@ directly. The one thing this trades away is sub-daily proactive
 notification — nothing pings you mid-day anymore; see `docs/DECISIONS.md`
 2026-08-14 for the full tradeoff. `doctor` and the digest report the
 replacement's health (event store + reconcile), not the retired watcher's.
+
+## Setup — once per machine, in this order
+
+A fresh install is not configured, and every command below tells you which step you
+are missing rather than assuming you ran it.
+
+| # | Command | What it establishes |
+|---|---|---|
+| 1 | `npm install` in the skill directory | dependencies |
+| 2 | `node cli.mjs setup --roots <dir>[:<dir>]` | where your repos live. Omit `--roots` to probe common layouts; it **exits non-zero** unless discovery then finds ≥1 workspace, so a broken install cannot report success |
+| 3 | `node cli.mjs bootstrap --baseline-from-git --apply` | the verification baseline. **Without this the event store is empty**, every edge reads `NEVER_VERIFIED`, and `doctor` is red. `bootstrap` is dry-run without `--apply` |
+| 4 | `node cli.mjs doctor` | confirms 2 and 3 actually took |
+
+**Step 3 is the one people miss.** `setup` succeeding and `status` printing workspaces
+is not a finished install — it is a configured one with nothing verified yet, and the
+difference is exactly what `doctor` exits non-zero to tell you. This ordering is the
+fix for a measured failure: a fresh agent given only this file got through `setup`,
+saw `status` print 11 workspaces, and reported the install broken, because `doctor`
+was red and nothing here named the step that clears it.
+
+If a step fails, it names its own cause — `roots-missing` is a config error,
+`no-markers` is an onboarding step (`init <dir> --workspace`). Full table:
+`docs/REFERENCE.md` § Install.
 
 ## Contract
 

@@ -1050,7 +1050,26 @@ async function doctor() {
   }
 
   console.log(`\n${BOLD}# State${RESET}`);
-  check("state.json exists", existsSync(STATE_PATH));
+  // INFO, NOT A CHECK — the v1 watcher was retired 2026-08-14 and watcher.mjs is the
+  // ONLY thing that ever wrote state.json. So on any machine installed after that date
+  // the file will never exist, and a `check()` here fails every fresh install forever
+  // for the absence of a dead component's artifact.
+  //
+  // It reads green on the author's machine only because a FOSSIL is still on disk,
+  // dated the day of the retirement. Green-by-leftover and red everywhere else is a
+  // check measuring the wrong thing, and it contradicted this command's own
+  // documented posture: doctor reports the REPLACEMENT's health (event store +
+  // reconcile), not the retired watcher's.
+  //
+  // Reported, never swallowed — absence must stay attributable
+  // (rule:discernment-checks §2). Same treatment the monitor log already gets above.
+  // Found by the Phase 6 baseline; tests/doctor-check-coverage.test.mjs had recorded
+  // the suspicion on 2026-08-14 and asked for exactly this verification first.
+  if (existsSync(STATE_PATH)) {
+    info("state.json", `present (${STATE_PATH.replace(HOME_DIR, "~")}) — v1 watcher fossil, read by nothing live`);
+  } else {
+    info("state.json", "absent — expected: the v1 watcher that wrote it was retired 2026-08-14");
+  }
   if (existsSync(STATE_PATH)) {
     try {
       const raw = await readFile(STATE_PATH, "utf8");
@@ -1229,8 +1248,36 @@ async function doctor() {
   console.log(`\n${BOLD}# Cross-repo${RESET}`);
   try {
     const x = await checkCrossRepo();
-    check("cross-repo edges resolve", x.missing === 0 && x.outsideAllowlist === 0,
-      `${x.edges} edges, ${x.missing} missing, ${x.outsideAllowlist} outside-allowlist`);
+    // "Outside the allowlist" means two different things, and conflating them made every
+    // fresh install red. If the allowlist is EMPTY, cross-repo is simply not configured —
+    // the shipped cross-allow.yml is deliberately empty so a new machine permits no cross
+    // edge it was never told about (Phase 2). Failing an install for not having
+    // configured an optional feature is the same mistake as failing it for the retired
+    // watcher's state.json.
+    //
+    // If the allowlist is NON-EMPTY and an edge still falls outside it, that IS a
+    // failure: a declared edge reaches past a bound someone deliberately set.
+    //
+    // The safety property is untouched either way — an empty allowlist still permits
+    // nothing. This changes only how doctor DESCRIBES that state.
+    let allowlistConfigured = false;
+    try {
+      const { CROSS_ALLOW_PATH } = await import("./lib/config.mjs");
+      const parsedAllow = YAML.parse(readFileSync(CROSS_ALLOW_PATH, "utf8"));
+      allowlistConfigured = Array.isArray(parsedAllow?.partner_roots) && parsedAllow.partner_roots.length > 0;
+    } catch {
+      allowlistConfigured = false;
+    }
+    const crossDetail = `${x.edges} edges, ${x.missing} missing, ${x.outsideAllowlist} outside-allowlist`;
+    if (!allowlistConfigured && x.outsideAllowlist > 0 && x.missing === 0) {
+      info(
+        "cross-repo edges resolve",
+        `${crossDetail} — allowlist is empty, so cross-repo is UNCONFIGURED, not violated. ` +
+          `Add partner_roots to $PROPAGATE_STATE_DIR/cross-allow.yml to enable these edges.`,
+      );
+    } else {
+      check("cross-repo edges resolve", x.missing === 0 && x.outsideAllowlist === 0, crossDetail);
+    }
     // G7: every fired row must carry a normalized `partner` join key.
     const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
     const rows = await readLedger(CROSS_LEDGER_JSONL);

@@ -35,9 +35,16 @@ function checkLabels() {
 const covered = (label) => TESTS.includes(label.split("—")[0].trim().slice(0, 34));
 
 // Recorded 2026-08-14. Each entry is a check nothing has ever proven can fail.
-// Three of these — the state.json trio — assert artifacts of the watcher that was
-// RETIRED 2026-08-14, so they may be removable rather than testable. Verify before
-// writing fixtures for them.
+//
+// The state.json trio was flagged here on 2026-08-14 as "may be removable rather than
+// testable — verify before writing fixtures". VERIFIED 2026-08-19, by the Phase 6
+// baseline: `state.json exists` was FAILING every fresh install for a file only the
+// retired watcher ever wrote, while reading green here purely because a fossil dated
+// the day of the retirement is still on disk. It is now `info`, not a check, and its
+// entry is gone from the list below — the debt is paid, not deferred.
+//
+// The other two stay: `parseable` only runs when the file exists, so it cannot fail a
+// fresh machine, and `.bak` already degrades to `!` with a reason.
 const KNOWN_UNCOVERED = [
   "Affects: tokens parse",
   "cross rows carry partner",
@@ -51,7 +58,6 @@ const KNOWN_UNCOVERED = [
   "no source open in more than one ledger",
   "no suspicious workspace markers",
   "no unreachable workspace markers",
-  "state.json exists",
   "state.json parseable",
   "state.json.bak exists",
 ];

@@ -765,3 +765,37 @@ untracked offender in `lib/` and watching it fail. Same shape as G48.
 `a` + `b/c` produce the same key, which for the duplicate-pair index and the edge-id
 hash is a correctness bug, not a style one.
 
+---
+
+### G50 · A check that fails for an UNCONFIGURED optional feature fails every fresh install
+
+Two doctor checks were failing new machines for states that are correct on a new
+machine, and both read green here only by accident of local history:
+
+| Check | Failed because | Green here because |
+|---|---|---|
+| `state.json exists` | only `watcher.mjs` ever wrote it, and the watcher was **retired 2026-08-14** — so it can never exist on a machine installed after that date | a **fossil** dated the day of the retirement is still on disk |
+| `cross-repo edges resolve` | Phase 2 correctly emptied the shipped `cross-allow.yml`, so all 4 edges are "outside allowlist" | the real allowlist sits in `~/.propagate/cross-allow.yml` |
+
+**The distinction the checks were missing is between UNCONFIGURED and VIOLATED.** An
+empty allowlist permits no cross edge — that is the safety property working. An edge
+outside a **non-empty** allowlist is a genuine violation. Same verdict for both was
+what made "not configured yet" indistinguishable from "someone broke the bound".
+
+**Signal:** the check is green on the machine that wrote it and red on every other
+one, and the failing text describes a state you would expect a new install to be in.
+
+**Cost:** two fresh-context agents each concluded "propagate is NOT correctly set up"
+on a machine where nothing was actually wrong. The second failure was a regression
+introduced by Phase 2 four commits earlier and invisible until someone simulated a new
+machine — `doctor` exits 0 here, and did throughout.
+
+**Do:** before a check votes, ask what a correct fresh install looks like. If the
+failing state is one a new machine is *supposed* to be in, it is `info` with the
+configuring action named — never a ✗. Absence still has to be attributable
+(rule:discernment-checks §2), so report it; just do not fail it.
+
+**The general form:** a check inherits its author's machine unless something forces it
+off. `HOME=$(mktemp -d)` in a test is that force. Both of these had existed for weeks
+with a green suite.
+
