@@ -4075,6 +4075,66 @@ const _invokedDirectly = (() => {
     return false; // argv[1] not a resolvable path (bundled/eval) -- do not dispatch
   }
 })();
+/**
+ * graph-index — build the queryable graph projection over the state ledger.
+ *
+ * Derived and disposable (lib/graph-index.mjs). Writes to $STATE_DIR, not the
+ * plugin dir: a marketplace update destroys that (N13/N14), and this is
+ * regenerable anyway. Exits 1 if the projection disagrees with the live
+ * derivation — that is a finding about the extractor, never something to tune.
+ */
+async function graphIndexCmd() {
+  const args = process.argv.slice(3);
+  const emit = args.includes("--emit") ? args[args.indexOf("--emit") + 1] : "sqlite";
+  const outFlag = args.includes("--out") ? args[args.indexOf("--out") + 1] : null;
+  const asJson = args.includes("--json");
+  // Same root lib/events.mjs uses; deliberately not the plugin dir (N13/N14).
+  const root = process.env.PROPAGATE_STATE_DIR || path.join(process.env.HOME || ".", ".propagate");
+
+  const gi = await import("./lib/graph-index.mjs");
+  const t0 = Date.now();
+  const model = await gi.buildModel(WORKSPACES, {});
+  const ms = Date.now() - t0;
+  const s = model.stats;
+
+  if (emit === "cypher") {
+    const out = outFlag || path.join(root, "graph-index.cypher");
+    await writeFile(out, gi.emitCypher(model), "utf8");
+    if (asJson) console.log(JSON.stringify({ emit, out, ms, stats: s }, null, 2));
+    else console.log(`graph-index  cypher -> ${out} (${ms}ms)`);
+    return;
+  }
+  if (emit !== "sqlite") {
+    console.error(`unknown --emit: ${emit} (expected sqlite|cypher)`);
+    process.exitCode = 2;
+    return;
+  }
+  const out = outFlag || path.join(root, "graph-index.db");
+  gi.emitSqlite(model, out);
+  if (asJson) {
+    console.log(JSON.stringify({ emit, out, ms, stats: s }, null, 2));
+  } else {
+    console.log(`graph-index -> ${out} (${ms}ms)\n`);
+    console.log(`  ${s.nodes} nodes (${s.files} file, ${s.projects} project, ${s.decisions} decision)`);
+    console.log(`  ${s.edges} edges (${s.declares} DECLARES, ${s.affects} AFFECTS, ${s.inProject} IN, ${s.blocks} BLOCKS)`);
+    console.log(`  ${s.events} events (${s.eventsMalformed} malformed)`);
+    if (s.unresolvedAffects > 0) {
+      console.log(
+        `\n  ${s.unresolvedAffects} of ${s.affects} AFFECTS tokens resolve to no project.` +
+          ` The \`Affects:\` vocabulary is uncontrolled — see v_coverage_gap.`,
+      );
+    }
+    console.log(`\n  views: v_blast_radius, v_archaeology, v_edge_history, v_coverage_gap`);
+  }
+  if (s.declares !== s.graphEdges || s.files !== s.graphNodes) {
+    console.error(
+      `graph-index: DISAGREES with the live derivation — ` +
+        `projection ${s.files}/${s.declares} vs graph ${s.graphNodes}/${s.graphEdges}`,
+    );
+    process.exitCode = 1;
+  }
+}
+
 if (_invokedDirectly) {
   const mode = process.argv[2] || "status";
   if (mode === "status") {
@@ -4111,11 +4171,13 @@ if (_invokedDirectly) {
     await backlogCmd();
   } else if (mode === "graph") {
     await graphCmd();
+  } else if (mode === "graph-index") {
+    await graphIndexCmd();
   } else if (mode === "monitor") {
     await monitorCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
     process.exit(2);
   }
 }

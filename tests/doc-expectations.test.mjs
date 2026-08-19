@@ -22,21 +22,26 @@ const byKey = (k) => {
 test("prose-only supersession ratchet holds at baseline, and FAILS when it grows", () => {
   const e = byKey("docs.supersession_prose_only");
   // Baseline lowered 107 -> 105 on 2026-08-18 after lib/doc-kind.mjs stopped counting
-  // the archival FILENAME mandated by STATE_MANAGEMENT.md §88-93. Lowering is explicitly
-  // sanctioned by the expectation's own rule; raising is not.
-  assert.equal(e.assert({ "docs.supersession_prose_only": 105 }), true, "baseline must hold");
+  // the archival FILENAME mandated by STATE_MANAGEMENT.md §88-93, then 105 -> 103 on
+  // 2026-08-19 after five docs gained a real `supersedes:` frontmatter declaration.
+  // Lowering is explicitly sanctioned by the expectation's own rule; raising is not.
+  //
+  // This test is the coupling alarm for that value, and it worked: the 105 -> 103 change
+  // landed in lib/metrics.mjs without touching this file and turned the suite red on the
+  // next run. Move both together, always.
+  assert.equal(e.assert({ "docs.supersession_prose_only": 103 }), true, "baseline must hold");
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 106 }),
+    e.assert({ "docs.supersession_prose_only": 104 }),
     false,
     "one more prose-only supersession must fail the run — this is the whole point of a ratchet",
   );
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 107 }),
+    e.assert({ "docs.supersession_prose_only": 105 }),
     false,
     "the OLD baseline must now fail — otherwise lowering the ratchet did nothing",
   );
   assert.equal(e.assert({ "docs.supersession_prose_only": 90 }), true, "shrinking must hold");
-  assert.match(e.detail({ "docs.supersession_prose_only": 106 }), /GREW/);
+  assert.match(e.detail({ "docs.supersession_prose_only": 104 }), /GREW/);
 });
 
 test("unresolvable supersedes target fails — a declaration that lies is worse than prose", () => {
