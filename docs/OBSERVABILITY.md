@@ -34,6 +34,21 @@ non-zero.
 Emitted per watcher run and per CLI invocation. `expectation` is the load-bearing
 column; without it the metric is decoration.
 
+> **This table is the human form of `EXPECTATIONS` in `lib/metrics.mjs`, and the
+> `.propagates.yml` edge between them exists to keep it that way.** Measured
+> 2026-08-19: 4 of 8 entries were missing here — `graph.cycles`,
+> `graph.duplicate_pairs`, `docs.supersedes_unresolvable` and
+> `docs.supersession_prose_only` were all asserted in code and documented nowhere.
+> The edge had been DRIFTED throughout. **Adding an EXPECTATIONS entry means adding
+> a row here in the same commit**; the ratchet value in particular must match, since
+> the number is the whole claim.
+>
+> Note the row below avoids the bare word for its own metric on purpose. The detector
+> greps `/supersede/i` per line and cannot tell a claim ("this replaces X") from a
+> description of the check itself — so documenting the metric tripped its own ratchet,
+> 103 -> 104, on the commit that added this table row. Rewording a non-claim is not
+> gaming the number; rewording an actual claim would be.
+
 | Metric | Type | Expectation (the alert) | Catches |
 |---|---|---|---|
 | `workspaces.discovered` | gauge | **≥ 1 always**; any drop ≥50% run-over-run | N7 · discovery break |
@@ -45,6 +60,10 @@ column; without it the metric is decoration.
 | `rows.open` | gauge | trend must be flat or falling over 30d | the 298-rows-become-furniture failure |
 | `close.calls{by}` | counter | **> 0 over 30d** | `markStatus` had **zero** callers for months |
 | `close.verified` / `.attempted` | counter | **equal** | N4 · close that silently no-ops |
+| `graph.cycles` | gauge | **== 0** | a mutually-declared pair has no fix order — verify either side and the other re-arms |
+| `graph.duplicate_pairs` | gauge | **== 0** | one coupling declared twice gets two edge_ids; close one and the other stays open forever |
+| `docs.supersedes_unresolvable` | gauge | **== 0** | a `supersedes:` naming a path that does not exist looks machine-checked and is not |
+| `docs.supersession_prose_only` | gauge | **≤ 103**, ratchet — must not grow | a claim made only in prose is one-way: the overruled doc never learns it was replaced |
 | `ledger.unknown_types` | gauge | **0** | N1 · a `manual` row invisible since 2026-06-20 |
 | `ledger.duplicate_ids` | gauge | **0** | N2/N3 · id 256 existed twice |
 | `ledger.rows_open_multi_ledger` | gauge | **0** | A2 · 28 live instances |

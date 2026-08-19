@@ -7,7 +7,7 @@
 > thesis is traceability. Plans that govern this repo live here and are linked from `STATE.md`.
 >
 > **Status:** ACTIVE — Phase 0 complete (this file). Phases 1-6 pending.
-> Supersede by editing this file's status line; do not delete.
+> Retire by editing this file's status line; do not delete.
 
 # Make propagate portable, own the global-rules lifecycle, and conform to skill-creation guidelines
 

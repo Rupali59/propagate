@@ -1172,3 +1172,48 @@ Recorded here rather than as separate issues; each is a docs/code disagreement, 
    heading in this file reads **RESOLVED 2026-08-17**. Verified the same day:
    `~/.claude/skills/propagate/.propagates.yml` exists and `reconcile --all` resolves 9
    edges under it. The backlog table is the stale copy, not the issue.
+
+### N32 · `check` cannot gate a repo that has a sidecar but is not a workspace root — **S1**
+
+**`check` silently matched nothing in this very repo, and would in any repo shaped like it.**
+Discovery works, the edges are evaluated by `reconcile`, `graph` lists them — only the
+commit-time gate is dead, which is the quietest failure available: a gate that never fires
+looks exactly like a repo with no couplings.
+
+**Measured 2026-08-19.** `lib/metrics.mjs` is a declared source with two downstreams
+(`docs/OBSERVABILITY.md`, `docs/GOTCHAS.md`). Staging it and running `check --staged` in
+`~/.claude/skills/propagate` printed nothing, exit 0. The same command in
+`Vipin Kaushik/marketing-intel` correctly warned. Its two edges had been DRIFTED for the whole
+session while six commits landed.
+
+**Mechanism.** `check()` derives `repoRoot` from `git rev-parse --show-toplevel`, which always
+reports the **real** path. This repo is reached by discovery through
+`~/Documents/GitHub/propagate-skill` → `~/.claude/skills/propagate` (a markered symlink,
+followed per N29). `resolveChangedFile()` then matches the changed file against
+`WORKSPACES[].root` by prefix, and:
+
+  - the file's real path is not under any workspace root — it is inside the hub workspace
+    only *via* the symlink;
+  - `propagate-skill` is not itself a workspace root (its `.propagates.yml` carries no
+    `workspace: true`, correctly — the 2026-08-18 "one ledger" decision).
+
+So there is no candidate to match, and `cd`-ing to the symlink path does not help: git resolves
+it before `check` ever sees it.
+
+**Two fixes that do NOT work**, both tried and reverted the same day so nobody repeats them:
+  1. Comparing realpaths on both sides. The workspace root is not a symlink; the *file* is
+     reachable only through one. Real→real can never bridge that.
+  2. Running the hook from the symlink path. `git rev-parse --show-toplevel` returns the real
+     path regardless of cwd.
+
+**What would work** — resolution must map the real path *into* the workspace's namespace, using
+the symlinks discovery already followed. `doctor` reports "symlinked dirs seen", so the
+information exists; it is simply not available to `resolveChangedFile`. Export the followed
+symlink map from discovery and consult it as a fallback.
+
+**Not fixed here on purpose.** A gate that cannot fire was installed in this repo and then
+removed rather than left as decoration (GOTCHAS G1). The seven Vipin Kaushik repos are
+unaffected — verified: `marketing-intel` still warns correctly.
+
+**Related:** GOTCHAS **G48** (an enforcement point that does not watch itself) — this is the
+fourth instance in that entry.

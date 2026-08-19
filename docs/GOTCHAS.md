@@ -677,3 +677,36 @@ NEVER_VERIFIED one takes its place. On 2026-08-17 that silently laundered a
 DIVERGED edge off the worklist — the state was not resolved, the edge was
 re-identified. Same mechanism retires 10 edges' history whenever a file is
 renamed. If you rewrite a `why`, expect to re-verify, and say so in the reason.
+
+### G48 · An enforcement point that does not watch itself
+
+Four instances in one session, all the same shape: a mechanism that enforces a
+property on others, and is exempt from it.
+
+- **`lib/config.mjs`** documented the silent-zero-discovery failure in prose
+  (`:33-38`, "reports healthy forever, which is precisely the failure this skill
+  exists to catch") and never implemented the detection. Fixed 2026-08-19.
+- **`rules/_check.mjs`** enforces that no `CLAUDE.md` restates a rule, while its
+  own `TREE` is hardcoded with no env override — on any other machine it scans an
+  empty tree, finds 0 restatements and **exits 0, reporting success**.
+- **`lib/skills-create.mjs:206-209`** is the canonical text of
+  `rule:description-standard` ("a description states WHEN to use the thing"), and
+  this skill's own `SKILL.md` description opens by summarising its workflow —
+  exactly what that rule forbids.
+- **The drift gate installed in seven repos on 2026-08-19 was not installed in
+  this one.** Six commits landed here that day without it, including two to
+  `lib/metrics.mjs` — a declared source whose two downstreams were DRIFTED the
+  whole time.
+
+**Cost, measured:** `docs.supersession_prose_only` was added to `EXPECTATIONS`
+with a threshold and a dated `basis`, and **4 of 8 expectations turned out to be
+absent from `docs/OBSERVABILITY.md` §1** — the table that edge exists to keep in
+sync. The number moved 107 → 105 → 103 across three sessions and the doc never
+learned any of it.
+
+**Signal:** you can describe the failure fluently in a comment. Prose about a
+hazard is not a check for it, and the fluency is what makes it feel handled.
+
+**Do:** when you build a check, run it against the thing that built it. The
+question is not "does this work" but "does this watch me". Installing a gate
+across a fleet is the moment to ask whether the fleet includes the toolchain.
