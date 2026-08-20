@@ -1500,3 +1500,45 @@ reviewed plan — moving command bodies into lib modules — after which
 an edge that cries wolf would trade a visible gap for an invisible one, which is the
 trade this register exists to prevent.
 
+---
+
+### N38 · The private→public coupling has no watcher — `release --check` step 3 is a procedure, not a check — **S2** — **OPEN**
+
+Raised while defining release mechanics
+(`~/.claude/plans/status-temporal-plum.md` §4, "named, deferred, not faked"). Recorded
+so a future pass does not read `make-public --check` passing as evidence the two-repo
+coupling is watched — that claim was drafted once already in this plan's first pass
+and caught in adversarial review before it shipped (A3 in the plan file): the draft
+declared `VERSION → docs/RELEASE.md` and called the cross-repo problem closed. That
+edge is within THIS repo; it says nothing about the repo that does not exist yet.
+
+**The actual coupling.** This private working copy (real names, real paths, internal
+docs) and the eventual public release copy (scrubbed, no git history in common) must
+stay in sync by hand, via `bin/make-public.mjs`, run by a person, at a time of their
+choosing. Nothing fires if that scrub goes stale relative to a code change — there is
+no edge, so there is no drift to detect.
+
+**Why it cannot be declared today.** A cross-repo edge is bounded by
+`cross-allow.yml`'s `partner_roots`, which is `[]` by design (empty is the safe
+default: an unconfigured install permits no cross-repo edge). Declaring
+`propagate-skill → propagate` today would need `partner_roots` to name the public
+repo's path — and the public repo does not exist. There is nothing to point at.
+
+**What stands in for it, and why that is weaker than it sounds.**
+`docs/RELEASE.md` step 3 (`node cli.mjs release --check`, gate `make-public-check`)
+runs the real scrub against the real forbidden-pattern list and refuses to report
+success without a complete identity map. That is real coverage of "does the scrub
+produce a clean tree right now" — but it is a thing a human has to remember to run,
+not a thing that fires on the triggering change the way a declared edge would. The
+distinction that matters: a propagate edge tells you a *specific* file moved out of
+sync with a *specific* downstream; `release --check` only tells you "as of this
+invocation, nothing forbidden survives the current scrub of the current tree." A
+change landing between releases produces no signal either way.
+
+**Close condition.** Once the public repo exists and its root is added to
+`cross-allow.yml`'s `partner_roots`, declare the edge for real — plausibly something
+like `cli.mjs`/`lib/**` (or a narrower set, per N37's god-file lesson) →
+the corresponding public-repo paths, `kind: cross-repo`. Until then this entry is the
+honest record that step 3 is a procedure a human runs, not a coupling propagate
+watches, and `release --check` passing must not be read as more than that.
+

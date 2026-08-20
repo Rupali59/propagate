@@ -31,7 +31,58 @@ Own git repo, remote `Rupali59/propagate-skill`.
 Plans live in `docs/plans/`, not `~/.claude/plans/` — session scratch rots, and `lib/graph.mjs`
 carried a citation to an overwritten one for weeks.
 
+### 2026-08-20 — Lane C (release mechanics) landed: `docs/RELEASE.md` + `release --check`
+
+Per `~/.claude/plans/status-temporal-plum.md` §3 (release mechanics, defined not run) and
+§4 (the two-repo coupling, named and deferred). Landed alongside Lanes A (decompose) and B
+(watchlist) from the same plan.
+
+- **`docs/RELEASE.md`** — the five-step procedure. Steps 1-4 are `release --check`; step 5
+  ("a human publishes") has no flag, deliberately — git history is permanent and this
+  skill's premise is "it reports, a human acts."
+- **`node cli.mjs release --check [--json]`** — thin dispatch arm in `cli.mjs` (D7 pattern);
+  the four gates live in `lib/core/release.mjs`, tested directly in
+  `tests/cli/release.test.mjs` (RED-first, each success case paired with a
+  negative control; `node --test tests/cli/release.test.mjs` derives the count). Every gate reports `passed` / `failed` / `could-not-run` — never lets
+  an unanswered gate read as a pass (`rule:discernment-checks` §2).
+- **A real bug caught by running the gate for real, not just its tests**: gate 2's summary
+  regex was written against TAP's `# pass N` and this machine's `npm test` actually emits
+  the "spec" reporter's `ℹ pass N`. The very first live run of `release --check` therefore
+  misreported a clean 763/0 suite as `could-not-run`. Fixed to accept both glyphs, with a
+  regression test locking in the `ℹ` form specifically (`docs/GOTCHAS.md`-worthy: a check
+  whose fixture format doesn't match the real tool's output looks green and proves nothing).
+- **Live run on this machine, 2026-08-20:** `version-manifests` passed (all four agree at
+  `0.1.0`); `suite` passed (763/0); `make-public-check` **could-not-run** — no identity map
+  at `~/.propagate/identity-map.json` on this machine, the same state CI is in by design;
+  `stranger-install` **failed** — a synthetic fresh workspace's `doctor` does not reach
+  clean after `setup` → `bootstrap --apply`, because nothing in the current install path
+  ever creates the per-workspace ledger JSONL/MD files for a workspace with no prior v1
+  rows (`init` scaffolds the sidecar, not the ledger; `bootstrap --apply` writes to the v2
+  event store, not the v1 ledger). Real, pre-existing gap, out of this lane's scope — filed
+  nowhere yet; the honest thing to do until it's triaged is let the gate report FAILED
+  rather than force a pass.
+- **`docs/ISSUES.md` N38** — the private→public coupling has no propagate edge yet
+  (`cross-allow.yml`'s `partner_roots` is `[]`; the public repo doesn't exist). Recorded
+  honestly as an open procedure, not a watched coupling — do not read `make-public --check`
+  passing as more than "clean this run."
+
 ## Now (in flight)
+
+### 2026-08-20 — Lane B done: `make-public.mjs` watchlist completeness
+
+Plan: `~/.claude/plans/status-temporal-plum.md` §2 "Identity map: configurable, with a
+self-maintaining watchlist". `make-public --check` now refuses if any depth-1 directory
+under `SEARCH_ROOTS` (`lib/core/config.mjs`) is neither a key in the identity map's
+`names` nor listed in its `allow` array — naming the specific unmapped directory. Map
+format extended to `{ names: {...}, allow: [...] }`; a flat legacy `{name: alias}` map
+(the shape on disk today) is still accepted, normalized as `{names: <that>, allow: []}`.
+Watchlist source is directory names, deliberately not discovered workspaces — discovery
+misses `Tathya`/`Khushboo`/`Tushar`, which have no `.propagates.yml` marker but do leak.
+New test `tests/portability/make-public-watchlist.test.mjs` (5 cases, RED-first — the 2
+refusal cases failed with exit 0 before `checkWatchlistCoverage()` existed). Full suite:
+749 pass / 0 fail (was 744/0). `doctor` exit 0 before and after. See `docs/DECISIONS.md`
+2026-08-20 "watchlist completeness" for the full writeup. Lane A (skill decomposition)
+and Lane C (release mechanics) are separate, not covered by this entry.
 
 ### 2026-08-14 — v1 watcher retired; doctor/digest report the v2 replacement's health
 

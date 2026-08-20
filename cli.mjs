@@ -17,6 +17,11 @@
  *                                              and REFUSE to report success unless discovery then
  *                                              finds >=1 workspace. Distinct from `init` (one
  *                                              sidecar) and `bootstrap` (baseline edges).
+ *   node cli.mjs release --check [--json]
+ *                                            — runs the four release gates (docs/RELEASE.md):
+ *                                              VERSION/manifests agree, suite green, `make-public
+ *                                              --check`, stranger install. Publishes nothing —
+ *                                              there is no --apply; a human runs step 5 by hand.
  *   node cli.mjs init <dir> [--workspace|--edges-only]
  *                               — scaffold a `.propagates.yml` marker. --workspace (default)
  *                                 writes `workspace: true` (a ledger-owning root) and verifies
@@ -181,6 +186,7 @@ import { discoverWorkspacesSync, isWorkspaceMarker } from "./lib/core/discovery.
 import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS, migrateLegacyState } from "./lib/core/setup.mjs";
 import { updateNotice, formatUpdateNotice } from "./lib/core/update-notice.mjs";
 import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/core/plist.mjs";
+import { runReleaseCheck } from "./lib/core/release.mjs";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -2049,6 +2055,57 @@ async function setupCmd(argv = []) {
     ],
     1,
   );
+}
+
+/**
+ * `release --check` — thin dispatch arm (D7): argv parsing and printing only.
+ * The gates themselves live in lib/core/release.mjs, never here. See
+ * docs/RELEASE.md for the procedure and why step 5 (publish) has no flag.
+ *
+ * There is no `--apply`/publish mode, deliberately: git history is permanent,
+ * and this skill's whole premise is that it reports while a human acts.
+ */
+async function releaseCmd(argv = []) {
+  const asJson = argv.includes("--json");
+  if (!argv.includes("--check")) {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs release --check [--json]`);
+    console.error(`${DIM}Runs the four release gates (docs/RELEASE.md) and publishes nothing.${RESET}`);
+    console.error(`${DIM}There is no --apply: step 5 ("a human publishes") has no flag on purpose.${RESET}`);
+    process.exit(2);
+  }
+
+  const result = runReleaseCheck();
+
+  if (asJson) {
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.exitCode);
+  }
+
+  const MARK = { passed: `${GREEN}✓${RESET}`, failed: `${RED}✗${RESET}`, "could-not-run": `${DIM}·${RESET}` };
+  console.log(`${BOLD}# release --check${RESET}  ${DIM}(docs/RELEASE.md — publishes nothing)${RESET}\n`);
+  for (const g of result.gates) {
+    const line = g.detail || g.reason || g.status;
+    console.log(`  ${MARK[g.status] ?? "?"} ${g.name.padEnd(20)} ${DIM}${line}${RESET}`);
+  }
+
+  const failed = result.gates.filter((g) => g.status === "failed");
+  const couldNotRun = result.gates.filter((g) => g.status === "could-not-run");
+  console.log();
+  if (result.overall === "ready") {
+    console.log(`${GREEN}${BOLD}release: READY${RESET} — all ${result.gates.length} gates passed. Step 5 (publish) is yours to do by hand.`);
+  } else if (result.overall === "blocked") {
+    console.log(
+      `${RED}${BOLD}release: BLOCKED${RESET} — ${failed.length} gate(s) failed` +
+        (couldNotRun.length ? `, ${couldNotRun.length} could not run` : "") +
+        `.`,
+    );
+  } else {
+    console.log(
+      `${YELLOW}${BOLD}release: INCOMPLETE${RESET} — ${couldNotRun.length} gate(s) could not run. ` +
+        `Not a pass — an unanswered gate must never be summarized as ready.`,
+    );
+  }
+  process.exit(result.exitCode);
 }
 
 /**
@@ -4664,6 +4721,8 @@ if (_invokedDirectly) {
     await rulesCmd();
   } else if (mode === "setup") {
     await setupCmd(process.argv.slice(3));
+  } else if (mode === "release") {
+    await releaseCmd(process.argv.slice(3));
   } else if (mode === "init") {
     await init(process.argv[3], process.argv.slice(4));
   } else if (mode === "reload") {
@@ -4700,7 +4759,7 @@ if (_invokedDirectly) {
     await monitorCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
     process.exit(2);
   }
 }

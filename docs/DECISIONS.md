@@ -877,6 +877,42 @@ unclassified stayed visible rather than being swept into a default bucket.
 move after baselining would silently reset every verification. It was free today and
 would not have been later.
 
+---
+
+## 2026-08-20 — `bin/make-public.mjs`: watchlist completeness (Lane B, plan §2)
+
+**Affects:** propagate
+
+`make-public --check` previously refused only when `identity-map.json` was missing or
+empty — never when it was *incomplete*. A new client name appearing later would be
+scrubbed by nothing and leak silently.
+
+**Watchlist source: depth-1 directory names under `SEARCH_ROOTS`** (`lib/core/config.mjs`),
+not discovered workspaces. Discovery was tried first and is wrong — it only sees
+directories carrying a `.propagates.yml` marker, and three real names that leak in the
+production tree have none: `Tathya` (11 files), `Khushboo` (4), `Tushar` (4). Directory
+names cover all seven; this was verified before writing the code, per the plan's explicit
+instruction not to substitute a different source.
+
+**Map format extended, backward compatible:**
+```jsonc
+{ "names": { "Some Client": "workspace-a" }, "allow": ["Motherboard", "rules", "scripts", "_archive"] }
+```
+A flat object with no `"names"` key (every map on disk today) is treated as
+`{ names: <that object>, allow: [] }` — `normalizeMap()` in `bin/make-public.mjs`. No
+migration required for the one production map file.
+
+Every depth-1 directory must be a `names` key or an `allow` entry, or the build exits 2
+naming the specific unmapped directories (not just "something is unmapped"). Verified
+RED-first: `tests/portability/make-public-watchlist.test.mjs` — 2 refusal cases (fresh
+map shape, flat legacy shape) failed before `checkWatchlistCoverage()` existed (exit 0,
+should have been nonzero), and 3 pass cases (allow-listed, name-mapped, flat-legacy-fully-covered)
+were green throughout, proving the RED cases were the code path under test and not a
+harness bug.
+
+`lib/core/config.mjs` is imported for `SEARCH_ROOTS` only (a pre-computed export); no new
+side effect is added to its module-load path.
+
 **Cost paid, recorded honestly.** Seven distinct path-depth classes had to be fixed, each
 found only by running the suite: quoted specifiers, segment-form `path.join`,
 trailing-`".."` constants, `new URL()` arguments, double-bumped `helpers/`,
