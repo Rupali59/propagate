@@ -847,3 +847,44 @@ be re-derived by someone who trusts it.
 `rule:discernment-checks` §4: a figure measured under conditions that differ from
 production is a different quantity than the one being claimed. The honest form
 names both and says which is which.
+
+---
+
+## 2026-08-20 — `lib/` and `tests/` grouped into directories
+
+**Affects:** propagate
+
+**Every `lib/…` and `tests/…` path in entries ABOVE this line is pre-move.** This entry
+is the map. Past entries are not edited — `rule:state-and-decisions` is append-only, and
+rewriting 66 historical citations would destroy the evidence trail those incident
+write-ups exist for. Read an older path by looking it up here.
+
+| `lib/core/` | `config.mjs`, `discovery.mjs`, `setup.mjs`, `which.mjs`, `lock.mjs`, `state.mjs`, `git-context.mjs`, `worktrees.mjs`, `plist.mjs` |
+| `lib/edges/` | `edges.mjs`, `frontmatter.mjs`, `reconcile.mjs`, `events.mjs`, `ledger.mjs`, `content-id.mjs`, `refs.mjs`, `code-canonical.mjs`, `cross-repo.mjs`, `bootstrap.mjs`, `journal.mjs` |
+| `lib/graph/` | `graph.mjs`, `graph-html.mjs`, `graph-index.mjs` |
+| `lib/report/` | `docs.mjs`, `doc-kind.mjs`, `decisions.mjs`, `metrics.mjs`, `adoption.mjs`, `inventory.mjs`, `backlog.mjs`, `monitor.mjs`, `notify.mjs` |
+| `lib/skills/` | `skills-create.mjs`, `skills-lifecycle.mjs`, `skills-scan.mjs`, `index-db.mjs` |
+| `lib/rules/` | `rules-check.mjs` |
+
+`tests/` moved from flat to `unit/`, `cli/`, `digest/`, `docs/`, `portability/`,
+`watcher/`, keeping `helpers/`. Grouped by **what a test exercises**, not by mirroring
+`lib/`: a large share are CLI-level and touch several lib concerns at once, so filing
+them under whichever module they import first would misdescribe them. Anything
+unclassified stayed visible rather than being swept into a default bucket.
+
+**Why now.** Zero events referenced any `propagate-skill/` path — its own edges are all
+`NEVER_VERIFIED`, never baselined. `edgeId` is derived from the source path, so the same
+move after baselining would silently reset every verification. It was free today and
+would not have been later.
+
+**Cost paid, recorded honestly.** Seven distinct path-depth classes had to be fixed, each
+found only by running the suite: quoted specifiers, segment-form `path.join`,
+trailing-`".."` constants, `new URL()` arguments, double-bumped `helpers/`,
+non-recursive `readdirSync`, and `SKILL_DIR`'s own `".."` count. Then two defects caused
+by the fixes themselves — see `docs/GOTCHAS.md` G51. `SKILL_DIR` now walks up to a
+marker (`package.json` + `SKILL.md`) instead of counting, so the next regrouping cannot
+repeat that one.
+
+`.propagates.yml` was updated in the same commit; `check --changed` names all five moved
+sources at their new paths, so no edge died in the move.
+

@@ -22,7 +22,7 @@ import path from "node:path";
 import os from "node:os";
 import { existsSync } from "node:fs";
 
-import { SEARCH_ROOTS, SKILL_DIR } from "./lib/config.mjs";
+import { SEARCH_ROOTS, SKILL_DIR } from "./lib/core/config.mjs";
 import {
   rebuildIndex,
   openDb,
@@ -34,8 +34,8 @@ import {
   queryOpenOlderThan,
   queryUnknownTypes,
   runReadOnlySql,
-} from "./lib/index-db.mjs";
-import { scanSkills, probeTranscripts } from "./lib/skills-scan.mjs";
+} from "./lib/skills/index-db.mjs";
+import { scanSkills, probeTranscripts } from "./lib/skills/skills-scan.mjs";
 
 export const DB_PATH = path.join(SKILL_DIR, "index.db");
 

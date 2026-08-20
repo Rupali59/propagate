@@ -17,7 +17,7 @@
 # workspace.
 
 sources:
-  lib/graph.mjs:
+  lib/graph/graph.mjs:
     propagates_to:
       - path: SKILL.md
         why: >-
@@ -34,7 +34,7 @@ sources:
           merely out of date.
         kind: code
 
-  lib/metrics.mjs:
+  lib/report/metrics.mjs:
     propagates_to:
       - path: docs/OBSERVABILITY.md
         why: >-
@@ -50,7 +50,7 @@ sources:
           in the code gets re-litigated the first time someone disagrees with it.
         kind: prose
 
-  lib/events.mjs:
+  lib/edges/events.mjs:
     propagates_to:
       - path: docs/DATA_MODEL.md
         why: >-
@@ -67,18 +67,18 @@ sources:
   # document warns about.
   docs/LIFECYCLE.md:
     propagates_to:
-      - path: lib/reconcile.mjs
+      - path: lib/edges/reconcile.mjs
         why: >-
           LIFECYCLE.md draws the edge machine's states; reconcile.mjs is where
           STATES is defined and where the transitions are derived. The doc names
           all eight — a ninth, or a rename, makes the diagram wrong.
         kind: code
-      - path: lib/events.mjs
+      - path: lib/edges/events.mjs
         why: >-
           the dispositions in the diagram (baselined, decoupled) are DISPOSITIONS
           entries; adding or removing one changes what transitions exist
         kind: code
-      - path: lib/skills-lifecycle.mjs
+      - path: lib/skills/skills-lifecycle.mjs
         why: >-
           LIFECYCLE.md states the skill machine's thresholds (3 uses to promote,
           reaped at 14d). Those are PROMOTE_MIN_USES and REAP_AFTER_DAYS; the doc

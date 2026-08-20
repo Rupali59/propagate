@@ -7,8 +7,8 @@
  * fresh subprocess per case, not an in-process re-import. Run via
  * spawnSync(process.execPath, [this file], { env }).
  */
-import { STATE_DIR, STATE_PATH, LOCK_PATH, HEARTBEAT_PATH, WATCHER_LOG, SKILL_DIR } from "../../lib/config.mjs";
-import { PLIST_PATH, LABEL } from "../../lib/plist.mjs";
+import { STATE_DIR, STATE_PATH, LOCK_PATH, HEARTBEAT_PATH, WATCHER_LOG, SKILL_DIR } from "../../lib/core/config.mjs";
+import { PLIST_PATH, LABEL } from "../../lib/core/plist.mjs";
 
 console.log(
   JSON.stringify({

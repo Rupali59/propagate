@@ -2,6 +2,10 @@
 
 # Propagate — issue register
 
+> **Paths in entries below may predate 2026-08-20**, when `lib/` and `tests/` were
+> grouped into directories. `docs/DECISIONS.md` 2026-08-20 carries the old→new map.
+> Entries are not rewritten: the citation is evidence, and evidence is not edited.
+
 Consolidated 2026-08-13 from two sources: problems observed live during a long workspace session,
 and the skill's own self-documented defects (in-code `TODO`/`deferred` markers, `SKILL.md`'s
 "does NOT do" section, and `docs/DECISIONS.md`). Re-consolidated the same day (register pass,

@@ -14,7 +14,7 @@
   "scripts": {
     "watcher": "node watcher.mjs",
     "smoke": "node watcher.mjs --smoke",
-    "test": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/*.test.mjs'",
+    "test": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs'",
     "setup": "node cli.mjs setup"
   },
   "dependencies": {

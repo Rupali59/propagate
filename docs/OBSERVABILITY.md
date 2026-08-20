@@ -34,7 +34,7 @@ non-zero.
 Emitted per watcher run and per CLI invocation. `expectation` is the load-bearing
 column; without it the metric is decoration.
 
-> **This table is the human form of `EXPECTATIONS` in `lib/metrics.mjs`, and the
+> **This table is the human form of `EXPECTATIONS` in `lib/report/metrics.mjs`, and the
 > `.propagates.yml` edge between them exists to keep it that way.** Measured
 > 2026-08-19: 4 of 8 entries were missing here — `graph.cycles`,
 > `graph.duplicate_pairs`, `docs.supersedes_unresolvable` and
@@ -137,7 +137,7 @@ something fires a lot and you need to know why, fast.
 
 ## 5 · Coverage — every known issue, and what catches it
 
-> Refreshed 2026-08-13 after §6 step 1 landed (`lib/metrics.mjs`, wired into
+> Refreshed 2026-08-13 after §6 step 1 landed (`lib/report/metrics.mjs`, wired into
 > `doctor()` and `digest.mjs`). Rows below are marked **built** where the
 > metric is now actually persisted and asserted, not just designed. Everything
 > else in this table is still the design from the original write-up — a plan,
@@ -185,12 +185,12 @@ vocabulary throughout this table are v1 nouns. §7 of `docs/DATA_MODEL.md`
 already reframes v2 around **verifications** and **derived states** rather than
 mutable rows with a `status` field — when that lands, the metrics above keyed
 to "open"/"close" become metrics keyed to "unverified"/"stale", not new
-concepts. Nothing in this build assumes v1's shape will last; `lib/metrics.mjs`
+concepts. Nothing in this build assumes v1's shape will last; `lib/report/metrics.mjs`
 takes metric values as plain `{key: number}` pairs precisely so the v2 rename
 is a relabeling, not a rewrite.
 
 **Not coverable by telemetry, and worth saying so:** the lossy fold (a schema/test
-problem), the docs-vs-reality drift (a doc test — `tests/skill-doc.test.mjs`), and
+problem), the docs-vs-reality drift (a doc test — `tests/docs/skill-doc.test.mjs`), and
 the premise being unstated. Telemetry catches behaviour, not meaning. Do not pretend
 otherwise; that pretence is how a green dashboard becomes the new silent no-op.
 
@@ -201,7 +201,7 @@ otherwise; that pretence is how a green dashboard becomes the new silent no-op.
 Cheapest first, and each is independently useful.
 
 1. **Counters + gauges into the existing `state.json` run record. — BUILT 2026-08-13.**
-   Landed as `lib/metrics.mjs`, a dedicated append-only `metrics.jsonl`
+   Landed as `lib/report/metrics.mjs`, a dedicated append-only `metrics.jsonl`
    (`PROPAGATE_STATE_DIR`-scoped, not `state.json` itself — `state.json` is the
    watcher's mtime baseline and mixing a growing metrics history into it risked
    the exact "a default that moves loses state silently" failure GOTCHAS G12
@@ -214,7 +214,7 @@ Cheapest first, and each is independently useful.
    - The five equality/non-zero expectations from §1 that needed no rate-style
      guessing (N7, N12, N1, N9, N14) are asserted every run, each carrying the
      concrete incident that motivated its threshold (`EXPECTATIONS` in
-     `lib/metrics.mjs`) — not invented numbers (GOTCHAS G16).
+     `lib/report/metrics.mjs`) — not invented numbers (GOTCHAS G16).
    - Six more metrics are recorded but explicitly marked `UNCALIBRATED`
      (`rows.open`, `doctor.duration_ms`, `sidecars.loaded`, `sidecars.problems`,
      `ledger.malformed`, `state.tracked_files`) — no threshold exists for them
@@ -249,7 +249,7 @@ Cheapest first, and each is independently useful.
    not for "what happened and to what."
 4. **`doctor --since <t>`** reading the above — troubleshooting becomes a query
    rather than an archaeology dig, which is what this session actually was. Not built.
-   `readMetricsRecords`/`readLastMetricsRecord` (`lib/metrics.mjs`) already read the
+   `readMetricsRecords`/`readLastMetricsRecord` (`lib/report/metrics.mjs`) already read the
    full history and the newest record respectively — a `--since` flag is a thin CLI
    layer over data that already exists, not a new storage problem.
 5. **Spans.** Only after 1–4, and only if attribution is still slow. Not built.

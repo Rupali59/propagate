@@ -6,7 +6,7 @@
  * each test case needs a fresh process, not an in-process re-import (ESM
  * module caching would otherwise reuse the first process's resolved paths).
  */
-import { regeneratePlist, PLIST_PATH } from "../../lib/plist.mjs";
+import { regeneratePlist, PLIST_PATH } from "../../lib/core/plist.mjs";
 
 const workspaces = JSON.parse(process.argv[2] || "[]");
 const result = await regeneratePlist({ workspaces });

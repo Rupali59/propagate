@@ -63,42 +63,42 @@ import {
   SEARCH_ROOTS,
   CROSS_LEDGER_JSONL,
   CROSS_LEDGER_MD,
-} from "./lib/config.mjs";
-import { loadCodeCanonicalSync } from "./lib/code-canonical.mjs";
-import { readState, writeState, detectMtimeChange, pruneMtimes, pruneCrossDecisions } from "./lib/state.mjs";
-import { parseDecisions } from "./lib/decisions.mjs";
-import { CROSS_TRIGGER_EPOCH } from "./lib/config.mjs";
-import { acquireLock } from "./lib/lock.mjs";
+} from "./lib/core/config.mjs";
+import { loadCodeCanonicalSync } from "./lib/edges/code-canonical.mjs";
+import { readState, writeState, detectMtimeChange, pruneMtimes, pruneCrossDecisions } from "./lib/core/state.mjs";
+import { parseDecisions } from "./lib/report/decisions.mjs";
+import { CROSS_TRIGGER_EPOCH } from "./lib/core/config.mjs";
+import { acquireLock } from "./lib/core/lock.mjs";
 import {
   loadSidecar,
   findSidecarFor,
   downstreamsFor,
   SidecarError,
-} from "./lib/frontmatter.mjs";
+} from "./lib/edges/frontmatter.mjs";
 import {
   enumerateDeclaredSources,
   synthesizeKindCodeEntries,
-} from "./lib/edges.mjs";
+} from "./lib/edges/edges.mjs";
 import {
   appendRowWithId,
   hasOpenDuplicateDrift,
   renderMarkdown,
-} from "./lib/ledger.mjs";
+} from "./lib/edges/ledger.mjs";
 import {
   loadCrossRepoSync,
   discoverCrossReposSync,
   resolveTarget,
   crossCorrelationId,
   resolvePartner,
-} from "./lib/cross-repo.mjs";
-import { notify, heartbeat } from "./lib/notify.mjs";
+} from "./lib/edges/cross-repo.mjs";
+import { notify, heartbeat } from "./lib/report/notify.mjs";
 import {
   enumerateWorktrees,
   expandWorktreePaths,
   worktreeStamp,
   correlationKey,
-} from "./lib/worktrees.mjs";
-import { getGitContext } from "./lib/git-context.mjs";
+} from "./lib/core/worktrees.mjs";
+import { getGitContext } from "./lib/core/git-context.mjs";
 
 const FILE_BASENAMES_OF_INTEREST = (basename) =>
   basename === "CLAUDE.md" ||

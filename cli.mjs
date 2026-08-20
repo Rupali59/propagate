@@ -125,7 +125,7 @@ import {
   CONFIG_PATH,
   STATE_DIR as CONFIG_ROOT_DIR,
   MAX_DEPTH,
-} from "./lib/config.mjs";
+} from "./lib/core/config.mjs";
 import YAML from "yaml";
 
 import {
@@ -136,14 +136,14 @@ import {
   findUnownedLedgers,
   openCount,
   classifyUnownedLedger,
-} from "./lib/ledger.mjs";
-import { loadSidecar, SidecarError, downstreamsFor } from "./lib/frontmatter.mjs";
-import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/cross-repo.mjs";
-import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges.mjs";
-import { reconcile, STATES, groupRows, inboundRows } from "./lib/reconcile.mjs";
-import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/events.mjs";
-import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/bootstrap.mjs";
-import { parseDecisions, zeroTokenEntries } from "./lib/decisions.mjs";
+} from "./lib/edges/ledger.mjs";
+import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatter.mjs";
+import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
+import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
+import { reconcile, STATES, groupRows, inboundRows } from "./lib/edges/reconcile.mjs";
+import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/edges/events.mjs";
+import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
+import { parseDecisions, zeroTokenEntries } from "./lib/report/decisions.mjs";
 import {
   METRICS_PATH,
   EXPECTATIONS,
@@ -152,7 +152,7 @@ import {
   detectVanishedKeys,
   readLastMetricsRecord,
   appendMetricsRecord,
-} from "./lib/metrics.mjs";
+} from "./lib/report/metrics.mjs";
 
 /**
  * Validate cross-repo edges: load each .propagates-cross.yml, resolve every
@@ -177,9 +177,9 @@ export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
   }
   return { edges, missing, outsideAllowlist };
 }
-import { discoverWorkspacesSync, isWorkspaceMarker } from "./lib/discovery.mjs";
-import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS, migrateLegacyState } from "./lib/setup.mjs";
-import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/plist.mjs";
+import { discoverWorkspacesSync, isWorkspaceMarker } from "./lib/core/discovery.mjs";
+import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS, migrateLegacyState } from "./lib/core/setup.mjs";
+import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/core/plist.mjs";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -630,7 +630,7 @@ async function status() {
     return;
   }
   if (process.argv.includes("--cross")) {
-    const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
+    const { CROSS_LEDGER_JSONL } = await import("./lib/core/config.mjs");
     const rows = (await readLedger(CROSS_LEDGER_JSONL)).filter((r) => r.status === "open");
     console.log(`${BOLD}# Cross-repo — ${rows.length} open${RESET}`);
     for (const r of rows) {
@@ -813,7 +813,7 @@ async function status() {
   if (!showAll && cur) {
     let crossRows = [];
     try {
-      const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
+      const { CROSS_LEDGER_JSONL } = await import("./lib/core/config.mjs");
       crossRows = (await readLedger(CROSS_LEDGER_JSONL)).filter((r) => r.status === "open");
     } catch {
       /* no cross ledger */
@@ -1029,7 +1029,7 @@ async function doctor() {
   // not armed by default, so "not installed" is the expected state and must not
   // read as broken. It becomes worth escalating only once someone loads it.
   try {
-    const { MONITOR_LOG } = await import("./lib/monitor.mjs");
+    const { MONITOR_LOG } = await import("./lib/report/monitor.mjs");
     if (!existsSync(MONITOR_LOG)) {
       info("monitor", "never run — no ~/.propagate/monitor.log (expected until `monitor --install` is armed)");
     } else {
@@ -1263,7 +1263,7 @@ async function doctor() {
     // nothing. This changes only how doctor DESCRIBES that state.
     let allowlistConfigured = false;
     try {
-      const { CROSS_ALLOW_PATH } = await import("./lib/config.mjs");
+      const { CROSS_ALLOW_PATH } = await import("./lib/core/config.mjs");
       const parsedAllow = YAML.parse(readFileSync(CROSS_ALLOW_PATH, "utf8"));
       allowlistConfigured = Array.isArray(parsedAllow?.partner_roots) && parsedAllow.partner_roots.length > 0;
     } catch {
@@ -1280,7 +1280,7 @@ async function doctor() {
       check("cross-repo edges resolve", x.missing === 0 && x.outsideAllowlist === 0, crossDetail);
     }
     // G7: every fired row must carry a normalized `partner` join key.
-    const { CROSS_LEDGER_JSONL } = await import("./lib/config.mjs");
+    const { CROSS_LEDGER_JSONL } = await import("./lib/core/config.mjs");
     const rows = await readLedger(CROSS_LEDGER_JSONL);
     const noPartner = rows.filter((r) => r.type === "drift" && !r.partner).length;
     check("cross rows carry partner", noPartner === 0, `${noPartner} rows missing partner`);
@@ -1583,7 +1583,7 @@ async function doctor() {
     let docsProseOnly = 0;
     let docsSupersedesUnresolvable = 0;
     try {
-      const { proseOnlySupersession, kindOf } = await import("./lib/doc-kind.mjs");
+      const { proseOnlySupersession, kindOf } = await import("./lib/report/doc-kind.mjs");
       const { globSync } = await import("node:fs");
       const seenDocs = new Set();
       for (const ws of WORKSPACES) {
@@ -1630,7 +1630,7 @@ async function doctor() {
     const graphCycleMembers = [];
     const graphDuplicateDetails = [];
     if (doctorReconcileRows) {
-      const { buildGraph } = await import("./lib/graph.mjs");
+      const { buildGraph } = await import("./lib/graph/graph.mjs");
       const g = buildGraph(doctorReconcileRows, { workspaceRoots: WORKSPACES.map((w) => w.root) });
       graphCycles = g.stats.cycles;
       graphDuplicatePairs = g.stats.duplicatePairs;
@@ -1740,7 +1740,7 @@ async function rulesCmd() {
   const sub = process.argv[3] || "check";
   const args = process.argv.slice(4);
   const asJson = args.includes("--json");
-  const { checkRules, selftest, loadRules } = await import("./lib/rules-check.mjs");
+  const { checkRules, selftest, loadRules } = await import("./lib/rules/rules-check.mjs");
 
   if (sub === "list") {
     const rules = loadRules(RULES_DIR);
@@ -1750,7 +1750,7 @@ async function rulesCmd() {
       console.log(`${DIM}a rule needs \`id\` and \`fingerprint\` in frontmatter; without them it is inert by construction.${RESET}`);
       process.exit(2);
     }
-    const { ruleCoverage } = await import("./lib/rules-check.mjs");
+    const { ruleCoverage } = await import("./lib/rules/rules-check.mjs");
     const globalMd = path.join(HOME_DIR, ".claude", "CLAUDE.md");
     const cov = Object.fromEntries(
       ruleCoverage({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS, extra: [globalMd] }).map((c) => [c.id, c]),
@@ -2585,7 +2585,7 @@ async function drainList(args, json) {
         // A hand-rolled filter here counted NOT_PRESENT_ON_REF and reported 23
         // where `graph` reported 21 — two commands disagreeing about what needs
         // work, which is worse than either number being slightly wrong.
-        const { isActionable } = await import("./lib/graph.mjs");
+        const { isActionable } = await import("./lib/graph/graph.mjs");
         const unsettled = derived.filter((r) => isActionable(r.state));
         if (unsettled.length > 0) {
           console.log(
@@ -3302,7 +3302,7 @@ async function runDispositionBatch(selected, workspaces, opts) {
     // Build the REAL payload and run the REAL validator. Previewing a
     // simplified shape would let the dry run promise a write that `--apply`
     // then refuses (e.g. wontfix with no --reason).
-    const { dryValidateEvent } = await import("./lib/events.mjs");
+    const { dryValidateEvent } = await import("./lib/edges/events.mjs");
     const preview = selected.map((row) => {
       const payload = buildEventPayload(row, disposition, reason);
       return {
@@ -3467,7 +3467,7 @@ async function verifyCmd() {
   // to let masquerade as a verification.
   const GUARD_EXEMPT = new Set(["deferred", "decoupled"]);
   if (!GUARD_EXEMPT.has(opts.disposition) && !opts.outOfOrder) {
-    const { buildGraph, blockedBy } = await import("./lib/graph.mjs");
+    const { buildGraph, blockedBy } = await import("./lib/graph/graph.mjs");
     const graph = buildGraph(rows, { workspaceRoots: workspaces.map((w) => w.root) });
 
     const offenders = [];
@@ -3718,7 +3718,7 @@ async function bootstrapCmd() {
  * lands there.
  */
 async function inventoryCmd() {
-  const { inventory, emitRows, STATUS } = await import("./lib/inventory.mjs");
+  const { inventory, emitRows, STATUS } = await import("./lib/report/inventory.mjs");
   const inv = inventory();
 
   if (process.argv.includes("--json")) {
@@ -3783,7 +3783,7 @@ async function inventoryCmd() {
  * a git checkout that tracks upstream.
  */
 async function skills() {
-  const { scanSkills, summarize, probeTranscripts, INSTALLER } = await import("./lib/skills-scan.mjs");
+  const { scanSkills, summarize, probeTranscripts, INSTALLER } = await import("./lib/skills/skills-scan.mjs");
   const tx = probeTranscripts();
   const scan = scanSkills({ transcripts: tx.byName });
   const sum = summarize(scan);
@@ -3846,7 +3846,7 @@ async function skills() {
  * what the registry is shepherding through a lifecycle.
  */
 async function lifecycleReport(tx) {
-  const lc = await import("./lib/skills-lifecycle.mjs");
+  const lc = await import("./lib/skills/skills-lifecycle.mjs");
   const { quarantined, promoted } = lc.scanLifecycle({ transcripts: tx.byName });
   if (!quarantined.length && !promoted.length) return;
 
@@ -3877,7 +3877,7 @@ async function skillsCreateCmd() {
     console.error('usage: node cli.mjs skills-create <kebab-name> <what it should do>');
     process.exit(2);
   }
-  const sc = await import("./lib/skills-create.mjs");
+  const sc = await import("./lib/skills/skills-create.mjs");
   const gate = await sc.creationAllowed({ name });
   if (!gate.ok) {
     console.log(`${RED}✗${RESET} refused: ${gate.reason}`);
@@ -3899,7 +3899,7 @@ async function skillsCreateCmd() {
 
 /** `skills-promote <name>` / `skills-demote <name>` / `skills-reap [--apply]` */
 async function skillsLifecycleCmd(mode) {
-  const lc = await import("./lib/skills-lifecycle.mjs");
+  const lc = await import("./lib/skills/skills-lifecycle.mjs");
   const name = process.argv[3];
 
   if (mode === "skills-promote" || mode === "skills-demote") {
@@ -3918,7 +3918,7 @@ async function skillsLifecycleCmd(mode) {
 
   // reap
   const apply = process.argv.includes("--apply");
-  const { probeTranscripts } = await import("./lib/skills-scan.mjs");
+  const { probeTranscripts } = await import("./lib/skills/skills-scan.mjs");
   const { quarantined } = lc.scanLifecycle({ transcripts: probeTranscripts().byName });
   const candidates = lc.reapable(quarantined);
 
@@ -3961,8 +3961,8 @@ async function skillsLifecycleCmd(mode) {
  * render through `formatGoverned` so they can never disagree about what they found.
  */
 async function docsCmd() {
-  const { buildAuthorityIndex, whatGoverns, formatGoverned, blocks } = await import("./lib/docs.mjs");
-  const { findAllSidecarsRecursive } = await import("./lib/edges.mjs");
+  const { buildAuthorityIndex, whatGoverns, formatGoverned, blocks } = await import("./lib/report/docs.mjs");
+  const { findAllSidecarsRecursive } = await import("./lib/edges/edges.mjs");
   const os = await import("node:os");
 
   const sidecars = [];
@@ -3972,7 +3972,7 @@ async function docsCmd() {
   const args = process.argv.slice(3).filter((a) => !a.startsWith("--"));
 
   if (process.argv.includes("--structure")) {
-    const { kindOf, brokenPathCitations } = await import("./lib/doc-kind.mjs");
+    const { kindOf, brokenPathCitations } = await import("./lib/report/doc-kind.mjs");
     const { globSync } = await import("node:fs");
     // A CHANGELOG or a dated plan citing a since-moved file is CORRECT — it is a
     // historical record. Only live docs must resolve. Without this split the check
@@ -4022,7 +4022,7 @@ async function docsCmd() {
   }
 
   if (process.argv.includes("--kinds")) {
-    const { kindOf, proseOnlySupersession } = await import("./lib/doc-kind.mjs");
+    const { kindOf, proseOnlySupersession } = await import("./lib/report/doc-kind.mjs");
     const { globSync } = await import("node:fs");
     const bySource = {};
     const byKind = {};
@@ -4065,7 +4065,7 @@ async function docsCmd() {
   }
 
   if (process.argv.includes("--superseded")) {
-    const { buildSupersessionIndex } = await import("./lib/doc-kind.mjs");
+    const { buildSupersessionIndex } = await import("./lib/report/doc-kind.mjs");
     const { globSync } = await import("node:fs");
     let docs = [];
     for (const ws of WORKSPACES) {
@@ -4127,7 +4127,7 @@ async function docsCmd() {
  * of the two bugs that moved this figure three times before it settled.
  */
 async function journalCmd() {
-  const { journal } = await import("./lib/journal.mjs");
+  const { journal } = await import("./lib/edges/journal.mjs");
   const os = await import("node:os");
   const arg = (f) => {
     const i = process.argv.indexOf(f);
@@ -4168,7 +4168,7 @@ async function journalCmd() {
 }
 
 async function backlogCmd() {
-  const { backlog } = await import("./lib/backlog.mjs");
+  const { backlog } = await import("./lib/report/backlog.mjs");
   const result = backlog();
 
   if (process.argv.includes("--json")) {
@@ -4240,14 +4240,14 @@ async function monitorCmd() {
   const json = args.includes("--json");
   const started = Date.now();
 
-  const mon = await import("./lib/monitor.mjs");
-  const { notify } = await import("./lib/notify.mjs");
+  const mon = await import("./lib/report/monitor.mjs");
+  const { notify } = await import("./lib/report/notify.mjs");
 
   // --install generates the plist FILE and stops. Loading it is a separate,
   // deliberate step — touching launchd is a one-way door and stays the human's,
   // per SKILL.md's contract.
   if (args.includes("--install")) {
-    const { writeMonitorPlist, MONITOR_LABEL } = await import("./lib/plist.mjs");
+    const { writeMonitorPlist, MONITOR_LABEL } = await import("./lib/core/plist.mjs");
     const res = await writeMonitorPlist({ workspaces: WORKSPACES });
     if (!res.ok) {
       console.error(`${RED}refused:${RESET} ${res.error}`);
@@ -4330,7 +4330,7 @@ async function monitorCmd() {
 
 /** Shared by graphCmd and the verify ordering guard, so both see one graph. */
 async function loadGraph(workspaces) {
-  const { buildGraph } = await import("./lib/graph.mjs");
+  const { buildGraph } = await import("./lib/graph/graph.mjs");
   const { rows, stats } = await reconcile(workspaces);
   return { graph: buildGraph(rows, { workspaceRoots: workspaces.map((w) => w.root) }), rows, stats };
 }
@@ -4360,7 +4360,7 @@ async function graphCmd() {
   const workspaces = showAll || !cur ? WORKSPACES : [cur];
 
   const { graph } = await loadGraph(workspaces);
-  const { fixOrder, neighbourhood } = await import("./lib/graph.mjs");
+  const { fixOrder, neighbourhood } = await import("./lib/graph/graph.mjs");
   const order = fixOrder(graph, { includeUnverified });
 
   // ── --node: ancestors and descendants of one file ────────────────────────
@@ -4399,7 +4399,7 @@ async function graphCmd() {
 
   // ── --html ───────────────────────────────────────────────────────────────
   if (htmlPath) {
-    const { renderGraphHtml } = await import("./lib/graph-html.mjs");
+    const { renderGraphHtml } = await import("./lib/graph/graph-html.mjs");
     const { writeFile } = await import("node:fs/promises");
     const html = renderGraphHtml(graph, order, { root: SEARCH_ROOTS[0] });
     await writeFile(htmlPath, html, "utf8");
@@ -4529,7 +4529,7 @@ async function graphIndexCmd() {
   // Same root lib/events.mjs uses; deliberately not the plugin dir (N13/N14).
   const root = process.env.PROPAGATE_STATE_DIR || path.join(process.env.HOME || ".", ".propagate");
 
-  const gi = await import("./lib/graph-index.mjs");
+  const gi = await import("./lib/graph/graph-index.mjs");
   const t0 = Date.now();
   const model = await gi.buildModel(WORKSPACES, {});
   const ms = Date.now() - t0;

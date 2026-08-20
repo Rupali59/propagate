@@ -34,22 +34,22 @@ import {
   SUSPICIOUS_MARKERS,
   CROSS_LEDGER_JSONL,
   SEARCH_ROOTS,
-  SKILL_DIR, INTEGRATIONS } from "./lib/config.mjs";
-import { readLedgerWithStats, lastActivityAt } from "./lib/ledger.mjs";
-import { reconcile, inboundRows, toNodeId } from "./lib/reconcile.mjs";
-import { PLIST_PATH } from "./lib/plist.mjs";
-import { notify } from "./lib/notify.mjs";
+  SKILL_DIR, INTEGRATIONS } from "./lib/core/config.mjs";
+import { readLedgerWithStats, lastActivityAt } from "./lib/edges/ledger.mjs";
+import { reconcile, inboundRows, toNodeId } from "./lib/edges/reconcile.mjs";
+import { PLIST_PATH } from "./lib/core/plist.mjs";
+import { notify } from "./lib/report/notify.mjs";
 import {
   heartbeatState,
   findDuplicateOpenAcrossLedgers,
   parsePlistWatchPaths,
   expectedWatchPaths,
 } from "./cli.mjs";
-import { rebuildIndex, latestMtimeUnderDir } from "./lib/index-db.mjs";
-import { scanSkills, probeTranscripts } from "./lib/skills-scan.mjs";
-import { readMetricsRecords, evaluateExpectations } from "./lib/metrics.mjs";
-import { inventory as buildInventory } from "./lib/inventory.mjs";
-import { readSystemsTable, pickAdoptionAsk, formatAdoptionLines } from "./lib/adoption.mjs";
+import { rebuildIndex, latestMtimeUnderDir } from "./lib/skills/index-db.mjs";
+import { scanSkills, probeTranscripts } from "./lib/skills/skills-scan.mjs";
+import { readMetricsRecords, evaluateExpectations } from "./lib/report/metrics.mjs";
+import { inventory as buildInventory } from "./lib/report/inventory.mjs";
+import { readSystemsTable, pickAdoptionAsk, formatAdoptionLines } from "./lib/report/adoption.mjs";
 
 const HOME = os.homedir();
 const DIGEST_STATE_PATH = path.join(HOME, ".claude", "propagate-digest-state.json");
@@ -574,8 +574,8 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
  * see lib/skills-create.mjs for the measurement that decided that.
  */
 async function lifecycleSweep(dryRun = false) {
-  const lc = await import("./lib/skills-lifecycle.mjs");
-  const { probeTranscripts } = await import("./lib/skills-scan.mjs");
+  const lc = await import("./lib/skills/skills-lifecycle.mjs");
+  const { probeTranscripts } = await import("./lib/skills/skills-scan.mjs");
   const { quarantined, promoted } = lc.scanLifecycle({ transcripts: probeTranscripts().byName });
   const ready = lc.promotable(quarantined);
   const candidates = lc.reapable(quarantined);

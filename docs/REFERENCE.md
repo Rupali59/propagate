@@ -15,12 +15,12 @@ For "what do I do right now," go back to `SKILL.md`.
   is unaffected, only running it as a script is blocked. `reconcile`,
   `check`, and the daily digest's DRIFT/INBOUND sections are the
   replacement; see the retirement note in `SKILL.md`.
-- Worktree helpers: `${CLAUDE_PLUGIN_ROOT}/lib/worktrees.mjs` — as of
+- Worktree helpers: `${CLAUDE_PLUGIN_ROOT}/lib/core/worktrees.mjs` — as of
   2026-08-14 `enumerateWorktrees`/`enumerateCanonicalRepos` (the
   worktree-expansion path used at watcher-fire time) has **no live caller
   left**; the watcher was its only consumer (`docs/ISSUES.md` N8). The
   smaller `correlationKey`/`worktreeStamp` helpers are still reused for id
-  conventions elsewhere (`lib/reconcile.mjs`).
+  conventions elsewhere (`lib/edges/reconcile.mjs`).
 - launchd plists (confirmed via `launchctl list` 2026-08-14, **after** the
   watcher's unload). Exactly one is installed now:
   `~/Library/LaunchAgents/com.tathya.propagate.digest.plist` — the digest is
@@ -29,14 +29,14 @@ For "what do I do right now," go back to `SKILL.md`.
   `docs/archive/com.tathya.propagate.watcher.plist.retired-2026-08-14` and is
   deliberately **not** written as a `~/Library/LaunchAgents/…` path, because a
   path in that form reads as installed and is one copy-paste from being so.
-  The retired label is still owned by `lib/plist.mjs:25`:
+  The retired label is still owned by `lib/core/plist.mjs:25`:
   `export const LABEL = process.env.PROPAGATE_LABEL || "com.tathya.propagate.watcher"` —
   override with `PROPAGATE_LABEL` if you ever rename it again, and update this
-  file and `doctor`'s checks in the same change. `lib/plist.mjs` only ever
+  file and `doctor`'s checks in the same change. `lib/core/plist.mjs` only ever
   generated the watcher's plist — see the `reload` entry in "Complete CLI
   surface" below for what that means now.
 - Ledger (JSONL, authoritative): **per-workspace, resolved by
-  `lib/discovery.mjs` `makeWorkspaceRecord`** —
+  `lib/core/discovery.mjs` `makeWorkspaceRecord`** —
   `<workspace-root>/docs/PROPAGATION_LEDGER.jsonl` when `<root>/docs/` exists,
   otherwise `<workspace-root>/.propagation/ledger.jsonl`. There is NOT one
   global ledger. Examples: `Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl` (has
@@ -99,9 +99,9 @@ silently no-ops and the row stays open. Derive it via discovery so it always
 matches what `status` reads:
 
 ```javascript
-import { markStatus, renderMarkdown } from "${CLAUDE_PLUGIN_ROOT}/lib/ledger.mjs";
-import { discoverWorkspacesSync } from "${CLAUDE_PLUGIN_ROOT}/lib/discovery.mjs";
-import { SEARCH_ROOTS } from "${CLAUDE_PLUGIN_ROOT}/lib/config.mjs";
+import { markStatus, renderMarkdown } from "${CLAUDE_PLUGIN_ROOT}/lib/edges/ledger.mjs";
+import { discoverWorkspacesSync } from "${CLAUDE_PLUGIN_ROOT}/lib/core/discovery.mjs";
+import { SEARCH_ROOTS } from "${CLAUDE_PLUGIN_ROOT}/lib/core/config.mjs";
 
 // pick the workspace whose root contains the row's source file (nearest ancestor)
 const ws = discoverWorkspacesSync(SEARCH_ROOTS)
@@ -131,7 +131,7 @@ contain pipes that look like more commands than actually exist.
 | `status` | List open drift rows, scoped to the workspace at cwd by default. `--all` for every workspace, `--cross` for the cross-repo ledger, `--json` for machine-readable output. |
 | `doctor` | Health check: launchd plist loaded (`launchctl list \| grep <label>`), heartbeat age (warn >1h during active periods, fail >1 day), all `.propagates.yml` sidecars pass schema validation, sidecar downstream paths resolve on disk (warn-only), `state.json` parseable with `.bak` present, ledger JSONL parseable. |
 | `init <dir> [--workspace\|--edges-only]` | Scaffold `.propagates.yml`. `--workspace` (default) writes `workspace: true` and verifies the directory becomes discoverable, exiting non-zero if not (N15). **No longer touches the plist** — that moved to `reload` (N14). |
-| `reload` | **Obsolete as of 2026-08-14** — its only purpose was regenerating the (now retired) watcher's plist and reloading it into launchd; `lib/plist.mjs` has never generated any other plist (grep confirms it — the digest plist is installed by a separate mechanism it never touches, see "Canonical state" above). Not removed from `cli.mjs` by this change (out of scope — no live launchd command was run to verify/enact this), but there is no remaining reason to run it. |
+| `reload` | **Obsolete as of 2026-08-14** — its only purpose was regenerating the (now retired) watcher's plist and reloading it into launchd; `lib/core/plist.mjs` has never generated any other plist (grep confirms it — the digest plist is installed by a separate mechanism it never touches, see "Canonical state" above). Not removed from `cli.mjs` by this change (out of scope — no live launchd command was run to verify/enact this), but there is no remaining reason to run it. |
 | `check` | Commit-time drift gate. Flags below. |
 | `check --changed` | Default when no range/staged flag given: working tree + staged vs HEAD, unioned. |
 | `check --range <a>..<b>` | Explicit git range (for CI or a hook). |
@@ -187,7 +187,7 @@ alone).
 
 The inbound view answers one question: *"has anything upstream drifted into
 what I'm about to touch?"* It is a pure filter over `reconcile()`'s own rows
-(`lib/reconcile.mjs`'s `inboundRows` — no new computation, no second event
+(`lib/edges/reconcile.mjs`'s `inboundRows` — no new computation, no second event
 store, no write into any repo):
 
 ```
@@ -335,7 +335,7 @@ The digest agent installs independently, against
 `com.tathya.propagate.digest.plist` — **still current**, the digest is not
 retired, only the watcher is. (The "installs the same way" framing this line
 used to carry was already slightly loose before this change: `reload`/
-`lib/plist.mjs` never generated the digest's plist even when the watcher was
+`lib/core/plist.mjs` never generated the digest's plist even when the watcher was
 live — it is, and always was, installed by a separate mechanism.)
 
 ## Disable temporarily — watcher: superseded by full retirement; digest: still applies
@@ -365,8 +365,8 @@ v1 (historical, RETIRED 2026-08-14 — see `docs/DECISIONS.md`):
 
 v2 (current):
 
-- `reconcile` (`lib/reconcile.mjs`) derives drift from content — git blob ids
-  on both sides of an edge plus the v2 event store (`lib/events.mjs`) — on
+- `reconcile` (`lib/edges/reconcile.mjs`) derives drift from content — git blob ids
+  on both sides of an edge plus the v2 event store (`lib/edges/events.mjs`) — on
   demand, not from a remembered baseline. No daemon, no background process.
 - State + sidecars + ledger all atomic-write via temp+rename (unchanged from
   v1; still true for the v1 rows `status`/`drain` still read).

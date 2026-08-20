@@ -2,6 +2,10 @@
 
 # Gotchas — running observations
 
+> **Paths in entries below may predate 2026-08-20**, when `lib/` and `tests/` were
+> grouped into directories. `docs/DECISIONS.md` 2026-08-20 carries the old→new map.
+> Entries are not rewritten: the citation is evidence, and evidence is not edited.
+
 `docs/ISSUES.md` records **defects**. This records **lessons**: patterns that cost
 us something, each with the concrete instance that taught it. Append as they arrive;
 never delete one because it feels obvious now.
@@ -798,4 +802,47 @@ configuring action named — never a ✗. Absence still has to be attributable
 **The general form:** a check inherits its author's machine unless something forces it
 off. `HOME=$(mktemp -d)` in a test is that force. Both of these had existed for weeks
 with a green suite.
+
+---
+
+### G51 · A blanket `../` bump over a test tree corrupts fixture data, and it looks exactly like a path bug
+
+Moving `tests/x.test.mjs` to `tests/<group>/x.test.mjs` means every relative specifier
+needs one more `..`. The obvious sweep is `(["'])\.\./` → `"../../`. It cannot tell an
+import specifier from a string that merely *starts* with `../`, and test files are full
+of the latter.
+
+**Measured on the real move, 2026-08-20: 123 bumps were correct, 19 were not.** The 19
+were fixture data — cross-repo rows like `{ edge_id: "e1", source: "../../up/a.md" }`
+and `parseSupersedes` cases. The sharpest one:
+
+```js
+assert.deepEqual(parseSupersedes("[../a.md, ../b.md]"), ["../../a.md", "../../b.md"]);
+//                                ^ kept ../ (a "[" precedes)   ^ gained ../../ (a quote precedes)
+```
+
+The regex rewrote the *expectation* and not the *input*, because one had a quote in
+front of it and the other had a bracket.
+
+**Signal — and this is the expensive part: the corruption fails as a path bug.** Seven
+distinct depth classes genuinely did need fixing (quoted specifiers, segment-form
+`path.join`, trailing-`".."` constants, `new URL()` args, double-bumped `helpers/`,
+non-recursive `readdirSync`, `SKILL_DIR`'s own count). After each fix the count improved,
+so the next failure read as "one more class I have not found yet". Two of them were not
+a class at all — they were the previous fix, applied too widely.
+
+**Cost:** the tests/ move went 725 pass → 423 pass at its worst and took seven
+diagnose-fix rounds, of which the last two were self-inflicted.
+
+**Do:** rewrite specifiers *as specifiers*. Match `from "…"`, `import("…")`,
+`new URL("…")`, `path.join(…, "..", …)` — never a bare substring that also occurs in
+data. Then **classify the diff before running the suite**: every added line, split into
+specifier-position and other-position. The 19 were visible in one pass over
+`git diff -M --unified=0` and would have cost nothing to catch.
+
+**And derive roots from a marker, not a count.** `SKILL_DIR` was
+`path.resolve(import.meta.url, "..", "..")` and became wrong by one level the moment
+`lib/config.mjs` became `lib/core/config.mjs` — seventeen tests failed with `ENOENT
+.../lib/cross-allow.yml`. It now walks up to `package.json` + `SKILL.md`, which survives
+any future regrouping.
 

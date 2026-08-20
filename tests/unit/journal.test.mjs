@@ -1,0 +1,183 @@
+/**
+ * The journal, and the two traps that moved its headline figure three times.
+ *
+ * For 2026-08-14 the day's activity was reported as 95/21, then 109/22, then 63/10,
+ * before settling at **118/24** — confirmed by two independent implementations. Each move
+ * was one of the traps below, and both are asserted here so neither can come back.
+ *
+ *   1. SYMLINKS. `find … -name .git` and `readdirSync().filter(e => e.isDirectory())`
+ *      both skip symlinked directories — a Dirent for one answers isSymbolicLink().
+ *      `~/Documents/GitHub/propagate-skill` is a symlink, so 14 commits were invisible.
+ *   2. BARE DATES. `--until=2026-08-15` goes through git's approxidate parser and
+ *      admitted commits stamped 2026-08-15.
+ *
+ * The second is why `commitsIn` throws on a bare date rather than quietly accepting it:
+ * this module's whole purpose is producing a number someone will trust.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, mkdir, writeFile, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { enumerateRepos, commitsIn, journal } from "../../lib/edges/journal.mjs";
+import { plain } from "../helpers/plain.mjs";
+
+const git = (cwd, ...args) =>
+  execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+
+async function repoAt(dir, when) {
+  await mkdir(dir, { recursive: true });
+  git(dir, "init", "-q");
+  git(dir, "config", "user.email", "t@example.com");
+  git(dir, "config", "user.name", "Tester");
+  await writeFile(path.join(dir, "f.txt"), "x\n", "utf8");
+  git(dir, "add", ".");
+  execFileSync("git", ["commit", "-q", "-m", "seed"], {
+    cwd: dir,
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when },
+  });
+  return dir;
+}
+
+test("a symlinked repo IS enumerated, and is reported as reached via a link", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "journal-"));
+  const real = await repoAt(path.join(root, "elsewhere", "actual-repo"), "2026-08-14T10:00:00+05:30");
+  const visible = path.join(root, "tree");
+  await mkdir(visible, { recursive: true });
+  await symlink(real, path.join(visible, "linked-repo"));
+
+  const { repos, symlinked } = enumerateRepos([visible]);
+  assert.equal(repos.length, 1, "the symlinked repo must be found — plain find/isDirectory misses it");
+  assert.equal(symlinked.length, 1, "and must be REPORTED as symlink-reached, not silently folded in");
+  assert.match(symlinked[0], /linked-repo$/);
+});
+
+test("without the symlink there is nothing to find — proves the fix, not the platform", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "journal-nolink-"));
+  const visible = path.join(root, "tree");
+  await mkdir(visible, { recursive: true });
+  const { repos } = enumerateRepos([visible]);
+  assert.deepEqual(repos, []);
+});
+
+test("a symlink cycle terminates instead of recursing forever", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "journal-cycle-"));
+  const a = path.join(root, "a");
+  await mkdir(a, { recursive: true });
+  await symlink(root, path.join(a, "loop")); // points at its own ancestor
+  const { repos } = enumerateRepos([root]);
+  assert.deepEqual(repos, [], "must return, not hang — following symlinks makes cycles possible");
+});
+
+test("bare dates are REJECTED — approxidate silently shifted the window", () => {
+  assert.throws(
+    () => commitsIn(".", "2026-08-14", "2026-08-15"),
+    /explicit datetimes/,
+    "a bare --until admitted commits stamped 2026-08-15; the caller must be explicit",
+  );
+  assert.throws(() => commitsIn(".", "2026-08-14T00:00:00+05:30", "2026-08-15"), /explicit datetimes/);
+});
+
+test("the window is half-open, and filters on committer date", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "journal-window-"));
+  await repoAt(path.join(root, "r1"), "2026-08-14T10:00:00+05:30");
+  await repoAt(path.join(root, "r2"), "2026-08-15T10:00:00+05:30");
+
+  const day14 = journal([root], "2026-08-14T00:00:00+05:30", "2026-08-15T00:00:00+05:30");
+  assert.equal(day14.commits, 1, "only the 08-14 commit — the 08-15 one must not leak in");
+  assert.equal(day14.reposWithActivity, 1);
+  assert.equal(day14.reposScanned, 2, "both repos scanned; only one had activity");
+});
+
+test("attribution is carried per repo — a count alone is wrong about who did what", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "journal-attr-"));
+  const r = await repoAt(path.join(root, "r"), "2026-08-14T10:00:00+05:30");
+  await writeFile(path.join(r, "g.txt"), "y\n", "utf8");
+  git(r, "add", ".");
+  execFileSync("git", ["commit", "-q", "-m", "other-session", "--author", "Someone Else <s@example.com>"], {
+    cwd: r,
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, GIT_COMMITTER_DATE: "2026-08-14T11:00:00+05:30" },
+  });
+
+  const out = journal([root], "2026-08-14T00:00:00+05:30", "2026-08-15T00:00:00+05:30");
+  assert.equal(out.commits, 2);
+  assert.deepEqual(
+    out.byRepo[0].authors.sort(),
+    ["Someone Else", "Tester"],
+    "16 of one repo's commits on 2026-08-15 were a different session; the record must show that",
+  );
+});
+
+test("a markered symlink is FOLLOWED and becomes a workspace; doctor still names every link it saw", async () => {
+  // spawnSync, not execFileSync: doctor exits non-zero whenever it finds a problem, and
+  // a fixture always will. execFileSync throws on that and discards the output we need.
+  const { spawnSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const root = await mkdtemp(path.join(tmpdir(), "journal-doctorlink-"));
+  const real = path.join(root, "elsewhere", "a-workspace");
+  await mkdir(path.join(real, "docs"), { recursive: true });
+  await writeFile(path.join(real, ".propagates.yml"), "workspace: true\nsources: {}\n", "utf8");
+  await writeFile(path.join(real, "docs", "PROPAGATION_LEDGER.jsonl"), "", "utf8");
+
+  const searchRoot = path.join(root, "tree");
+  await mkdir(searchRoot, { recursive: true });
+  await symlink(real, path.join(searchRoot, "linked-ws"));
+
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "cli.mjs");
+  const res = spawnSync(process.execPath, [cli, "doctor"], {
+    cwd: searchRoot,
+    encoding: "utf8",
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: searchRoot },
+  });
+  const out = plain(res.stdout + res.stderr);
+
+  // CONTRACT CHANGED 2026-08-17 (N29). A symlinked dir carrying a marker is now
+  // DESCENDED by both walks — lib/discovery.mjs's listDirs and lib/edges.mjs's
+  // findAllSidecarsRecursive. Before, it was skipped in silence: five edges declared
+  // behind the hub's `propagate-skill` link moved the expanded edge count 711 -> 711,
+  // and the skill that exists to catch undeclared couplings could not declare its own.
+  //
+  // This test previously asserted the OPPOSITE — that such a link is reported as
+  // IGNORED. That assertion was correct until the walk changed and is kept here in
+  // inverted form, because the strongest evidence the fix works is the fixture that
+  // used to prove it did not.
+
+  // 1. the marker was honoured: the linked dir is a real workspace now
+  assert.match(out, /# Workspace: linked-ws/, "a markered symlink must be discovered as a workspace");
+
+  // 2. links are still enumerated — following one does not excuse silence about it
+  assert.match(out, /symlinked dirs seen/, "must still name every link it saw (G2: absence is attributable)");
+  assert.match(out, /followed, N29/, "and say that a markered link was followed, not merely that it exists");
+
+  // 3. the old claim must be gone, not just unasserted
+  assert.doesNotMatch(out, /IGNORED/, "a markered link is no longer ignored; the old message would now be false");
+});
+
+test("an UNMARKERED symlink is still not descended, and is still named", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const root = await mkdtemp(path.join(tmpdir(), "journal-nomarker-"));
+  const real = path.join(root, "elsewhere", "plain-dir");
+  await mkdir(real, { recursive: true });
+  await writeFile(path.join(real, "README.md"), "no marker here\n", "utf8");
+
+  const searchRoot = path.join(root, "tree");
+  await mkdir(searchRoot, { recursive: true });
+  await symlink(real, path.join(searchRoot, "linked-plain"));
+
+  const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "cli.mjs");
+  const res = spawnSync(process.execPath, [cli, "doctor"], {
+    cwd: searchRoot, encoding: "utf8",
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: searchRoot },
+  });
+  const out = plain(res.stdout + res.stderr);
+
+  // FAILING INPUT: drop the `existsSync(.propagates.yml)` guard from listDirs and this
+  // link gets walked too — which is how following symlinks by default invites cycles
+  // and duplicate workspaces. The marker is the opt-in, and this is the test of that.
+  assert.match(out, /no marker — nothing lost/, "an unmarkered link must be named as skipped");
+  assert.doesNotMatch(out, /# Workspace: linked-plain/, "and must NOT become a workspace");
+});
