@@ -151,7 +151,20 @@ test("doctor reports the retired watcher as informational only, never a failure,
     assert.notEqual(replacementSectionStart, -1, "replacement health section must exist");
     const retiredSection = out.slice(retiredSectionStart, replacementSectionStart);
     assert.doesNotMatch(retiredSection, /✗/, "no ✗ inside the retired watcher section");
-    assert.match(retiredSection, /·.*plist loaded/);
+    // PLATFORM-CONDITIONAL, because the line itself is. Phase 3 made the launchd probe
+    // fire only when `LAUNCHD_ACTIVE` (scheduler === launchd AND platform === darwin), so
+    // on Linux there is no plist line to assert — correctly, since there is no launchd.
+    // The test was left asserting a macOS-only string against code that had been made
+    // portable, and it failed on CI's ubuntu runner while passing 741/741 locally.
+    //
+    // The invariant that holds EVERYWHERE is the one worth pinning: whatever the retired
+    // section says, it never says it with a ✗ (asserted above). The plist line is checked
+    // only where a plist can exist.
+    if (process.platform === "darwin") {
+      assert.match(retiredSection, /·.*plist loaded/, "on macOS the plist state must still be reported, as info");
+    } else {
+      assert.doesNotMatch(retiredSection, /plist loaded/, "off darwin there is no launchd, so no plist claim may be made");
+    }
     // Scoped test env: PROPAGATE_STATE_DIR is a fresh temp dir, so there is
     // no heartbeat file yet — that's the "heartbeat file" branch, not
     // "heartbeat age" (which only prints once one exists). Either way it

@@ -9,7 +9,7 @@
     "propagate": "cli.mjs"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
   },
   "scripts": {
     "test": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs'",

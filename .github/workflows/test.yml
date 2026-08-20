@@ -8,8 +8,16 @@ name: test
 # are the versions `engines.node` may claim. A floor asserted without a run is a guess, and
 # a wrong floor either turns users away or fails them confusingly at runtime.
 #
-# 20 is expected to FAIL (no fs.globSync) and is included deliberately — a matrix where
-# everything passes tells you nothing about where the floor actually is.
+# MEASURED 2026-08-20, run 32359957229:
+#   node 20  FAILED at "does it even load" — fs.globSync absent. Floor is above 20.
+#   node 22  loaded fine; only env-dependent tests failed (since fixed).
+#   node 24  same failures as 22 — i.e. not version-specific.
+# engines.node was ">=24" on nobody's measurement and excluded the current LTS. It is now
+# ">=22", which is what the runner actually proved.
+#
+# 20 STAYS IN THE MATRIX and is expected to fail. A matrix where everything passes tells
+# you nothing about where the floor is, and the day globSync stops being the constraint
+# this is how we find out.
 
 on:
   push:
@@ -25,6 +33,8 @@ jobs:
       matrix:
         node: ['20', '22', '24']
     name: node ${{ matrix.node }}
+    # 20 is the below-floor probe: its failure is the measurement, not a broken build.
+    continue-on-error: ${{ matrix.node == '20' }}
     steps:
       - uses: actions/checkout@v4
 
