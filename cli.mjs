@@ -179,6 +179,7 @@ export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
 }
 import { discoverWorkspacesSync, isWorkspaceMarker } from "./lib/core/discovery.mjs";
 import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS, migrateLegacyState } from "./lib/core/setup.mjs";
+import { updateNotice, formatUpdateNotice } from "./lib/core/update-notice.mjs";
 import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/core/plist.mjs";
 
 const RESET = "\x1b[0m";
@@ -4644,6 +4645,17 @@ async function graphIndexCmd() {
 
 if (_invokedDirectly) {
   const mode = process.argv[2] || "status";
+
+  // ONE line, at most, on the two commands a person actually types. Wired here rather
+  // than inside each command so there is exactly one call site to reason about — and
+  // wired at all because the check previously existed and was invoked by nothing, which
+  // is GOTCHAS G48 (an enforcement point that watches nothing). Never throws, never
+  // blocks: `updateNotice` swallows every failure by construction.
+  if (mode === "status" || mode === "doctor") {
+    const notice = formatUpdateNotice(updateNotice(), { dim: DIM, reset: RESET });
+    if (notice) console.log(notice);
+  }
+
   if (mode === "status") {
     await status();
   } else if (mode === "doctor") {

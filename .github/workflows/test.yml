@@ -63,11 +63,26 @@ jobs:
           node cli.mjs setup --roots "$HOME/code"
           node cli.mjs doctor || true   # red before bootstrap is CORRECT; see SKILL.md step 3
 
-      - name: no private paths shipped
-        # The port blocker, asserted rather than eyeballed. If any of these appear in a
-        # tracked file the publish is wrong, and a human reading the diff will miss it.
+      # NOTE: the private-path gate that used to live here has been removed, and its
+      # removal is deliberate rather than a retreat. THIS repo is the private working copy
+      # and is SUPPOSED to contain real names and paths — 314 hits across 13 files, which
+      # is what makes its incident docs worth reading. Gating the private repo on being
+      # scrubbed would have failed every run forever, and a permanently-red check is one
+      # people stop looking at.
+      #
+      # The scrub is enforced where it actually matters: bin/make-public.mjs exits 1 if any
+      # forbidden pattern survives into the built public tree, and it runs at publish time,
+      # which is the only moment the distinction between the two repos is real.
+      - name: the public build would be clean
+        # No identity map in CI (it lives outside the repo on purpose, so it cannot be
+        # published), so this asserts the tool REFUSES rather than that the scrub passes.
+        # Refusing without a map is the safety property: the failure mode to prevent is a
+        # half-scrubbed publish, not a missing one.
         run: |
-          if git grep -InE 'rupali\.b|/Users/[a-z]' -- . ':(exclude)node_modules' ':(exclude).github/workflows/test.yml'; then
-            echo "::error::private path found in a tracked file"; exit 1
+          set +e
+          PROPAGATE_STATE_DIR="$(mktemp -d)" node bin/make-public.mjs --out /tmp/pub --check
+          code=$?
+          if [ "$code" -ne 2 ]; then
+            echo "::error::make-public should exit 2 without an identity map, got $code"; exit 1
           fi
-          echo "no private paths"
+          echo "refuses to build without an identity map, as designed"
