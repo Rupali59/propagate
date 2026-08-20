@@ -24,10 +24,12 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync, readdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+
+import { SEARCH_ROOTS } from "../lib/core/config.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STATE = process.env.PROPAGATE_STATE_DIR || path.join(os.homedir(), ".propagate");
@@ -55,6 +57,25 @@ function sh(args) {
   return execFileSync("git", args, { cwd: REPO, encoding: "utf8", maxBuffer: 1 << 26 });
 }
 
+/**
+ * The map has two shapes on disk:
+ *   - flat legacy:  { "Some Client": "alias", ... }
+ *   - current:      { "names": { "Some Client": "alias", ... }, "allow": [...] }
+ *
+ * A flat object has no "names" key, so that alone distinguishes it — every real
+ * client name is a legitimate object key, "names" is not one anyone has chosen.
+ * Treating flat-as-{names: flat, allow: []} keeps every map on disk today valid
+ * without a migration step.
+ */
+function normalizeMap(raw) {
+  if (raw && typeof raw === "object" && !Array.isArray(raw) && Object.prototype.hasOwnProperty.call(raw, "names")) {
+    const names = raw.names && typeof raw.names === "object" ? raw.names : {};
+    const allow = Array.isArray(raw.allow) ? raw.allow : [];
+    return { names, allow };
+  }
+  return { names: raw && typeof raw === "object" ? raw : {}, allow: [] };
+}
+
 function loadMap() {
   if (!existsSync(MAP_PATH)) {
     console.error(`no identity map at ${MAP_PATH}`);
@@ -64,13 +85,60 @@ function loadMap() {
     console.error(`the same workspace keeps the same name across every doc that mentions it.`);
     process.exit(2);
   }
-  const map = JSON.parse(readFileSync(MAP_PATH, "utf8"));
-  const entries = Object.entries(map).sort((a, b) => b[0].length - a[0].length); // longest first
+  const { names, allow } = normalizeMap(JSON.parse(readFileSync(MAP_PATH, "utf8")));
+  const entries = Object.entries(names).sort((a, b) => b[0].length - a[0].length); // longest first
   if (!entries.length) {
     console.error("identity map is empty — nothing would be scrubbed");
     process.exit(2);
   }
-  return entries;
+  return { entries, names, allow };
+}
+
+/**
+ * WATCHLIST COMPLETENESS. The map being non-empty proves nothing about it being
+ * *complete* — a new client directory appearing later is scrubbed by nothing and
+ * leaks silently. The watchlist is depth-1 directory names under SEARCH_ROOTS,
+ * not discovered workspaces: discovery only sees directories carrying a
+ * `.propagates.yml` marker, and real client names (Tathya, Khushboo, Tushar in
+ * the production tree) leak into docs with no marker of their own. Every
+ * depth-1 name must appear as a `names` key or be listed in `allow`, or the
+ * build refuses and names exactly which directory is unaccounted for.
+ */
+function watchlist() {
+  const seen = new Set();
+  const out = [];
+  for (const root of SEARCH_ROOTS) {
+    let children;
+    try {
+      children = readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const dirent of children) {
+      if (!dirent.isDirectory()) continue;
+      if (dirent.name.startsWith(".")) continue;
+      if (seen.has(dirent.name)) continue;
+      seen.add(dirent.name);
+      out.push(dirent.name);
+    }
+  }
+  return out;
+}
+
+function checkWatchlistCoverage({ names, allow }) {
+  const nameKeys = new Set(Object.keys(names));
+  const allowed = new Set(allow);
+  const unmapped = watchlist().filter((dir) => !nameKeys.has(dir) && !allowed.has(dir));
+  if (unmapped.length) {
+    console.error(`\n  ${unmapped.length} WATCHLIST DIRECTOR${unmapped.length === 1 ? "Y IS" : "IES ARE"} UNMAPPED:`);
+    for (const dir of unmapped) {
+      console.error(`     ${dir}`);
+    }
+    console.error(`\n  Every directory at depth 1 under SEARCH_ROOTS must be a key in the identity`);
+    console.error(`  map's "names", or listed in its "allow" array. Add it to one of them at`);
+    console.error(`  ${MAP_PATH}`);
+    process.exit(2);
+  }
 }
 
 function excludedBy(rel) {
@@ -96,7 +164,8 @@ if (!OUT) {
   process.exit(2);
 }
 
-const entries = loadMap();
+const { entries, names, allow } = loadMap();
+checkWatchlistCoverage({ names, allow });
 const tracked = sh(["ls-files"]).trim().split("\n").filter(Boolean);
 
 const skipped = new Map();
