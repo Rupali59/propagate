@@ -8,10 +8,24 @@
  * subprocess per case (tests/helpers/print-config-paths.mjs), not an
  * in-process re-import — same pattern as tests/doctor.test.mjs.
  *
- * Test 1 below is the regression guard STOP-phase Phase B asked for by name:
- * "prove the defaults are unchanged" — if this ever fails, the live watcher
- * loses its mtime baseline on the next run and every tracked file re-fires as
- * first-observation (N13, again, self-inflicted).
+ * Test 1 below WAS "prove the defaults are unchanged" — that resolved paths equal
+ * SKILL_DIR when PROPAGATE_STATE_DIR is unset. Its stated reason was that otherwise
+ * "the live watcher loses its mtime baseline on the next run".
+ *
+ * CHANGED DELIBERATELY 2026-08-20, not tuned until it passed. That watcher was RETIRED
+ * 2026-08-14 and refuses to run; `state.json` is a fossil `doctor` now reports as info
+ * (GOTCHAS G50). The harm the guard named no longer exists, while the arrangement it
+ * protected did real damage: state lived beside the code, in the directory a
+ * marketplace update replaces wholesale, and the test suite appended 1170 bytes to a
+ * production `watcher.log` on every run (2.9 MB accumulated).
+ *
+ * The general form of G12 — "a default that moves loses state silently" — still binds,
+ * and is discharged by lib/setup.mjs migrateLegacyState(), which MOVES the live
+ * artifacts rather than orphaning them. Guarded by tests/setup-migration.test.mjs.
+ *
+ * So the invariant flips: the default is now ~/.propagate, and the thing asserted is
+ * that NO state path resolves inside the skill directory
+ * (tests/state-isolation.test.mjs).
  */
 
 import { test } from "node:test";
@@ -25,6 +39,9 @@ import { fileURLToPath } from "node:url";
 
 import { SKILL_DIR } from "../lib/config.mjs";
 
+/** The default state home, as of 2026-08-20. Was SKILL_DIR; see the header. */
+const DEFAULT_STATE_DIR = path.join(os.homedir(), ".propagate");
+
 const HELPER_PATH = fileURLToPath(new URL("./helpers/print-config-paths.mjs", import.meta.url));
 
 /** A harmless empty scratch dir, so discovery at import-time has nothing real to walk. */
@@ -33,9 +50,17 @@ async function emptySearchRoot() {
 }
 
 function runHelper(env) {
+  // `undefined` DELETES the variable rather than inheriting it. Spreading process.env
+  // meant the "PROPAGATE_STATE_DIR is unset" cases silently inherited whatever the
+  // runner exported — and once npm test began setting it (2026-08-20, to stop the
+  // suite writing production state), the unset case stopped being unset and the test
+  // was asserting on the runner's value. A case that cannot reach the state it names
+  // is a case that proves nothing.
+  const merged = { ...process.env, ...env };
+  for (const [k, v] of Object.entries(env)) if (v === undefined) delete merged[k];
   const result = spawnSync(process.execPath, [HELPER_PATH], {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: merged,
   });
   assert.equal(result.status, 0, `helper subprocess failed: ${result.stderr}`);
   return JSON.parse(result.stdout.trim().split("\n").pop());
@@ -44,15 +69,17 @@ function runHelper(env) {
 test("defaults unchanged: resolved paths equal today's literals when PROPAGATE_STATE_DIR is unset", async () => {
   const searchRoot = await emptySearchRoot();
   try {
-    const env = { ...process.env, PROPAGATE_SEARCH_ROOTS: searchRoot };
-    delete env.PROPAGATE_STATE_DIR;
-    const paths = runHelper(env);
+    // `undefined`, NOT `delete`. runHelper spreads process.env first, so a key that is
+    // merely absent from the override is re-supplied by the parent — which is exactly
+    // what happened once npm test started exporting PROPAGATE_STATE_DIR. Present-and-
+    // undefined is the only form that can unset.
+    const paths = runHelper({ PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: undefined });
 
-    assert.equal(paths.STATE_DIR, null, "STATE_DIR must be null (default) when unset");
-    assert.equal(paths.STATE_PATH, path.join(SKILL_DIR, "state.json"));
-    assert.equal(paths.LOCK_PATH, path.join(SKILL_DIR, ".lock-target"));
-    assert.equal(paths.HEARTBEAT_PATH, path.join(SKILL_DIR, "heartbeat"));
-    assert.equal(paths.WATCHER_LOG, path.join(SKILL_DIR, "watcher.log"));
+    assert.equal(paths.STATE_DIR, DEFAULT_STATE_DIR, "STATE_DIR defaults to ~/.propagate when unset");
+    assert.equal(paths.STATE_PATH, path.join(DEFAULT_STATE_DIR, "state.json"));
+    assert.equal(paths.LOCK_PATH, path.join(DEFAULT_STATE_DIR, ".lock-target"));
+    assert.equal(paths.HEARTBEAT_PATH, path.join(DEFAULT_STATE_DIR, "heartbeat"));
+    assert.equal(paths.WATCHER_LOG, path.join(DEFAULT_STATE_DIR, "watcher.log"));
     assert.equal(
       paths.PLIST_PATH,
       path.join(os.homedir(), "Library", "LaunchAgents", `${paths.LABEL}.plist`),
@@ -82,7 +109,7 @@ test("PROPAGATE_STATE_DIR relocates state, lock, heartbeat, watcher log AND the 
     assert.equal(paths.PLIST_PATH, path.join(stateDir, `${paths.LABEL}.plist`));
 
     // Not one of them still points at the production location.
-    assert.notEqual(paths.STATE_PATH, path.join(SKILL_DIR, "state.json"));
+    assert.notEqual(paths.STATE_PATH, path.join(DEFAULT_STATE_DIR, "state.json"));
     assert.notEqual(
       paths.PLIST_PATH,
       path.join(os.homedir(), "Library", "LaunchAgents", `${paths.LABEL}.plist`),
@@ -131,8 +158,8 @@ test("a bad PROPAGATE_STATE_DIR (a file, not a directory) warns and falls back t
     assert.match(result.stderr, /falling back/i);
 
     const paths = JSON.parse(result.stdout.trim().split("\n").pop());
-    assert.equal(paths.STATE_DIR, null, "falls back to the default (null) state dir");
-    assert.equal(paths.STATE_PATH, path.join(SKILL_DIR, "state.json"));
+    assert.equal(paths.STATE_DIR, DEFAULT_STATE_DIR, "an unusable explicit override degrades to the DEFAULT state dir, not to the skill dir");
+    assert.equal(paths.STATE_PATH, path.join(DEFAULT_STATE_DIR, "state.json"));
     assert.equal(
       paths.PLIST_PATH,
       path.join(os.homedir(), "Library", "LaunchAgents", `${paths.LABEL}.plist`),
@@ -159,8 +186,8 @@ test("an unwritable PROPAGATE_STATE_DIR parent (nonexistent, uncreatable) warns 
     assert.equal(result.status, 0, `module load must not throw/crash: ${result.stderr}`);
     assert.match(result.stderr, /PROPAGATE_STATE_DIR/);
     const paths = JSON.parse(result.stdout.trim().split("\n").pop());
-    assert.equal(paths.STATE_DIR, null);
-    assert.equal(paths.STATE_PATH, path.join(SKILL_DIR, "state.json"));
+    assert.equal(paths.STATE_DIR, DEFAULT_STATE_DIR);
+    assert.equal(paths.STATE_PATH, path.join(DEFAULT_STATE_DIR, "state.json"));
   } finally {
     await rm(searchRoot, { recursive: true, force: true });
   }

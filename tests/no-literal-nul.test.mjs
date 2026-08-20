@@ -42,7 +42,12 @@ test("no tracked non-vendor file contains a literal NUL byte", () => {
   )
     .trim()
     .split("\n")
-    .filter((f) => f && !f.startsWith("node_modules/"));
+    .filter((f) => f && !f.startsWith("node_modules/"))
+    // Source only. `docs/archive/` holds retired artifacts kept verbatim as evidence —
+    // including gzipped watcher logs, which are binary by definition and would fail a
+    // guard whose whole point is "source files must stay greppable". Excluding them is
+    // narrowing the claim to what it always meant, not weakening it.
+    .filter((f) => !f.startsWith("docs/archive/") && !/\.(gz|db|png|jpg|jpeg|ico|zip|tgz)$/i.test(f));
 
   // Attributable absence: an empty file list means git failed or the cwd is wrong,
   // not that the repo is clean. A check that cannot fail is worse than no check.

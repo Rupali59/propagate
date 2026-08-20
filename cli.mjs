@@ -123,6 +123,7 @@ import {
   GRAPH_MCP_CACHE_PATH,
   RULES_DIR,
   CONFIG_PATH,
+  STATE_DIR as CONFIG_ROOT_DIR,
   MAX_DEPTH,
 } from "./lib/config.mjs";
 import YAML from "yaml";
@@ -177,7 +178,7 @@ export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
   return { edges, missing, outsideAllowlist };
 }
 import { discoverWorkspacesSync, isWorkspaceMarker } from "./lib/discovery.mjs";
-import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS } from "./lib/setup.mjs";
+import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS, migrateLegacyState } from "./lib/setup.mjs";
 import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/plist.mjs";
 
 const RESET = "\x1b[0m";
@@ -1914,6 +1915,15 @@ async function setupCmd(argv = []) {
     writeFileSync(CONFIG_PATH, renderConfig({ roots, scheduler: SCHEDULER }), "utf8");
     wrote = true;
     console.log(`${existed ? "overwrote" : "wrote"}: ${CONFIG_PATH}`);
+  }
+
+  // --- 2b. relocate anything the old default left beside the code -----------
+  // The default moved from SKILL_DIR to ~/.propagate on 2026-08-20. GOTCHAS G12 does
+  // not forbid that; it requires the move not to lose what was already written.
+  const mig = migrateLegacyState(SKILL_DIR, CONFIG_ROOT_DIR);
+  if (mig.moved.length) console.log(`moved into ${CONFIG_ROOT_DIR}: ${mig.moved.join(", ")}`);
+  for (const c of mig.conflicts) {
+    console.log(`${YELLOW}conflict:${RESET} ${c} exists in both places — left as-is, yours to resolve.`);
   }
 
   // --- 3. verify what is ON DISK, not what is in memory ---------------------
