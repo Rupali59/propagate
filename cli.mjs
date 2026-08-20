@@ -2230,6 +2230,34 @@ export function resolveChangedFile(absPath, workspaces = WORKSPACES) {
       }
     }
   }
+  // THIRD STRATEGY — both spellings of one directory (2026-08-20).
+  //
+  // The two above cover: (1) the file is lexically inside a workspace, and (2) N32, a
+  // repo reached through a symlink that is a CHILD of the workspace root. Neither covers
+  // the root's own ANCESTOR being a symlink: `git rev-parse --show-toplevel` returns a
+  // realpath'd `/private/var/...` while discovery holds the lexical `/var/...`, so the
+  // prefix test compares two names for the same directory and finds nothing.
+  //
+  // Found by running the edge lifecycle end to end: an identical fixture fired under
+  // $HOME and was SILENT under /var/folders. reconcile said DRIFTED in both — only the
+  // gate was dead, which is N32's signature in a new shape.
+  //
+  // Deliberately LAST. This is not the realpath-on-both-sides approach that was tried
+  // and reverted during N32; that was proposed as a replacement for the real -> link
+  // translation and breaks N32's case, where the workspace root is not the symlink.
+  // Running it only after both existing strategies miss keeps N32 on its own path.
+  for (const ws of workspaces) {
+    let realRoot;
+    try {
+      realRoot = realpathSync(ws.root);
+    } catch {
+      continue; // a workspace root that no longer exists is not a match, and not fatal
+    }
+    if (under(realRoot, realChanged)) {
+      return { workspace: ws, rel: path.relative(realRoot, realChanged) };
+    }
+  }
+
   return null;
 }
 

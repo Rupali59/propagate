@@ -1396,3 +1396,43 @@ is judgment work, one rule at a time, and is what this issue tracks.
 already recorded: `nextjs-dev-server-port` matched the helper script's name and produced
 7 false positives (N34). Widen only against a real sample.
 
+---
+
+### N36 · The commit-time gate is silently dead for any repo under a symlinked path — **S1** — **RESOLVED 2026-08-20**
+
+**Found by running the edge lifecycle end to end**, which no unit test did. One fixture —
+a workspace with a declared `spec.md -> docs/impl.md` edge, source staged, downstream
+deliberately stale — behaved two ways depending only on where it lived:
+
+| Repo path | `check --staged` |
+|---|---|
+| `/var/folders/…` (macOS tmpdir, a symlink to `/private/var/folders`) | **nothing, exit 0** |
+| `$HOME/…` (no symlink in the path) | `spec.md → verify: docs/impl.md` |
+
+`reconcile` reported **DRIFTED in both**. Discovery, reconcile and graph were all
+correct; only the gate was dead — N32's exact signature in a different shape.
+
+**Cause.** `check` injects `git rev-parse --show-toplevel`, which always returns the
+REALPATH (`/private/var/...`), while discovery holds the lexical path (`/var/...`). The
+prefix test in `resolveChangedFile` then compares two spellings of one directory and
+finds no match, and the miss is dropped silently at the call site.
+
+N32's fix does not cover this: it scans symlinks that are CHILDREN of the workspace root.
+Here the root's own ANCESTOR is the symlink.
+
+**Fix.** A third strategy in `resolveChangedFile`, tried only after the existing two
+miss: compare `realpath(changed)` against `realpath(ws.root)`. Deliberately last, and
+deliberately not a replacement — the realpath-on-both-sides approach reverted during N32
+failed because it was proposed INSTEAD of the real→link translation, which N32's case
+needs. Ordering keeps both working, and `tests/cli/check-symlinked-root.test.mjs`
+asserts all three cases including a negative control, so fixing one by breaking the other
+fails loudly.
+
+**Verified both ways after the fix:** the `/var/folders` fixture now fires, and
+propagate's own symlink-reached repo still resolves through the link
+(`propagate-skill/lib/report/metrics.mjs → …`), not through its realpath.
+
+**Reach.** Any repo whose path traverses a symlink — macOS temp dirs, `/home` symlinked
+to another volume, a checkout under a linked directory. The gate reports success while
+enforcing nothing, which is the failure this skill exists to catch.
+
