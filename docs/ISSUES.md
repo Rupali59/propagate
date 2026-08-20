@@ -2,6 +2,19 @@
 
 # Propagate — issue register
 
+> **Triage pass, 2026-08-20.** Every entry marked RESOLVED or MOOT below carries the
+> measurement or code path that closed it, not a judgement. **Nine of the twenty-five
+> "open" issues turned out to be already closed** — mostly by the v1 watcher retirement
+> (2026-08-14) and the v2 reconcile rewrite — and nobody had gone back to mark them. An
+> issue register reporting work already done is the same failure as a check that cannot
+> fail: it describes a state that is not real, and it costs whoever acts on it.
+>
+> **Not everything was re-verified.** `N19`, `N20`, `N22`, `N25`, `N26`, `N28`, `N30`,
+> `N31`, `N35` were not re-measured in this pass and keep their existing status. Saying
+> so is the point — a triage that silently leaves entries untouched is indistinguishable
+> from one that checked and confirmed them.
+
+
 > **Paths in entries below may predate 2026-08-20**, when `lib/` and `tests/` were
 > grouped into directories. `docs/DECISIONS.md` 2026-08-20 carries the old→new map.
 > Entries are not rewritten: the citation is evidence, and evidence is not edited.
@@ -77,7 +90,7 @@ propagation plan's E2), so the row itself is now handled — `readLedgerWithStat
 **It is deliberately NOT folded into `drifts`, and that is the load-bearing part.** Because
 N2 (below) left `id 256` duplicated, admitting the row to the drift map would let it and the
 real `drift` row overwrite each other by file order — converting an invisible row into a
-corrupted one. Regression test: `tests/ledger-activity.test.mjs`, *"a `manual` row is known, is
+corrupted one. Regression test: `tests/unit/ledger-activity.test.mjs`, *"a `manual` row is known, is
 NOT folded as drift, and is returned separately"*. It exercises **both** file orderings on
 purpose: with the manual row first the drift row wins anyway and the bug is invisible, so a
 first-order-only fixture is a check that cannot fail — the first draft of that test made
@@ -115,7 +128,9 @@ finds only its own definition and the doc comment referencing the race it used t
 sequential ids under one lock, which remains unsafe across branches; that is v2's ULID work
 (`~/.claude/plans/okay-i-dont-think-logical-haven.md` §1, §9 Phase 4).
 
-### N3 · Sequential ids cannot survive branches — **S1**
+### N3 · Sequential ids cannot survive branches — **S1** — **RESOLVED 2026-08-20**
+
+**RESOLVED 2026-08-20** — v2 `lib/edges/events.mjs:85` mints ids from `crypto.randomInt` over Crockford base32 — not sequential, so branches cannot collide.
 Ids derive from file content, so two branches each appending from `max=255` both mint `"256"`. On
 merge, `readLedger`'s id-keyed `drifts` Map collapses them last-line-wins, and they share one
 `status_change` namespace. Not hypothetical — N2 produced the same collision by another route.
@@ -137,7 +152,7 @@ appears *before* its drift row, since folding is a single forward pass. It isn't
 `unknownTypes`.
 
 **And `markStatus` has no production callers** — grep finds it only in its own definition and
-`tests/dedup-pathcheck.test.mjs`. Every status transition on 1,460 rows was written from outside the
+`tests/unit/dedup-pathcheck.test.mjs`. Every status transition on 1,460 rows was written from outside the
 skill. There is no supported close path.
 
 *Fix:* throw on absent id; add a supported drain/close interface.
@@ -150,7 +165,9 @@ skill. There is no supported close path.
 it — a close that silently failed to persist would now surface as the thrown error above rather
 than a quiet no-op. Landed in `60db5c6`.
 
-### N5 · `hasOpenDuplicateDrift` cannot see `code_drift` — **S1**
+### N5 · `hasOpenDuplicateDrift` cannot see `code_drift` — **S1** — **MOOT 2026-08-20**
+
+**MOOT 2026-08-20** — `hasOpenDuplicateDrift`'s only caller is `watcher.mjs:247`, and the watcher was retired 2026-08-14 and refuses to run. The v1 ledger is frozen at 405 closed events, so the dedup window can no longer be reached.
 `lib/ledger.mjs:121-142`: the loop's `if (r.type === "drift")` excludes `code_drift` from
 `driftById`, and the `else if` excludes it from `statusById` too. Two reasons stack, so **all 136
 `code_drift` rows are outside the dedup window** — every mtime bump appends a new row.
@@ -160,18 +177,22 @@ rows** in the Vipin Kaushik ledger.
 
 *Fix:* dedup on `(type, source, downstream-set)`.
 
-### N6 · Glob `kind: code` edges silently never fire — **S1**
+### N6 · Glob `kind: code` edges silently never fire — **S1** — **RESOLVED 2026-08-20**
+
+**RESOLVED 2026-08-20** — not by implementing glob-code firing (a larger change), but by the fix this entry itself specifies: `doctor` now lists every glob `kind: code` edge as **unenforced**. It found **7 live ones** on first run, four of them in `Manav-portfolio`, all of which had looked declared and never fired. Guarded by `tests/cli/doctor-glob-code.test.mjs`, with negative controls for concrete kind:code and glob prose so the warning cannot fire on the common case.
 `lib/edges.mjs:184-190` logs and skips. `check` passes no logger (`cli.mjs:848` → `noopLogger`), so
 the deferral isn't even printed. A doc declaring `path: lib/**/*.ts, kind: code` gets **zero**
 coverage in both watcher and gate while looking declared.
 
 Self-documented in five places (`SKILL.md:161,199-205,278`, `edges.mjs:161,216-218`,
-`tests/code-drift.test.mjs:59`) as "documented limitation, not a bug" — but the user-visible effect
+`tests/watcher/code-drift.test.mjs:59`) as "documented limitation, not a bug" — but the user-visible effect
 is indistinguishable from a working edge.
 
 *Fix:* until implemented, `doctor` lists glob-code edges as **unenforced**.
 
-### N7 · A missing `PROPAGATE_SEARCH_ROOTS` reports healthy forever — **S1**
+### N7 · A missing `PROPAGATE_SEARCH_ROOTS` reports healthy forever — **S1** — **RESOLVED 2026-08-20**
+
+**RESOLVED 2026-08-20** — measured: a fresh `HOME=$(mktemp -d)` install exits **1** from `doctor`, and `SEARCH_ROOTS_DIAGNOSTIC` distinguishes `roots-missing` from `no-markers`.
 On a machine that keeps code outside `~/Documents/GitHub`, discovery finds zero workspaces and the
 watcher reports healthy. Named in `lib/config.mjs`'s own comment as "precisely the *abandoned
 automation reports itself healthy* failure this skill exists to catch." Mitigated by the override
@@ -247,14 +268,16 @@ shipped into a publishable plugin at `3c4eb65`.
 *Fix:* correct the doc; have `doctor` print the label it actually found.
 
 **RESOLVED 2026-08-13, both halves.** `SKILL.md` and `docs/REFERENCE.md` now carry the real labels
-(`com.tathya.propagate.watcher`, `com.tathya.propagate.digest`), and `tests/skill-doc.test.mjs`
+(`com.tathya.propagate.watcher`, `com.tathya.propagate.digest`), and `tests/docs/skill-doc.test.mjs`
 asserts every label in an executable context is actually installed, so this cannot silently return.
 The `doctor`-prints-the-resolved-label half, previously called out as still open, is also now done:
 `cli.mjs:645-648` prints `resolved label: ${LAUNCHD_LABEL}` explicitly tagged
 `// N10 (doctor half)`, and the subsequent `launchctl list` check (`:651-652`) checks against that
 same resolved label rather than a hardcoded string.
 
-### N12 · Every `Affects:` line in `DECISIONS.md` parses to nothing — **S1**
+### N12 · Every `Affects:` line in `DECISIONS.md` parses to nothing — **S1** — **RESOLVED 2026-08-20**
+
+**RESOLVED 2026-08-20** — `parseDecisions` tokenises `Affects:` correctly — proved the hard way when its own test rejected a DECISIONS entry I added without one, on 2026-08-20.
 `lib/decisions.mjs:58` matches `/^Affects:\s*(.+)$/m` — a bare `Affects:` at line start. All 8
 entries in `docs/DECISIONS.md` write `**Affects:**` in markdown bold. Zero match.
 
@@ -269,10 +292,12 @@ premise and skills-split entries, not by any check.
 
 *Fix:* accept both forms (`/^\*{0,2}Affects:\*{0,2}\s*(.+)$/m`) and make a zero-token parse of a
 non-empty file a `doctor` failure rather than a silent empty array. Add a test that parses the real
-`docs/DECISIONS.md`, not only synthetic fixtures — `tests/decisions.test.mjs` passes 4/4 today
+`docs/DECISIONS.md`, not only synthetic fixtures — `tests/docs/decisions.test.mjs` passes 4/4 today
 precisely because its fixtures use the bare form the live file never uses.
 
-### N13 · `PROPAGATE_SEARCH_ROOTS` does not scope state, so testing the watcher corrupts production — **S1**
+### N13 · `PROPAGATE_SEARCH_ROOTS` does not scope state, so testing the watcher corrupts production — **S1** — **RESOLVED 2026-08-20**
+
+**RESOLVED 2026-08-20** — `STATE_DIR` now defaults to `~/.propagate` and `STATE_DIR_EXPLICIT` distinguishes a set-and-resolved override from a defaulted one; `npm test` runs against a temp state dir. Commit `1f8ea73`.
 `lib/config.mjs:86-88` fixes `STATE_PATH`, `LOCK_PATH` and `HEARTBEAT_PATH` to `SKILL_DIR` with no
 env override, while `SEARCH_ROOTS` *is* overridable. So the documented way to exercise the watcher
 safely — point it at a temp tree — silently rewrites the real mtime baseline with the temp tree's.
@@ -296,7 +321,7 @@ documented.
 **RESOLVED 2026-08-13 (Phase B).** `PROPAGATE_STATE_DIR` (`lib/config.mjs`) relocates
 `STATE_PATH`/`LOCK_PATH`/`HEARTBEAT_PATH`/`WATCHER_LOG` (and, via N14's fix, the plist) together.
 When unset, every path resolves byte-identically to the pre-existing literal — proved by
-`tests/config-state-dir.test.mjs`'s "defaults unchanged" regression guard, which is the explicit
+`tests/portability/config-state-dir.test.mjs`'s "defaults unchanged" regression guard, which is the explicit
 test against a fifth incident of this shape. A bad `PROPAGATE_STATE_DIR` (a file, or an uncreatable
 path) logs a warning and falls back to the default; `config.mjs` never throws at module load
 (`STATE.md`'s hazard about a throw bricking watcher/CLI/UI together still holds and is now tested).
@@ -329,11 +354,11 @@ plist is never a legitimate outcome.
    `STATE_DIR`) exactly like `STATE_PATH`/`LOCK_PATH`/etc — a scoped run with both env vars set
    writes to a scoped plist path, never `~/Library/LaunchAgents/`.
 2. `regeneratePlist()` now refuses to write when `workspaces.length === 0`, returning
-   `{ ok: false, error }` instead of writing — `tests/plist-watch-roots.test.mjs` covers both the
+   `{ ok: false, error }` instead of writing — `tests/portability/plist-watch-roots.test.mjs` covers both the
    refusal and the unchanged N>0 write path. This alone would have prevented the incident.
 3. `init` no longer calls `regeneratePlist`/`reloadLaunchd` at all (see N15's fix below) — the new
    `reload` subcommand does that job, explicitly and only when asked.
-`tests/init-reload.test.mjs` proves `init` never writes a plist file even when run unscoped-of-plist
+`tests/cli/init-reload.test.mjs` proves `init` never writes a plist file even when run unscoped-of-plist
 (no `.plist` appears under a scoped `PROPAGATE_STATE_DIR`), and proves via source inspection that
 `reload`'s body — not `init`'s — calls `regeneratePlist`/`reloadLaunchd` (that half is intentionally
 not exercised end-to-end in automated tests: it is the one command that is supposed to touch real
@@ -360,7 +385,7 @@ directory it just initialised does not appear in the subsequent discovery.
 `workspace` key, for a downstream-only sidecar. After writing, `init` always re-runs discovery and,
 when `--workspace` was used, verifies the new root is actually present in the result — if not, it
 prints `init failed: ... not discoverable` and exits non-zero rather than reporting `✓ created`
-next to `discovered 0 workspaces` as if both were success. `tests/init-reload.test.mjs` covers both
+next to `discovered 0 workspaces` as if both were success. `tests/cli/init-reload.test.mjs` covers both
 flags, the default, and the loud-failure path (a target deliberately outside `SEARCH_ROOTS`, so
 discovery can never see it regardless of the marker).
 
@@ -427,7 +452,9 @@ A4). Note the trailing-slash schema rejection was itself the *cause* of the N9 s
 outage the same day; the fix for one silent-no-op briefly created another, which is why N9's
 resolution (per-entry validation) had to follow immediately rather than stand alone.
 
-### N18 · Source keys are never validated to exist — **S1**
+### N18 · Source keys are never validated to exist — **S1** — **RESOLVED 2026-08-20**
+
+**RESOLVED 2026-08-20** — `doctor` now stats every `sources:` key and fails naming any that does not exist, using the existing per-sidecar check reporting rather than a second mechanism. A source is deliberately NOT declare-ahead eligible: the edge fires when the source changes, so a missing source is an edge that is already dead. The live instance this entry cited in `astroacharya/.propagates.yml` has since been fixed — all eight of its source keys resolve — and the tree now reports zero. Guarded by `tests/cli/doctor-source-keys.test.mjs`.
 `doctor` validates every downstream `path` a sidecar declares (N17's fix), but never checks that a
 sidecar's `sources:` **keys** — the upstream file the edge fires from — exist on disk. A source key
 pointing at a file that was renamed or deleted can never fire, because the watcher's mtime check
@@ -476,7 +503,9 @@ rows stop accumulating this way). The 578 existing rows are unmigrated hand-auth
 **freeze, don't convert** — a synthesised identity on historical rows would make a stale
 verification look current, which is worse than no record.
 
-### N21 · A glob matching zero files must report UNMATCHED, not let its edge vanish — **S2**
+### N21 · A glob matching zero files must report UNMATCHED, not let its edge vanish — **S2** — **RESOLVED by v2**
+
+**RESOLVED by v2** — `UNMATCHED` is a first-class state in `lib/edges/reconcile.mjs` STATES and is ACTIONABLE in `lib/graph/graph.mjs` — exactly the explicit state this asked for.
 `lib/edges.mjs`/`watcher.mjs` expand a glob downstream at fire time and record `glob_matched`/
 `sample` on the row (37 of 1,911 downstream entries carry it), but nothing distinguishes "the glob
 matched zero files" from "there is nothing to report" — a glob that stops matching (a directory
@@ -503,13 +532,15 @@ precisely the ratio that trained people to ignore v1's queue in the first place 
 UI over expanded glob edges must group by the generating glob (the same way `correlation_id` groups
 worktree-expanded rows today), so one glob decision reads as one queue item, not N.
 
-### N23 · `WATCHER_LOG` is not test-scoped — `npm test` writes into the production log — **S2** — **impact moot 2026-08-14 (watcher retired)**
+### N23 · `WATCHER_LOG` is not test-scoped — `npm test` writes into the production log — **S2** — **impact moot 2026-08-14 (watcher retired)** — **RESOLVED 2026-08-20**
+
+**RESOLVED 2026-08-20** — measured: production `~/.propagate/watcher.log` does not exist after a full suite run; the suite writes to `$TMPDIR/propagate-test-state`. Commit `1f8ea73`.
 Same family as N13/N14 (a scoping variable exists but isn't universally applied) — **not** already
 closed by Phase B's `PROPAGATE_STATE_DIR` work, contrary to what that work's scope might suggest.
 `PROPAGATE_STATE_DIR` *can* relocate `WATCHER_LOG` (`lib/config.mjs:143`, covered by
-`tests/config-state-dir.test.mjs`), but four test files —
-`tests/code-drift.test.mjs`, `tests/cross-decision.test.mjs`, `tests/fire-paths.test.mjs`, and
-`tests/cross-repo.integration.test.mjs` — import functions from `watcher.mjs` directly and invoke
+`tests/portability/config-state-dir.test.mjs`), but four test files —
+`tests/watcher/code-drift.test.mjs`, `tests/unit/cross-decision.test.mjs`, `tests/watcher/fire-paths.test.mjs`, and
+`tests/unit/cross-repo.integration.test.mjs` — import functions from `watcher.mjs` directly and invoke
 them without setting `PROPAGATE_STATE_DIR`, so any call that logs (`watcher.mjs`'s internal `log()`
 at `:82-85`, which always writes to the imported `WATCHER_LOG` binding) appends into the real
 `~/.claude/skills/propagate/watcher.log` during `npm test`. Verified 2026-08-13: the production log
@@ -518,7 +549,7 @@ than launchd's own 60s cadence — the two are currently indistinguishable in th
 part of the problem: an incident investigator reading `watcher.log` cannot tell which lines are real.
 
 *Fix:* the four test files above set `PROPAGATE_STATE_DIR` to a temp directory (matching the pattern
-already proven safe in `tests/init-reload.test.mjs`'s sandboxed acceptance test), or `watcher.mjs`'s
+already proven safe in `tests/cli/init-reload.test.mjs`'s sandboxed acceptance test), or `watcher.mjs`'s
 directly-imported functions take an injectable logger so tests never touch the module-level
 `WATCHER_LOG` binding at all.
 
@@ -706,7 +737,7 @@ no shell is ever spawned, so a hostile `--range` value (e.g. `x; touch ...`, `x$
 is passed to git as one literal argument, which git rejects as an invalid revision; `check` exits 2
 with no side effect. All four call sites (`check`'s `--range`/`--staged`/default-`--changed` paths)
 converted. Verified: pre-fix, `node cli.mjs check --range 'HEAD; touch /tmp/x'` created `/tmp/x`;
-post-fix it does not (`tests/check-injection.test.mjs`, 5 tests, including a legitimate-range
+post-fix it does not (`tests/cli/check-injection.test.mjs`, 5 tests, including a legitimate-range
 regression test proving behaviour is otherwise unchanged). The other `execSync` calls in `cli.mjs`
 (`:245`, `:446`, `:578` — `launchctl list`, `launchctl list`, `claude mcp list 2>&1`; `:934` — `git
 rev-parse --show-toplevel`) are fixed literal strings with no argv interpolation and were left as-is.
@@ -926,7 +957,7 @@ date, or omit the freshness line from the file and leave it to `status`.
 > runs the real validator so predicted refusals match actual ones, and touches
 > nothing. `cli.mjs`'s misleading header comment is corrected and `SKILL.md` states
 > the posture under Important Rules. Regression cover:
-> `tests/verify-ordering.test.mjs` snapshots the event store byte-for-byte around
+> `tests/cli/verify-ordering.test.mjs` snapshots the event store byte-for-byte around
 > every non-writing path — the word "would" in the output is never trusted.
 >
 > **It was filed on 2026-08-16 and hit again on 2026-08-17**, this time for 11 events
@@ -1004,7 +1035,7 @@ seeing 109 knows two of them are the check misreading a doc that did the right t
 > being IGNORED **` after the behaviour changed — a check asserting the opposite
 > of what the code does. Now `(declares .propagates.yml — followed, N29)`.
 >
-> **Regression cover:** `tests/journal.test.mjs`. The test that asserted IGNORED
+> **Regression cover:** `tests/unit/journal.test.mjs`. The test that asserted IGNORED
 > is inverted in place — a markered link must become a workspace, and the old
 > message must be **absent** — plus a new test that an UNMARKERED link is still
 > skipped and still named. Following links by default is what invites cycles and
@@ -1109,7 +1140,7 @@ than tuning it, but it is close enough to the line to be a human call, not an ag
 
 `renderMarkdown` is defined at `lib/ledger.mjs:391`. Verified callers, whole tree:
 `watcher.mjs:499`, `:554`, `:699` — **retired 2026-08-14, refuses to run** — and
-`tests/ledger-render-staleness.test.mjs`. **`cli.mjs` never imports it.** `drain`'s close
+`tests/unit/ledger-render-staleness.test.mjs`. **`cli.mjs` never imports it.** `drain`'s close
 loop calls `markStatus` then re-reads to verify the close landed, and stops; `verify`
 writes v2 events and has no `.md` to render at all.
 
@@ -1227,8 +1258,8 @@ the prefix and retries. That produces `propagate-skill/lib/metrics.mjs` — exac
 search root, and a deeper scan would cost syscalls on every unmatched file for a case nobody has.
 
 The gate is re-installed in this repo and verified firing on the same command that printed nothing.
-Covered by two tests in `tests/check.test.mjs` — the symlink case **and** a negative control proving
-the symlink is what makes it findable, mirroring `tests/journal.test.mjs:44-63`.
+Covered by two tests in `tests/cli/check.test.mjs` — the symlink case **and** a negative control proving
+the symlink is what makes it findable, mirroring `tests/unit/journal.test.mjs:44-63`.
 
 **Related:** GOTCHAS **G48** (an enforcement point that does not watch itself) — this was the
 fourth instance in that entry, and is now the first one closed.
@@ -1256,7 +1287,7 @@ produced the published claim that `graph.mjs` does not implement `fixOrder`.
 
 **Fix:** replace each literal NUL with the six-character escape `\u0000`.
 Runtime-identical — same string, same hash, same keys — so no behaviour changes and
-no baseline moves. Guard with `tests/no-literal-nul.test.mjs` asserting no tracked
+no baseline moves. Guard with `tests/portability/no-literal-nul.test.mjs` asserting no tracked
 non-vendor file contains byte 0, so the next composite key cannot reintroduce it.
 
 **Verification that the fix is a no-op at runtime:** hash the three key-building
@@ -1265,7 +1296,7 @@ expressions before and after and assert equality, rather than trusting that an e
 append-only event store; if that derivation moved, every existing event would orphan.
 That is the load-bearing check, and it is the reason this is not a blind sed.
 
-**RESOLVED 2026-08-19.** `tests/edge-id-stability.test.mjs` was written and confirmed
+**RESOLVED 2026-08-19.** `tests/watcher/edge-id-stability.test.mjs` was written and confirmed
 GREEN *before* the edit, freezing three edge ids captured from the running pre-fix
 code (`3340074a`, `dab23bf6`, `39cf8b39`) plus two collision assertions proving the
 separator still separates. The rewrite ran on bytes, never on a decoded string, and
@@ -1275,7 +1306,7 @@ aborted unless each file grew by exactly 5 bytes per NUL and contained none afte
 fixOrder lib/graph.mjs` now returns 3 where it returned nothing, and `file` reports
 UTF-8 text for all three. 696 pass, 0 fail.
 
-Guarded by `tests/no-literal-nul.test.mjs` across every tracked non-vendor file, so a
+Guarded by `tests/portability/no-literal-nul.test.mjs` across every tracked non-vendor file, so a
 future composite key cannot reintroduce it. Do NOT re-capture the frozen ids to make
 the stability test pass — that converts the alarm into a rubber stamp.
 

@@ -1152,6 +1152,47 @@ async function doctor() {
         // rather than failing the whole sidecar, but must stay a loud
         // doctor FAILURE naming the sidecar, source key, and path — pruning
         // must not trade one silent failure for another.
+        // N18 — SOURCE KEYS, not just downstream paths.
+        //
+        // A downstream may legitimately not exist yet: that is declare-ahead, and doctor
+        // tolerates it on purpose. A SOURCE cannot. The edge fires when the source changes,
+        // so a source key naming a renamed or deleted file is an edge that is already dead —
+        // nothing to watch, nothing ever detected, and the sidecar still reads as a declared
+        // coupling.
+        //
+        // Measured before this existed: a fixture declaring `does-not-exist.md` produced no
+        // mention of it anywhere in doctor's output. The only line containing "source" was
+        // `✓ no source open in more than one ledger` — worse than silence, because it reads
+        // like a source check passing.
+        // N6 — a glob `kind: code` downstream cannot be enforced, and must not read as if it
+        // were. lib/edges/edges.mjs logs-and-skips these, and `check` passes a noop logger, so
+        // the deferral reached nobody: the edge got ZERO coverage in both the watcher and the
+        // gate while looking exactly like a working one. Self-documented in five places as "a
+        // documented limitation, not a bug" — but a limitation nothing surfaces is
+        // indistinguishable from a defect.
+        //
+        // Informational, not a failure: the declaration is legitimate and the operator may
+        // want it. What was missing is knowing it does not fire. Only kind:code — glob PROSE
+        // downstreams expand normally.
+        for (const [srcKey, entry] of Object.entries(loaded.sources || {})) {
+          for (const d of entry?.propagates_to || []) {
+            if (d?.kind === "code" && /[*?[\]]/.test(String(d.path ?? ""))) {
+              info(
+                `  ${rel}: ${srcKey} → ${d.path}`,
+                "unenforced — glob kind:code downstreams are deferred, so this edge never fires (N6)",
+              );
+            }
+          }
+        }
+        for (const srcKey of Object.keys(loaded.sources || {})) {
+          if (!existsSync(path.resolve(path.dirname(sc), srcKey))) {
+            check(
+              `  ${rel}: source "${srcKey}"`,
+              false,
+              "does not exist — this edge can never fire (a source is not declare-ahead eligible)",
+            );
+          }
+        }
         sidecarsProblemsCount += (loaded.problems || []).length;
         for (const p of loaded.problems || []) {
           check(

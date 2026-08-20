@@ -274,7 +274,7 @@ JSDoc typedef."
   copies `.status` off a Transition, so even if `markStatus` were called with
   a `notes` argument today, no reader could ever see it on the folded Event.
   The repo's own test asserts exactly this:
-  `tests/ledger-activity.test.mjs:80` — `assert.equal(rows[0].notes,
+  `tests/unit/ledger-activity.test.mjs:80` — `assert.equal(rows[0].notes,
   undefined, "readLedger never copies notes off status_change rows")`.
 
 ---
@@ -284,7 +284,7 @@ JSDoc typedef."
 `markStatus` (`lib/ledger.mjs:97`) is the only function in this codebase that
 writes a Transition row, and it has **zero production callers** — it appears
 in its own definition and in exactly two test files
-(`tests/dedup-pathcheck.test.mjs:46`, `tests/ledger-activity.test.mjs:68,92`).
+(`tests/unit/dedup-pathcheck.test.mjs:46`, `tests/unit/ledger-activity.test.mjs:68,92`).
 No code path in `cli.mjs`, `watcher.mjs`, or `digest.mjs` ever invokes it.
 
 That means there has never been a supported way to close a row. Every close

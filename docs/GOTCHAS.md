@@ -125,7 +125,10 @@ safely using the documented method.
 manual run, and the docs must say so.
 
 ### G11 · Zero is never a legitimate output for a destructive write
-**Guarded by:** `lib/plist.mjs:128-133` refuses to write a plist with 0 watch roots, citing N14.
+**Guarded by:** `lib/core/plist.mjs` — `regeneratePlist()` refuses to write a plist with 0
+watch roots, citing N14. Cited by function rather than by line range: the line numbers were
+correct when written and silently wrong after the 2026-08-20 regrouping, which is what a
+citation-resolution check now catches (`tests/docs/doc-citations.test.mjs`).
 `regeneratePlist` cheerfully wrote a plist with **0 watch roots** over a working one,
 because discovery legitimately found 0 workspaces in a temp tree.
 
@@ -133,7 +136,7 @@ because discovery legitimately found 0 workspaces in a temp tree.
 incident entirely.
 
 ### G12 · A default that moves loses state silently
-**Guarded by:** `tests/config-state-dir.test.mjs` — the unset-case test this entry asks for.
+**Guarded by:** `tests/portability/config-state-dir.test.mjs` — the unset-case test this entry asks for.
 Adding `PROPAGATE_STATE_DIR` was safe; accidentally relocating `state.json`'s
 *default* would have lost the mtime baseline and re-fired every file as
 first-observation — the same incident, at full scale, caused by its own fix.
@@ -606,7 +609,7 @@ this is precisely a silent zero.
 ### G44 · A flag that means "write" in one code path and nothing in another
 **General form:** `rule:safety-flag-needs-a-test` — written 2026-08-17, after this was
 the third instance. **Guarded by:** the `if (!apply)` branch in `runDispositionBatch`
-and `tests/verify-ordering.test.mjs`, which snapshots the store byte-for-byte.
+and `tests/cli/verify-ordering.test.mjs`, which snapshots the store byte-for-byte.
 `verify --apply` gated **only** the `decoupled` sidecar edit. The other seven
 dispositions wrote their event the moment the command was invoked, and
 `cli.mjs`'s header comment — *"does NOT touch the file unless `--apply` is
@@ -623,7 +626,7 @@ narrower and worse: *the comment was accurate about the thing it was next to*.
 Read a flag's guard at the call site that performs the side effect you care
 about, not at the one the docs happen to describe.
 
-Corollary now enforced by `tests/verify-ordering.test.mjs`: a dry run must be
+Corollary now enforced by `tests/cli/verify-ordering.test.mjs`: a dry run must be
 asserted by **snapshotting the store before and after**, never by trusting the
 word "would" in the output.
 
@@ -752,11 +755,11 @@ then binary detection — and only reading the bytes in node settled it. Caught 
 publishing, and only because the number was too surprising to accept.
 
 **Do:** write `\u0000`, six ASCII characters, in source. Runtime-identical, and the
-file stays text. `tests/no-literal-nul.test.mjs` asserts this across every non-vendor
+file stays text. `tests/portability/no-literal-nul.test.mjs` asserts this across every non-vendor
 file, so a new composite key cannot reintroduce it.
 
 **The guard failed to catch itself, and that is the sharpest part of this entry.**
-`tests/no-literal-nul.test.mjs` was written with two literal NULs in its own
+`tests/portability/no-literal-nul.test.mjs` was written with two literal NULs in its own
 docstring — the same mistake it exists to catch, made while writing the catcher. It
 ran **green**, and the full suite reported 696 pass. It went red only after `git add`,
 because it enumerated `git ls-files`, which lists **tracked** files only. A guard that
