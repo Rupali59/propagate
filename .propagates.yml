@@ -16,7 +16,53 @@
 # creating an eighth workspace-root ledger for a directory that is not a
 # workspace.
 
+# ON WHAT IS DELIBERATELY *NOT* DECLARED HERE.
+#
+# `cli.mjs` -> `docs/REFERENCE.md` is a real coupling and is still not declared, because
+# the edge would be worse than the gap. Measured over 30 days: cli.mjs changed in 46
+# commits, REFERENCE.md in 7. A file-level edge fires 46 times to be right about 7, and a
+# check with a 6.5:1 false-positive rate trains people to ignore it -- which is how a
+# working check becomes decorative.
+#
+# The god-file IS the coverage problem. Once commands move into lib modules (reviewed
+# plan, D7), `lib/core/setup.mjs -> docs/REFERENCE.md` becomes precise and cheap, which is
+# exactly why the three edges below could be declared today and cli.mjs could not.
+# Tracked in docs/ISSUES.md.
+
 sources:
+  propagates.schema.json:
+    propagates_to:
+      - path: SKILL.md
+        why: >-
+          SKILL.md's `declare` workflow shows the sidecar shape a user must write. The
+          schema is additionalProperties:false, so a field added here and not documented
+          there is a field whose absence silently rejects the whole sidecar.
+        kind: code
+      - path: docs/REFERENCE.md
+        why: >-
+          REFERENCE documents the sidecar keys operators actually type. Schema and
+          reference disagreeing means a documented key that does not validate.
+        kind: code
+  lib/core/setup.mjs:
+    propagates_to:
+      - path: docs/REFERENCE.md
+        why: >-
+          REFERENCE § Install carries the outcome table (ok / no-roots / roots-missing /
+          no-markers / markers-rejected) and each one's fix. Adding an outcome without
+          adding its row leaves a stranger with a failure and no next step.
+        kind: code
+      - path: SKILL.md
+        why: >-
+          SKILL.md's Setup section is the four-step sequence a fresh install follows. It
+          exists because a fresh agent got through setup and reported the install broken.
+        kind: code
+  lib/rules/rules-check.mjs:
+    propagates_to:
+      - path: SKILL.md
+        why: >-
+          SKILL.md documents what `rules check` exits non-zero on — including that it
+          fails when it scanned NOTHING. That promise is a property of this file.
+        kind: code
   VERSION:
     propagates_to:
       - path: package.json

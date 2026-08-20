@@ -153,11 +153,23 @@ function registeredCommands() {
   return new Set(found);
 }
 
-/** Every `cli.mjs <word>` the docs tell a reader to run. */
+/**
+ * Every `node …cli.mjs <word>` the docs tell a reader to RUN.
+ *
+ * The `node ` prefix is required on purpose. Matching a bare `cli.mjs <word>` also matches
+ * prose — "cli.mjs changed in 46 commits" parsed as a command named `changed` and failed
+ * this test on 2026-08-20. Docs increasingly DISCUSS cli.mjs as well as invoke it, so the
+ * pattern has to tell the two apart.
+ *
+ * Verified the tightened form still fires: across every doc it drops exactly the one prose
+ * false positive and keeps all 15 real invocations (bootstrap, check, doctor, drain, graph,
+ * init, inventory, reconcile, reload, rules, setup, …). A narrowed check that stops
+ * matching anything is the failure this file exists to prevent (GOTCHAS G1).
+ */
 function documentedCommands() {
   const found = [];
   for (const file of docFiles()) {
-    for (const m of read(file).matchAll(/cli\.mjs\s+([a-z][a-z0-9-]*)/g)) {
+    for (const m of read(file).matchAll(/node\s+\S*cli\.mjs\s+([a-z][a-z0-9-]*)/g)) {
       found.push({ file: rel(file), cmd: m[1] });
     }
   }

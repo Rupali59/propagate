@@ -1467,3 +1467,36 @@ propagate's own symlink-reached repo still resolves through the link
 to another volume, a checkout under a linked directory. The gate reports success while
 enforcing nothing, which is the failure this skill exists to catch.
 
+---
+
+### N37 · propagate declares 3% of itself, and the god-file is why — **S2** — **PARTIALLY RESOLVED 2026-08-20**
+
+Found by an adversarial pass ahead of the public port, per
+`rule:adversarial-review-reads-the-ledger` (read the sidecar before the artifacts).
+
+**Measured:** 5 declared sources against 163 tracked files, and **8 of 9 own edges
+`NEVER_VERIFIED`**. `cli.mjs` — 4,694 lines, the entire CLI surface — undeclared. The tool
+reported the tree healthy while 97% of itself had never had a coupling review. That is the
+rule's own headline case, occurring in the tool the rule was written for.
+
+**Partially closed:** 9 sources now (VERSION's three-way manifest fan-out,
+`propagates.schema.json` → SKILL.md + REFERENCE, `lib/core/setup.mjs` → REFERENCE +
+SKILL.md, `lib/rules/rules-check.mjs` → SKILL.md), 17 own edges.
+
+**Deliberately still open: `cli.mjs` → `docs/REFERENCE.md`.** The coupling is real. The
+edge would be worse than the gap. Measured over 30 days: **cli.mjs changed in 46 commits,
+REFERENCE.md in 7.** A file-level edge fires 46 times to be right about 7 — a 6.5:1
+false-positive rate, and a check people learn to ignore has failed more completely than
+one that was never written. Same shape as N6, where an edge that could not fire still read
+as declared.
+
+**The god-file IS the coverage problem.** propagate's model is file-level, so a 4,694-line
+file cannot carry a precise coupling. The three edges added today were declarable
+*because* their modules are small and stable. Closing this properly requires D7 from the
+reviewed plan — moving command bodies into lib modules — after which
+`lib/core/sync.mjs → docs/REFERENCE.md` is precise and cheap.
+
+**Do not close this by declaring the noisy edge.** Improving the coverage count by adding
+an edge that cries wolf would trade a visible gap for an invisible one, which is the
+trade this register exists to prevent.
+
