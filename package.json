@@ -1,10 +1,10 @@
 {
   "name": "claude-propagate",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
-  "description": "Declare, watch and record the couplings between files that must move together \u2014 across branches, worktrees and repos. Append-only ledger; never edits a downstream. See SKILL.md.",
-  "main": "watcher.mjs",
+  "description": "Use when a change to one file needs to reach files that must move with it \u2014 across branches, worktrees, or repos. Declares those couplings in a sidecar, derives drift from content on demand, and records every verification in an append-only ledger. Never edits a downstream; it tells a human.",
+  "main": "cli.mjs",
   "bin": {
     "propagate": "cli.mjs"
   },
@@ -12,14 +12,36 @@
     "node": ">=24"
   },
   "scripts": {
-    "watcher": "node watcher.mjs",
-    "smoke": "node watcher.mjs --smoke",
     "test": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs'",
-    "setup": "node cli.mjs setup"
+    "setup": "node cli.mjs setup",
+    "doctor": "node cli.mjs doctor"
   },
   "dependencies": {
     "ajv": "^8.17.1",
     "proper-lockfile": "^4.1.2",
     "yaml": "^2.6.0"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rupali59/propagate-skill.git"
+  },
+  "files": [
+    "cli.mjs",
+    "digest.mjs",
+    "index.mjs",
+    "watcher.mjs",
+    "lib/",
+    "bin/",
+    "docs/",
+    "SKILL.md",
+    "STATE.md",
+    "VERSION",
+    "LICENSE",
+    "README.md",
+    "propagates.schema.json",
+    "propagates-cross.schema.json",
+    "cross-allow.yml",
+    ".claude-plugin/"
+  ]
 }

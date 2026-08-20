@@ -17,6 +17,23 @@
 # workspace.
 
 sources:
+  VERSION:
+    propagates_to:
+      - path: package.json
+        why: >-
+          The release version is stated in four places and must be one fact. A bump that
+          misses one ships a plugin whose manifest version does not match its code.
+        kind: code
+      - path: .claude-plugin/plugin.json
+        why: >-
+          The marketplace displays this version. If it lags VERSION, users install what
+          they think is current and get something older, with no signal either way.
+        kind: code
+      - path: .claude-plugin/marketplace.json
+        why: >-
+          Install resolves through this manifest, so a stale version here is the one a
+          stranger actually receives.
+        kind: code
   lib/graph/graph.mjs:
     propagates_to:
       - path: SKILL.md

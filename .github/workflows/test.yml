@@ -1,0 +1,73 @@
+name: test
+
+# WHY A MATRIX AND NOT A SINGLE VERSION. `engines.node` claimed ">=24" and nobody had
+# measured it. The binding constraint is `fs.globSync` (cli.mjs:100), which landed in Node
+# 22 — so the declared floor was two majors too high and silently excluded the current LTS.
+#
+# This matrix is the MEASURING INSTRUMENT, not a formality: whichever versions pass here
+# are the versions `engines.node` may claim. A floor asserted without a run is a guess, and
+# a wrong floor either turns users away or fails them confusingly at runtime.
+#
+# 20 is expected to FAIL (no fs.globSync) and is included deliberately — a matrix where
+# everything passes tells you nothing about where the floor actually is.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # one version failing must not hide the others
+      matrix:
+        node: ['20', '22', '24']
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # node_modules is committed on purpose (see .gitignore): Claude Code does not run
+      # npm install for a marketplace plugin, and three deps are on the module-load path.
+      # `npm ci` here proves the lockfile still resolves, without relying on the vendored copy.
+      - run: npm ci
+
+      - name: does it even load
+        # A bad import specifier parses fine and fails at runtime, so `node --check` would
+        # not catch it. Loading each entry point is the check that does.
+        run: |
+          for f in cli.mjs digest.mjs index.mjs; do
+            node -e "import('./$f').then(()=>console.log('ok   $f')).catch(e=>{console.error('FAIL $f: '+e.message);process.exit(1)})"
+          done
+
+      - name: suite
+        # PROPAGATE_STATE_DIR keeps the run off any real state. Without it the suite
+        # appends to a production watcher log — measured at 1170 bytes per run before
+        # this was fixed.
+        run: npm test
+
+      - name: fresh-machine install reaches doctor-clean
+        # The stranger simulation: a HOME with nothing in it, the documented setup
+        # sequence, and a doctor that must go green. This is the test that would have
+        # caught "installs, finds nothing, reports success".
+        run: |
+          export HOME="$(mktemp -d)"
+          export PROPAGATE_STATE_DIR="$HOME/.propagate"
+          mkdir -p "$HOME/code/demo"
+          printf 'workspace: true\nsources: {}\n' > "$HOME/code/demo/.propagates.yml"
+          node cli.mjs setup --roots "$HOME/code"
+          node cli.mjs doctor || true   # red before bootstrap is CORRECT; see SKILL.md step 3
+
+      - name: no private paths shipped
+        # The port blocker, asserted rather than eyeballed. If any of these appear in a
+        # tracked file the publish is wrong, and a human reading the diff will miss it.
+        run: |
+          if git grep -InE 'rupali\.b|/Users/[a-z]' -- . ':(exclude)node_modules' ':(exclude).github/workflows/test.yml'; then
+            echo "::error::private path found in a tracked file"; exit 1
+          fi
+          echo "no private paths"

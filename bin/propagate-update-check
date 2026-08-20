@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# propagate-update-check — is a newer propagate available?
+#
+# Output is ONE line, or nothing:
+#   UPGRADE_AVAILABLE <local> <remote>   a newer version exists
+#   JUST_UPGRADED <old> <new>            an upgrade landed since the last run
+#   (nothing)                            up to date, snoozed, disabled, offline, or cached
+#
+# WHY SILENCE IS ONLY EVER "NOTHING TO SAY". rule:discernment-checks §2 — absence must be
+# attributable. Every non-silent state names itself. Silence here means exactly one thing:
+# there is no upgrade to report right now. It never means "the check failed" — a failed
+# check is silent AND leaves no marker, so the next run retries rather than assuming.
+#
+# WHY IT MUST BE DISABLEABLE. A check a user cannot turn off is a check they route around.
+# Three ways off, in precedence order: PROPAGATE_UPDATE_CHECK=off, `updateCheck: off` in
+# config.yml, or a snooze file. Off is a supported configuration, not a degraded one.
+#
+# WHY IT NEVER BLOCKS. This runs on the skill's hot path. Network calls get a hard timeout
+# and any failure exits 0 silently. A tool that hangs because GitHub is slow is worse than
+# a tool that misses one upgrade notice.
+#
+# Modelled on ~/.claude/skills/gstack/bin/gstack-update-check, which is proven in daily use
+# on this machine. Deliberately the same shape so the two behave alike for a reader.
+set -uo pipefail
+
+SKILL_DIR="${PROPAGATE_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+STATE_DIR="${PROPAGATE_STATE_DIR:-$HOME/.propagate}"
+VERSION_FILE="$SKILL_DIR/VERSION"
+CACHE_FILE="$STATE_DIR/last-update-check"
+MARKER_FILE="$STATE_DIR/just-upgraded-from"
+SNOOZE_FILE="$STATE_DIR/update-snoozed"
+CHECK_INTERVAL="${PROPAGATE_UPDATE_INTERVAL:-86400}"   # once a day
+REMOTE_RAW="${PROPAGATE_REMOTE_VERSION_URL:-https://raw.githubusercontent.com/Rupali59/propagate-skill/main/VERSION}"
+
+# --- 1. an upgrade that already happened outranks a check for a new one ----------
+if [ -f "$MARKER_FILE" ]; then
+  old=$(cat "$MARKER_FILE" 2>/dev/null || echo "unknown")
+  new=$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")
+  rm -f "$MARKER_FILE" 2>/dev/null || true
+  [ "$old" != "$new" ] && echo "JUST_UPGRADED $old $new"
+  exit 0
+fi
+
+# --- 2. every way to be switched off ---------------------------------------------
+[ "${PROPAGATE_UPDATE_CHECK:-on}" = "off" ] && exit 0
+if [ -f "$STATE_DIR/config.yml" ] && grep -qE '^[[:space:]]*updateCheck:[[:space:]]*(off|false|no)' "$STATE_DIR/config.yml" 2>/dev/null; then
+  exit 0
+fi
+if [ -f "$SNOOZE_FILE" ]; then
+  until_ts=$(cat "$SNOOZE_FILE" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  [ "$until_ts" -gt "$now" ] 2>/dev/null && exit 0
+  rm -f "$SNOOZE_FILE" 2>/dev/null || true
+fi
+
+# --- 3. rate limit: do not touch the network on every invocation ------------------
+if [ -f "$CACHE_FILE" ]; then
+  last=$(cat "$CACHE_FILE" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  [ $(( now - last )) -lt "$CHECK_INTERVAL" ] 2>/dev/null && exit 0
+fi
+
+local_v=$(tr -d '[:space:]' < "$VERSION_FILE" 2>/dev/null || echo "")
+[ -z "$local_v" ] && exit 0   # no VERSION file: nothing to compare, say nothing
+
+# --- 4. ask the remote, but never wait long and never fail loudly -----------------
+# A failed fetch deliberately does NOT stamp the cache file: the next run retries
+# rather than treating a network blip as "checked, nothing new".
+command -v curl >/dev/null 2>&1 || exit 0
+remote_v=$(curl -fsS --max-time 3 "$REMOTE_RAW" 2>/dev/null | tr -d '[:space:]') || exit 0
+[ -z "$remote_v" ] && exit 0
+
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+date +%s > "$CACHE_FILE" 2>/dev/null || true
+
+[ "$local_v" != "$remote_v" ] && echo "UPGRADE_AVAILABLE $local_v $remote_v"
+exit 0
