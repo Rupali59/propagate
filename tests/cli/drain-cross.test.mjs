@@ -73,6 +73,11 @@ async function makeFixture() {
   await writeFile(path.join(ws, ".propagates.yml"), "workspace: true\nsources: {}\n");
   await writeFile(path.join(ws, "docs", "PROPAGATION_LEDGER.jsonl"), "");
 
+  // Cross ledger lives at <root>/PROPAGATION_CROSS_LEDGER.jsonl by default —
+  // lib/core/config.mjs CROSS_LEDGER_JSONL only prefers <root>/propagation/
+  // when a file already exists there (existence-keyed cascade, same
+  // discipline as workspace ledgers). No propagation/ file in this fixture,
+  // so the root path is where the real code will look.
   await writeFile(
     path.join(searchRoot, "PROPAGATION_CROSS_LEDGER.jsonl"),
     [crossRow("006", "SSJK"), crossRow("007", "SSJK"), crossRow("008", "Motherboard")].join("\n") + "\n",

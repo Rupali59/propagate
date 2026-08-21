@@ -16,6 +16,8 @@ import {
   SKILL_DIR,
   CROSS_ALLOW_PATH,
   CROSS_ALLOW_SHIPPED,
+  CROSS_LEDGER_JSONL,
+  CROSS_LEDGER_MD,
 } from "../../lib/core/config.mjs";
 import { PLIST_PATH, LABEL } from "../../lib/core/plist.mjs";
 import { existsSync } from "node:fs";
@@ -34,5 +36,7 @@ console.log(
     CROSS_ALLOW_SHIPPED,
     CROSS_ALLOW_PATH_EXISTS: existsSync(CROSS_ALLOW_PATH),
     CROSS_ALLOW_SHIPPED_EXISTS: existsSync(CROSS_ALLOW_SHIPPED),
+    CROSS_LEDGER_JSONL,
+    CROSS_LEDGER_MD,
   }),
 );

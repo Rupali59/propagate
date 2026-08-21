@@ -68,6 +68,49 @@ Per `~/.claude/plans/status-temporal-plum.md` §3 (release mechanics, defined no
 
 ## Now (in flight)
 
+### 2026-08-21 — one ledger per workspace: three migrated, branch sweep started, two blockers open
+
+**Architecture:** one propagation ledger per workspace at depth 1; sub-projects roll their
+edges up. `Vipin Kaushik` was already the reference shape and is now confirmed clean across
+**22 branches in six sub-repos — zero ledgers on any ref**. Because its sub-projects never
+owned ledgers, branch divergence was never possible there. The rule prevents the class of
+bug rather than detecting it.
+
+**Migrated** with `propagate migrate-ledger` (new, `--from`/`--into`/`--all-refs`/`--apply`,
+dry-run by default) — append-only close-and-re-emit per `docs/DECISIONS.md` 2026-08-10:
+
+| Source | Rows | Into |
+|---|---|---|
+| `SSJK-mb` | 43 | `PanditPawanKaushik/docs` |
+| `Keerti-portfolio` | 18 | `Keerti/docs` |
+| `Manav-portfolio` | 5 + **12 from branches** | `ManavDaehi/docs` |
+
+Ledger files 12 → 8. Tree-wide **746 distinct rows / 0 open, conserved**. Every
+sub-project's edge ids and states identical before and after (21 + 41 + 81 diffed against
+baselines captured before anything moved).
+
+**Three defects caught in dry runs, none reached the data.** (1) The working-tree-only read
+missed 12 rows on a Manav-portfolio feature branch. (2) Ref-mode idempotence keyed on
+`(ledger, ref, oldId)` could not see rows a prior plain migration wrote — would have
+duplicated 5. (3) The same gap one level down: transitions of content-skipped rows were
+re-appended, **confirmed unbounded** (a second run added more). All three were invisible to
+a passing suite because each lived at a seam between two modes.
+
+**Branch nodes** are live in the data: every ref-swept row carries
+`source_worktree: {branch, commit}`, giving that field its first reader after
+`docs/DATA_MODEL.md` recorded it at *3 rows written, NONE readers*.
+
+**Blocked, both recorded:** **N41** — cross-branch dedupe silently discards a differing
+disposition; exactly one live instance (`SSJK-mb`'s `CLAUDE.md` row: `open` on one feature
+branch, `done` on four others including `main`). Sweeping SSJK-mb waits on this. **N42** —
+`renderMarkdown` groups by branch and has no live caller, and the `.md` it would render now
+carries hand-written prose that regenerating would destroy.
+
+**Still open:** §4 (`Rupali-content` + Obsidian), the delete/modify merge conflict on
+`feat/home-redesign-2026-08` once its rows land, and a docs-structure convention spanning
+every workspace's `docs/` folder — scope agreed 2026-08-21, not yet designed.
+
+
 ### 2026-08-21 — N39's fix attempted, blocked, and the blocker is bigger than the fix
 
 Trying to finish propagate's partial baseline surfaced **N40**: `edgeId` hashes the

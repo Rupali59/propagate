@@ -143,6 +143,25 @@ test("expectedWatchPaths includes root only when docs/ does not exist", () => {
   assert.deepEqual([...set], ["/nonexistent-ws-root-xyz"]);
 });
 
+test("expectedWatchPaths includes the resolved ledger directory for a propagation/-layout workspace (the silent unwatched-ledger fix)", () => {
+  // Before the fix, expectedWatchPaths rebuilt path.join(ws.root, "docs")
+  // instead of reading ws.ledgerJsonl — a propagation/-layout (or legacy
+  // .propagation/-layout) workspace's ledger dir was silently absent from
+  // the watch set even though the workspace record has it right there.
+  const set = expectedWatchPaths([
+    { root: "/ws", ledgerJsonl: "/ws/propagation/ledger.jsonl" },
+  ]);
+  assert.ok(set.has("/ws"));
+  assert.ok(set.has("/ws/propagation"), "the resolved ledger directory must be watched");
+});
+
+test("expectedWatchPaths includes the resolved ledger directory for a legacy .propagation/-layout workspace", () => {
+  const set = expectedWatchPaths([
+    { root: "/ws", ledgerJsonl: "/ws/.propagation/ledger.jsonl" },
+  ]);
+  assert.ok(set.has("/ws/.propagation"));
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // nestedUnderOf
 // ─────────────────────────────────────────────────────────────────────────────

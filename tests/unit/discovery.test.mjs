@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { discoverWorkspacesSync, isWorkspaceMarker } from "../../lib/core/discovery.mjs";
+import { discoverWorkspacesSync, isWorkspaceMarker, liveLedgerCandidates } from "../../lib/core/discovery.mjs";
 
 async function makeMarker(dir, body) {
   await mkdir(dir, { recursive: true });
@@ -111,4 +111,92 @@ test("degraded is false when no markers exist at all", async () => {
   assert.equal(workspaces.length, 0);
   assert.equal(markersSeen, 0);
   assert.equal(degraded, false, "no markers seen at all is not the degraded failure mode");
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// propagation/ layout (docs/DECISIONS.md, "a propagation/ folder in every
+// workspace"). RED items 1 and 2 of the plan at
+// ~/.claude/plans/status-temporal-plum.md.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("PROPAGATION/ LAYOUT: a workspace with propagation/ledger.jsonl present resolves to it, first-checked", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "disc-"));
+  await makeMarker(root, FLAGGED);
+
+  const propagationDir = path.join(root, "propagation");
+  await mkdir(propagationDir, { recursive: true });
+  await writeFile(path.join(propagationDir, "ledger.jsonl"), "", "utf8");
+  await writeFile(path.join(propagationDir, "ledger.md"), "", "utf8");
+
+  const { workspaces } = discoverWorkspacesSync([root]);
+
+  assert.equal(workspaces.length, 1);
+  assert.equal(workspaces[0].ledgerJsonl, path.join(propagationDir, "ledger.jsonl"));
+  assert.equal(workspaces[0].ledgerMd, path.join(propagationDir, "ledger.md"));
+});
+
+test("PROPAGATION/ LAYOUT: propagation/ledger.jsonl wins even when an older candidate also exists (checked first)", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "disc-"));
+  await makeMarker(root, FLAGGED);
+
+  // An older docs/-pinned ledger exists too — propagation/ still wins because
+  // it is checked FIRST when a file is actually there.
+  const docsDir = path.join(root, "docs");
+  await mkdir(docsDir, { recursive: true });
+  await writeFile(path.join(docsDir, "PROPAGATION_LEDGER.jsonl"), "", "utf8");
+
+  const propagationDir = path.join(root, "propagation");
+  await mkdir(propagationDir, { recursive: true });
+  await writeFile(path.join(propagationDir, "ledger.jsonl"), "", "utf8");
+
+  const { workspaces } = discoverWorkspacesSync([root]);
+
+  assert.equal(workspaces.length, 1);
+  assert.equal(workspaces[0].ledgerJsonl, path.join(propagationDir, "ledger.jsonl"));
+});
+
+test("PROPAGATION/ LAYOUT INERTNESS: a bare empty propagation/ directory (no ledger file inside) does NOT relocate a live docs/ ledger", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "disc-"));
+  await makeMarker(root, FLAGGED);
+
+  const docsDir = path.join(root, "docs");
+  await mkdir(docsDir, { recursive: true });
+  await writeFile(path.join(docsDir, "PROPAGATION_LEDGER.jsonl"), "", "utf8");
+
+  // propagation/ shows up as a bare directory — e.g. someone started a git mv
+  // and hasn't finished, or a totally unrelated dir with that name. No FILE
+  // there yet, so it must not win.
+  await mkdir(path.join(root, "propagation"), { recursive: true });
+
+  const { workspaces } = discoverWorkspacesSync([root]);
+
+  assert.equal(workspaces.length, 1);
+  assert.equal(
+    workspaces[0].ledgerJsonl,
+    path.join(docsDir, "PROPAGATION_LEDGER.jsonl"),
+    "a bare propagation/ directory must not relocate a live docs/ ledger — only a FILE there wins",
+  );
+});
+
+test("liveLedgerCandidates: reports every existing candidate ledger .jsonl for a workspace root", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "disc-"));
+
+  assert.deepEqual(liveLedgerCandidates(root), [], "no candidates on a bare directory");
+
+  const docsDir = path.join(root, "docs");
+  await mkdir(docsDir, { recursive: true });
+  const docsJsonl = path.join(docsDir, "PROPAGATION_LEDGER.jsonl");
+  await writeFile(docsJsonl, "", "utf8");
+
+  assert.deepEqual(liveLedgerCandidates(root), [docsJsonl]);
+
+  const propagationDir = path.join(root, "propagation");
+  await mkdir(propagationDir, { recursive: true });
+  const propagationJsonl = path.join(propagationDir, "ledger.jsonl");
+  await writeFile(propagationJsonl, "", "utf8");
+
+  const found = liveLedgerCandidates(root);
+  assert.equal(found.length, 2, "both candidates now live — the phantom-ledger state");
+  assert.ok(found.includes(docsJsonl));
+  assert.ok(found.includes(propagationJsonl));
 });

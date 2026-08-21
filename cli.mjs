@@ -186,11 +186,13 @@ export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
   }
   return { edges, missing, outsideAllowlist };
 }
-import { discoverWorkspacesSync, isWorkspaceMarker } from "./lib/core/discovery.mjs";
+import { discoverWorkspacesSync, isWorkspaceMarker, liveLedgerCandidates } from "./lib/core/discovery.mjs";
 import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS, migrateLegacyState } from "./lib/core/setup.mjs";
 import { updateNotice, formatUpdateNotice } from "./lib/core/update-notice.mjs";
 import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/core/plist.mjs";
 import { runReleaseCheck } from "./lib/core/release.mjs";
+import { migrateLedger } from "./lib/edges/migrate-ledger.mjs";
+import { relocateLedger } from "./lib/edges/relocate-ledger.mjs";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -336,13 +338,21 @@ export function parsePlistWatchPaths(xml) {
   );
 }
 
-/** Expected WatchPaths for a set of discovered workspaces (root + docs/ when present). */
+/**
+ * Expected WatchPaths for a set of discovered workspaces: root, `docs/` when
+ * present, and — the fix for the silent unwatched-ledger gap — the resolved
+ * ledger directory itself (`ws.ledgerJsonl`'s dirname), read from the
+ * workspace record rather than rebuilt from `path.join(ws.root, "docs")`.
+ * Rebuilding assumed the docs/ convention and silently dropped both
+ * `.propagation/`- and `propagation/`-layout workspaces from the watch set.
+ */
 export function expectedWatchPaths(workspaces) {
   const set = new Set();
   for (const ws of workspaces) {
     set.add(ws.root);
     const docsDir = path.join(ws.root, "docs");
     if (existsSync(docsDir)) set.add(docsDir);
+    if (ws.ledgerJsonl) set.add(path.dirname(ws.ledgerJsonl));
   }
   return set;
 }
@@ -1582,6 +1592,27 @@ async function doctor() {
     check("no source open in more than one ledger", false, err.message);
   }
 
+  // (b2) more than one live ledger FILE under one workspace root — the
+  // phantom-ledger hazard from a half-finished propagation/ migration: a
+  // `git mv` that moved the .jsonl but not the .md, or that ran before the
+  // discovery cascade knew about propagation/, leaves a real ledger at one
+  // path and a fresh empty pair minted at another. Loud, naming both, rather
+  // than silently reading whichever one discovery happens to pin.
+  try {
+    const multi = [];
+    for (const ws of WORKSPACES) {
+      const candidates = liveLedgerCandidates(ws.root);
+      if (candidates.length > 1) multi.push(`${ws.name}: ${candidates.join(", ")}`);
+    }
+    check(
+      "at most one live ledger file per workspace",
+      multi.length === 0,
+      multi.length ? multi.join("; ") : "",
+    );
+  } catch (err) {
+    check("at most one live ledger file per workspace", false, err.message);
+  }
+
   // (c) malformed JSONL lines per ledger — readLedger silently `continue`s
   // past unparseable lines, so the existing "ledger JSONL parseable" check
   // above is vacuous; this makes a non-zero count a real problem.
@@ -2221,6 +2252,146 @@ async function releaseCmd(argv = []) {
     );
   }
   process.exit(result.exitCode);
+}
+
+/**
+ * `migrate-ledger` — thin dispatch arm (D7): argv parsing and printing only.
+ * All logic lives in lib/edges/migrate-ledger.mjs. Built per
+ * docs/DECISIONS.md (2026-08-10, "the 69 misfiled hub rows are deferred") —
+ * append-only close-and-re-emit with a manifest, never an in-place rewrite.
+ *
+ * Dry-run by default; `--apply` writes. The source ledger is NEVER written.
+ *
+ * `--all-refs` / `--from-ref <ref>` (docs/ISSUES.md N25): sweep the source
+ * repo's branches via `git show`, never `git checkout`. Mutually exclusive
+ * with each other. In this mode `--from` names the CONCEPTUAL ledger path
+ * (workspace-root/docsdir/PROPAGATION_LEDGER.jsonl) — it need not exist on
+ * whatever branch happens to be checked out, so the working-tree existence
+ * check below is skipped; the repo itself must still exist and be a git repo.
+ */
+async function migrateLedgerCmd(argv = []) {
+  const asJson = argv.includes("--json");
+  const apply = argv.includes("--apply");
+  const allRefs = argv.includes("--all-refs");
+  const fromIdx = argv.indexOf("--from");
+  const intoIdx = argv.indexOf("--into");
+  const fromRefIdx = argv.indexOf("--from-ref");
+  const fromPath = fromIdx >= 0 ? argv[fromIdx + 1] : undefined;
+  const intoPath = intoIdx >= 0 ? argv[intoIdx + 1] : undefined;
+  const fromRef = fromRefIdx >= 0 ? argv[fromRefIdx + 1] : undefined;
+
+  if (!fromPath || !intoPath) {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs migrate-ledger --from <ledger.jsonl> --into <ledger.jsonl> [--apply] [--all-refs | --from-ref <ref>] [--json]`);
+    console.error(`${DIM}Dry-run by default. --apply writes. The --from ledger is never written.${RESET}`);
+    process.exit(2);
+  }
+  if (allRefs && fromRef) {
+    console.error(`${RED}error:${RESET} --all-refs and --from-ref are mutually exclusive`);
+    process.exit(2);
+  }
+  if (!allRefs && !fromRef && !existsSync(fromPath)) {
+    console.error(`${RED}error:${RESET} --from ledger does not exist: ${fromPath}`);
+    process.exit(2);
+  }
+
+  let result;
+  try {
+    result = await migrateLedger({ fromPath, intoPath, apply, allRefs, fromRef });
+  } catch (err) {
+    console.error(`${RED}error:${RESET} ${err.message}`);
+    process.exit(2);
+  }
+
+  if (asJson) {
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(0);
+  }
+
+  const verb = apply ? "migrated" : "would migrate";
+  console.log(`${BOLD}# migrate-ledger${RESET}  ${DIM}(${apply ? "APPLY" : "dry-run — nothing written"})${RESET}\n`);
+  console.log(`  from:   ${result.from}`);
+  console.log(`  into:   ${result.into}`);
+  console.log(`  prefix: ${result.prefix || DIM + "(none)" + RESET}\n`);
+  if (result.refMode) {
+    console.log(`  refs swept: ${result.refsSwept.map((r) => r.ref).join(", ") || DIM + "(none)" + RESET}`);
+    if (result.skippedRefs.length > 0) {
+      console.log(`  ${YELLOW}refs skipped:${RESET}`);
+      for (const s of result.skippedRefs) {
+        console.log(`    ${DIM}-${RESET} ${s.ref}: ${s.reason}`);
+      }
+    }
+    if (result.duplicateEventsCollapsed > 0) {
+      console.log(`  ${result.duplicateEventsCollapsed} duplicate sighting(s) on other refs collapsed into their canonical row`);
+    }
+    const multiRef = result.idMap.filter((r) => r.appearedOnRefs && r.appearedOnRefs.length > 1);
+    if (multiRef.length > 0) {
+      console.log(`  ${DIM}rows seen on more than one ref:${RESET}`);
+      for (const r of multiRef) {
+        console.log(`    ${DIM}-${RESET} ${r.newId} (source id ${r.oldId} on ${r.ref}) also on: ${r.appearedOnRefs.filter((x) => x !== r.ref).join(", ")}`);
+      }
+    }
+    console.log("");
+  }
+  console.log(`  ${verb} ${result.migrated} row(s), skipped ${result.skipped} already-migrated row(s)`);
+  console.log(`  transitions: ${result.transitionsMigrated} migrated, ${result.transitionsSkipped} skipped, ${result.orphanTransitions} orphaned`);
+  if (result.manifestPath) {
+    console.log(`\n  manifest: ${result.manifestPath}`);
+  } else if (apply) {
+    console.log(`\n  ${DIM}no manifest written — nothing new was migrated${RESET}`);
+  }
+  if (!apply) {
+    console.log(`\n${DIM}Re-run with --apply to write.${RESET}`);
+  }
+}
+
+/**
+ * `relocate-ledger` — thin dispatch arm (D7): argv parsing and printing only.
+ * All logic lives in lib/edges/relocate-ledger.mjs. Moves ONE workspace's
+ * ledger pair onto the `propagation/` layout via `git mv`, so history
+ * follows. This is a relocation, never a row migration — see that module's
+ * header and docs/DECISIONS.md "a propagation/ folder in every workspace".
+ *
+ * Dry-run by default; `--apply` writes.
+ */
+async function relocateLedgerCmd(argv = []) {
+  const asJson = argv.includes("--json");
+  const apply = argv.includes("--apply");
+  const wsIdx = argv.indexOf("--workspace");
+  const workspace = wsIdx >= 0 ? argv[wsIdx + 1] : undefined;
+
+  if (!workspace) {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs relocate-ledger --workspace <root> [--apply] [--json]`);
+    console.error(`${DIM}Dry-run by default. --apply performs the git mv.${RESET}`);
+    process.exit(2);
+  }
+
+  let result;
+  try {
+    result = await relocateLedger({ workspace, apply });
+  } catch (err) {
+    if (asJson) {
+      console.log(JSON.stringify({ error: err.message }, null, 2));
+    } else {
+      console.error(`${RED}error:${RESET} ${err.message}`);
+    }
+    process.exit(2);
+  }
+
+  if (asJson) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  const verb = apply ? "relocated" : "would relocate";
+  console.log(`${BOLD}# relocate-ledger${RESET}  ${DIM}(${apply ? "APPLY" : "dry-run — nothing written"})${RESET}\n`);
+  console.log(`  workspace: ${result.workspace}`);
+  console.log(`  ${verb}:`);
+  console.log(`    ${result.from.jsonl} -> ${result.into.jsonl}`);
+  if (result.from.md) console.log(`    ${result.from.md} -> ${result.into.md}`);
+  console.log(`  rows: ${result.rowCount}`);
+  if (!apply) {
+    console.log(`\n${DIM}Re-run with --apply to write.${RESET}`);
+  }
 }
 
 /**
@@ -4922,6 +5093,10 @@ if (_invokedDirectly) {
     await setupCmd(process.argv.slice(3));
   } else if (mode === "release") {
     await releaseCmd(process.argv.slice(3));
+  } else if (mode === "migrate-ledger") {
+    await migrateLedgerCmd(process.argv.slice(3));
+  } else if (mode === "relocate-ledger") {
+    await relocateLedgerCmd(process.argv.slice(3));
   } else if (mode === "init") {
     await init(process.argv[3], process.argv.slice(4));
   } else if (mode === "reload") {

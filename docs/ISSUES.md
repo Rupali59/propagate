@@ -1630,3 +1630,63 @@ not a patch, and it needs its own plan.
 **Interaction with N39:** propagate's own repo therefore stays partially baselined — 9
 `NEVER_VERIFIED`, 6 `CLEAN`, 2 `REVERSED`. The mechanical fix is blocked until this is
 resolved or `bootstrap` gains a per-workspace filter that does not go through search roots.
+
+### N41 · Cross-branch dedupe silently discards a differing disposition — **S2** — **OPEN**
+
+**2026-08-21.** `migrate-ledger --all-refs` dedupes rows on `(type, source, timestamp)`
+because ledger ids are per-file and meaningless across refs. When the same logical row
+carries a **different final status** on different branches, the dedupe keeps whichever ref
+sorts first (`main` → `master` → checked-out → alphabetical) and discards the rest **with no
+report**.
+
+That is the semantic-conflict case the office-hours design named `CONTESTED`
+(`docs/deferred/2026-08-20-two-tier-ref-aware-ledger.md`): *"Branch A verifies edge E as
+`propagated`; branch B verifies the same edge as `wontfix`. Union storage faithfully
+preserves both, and the ledger now holds two contradictory human decisions about one edge."*
+
+**Measured across every multi-branch sub-project ledger in the tree — exactly one live
+instance:**
+
+```
+SSJK-mb  docs/CLAUDE.md row
+  feat/impersonate-lucide-icons : open
+  feat/r1-dashboard             : done
+  feat/r1-redis-queue-substrate : done
+  fix/passkey-bootstrap         : done
+  main                          : done
+```
+
+`Manav-portfolio`: 3 rows on more than one branch, 0 contested. `Keerti-portfolio`: 0 of
+either. So the mechanism is needed and the current exposure is one row.
+
+**Why it is S2 and not S1:** the discarded value is currently the minority one on an
+unmerged feature branch, and the majority (including `main`) agrees. The defect is that
+this is decided by sort order rather than by a human, and reported nowhere.
+
+**What it should do**, per the maintainer 2026-08-21 — *"like git workflow, decisions
+should be amended and reconciled if differentiated"*: a collapse that spans differing
+dispositions must be surfaced as contested and reconciled deliberately, not resolved by
+ordering. `docs/deferred/…` D5 already settled the shape: **`contested` is a flag on the
+row, not a ninth state** — the edge keeps its real content state and carries the conflicting
+dispositions alongside.
+
+**Blocks:** sweeping `SSJK-mb` with `--all-refs`, which is where the one instance lives.
+
+### N42 · `renderMarkdown` has no live caller, and the file it renders is hand-written — **S2** — **OPEN**
+
+**2026-08-21.** `renderMarkdown` (`lib/edges/ledger.mjs`) now groups rows under per-branch
+headings, giving `source_worktree` its first reader. **Nothing calls it.** Its only caller
+is `watcher.mjs`, retired 2026-08-14. So branch nodes exist in the `.jsonl` and are invisible
+in the `.md` a human reads — `docs/GOTCHAS.md` G48 / `rule:enforcement-watches-itself`,
+in freshly-written code.
+
+It cannot simply be wired up. The rendered `.md` files now carry **hand-written prose**:
+`ManavDaehi/docs/PROPAGATION_LEDGER.md` opens by explaining why it is frozen, and both
+`Manav-portfolio`'s and `SSJK-mb`'s carry uncommitted editorial corrections. Regenerating
+would destroy them.
+
+The file is doing two incompatible jobs — machine-rendered table and human explanation —
+which is the conflation `rule:state-and-decisions` names: *"a file that is half
+machine-refreshed and half hand-written reads as one thing."*
+
+**Unresolved and needed before the branch-node view reaches a human.**
