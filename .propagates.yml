@@ -40,6 +40,15 @@ sources:
           project. Measured 2026-08-21: 50 files carried a hardcoded ledger path and this
           checklist was one of exactly two that would keep producing more.
         kind: prose
+      - path: ../rules/model-routing.md
+        why: >-
+          model-routing tells every subagent brief to run /propagate so its work reaches the
+          workspace ledger. Until 2026-08-21 it named `docs/PROPAGATION_LEDGER.md` outright and
+          was wrong the moment the layout moved - a live imperative, injected into every session
+          by the SessionStart hook, misinstructing every agent that read it. It now references
+          REFERENCE.md instead of naming a path, and this edge is what makes that reference stay
+          true: a pointer nothing watches is exactly how it went stale.
+        kind: prose
       - path: ../.templates/RETIREMENT-CHECKLIST.md
         why: >-
           The retirement path names the ledger it must account for before a workspace is

@@ -109,6 +109,12 @@ files at more than one candidate — a half-finished relocation is loud, not sil
 with `relocate-ledger`, never by hand: `git mv` alone makes discovery fall through to the
 `docs/`-exists heuristic and mint a fresh empty ledger while the real one goes unowned.
 
+**Who points here.** `rule:model-routing` tells every subagent brief to run `/propagate` so
+its work reaches the ledger, and references this section rather than naming a path — it named
+one until 2026-08-21 and was wrong the moment the layout moved. Both lifecycle checklists in
+`.templates/` do the same. All three are declared downstreams of this file, so a future layout
+change fires drift at them instead of leaving them stale.
+
 **Dated records keep the old path.** An archived session note or a `DECISIONS.md` entry
 describes what was true then; `rule:state-and-decisions` forbids editing past entries. Only
 live pointers are repointed.
