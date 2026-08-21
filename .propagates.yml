@@ -30,6 +30,23 @@
 # Tracked in docs/ISSUES.md.
 
 sources:
+  docs/REFERENCE.md:
+    propagates_to:
+      - path: ../.templates/NEW-PROJECT-CHECKLIST.md
+        why: >-
+          REFERENCE.md's "Ledger layout" section is canonical for where propagation items
+          live. This checklist tells whoever adds a workspace what to create, so a layout
+          change here that does not reach it manufactures the old shape for every future
+          project. Measured 2026-08-21: 50 files carried a hardcoded ledger path and this
+          checklist was one of exactly two that would keep producing more.
+        kind: prose
+      - path: ../.templates/RETIREMENT-CHECKLIST.md
+        why: >-
+          The retirement path names the ledger it must account for before a workspace is
+          archived. If the layout moves and this does not, a retiring workspace's ledger
+          history is looked for where it no longer is - the one moment nobody gets a second
+          chance to find it.
+        kind: prose
   propagates.schema.json:
     propagates_to:
       - path: skills/reconcile/SKILL.md

@@ -90,6 +90,29 @@ runtime. What retired is the **mechanism that produced new rows this way**:
   `state.json` without firing drift (bootstrap behaviour) — moot now that
   nothing populates `state.json` from a live fire.
 
+## Ledger layout — one `propagation/` folder per workspace
+
+**Every workspace, including the hub, keeps its propagation items in
+`<workspace>/propagation/`** — `ledger.jsonl` and its rendered `ledger.md`, plus migration
+manifests under `propagation/archive/`. One folder, at depth 1, **never per sub-project**: a
+sub-project's edges roll up to its workspace.
+
+This is canonical. Do not restate the path in a project doc — cite this section. Before
+2026-08-21 the location was decided by whether `docs/` happened to exist at first write, and
+`docs/DECISIONS.md` records the consequence: *"the location remains an accident of directory
+layout at first-write time; the guard contains the damage but does not remove the cause."*
+That produced three layouts at once across eight ledgers.
+
+`docs/PROPAGATION_LEDGER.*` and `.propagation/ledger.*` are the superseded forms. Discovery
+still resolves them so nothing breaks, and `doctor` **fails** if a workspace has live ledger
+files at more than one candidate — a half-finished relocation is loud, not silent. Move one
+with `relocate-ledger`, never by hand: `git mv` alone makes discovery fall through to the
+`docs/`-exists heuristic and mint a fresh empty ledger while the real one goes unowned.
+
+**Dated records keep the old path.** An archived session note or a `DECISIONS.md` entry
+describes what was true then; `rule:state-and-decisions` forbids editing past entries. Only
+live pointers are repointed.
+
 ## Ledger resolution
 
 ⚠️ **Resolve the ledger path from the workspace the row belongs to — do NOT
