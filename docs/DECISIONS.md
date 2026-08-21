@@ -924,3 +924,49 @@ repeat that one.
 `.propagates.yml` was updated in the same commit; `check --changed` names all five moved
 sources at their new paths, so no edge died in the move.
 
+
+---
+
+## 2026-08-21: `rules check` reported a declared deviation only if the file also restated the rule
+
+**What:** in `lib/rules/rules-check.mjs`, the override test now runs **before** the
+fingerprint gate. Previously the loop read:
+
+```js
+if (!re.test(raw)) continue;      // fingerprint gate
+if (ov.test(raw)) { ...overrides.push... }
+```
+
+so a `CLAUDE.md` was considered for override detection **only if it also matched the
+rule's fingerprint** — that is, only if it restated the rule.
+
+**Why that is backwards.** The rules directory exists to make files *reference* a rule
+(`rule:<id>`) rather than restate it; restatement is the failure it was built to end,
+after 9 copies of tool-priority carrying 4 mutually exclusive claims. The `overrides:`
+escape hatch exists so that genuine divergence stays **visible**. Gating it behind the
+fingerprint meant **the cleaner the file, the less likely its declared deviation would
+ever be seen** — the two mechanisms worked against each other, and the failure was silent.
+
+**Found in the field, not by reading.** `Motherboard/CLAUDE.md` declared
+`overrides: state-and-decisions` and `rules check` reported one deviation in the tree,
+Vipin Kaushik's. The Motherboard declaration only appeared after its paragraph was
+reworded to state what the rule requires — i.e. after adding a restatement, which is the
+thing the whole system discourages. That workaround has now been removed and the
+declaration is still detected, which is the end-to-end proof: the file does **not** match
+the fingerprint and the deviation is still reported at `CLAUDE.md:8`.
+
+**Test first, and it failed for the stated reason.** `tests/cli/rules-check.test.mjs`
+gains *"a declared override is reported even when the file does NOT restate the rule"*.
+It went red at `0 !== 1` before the change and green after. The pre-existing override test
+was not wrong, but its fixture happened to contain the fingerprint (*"Doppler is the
+source of truth elsewhere"*), which is exactly why the gap survived: **the only test
+covering overrides could not distinguish the two orderings.**
+
+Full suite after the change: **881 tests, 881 pass, 0 fail.**
+
+**Not changed:** `overrideRe` itself. Its near-miss cases still hold — `rule:<id>` does
+not count as an override, prose mentioning both words does not, and a longer id
+(`<id>-extended`) must not match. Only the ordering moved.
+
+**Affects:** propagate-skill, Motherboard, Vipin Kaushik
+**Refs:** `lib/rules/rules-check.mjs`, `tests/cli/rules-check.test.mjs`

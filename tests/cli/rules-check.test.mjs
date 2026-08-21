@@ -116,6 +116,31 @@ test("a declared override is reported but does not fail the run", async () => {
   }
 });
 
+test("a declared override is reported even when the file does NOT restate the rule", async () => {
+  const { checkRules } = await import("../../lib/rules/rules-check.mjs");
+  const f = fixture();
+  try {
+    f.rule("secrets-source-of-truth", "Doppler is the source of truth");
+    // The clean case: this file REFERENCES the rule and declares a deviation. It
+    // deliberately does NOT contain the fingerprint, because not restating the rule
+    // is the behaviour the whole rules directory exists to encourage.
+    //
+    // Until 2026-08-21 override detection sat behind `if (!re.test(raw)) continue`,
+    // so a file like this declared a deviation that was NEVER surfaced -- and the
+    // tidier the file, the more certain it was to be missed. Found in
+    // Motherboard/CLAUDE.md, which had to be reworded to restate part of the rule
+    // before its own `overrides:` line would show up.
+    f.claudeMd("clean-deviant",
+      "# D\nSecrets: `rule:secrets-source-of-truth`.\n**`overrides: secrets-source-of-truth`** — we use Vault.\n");
+    const r = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    assert.equal(r.overrides.length, 1, "the deviation must be surfaced without a restatement");
+    assert.equal(r.findings.length, 0, "and it is not a restatement");
+    assert.equal(r.exitCode, 0, "declared deviations do not fail the run");
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("selftest proves every fingerprint can fire, and fails when one cannot", async () => {
   const { selftest } = await import("../../lib/rules/rules-check.mjs");
   const f = fixture();
