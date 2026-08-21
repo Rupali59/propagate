@@ -477,6 +477,54 @@ sources:
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// SUBPROCESS: lib/edges/bootstrap.mjs's applyBaseline routes through
+// lib/edges/provenance.mjs too (lane W1, status-temporal-plum.md §1+§2) —
+// same helper cli.mjs's verify command uses, so a `baselined` event carries
+// the same provenance shape as a `verify`-written one.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("bootstrap --apply — the baselined event carries provenance: working-tree ref, real commit position, by_kind bootstrap", async () => {
+  await withFixture(async (env) => {
+    const ws = await makeWorkspace(env.searchRoot, "ws-prov");
+    await writeFile(path.join(ws, "src.txt"), "src v1\n");
+    await writeFile(path.join(ws, "dst.txt"), "dst v1\n");
+    await writeFile(
+      path.join(ws, ".propagates.yml"),
+      `workspace: true
+sources:
+  src.txt:
+    propagates_to:
+      - path: dst.txt
+        why: "provenance pairing"
+`,
+    );
+    await commitAll(ws, "src + dst together");
+    const realSha = git(["rev-parse", "HEAD"], ws);
+
+    const { status } = runBootstrapJson(["--baseline-from-git", "--apply"], env);
+    assert.equal(status, 0);
+
+    const after = runReconcileJson(env);
+    assert.equal(after.rows.length, 1);
+    const last = after.rows[0].last;
+
+    assert.equal(last.observed_on_ref, "working-tree");
+    assert.equal(last.observed_at_commit, realSha);
+    assert.equal(last.observed_on_branch, "main");
+    // `bootstrap` scaffolds a `.propagation/` directory (v1 ledger
+    // side effect, STATE.md P1's `ledgerScaffoldingAllowed()`) as an
+    // untracked directory BEFORE applyBaseline writes its events, so the
+    // tree is genuinely dirty at write time — verified directly against a
+    // real repo: `git status --porcelain` shows `?? .propagation/` right
+    // after `bootstrap --apply` runs, before this test existed. Asserting
+    // `false` here would have been the same "assume clean" mistake this
+    // wedge exists to catch, just baked into the fixture instead of the code.
+    assert.equal(last.observed_dirty, true);
+    assert.equal(last.by_kind, "bootstrap", "bootstrap's own default, distinct from verify's 'human'");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // SUBPROCESS: --none leaves everything NEVER_VERIFIED (test #7).
 // ─────────────────────────────────────────────────────────────────────────
 

@@ -1351,6 +1351,20 @@ async function main() {
   const dryRun = args.includes("--dry-run");
   const stdoutOnly = args.includes("--stdout");
 
+  // --install generates the plist FILE and stops. Loading it is a separate,
+  // deliberate step -- touching launchd is a one-way door and stays the
+  // human's, per SKILL.md's contract. Same pattern as `monitor --install`.
+  if (args.includes("--install")) {
+    const { writeDigestPlist, DIGEST_LABEL } = await import("./lib/core/plist.mjs");
+    const res = await writeDigestPlist();
+    console.log(`wrote ${res.path}`);
+    console.log(`\nNot loaded. To arm it:`);
+    console.log(`  launchctl bootstrap gui/$(id -u) ${JSON.stringify(res.path)}`);
+    console.log(`To disarm:`);
+    console.log(`  launchctl bootout gui/$(id -u)/${DIGEST_LABEL}`);
+    return;
+  }
+
   const indexDb = await rebuildIndexForDigest();
   try {
     await runDigest({ dryRun, stdoutOnly, indexDb });

@@ -13,7 +13,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -58,6 +58,24 @@ function runReconcileJson(env) {
 
 function rowFor(parsed, sourceAbs) {
   return parsed.rows.find((row) => row.source.path === sourceAbs);
+}
+
+/** Read one event straight off disk by event_id — the real store shape,
+ * scoped to this test's own PROPAGATE_STATE_DIR (never the real ~/.propagate,
+ * per docs/GOTCHAS.md G52). Used to assert on provenance fields the CLI's
+ * own JSON output does not echo back (event_id is the only linking field). */
+async function readEventById(stateDir, eventId) {
+  const eventsDir = path.join(stateDir, "events");
+  const files = (await readdir(eventsDir)).filter((f) => f.endsWith(".jsonl"));
+  for (const f of files) {
+    const raw = await readFile(path.join(eventsDir, f), "utf8");
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      const row = JSON.parse(line);
+      if (row.event_id === eventId) return row;
+    }
+  }
+  throw new Error(`event ${eventId} not found under ${eventsDir}`);
 }
 
 async function withFixture(fn) {
@@ -639,5 +657,184 @@ test("verify — no edges matched exits non-zero", async () => {
     const r = runCli(["verify", "--edge", "doesnotexist", "--disposition", "propagated"], env);
     assert.equal(r.status, 1);
     assert.match(r.stderr, /no edges matched/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Provenance (lane W1, ~/.claude/plans/status-temporal-plum.md §1+§2):
+// every event `verify` writes — both the disposition-batch path
+// (buildEventPayload) and the decoupled path — must carry a real
+// observed_on_ref plus the new position/actor fields, routed through
+// lib/edges/provenance.mjs rather than the old `row.source.ref ||
+// "working-tree"` inline expression.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("verify --disposition propagated — the written event carries provenance: working-tree ref, real commit position, clean tree, by_kind human", async () => {
+  await withFixture(async (env) => {
+    const ws = await makeWorkspace(env.searchRoot, "ws-prov1");
+    await writeFile(path.join(ws, "src.txt"), "src v1\n");
+    await writeFile(path.join(ws, "dst.txt"), "dst v1\n");
+    await writeFile(
+      path.join(ws, ".propagates.yml"),
+      `workspace: true
+sources:
+  src.txt:
+    propagates_to:
+      - path: dst.txt
+        why: "provenance pairing"
+`,
+    );
+    await commitAll(ws, "initial");
+    const realSha = git(["rev-parse", "HEAD"], ws);
+
+    const before = runReconcileJson(env);
+    const row = rowFor(before, path.join(ws, "src.txt"));
+
+    const r = runCli(["verify", "--edge", row.edge_id, "--disposition", "propagated", "--apply", "--json"], env);
+    assert.equal(r.status, 0, `verify failed: ${r.stderr}\n${r.stdout}`);
+    const parsed = JSON.parse(r.stdout.trim());
+    const eventId = parsed.confirmed[0].event_id;
+    assert.ok(eventId, "confirmed entry must carry event_id to look the event up");
+
+    const event = await readEventById(env.stateDir, eventId);
+    assert.equal(event.observed_on_ref, "working-tree", "no --ref was given; the repo is a genuine working-tree read");
+    assert.equal(event.observed_at_commit, realSha);
+    assert.equal(event.observed_on_branch, "main");
+    assert.equal(event.observed_dirty, false, "nothing was left uncommitted at the moment of the write");
+    assert.equal(event.by_kind, "human");
+    assert.ok(!("observed_on_ref_error" in event), "no error key on a clean resolution");
+  });
+});
+
+// RED test #3 applied end-to-end through the real CLI: verifying while the
+// workspace has an uncommitted change must set observed_dirty: true on the
+// written event — a dirty tree means the commit recorded does NOT attribute
+// the content that was actually hashed and pinned.
+test("verify --disposition no-change-needed — a dirty working tree at write time sets observed_dirty: true", async () => {
+  await withFixture(async (env) => {
+    const ws = await makeWorkspace(env.searchRoot, "ws-prov2");
+    await writeFile(path.join(ws, "src.txt"), "src v1\n");
+    await writeFile(path.join(ws, "dst.txt"), "dst v1\n");
+    await writeFile(
+      path.join(ws, ".propagates.yml"),
+      `workspace: true
+sources:
+  src.txt:
+    propagates_to:
+      - path: dst.txt
+        why: "dirty-tree pairing"
+`,
+    );
+    await commitAll(ws, "initial");
+
+    const before = runReconcileJson(env);
+    const row = rowFor(before, path.join(ws, "src.txt"));
+
+    // Leave an unrelated uncommitted change in the same repo before verifying.
+    await writeFile(path.join(ws, "unrelated.txt"), "uncommitted\n");
+
+    const r = runCli(["verify", "--edge", row.edge_id, "--disposition", "no-change-needed", "--apply", "--json"], env);
+    assert.equal(r.status, 0, `verify failed: ${r.stderr}\n${r.stdout}`);
+    const parsed = JSON.parse(r.stdout.trim());
+    const eventId = parsed.confirmed[0].event_id;
+
+    const event = await readEventById(env.stateDir, eventId);
+    assert.equal(event.observed_dirty, true, "an uncommitted change elsewhere in the repo must still be reported as dirty");
+    assert.ok(event.observed_at_commit, "the commit is still recorded, alongside the dirty flag that qualifies it");
+  });
+});
+
+test("verify --disposition decoupled --apply — the event also carries provenance, routed through the same helper", async () => {
+  await withFixture(async (env) => {
+    const ws = await makeWorkspace(env.searchRoot, "ws-prov3");
+    await writeFile(path.join(ws, "src.txt"), "src v1\n");
+    await writeFile(path.join(ws, "dst.txt"), "dst v1\n");
+    await writeFile(
+      path.join(ws, ".propagates.yml"),
+      `workspace: true
+sources:
+  src.txt:
+    propagates_to:
+      - path: dst.txt
+        why: "mistaken pairing"
+`,
+    );
+    await commitAll(ws, "initial");
+    const realSha = git(["rev-parse", "HEAD"], ws);
+
+    const before = runReconcileJson(env);
+    const row = rowFor(before, path.join(ws, "src.txt"));
+
+    const r = runCli(
+      ["verify", "--edge", row.edge_id, "--disposition", "decoupled", "--apply", "--reason", "never should have coupled these", "--json"],
+      env,
+    );
+    assert.equal(r.status, 0, `decoupled --apply failed: ${r.stderr}\n${r.stdout}`);
+    const parsed = JSON.parse(r.stdout.trim());
+    const eventId = parsed.results[0].event_id;
+    assert.ok(eventId);
+
+    const event = await readEventById(env.stateDir, eventId);
+    assert.equal(event.observed_on_ref, "working-tree");
+    assert.equal(event.observed_at_commit, realSha);
+    assert.equal(event.observed_on_branch, "main");
+    // decoupled edits the sidecar BEFORE writing the event (cli.mjs's own
+    // comment: "Sidecar edit first: it is the concrete, visible fact"), so
+    // the tree is genuinely dirty (.propagates.yml uncommitted) at the
+    // moment of the write — observed_dirty:true here is the honest answer,
+    // not a bug. A hardcoded `false` would be the same "assume clean"
+    // mistake this wedge exists to remove, just on the other value.
+    assert.equal(event.observed_dirty, true);
+    assert.equal(event.by_kind, "human");
+  });
+});
+
+// An old-shape event (the exact 11-key shape all 1347 live events carry —
+// see docs/deferred/2026-08-20-two-tier-ref-aware-ledger.md, "Premises")
+// must still validate and still fold once W1's new optional fields exist in
+// the schema. This is a literal line copied from the live store
+// (~/.propagate/events/2026-08.jsonl, read-only — never written to by any
+// test), not a hand-invented fixture, so the field SET and every content
+// hash can't drift from what's actually on disk — except `by`, which was
+// this machine's real username in the source line and is replaced with a
+// neutral placeholder here so this fixture doesn't fail the make-public
+// privacy check (tests/portability/make-public-watchlist.test.mjs) for
+// every future public build. Nothing about the "still validates and still
+// folds" claim depends on WHOSE name is in that field.
+test("readEvents: an old 11-key event (verbatim from the live store, less the real username) still parses cleanly with the new fields simply absent", async () => {
+  await withFixture(async (env) => {
+    const eventsDir = path.join(env.stateDir, "events");
+    await mkdir(eventsDir, { recursive: true });
+    const legacyLine =
+      '{"edge_id":"d3f4ce26","node_id":"GitHub:scripts/claude-next.sh","disposition":"baselined","reason":"baseline-from-git: co-committed at e489b3737649676581c402f410a1bc56538499be","by":"propagate-test-user","observed_on_ref":"working-tree","source_content":"d39f2b5d9f16a61a55621fc46a19831e1b496f7e4501f752cc27c528e4344418","downstream_content":"bce18f16d6b9ff3e40758f1d2098006575d1ff68d6ab679cb5d7402b8a55a792","event_id":"01KZYCX8T35V14NC3PZN7HMJXG","ts":"2026-08-13T20:27:08.482Z","hash_alg":"sha256"}';
+    await writeFile(path.join(eventsDir, "2026-08.jsonl"), legacyLine + "\n");
+
+    const script = `
+      import { readEvents, knownGoodPairs } from ${JSON.stringify(fileURLToPath(new URL("../../lib/edges/events.mjs", import.meta.url)))};
+      const { events, malformed } = await readEvents({ edgeId: "d3f4ce26" });
+      const pairs = await knownGoodPairs();
+      console.log(JSON.stringify({ events, malformed, hasPair: pairs.has("d3f4ce26|d39f2b5d9f16a61a55621fc46a19831e1b496f7e4501f752cc27c528e4344418|bce18f16d6b9ff3e40758f1d2098006575d1ff68d6ab679cb5d7402b8a55a792") }));
+    `;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      encoding: "utf8",
+      env: { ...process.env, PROPAGATE_STATE_DIR: env.stateDir },
+    });
+    assert.equal(result.status, 0, `subprocess failed: ${result.stderr}`);
+    const out = JSON.parse(result.stdout.trim());
+
+    assert.equal(out.malformed, 0, "a real legacy line must never be counted malformed");
+    assert.equal(out.events.length, 1);
+    const event = out.events[0];
+    assert.equal(event.edge_id, "d3f4ce26");
+    assert.equal(event.observed_on_ref, "working-tree");
+    assert.equal(event.disposition, "baselined");
+    // W1's new fields are simply absent — never fabricated as "" or false.
+    assert.equal("observed_at_commit" in event, false);
+    assert.equal("observed_on_branch" in event, false);
+    assert.equal("observed_dirty" in event, false);
+    assert.equal("by_kind" in event, false);
+    // Still folds: the pinning lookup reconcile() relies on (edge_id +
+    // both content ids) still resolves correctly off this event.
+    assert.equal(out.hasPair, true, "the legacy event must still participate in knownGoodPairs' fold");
   });
 });

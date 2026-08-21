@@ -142,12 +142,16 @@ import {
   openCount,
   classifyUnownedLedger,
 } from "./lib/edges/ledger.mjs";
+import { findLedgersUnder } from "./lib/edges/refs.mjs";
 import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
 import { reconcile, STATES, groupRows, inboundRows } from "./lib/edges/reconcile.mjs";
 import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
+import { resolveProvenance, resolveObservedRef } from "./lib/edges/provenance.mjs";
+import { appendRun } from "./lib/core/runs.mjs";
+import { describeWhy } from "./lib/edges/why.mjs";
 import { parseDecisions, zeroTokenEntries } from "./lib/report/decisions.mjs";
 import {
   METRICS_PATH,
@@ -218,6 +222,88 @@ export function decisionsAttributionReport(text) {
   const entries = parseDecisions(text);
   const zero = zeroTokenEntries(entries);
   return { entries, zero, allZero: entries.length > 0 && zero.length === entries.length };
+}
+
+/**
+ * Report ledgers `findLedgersUnder` (lib/edges/refs.mjs) finds that
+ * `discoverWorkspacesSync` would not — dot-directories, past `DEFAULT_MAX_DEPTH`,
+ * or below a sidecar that never opted in with `workspace: true`. Plan:
+ * ~/.claude/plans/status-temporal-plum.md P4 "undiscoverable-ledger report".
+ *
+ * `findLedgersUnder` existed with zero production callers (only `enumerateRefs`
+ * was ever imported from refs.mjs, by lib/edges/bootstrap.mjs) — a correct,
+ * built capability nothing watched (docs/GOTCHAS.md G48). This wires it in as
+ * a `doctor` section, deliberately INFORMATIONAL: a ledger being invisible to
+ * discovery is a real gap worth naming, but it is not, by itself, a defect in
+ * the repo being checked — reporting it with a `✗` would train people to
+ * ignore doctor (G1, G23).
+ *
+ * NOT the same coverage as the pre-existing `findUnownedLedgers` / "no unowned
+ * ledger files" hard check already in `doctor` below: that one has its own raw
+ * walk with its own SKIP set (deliberately not excluding dot-dirs so it can
+ * catch exactly the PanditPawanKaushik-worktree class of case) and fails
+ * doctor outright. This section adds the WHY — dot-directory / depth /
+ * no-workspace-marker, taken from `discoverWorkspacesSync`'s actual read-only
+ * ground truth — that the other check does not carry. See P4's verification
+ * report for a live-machine finding: the two mechanisms overlap for most
+ * inputs, but not all (`.gstack` is skipped by one and not the other).
+ *
+ * Every non-finding case is named per `rule:discernment-checks` §2 — "no
+ * result" and "no result *because*" must never collapse into the same output:
+ *   - `no-roots`     — SEARCH_ROOTS resolved to nothing to walk
+ *   - `walk-failed`  — the raw filesystem walk itself threw
+ *   - `none-found`   — the walk ran and found nothing undiscoverable
+ *   - `found`        — findings[], each `{ path, reason, open }`
+ *
+ * `open` is the FOLDED open-row count (openCount(), reused rather than
+ * reimplemented — the ledger is append-only, so a closed row keeps its
+ * original `open` line and a raw line count overcounts; docs/GOTCHAS.md
+ * "501 where the truth was 8"). `open` is `-1` when the ledger itself could
+ * not be read — still reported by path and reason, never silently dropped.
+ *
+ * Exported (not inlined in `doctor()`) so the no-roots/walk-failed branches —
+ * impractical to force from a real machine's configured search roots — can be
+ * pinned directly, same reasoning as `decisionsAttributionReport` above.
+ *
+ * @param {string[]} searchRoots
+ * @returns {Promise<{status: "no-roots"|"walk-failed"|"none-found"|"found", findings: Array<{path: string, reason: string, open: number}>, error?: string}>}
+ */
+export async function undiscoverableLedgersReport(searchRoots) {
+  if (!searchRoots || searchRoots.length === 0) {
+    return { status: "no-roots", findings: [] };
+  }
+
+  let rawFindings;
+  try {
+    const seen = new Set();
+    rawFindings = [];
+    for (const root of searchRoots) {
+      for (const f of findLedgersUnder(root)) {
+        if (seen.has(f.path)) continue;
+        seen.add(f.path);
+        rawFindings.push(f);
+      }
+    }
+  } catch (err) {
+    return { status: "walk-failed", findings: [], error: err.message };
+  }
+
+  const undiscoverable = rawFindings.filter((f) => !f.discoverable);
+  if (undiscoverable.length === 0) {
+    return { status: "none-found", findings: [] };
+  }
+
+  const findings = [];
+  for (const f of undiscoverable) {
+    let open;
+    try {
+      open = await openCount(f.path);
+    } catch {
+      open = -1; // unreadable ledger — still reported, never dropped (G2)
+    }
+    findings.push({ path: f.path, reason: f.reason, open });
+  }
+  return { status: "found", findings };
 }
 
 /**
@@ -1610,6 +1696,35 @@ async function doctor() {
     check("no unreachable workspace markers", false, err.message);
   }
 
+  // INFORMATIONAL, never a doctor failure — see undiscoverableLedgersReport's
+  // header comment for why this is a separate mechanism from the hard-failing
+  // "no unowned ledger files" check above, and rule:discernment-checks §2 for
+  // why every non-finding case is named rather than left blank.
+  console.log(`\n${BOLD}# Undiscoverable ledgers (informational)${RESET}`);
+  console.log(
+    `  ${DIM}ledgers findLedgersUnder() reaches that discovery would not — see lib/edges/refs.mjs header. Never a doctor failure.${RESET}`,
+  );
+  try {
+    const undiscoverableReport = await undiscoverableLedgersReport(SEARCH_ROOTS);
+    if (undiscoverableReport.status === "no-roots") {
+      info("undiscoverable-ledger scan", "no-roots — no search roots configured");
+    } else if (undiscoverableReport.status === "walk-failed") {
+      info("undiscoverable-ledger scan", `walk-failed — ${undiscoverableReport.error}`);
+    } else if (undiscoverableReport.status === "none-found") {
+      info("undiscoverable-ledger scan", "none-found");
+    } else {
+      for (const f of undiscoverableReport.findings) {
+        info(
+          `undiscoverable ledger (${f.reason})`,
+          `${f.path} — ${f.open < 0 ? "open count unreadable" : `${f.open} open row(s)`}`,
+        );
+      }
+    }
+  } catch (err) {
+    // Reporting must never break doctor (same discipline as the symlink scan above).
+    info("undiscoverable-ledger scan", `walk-failed — ${err.message}`);
+  }
+
   console.log(`\n${BOLD}# Log tail${RESET}`);
   if (existsSync(WATCHER_LOG)) {
     const raw = await readFile(WATCHER_LOG, "utf8");
@@ -3000,6 +3115,40 @@ async function reconcileInbound({ json, groupBy }) {
   if (groupBy !== "none") printGroupedView(groups, ungrouped, groupBy);
 }
 
+/**
+ * Persist one run record for `reconcile`'s invocation (plan §3). Called from
+ * the CALLER of reconcile(), never from reconcile() itself — reconcile.mjs's
+ * own header states it is read-only and must stay that way.
+ *
+ * `stats.byState` is already the per-state edge count reconcile() returns
+ * (used two lines below this call site to print the same numbers), so this
+ * reuses it rather than re-deriving it from `rows`. The resolved ref per
+ * repo reuses `resolveObservedRef` (lib/edges/provenance.mjs) — the same
+ * three-outcome rule the provenance wedge established for events, applied
+ * here to workspace roots instead of edge sides.
+ *
+ * Never lets a run-record write failure take down the `reconcile` command
+ * itself: this is an additive audit trail on a command whose primary job is
+ * printing a read-only derivation, not a precondition for it succeeding.
+ */
+async function recordReconcileRun(workspaces, stats) {
+  const refs = {};
+  for (const ws of workspaces) {
+    const { observed_on_ref } = resolveObservedRef({ path: ws.root, ref: null });
+    refs[ws.root] = observed_on_ref;
+  }
+  try {
+    await appendRun({
+      roots: workspaces.map((ws) => ws.root),
+      refs,
+      edge_counts: { ...stats.byState },
+      durationMs: stats.durationMs,
+    });
+  } catch (err) {
+    console.error(`${DIM}(run record not written: ${err.message})${RESET}`);
+  }
+}
+
 async function reconcileCmd() {
   const args = process.argv.slice(3);
   const json = args.includes("--json");
@@ -3021,6 +3170,7 @@ async function reconcileCmd() {
   const workspaces = showAll || !cur ? WORKSPACES : [cur];
 
   const { rows, stats } = await reconcile(workspaces);
+  await recordReconcileRun(workspaces, stats);
   const { groups, ungrouped } = groupRows(rows, groupBy);
 
   if (json) {
@@ -3046,6 +3196,54 @@ async function reconcileCmd() {
   // Grouped view (--group-by glob|node). Left out when groupBy === "none" so
   // default output is byte-identical to before this flag existed.
   if (groupBy !== "none") printGroupedView(groups, ungrouped, groupBy);
+}
+
+/**
+ * `why <edge_id> [--all] [--json]` — thin dispatch arm (D7): parses argv,
+ * calls the lib module, prints, sets the exit code. All the logic —
+ * disposition-change filtering, the unknown-edge/no-events/found
+ * distinction — lives in lib/edges/why.mjs's describeWhy().
+ */
+async function whyCmd() {
+  const args = process.argv.slice(3);
+  const json = args.includes("--json");
+  const showAll = args.includes("--all");
+  const edgeIdArg = args.find((a) => !a.startsWith("--"));
+
+  if (!edgeIdArg) {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs why <edge_id> [--all] [--json]`);
+    process.exit(2);
+  }
+
+  const result = await describeWhy(edgeIdArg, { all: showAll });
+
+  if (json) {
+    console.log(JSON.stringify({ generatedAt: new Date().toISOString(), ...result }));
+    process.exit(result.status === "unknown-edge" ? 1 : 0);
+  }
+
+  console.log(`${BOLD}# why ${result.edge_id}${RESET}  ${DIM}(${showAll ? "full history" : "disposition changes only"})${RESET}\n`);
+
+  if (result.status !== "found") {
+    console.log(`  ${DIM}${result.message}${RESET}`);
+    process.exit(result.status === "unknown-edge" ? 1 : 0);
+  }
+
+  console.log(
+    `  ${result.shown.length} of ${result.totalEvents} event${result.totalEvents === 1 ? "" : "s"} shown` +
+      (result.malformed ? `  ${DIM}(${result.malformed} malformed line(s) skipped)${RESET}` : ""),
+  );
+  console.log();
+  for (const e of result.shown) {
+    const where = e.position.recorded
+      ? `branch=${e.position.branch ?? "(detached)"} commit=${e.position.commit ? e.position.commit.slice(0, 8) : "?"}${e.position.dirty ? " [dirty]" : ""}`
+      : `${DIM}${e.position.note}${RESET}`;
+    console.log(`  ${e.ts}  ${BOLD}${e.disposition}${RESET}  ${where}`);
+    console.log(`    ${DIM}by=${e.by ?? "?"} by_kind=${e.by_kind ?? "(not recorded)"} ref=${e.observed_on_ref ?? "?"}${RESET}`);
+    if (e.reason) console.log(`    ${e.reason}`);
+    console.log();
+  }
+  process.exit(0);
 }
 
 async function drain() {
@@ -3329,12 +3527,13 @@ async function runDecoupled(selected, workspaces, opts) {
     }
 
     try {
+      const provenance = resolveProvenance(row, "human");
       const payload = {
         edge_id: row.edge_id,
         node_id: row.node_id,
         disposition: "decoupled",
         by: process.env.USER || "verify",
-        observed_on_ref: row.source.ref || "working-tree",
+        ...provenance,
         source_content: row.source.contentId,
         downstream_content: row.downstream.contentId,
       };
@@ -3399,7 +3598,7 @@ function buildEventPayload(row, disposition, reason) {
     node_id: row.node_id,
     disposition,
     by: process.env.USER || "verify",
-    observed_on_ref: row.source.ref || "working-tree",
+    ...resolveProvenance(row, "human"),
   };
   if (reason !== undefined) payload.reason = reason;
   if (disposition !== "deferred") {
@@ -4733,6 +4932,8 @@ if (_invokedDirectly) {
     await drain();
   } else if (mode === "reconcile") {
     await reconcileCmd();
+  } else if (mode === "why") {
+    await whyCmd();
   } else if (mode === "verify") {
     await verifyCmd();
   } else if (mode === "bootstrap") {
@@ -4759,7 +4960,7 @@ if (_invokedDirectly) {
     await monitorCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
     process.exit(2);
   }
 }

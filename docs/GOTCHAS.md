@@ -687,36 +687,38 @@ renamed. If you rewrite a `why`, expect to re-verify, and say so in the reason.
 
 ### G48 · An enforcement point that does not watch itself
 
-Four instances in one session, all the same shape: a mechanism that enforces a
-property on others, and is exempt from it.
+**General form promoted 2026-08-21 to `rule:enforcement-watches-itself`** — the how-to-apply
+and the cross-project instance list live there now. What stays here is what this repo paid.
 
-- **`lib/config.mjs`** documented the silent-zero-discovery failure in prose
-  (`:33-38`, "reports healthy forever, which is precisely the failure this skill
-  exists to catch") and never implemented the detection. Fixed 2026-08-19.
-- **`rules/_check.mjs`** enforces that no `CLAUDE.md` restates a rule, while its
-  own `TREE` is hardcoded with no env override — on any other machine it scans an
-  empty tree, finds 0 restatements and **exits 0, reporting success**.
-- **`lib/skills-create.mjs:206-209`** is the canonical text of
-  `rule:description-standard` ("a description states WHEN to use the thing"), and
-  this skill's own `SKILL.md` description opens by summarising its workflow —
-  exactly what that rule forbids.
-- **The drift gate installed in seven repos on 2026-08-19 was not installed in
-  this one.** Six commits landed here that day without it, including two to
-  `lib/metrics.mjs` — a declared source whose two downstreams were DRIFTED the
-  whole time.
+- **`lib/config.mjs`** documented the silent-zero-discovery failure in prose (`:33-38`,
+  "reports healthy forever, which is precisely the failure this skill exists to catch") and
+  never implemented the detection. Fixed 2026-08-19.
+- **`rules/_check.mjs`** enforced that no `CLAUDE.md` restates a rule while its own `TREE`
+  was hardcoded with no env override — on any other machine it scans an empty tree, finds 0
+  restatements and **exits 0, reporting success**.
+- **`lib/skills-create.mjs:206-209`** is the canonical text of `rule:description-standard`,
+  and this skill's own `SKILL.md` description opened by summarising its workflow — exactly
+  what that rule forbids.
+- **The drift gate installed in seven repos on 2026-08-19 was not installed in this one.**
+  Six commits landed here that day without it, including two to `lib/metrics.mjs` — a
+  declared source whose two downstreams were DRIFTED the whole time.
+- **`bin/propagate-update-check`** was written, verified across five behaviours, and invoked
+  by nothing; with a remote deliberately ahead, `doctor` and `status` said "upgrade" zero
+  times. Wired 2026-08-20.
+- **`findLedgersUnder`** — built specifically to reach ledgers discovery cannot see — had
+  zero production callers until 2026-08-20.
+- **`bootstrap` printed `0 baselineable · 0 no-co-commit · 0 bound-reached`** where the
+  adjacent `status` printed `✗ no workspaces` (2026-08-21). The command that exists to make
+  absence attributable rendered "I looked at nothing" identically to "everything is fine".
+  Trusting it would have closed N39 as resolved.
 
-**Cost, measured:** `docs.supersession_prose_only` was added to `EXPECTATIONS`
-with a threshold and a dated `basis`, and **4 of 8 expectations turned out to be
-absent from `docs/OBSERVABILITY.md` §1** — the table that edge exists to keep in
-sync. The number moved 107 → 105 → 103 → 101 across three sessions and the doc never
-learned any of it.
+**Cost, measured:** `docs.supersession_prose_only` was added to `EXPECTATIONS` with a
+threshold and a dated `basis`, and **4 of 8 expectations turned out to be absent from
+`docs/OBSERVABILITY.md` §1** — the table that edge exists to keep in sync. The number moved
+107 → 105 → 103 → 101 across three sessions and the doc never learned any of it.
 
-**Signal:** you can describe the failure fluently in a comment. Prose about a
-hazard is not a check for it, and the fluency is what makes it feel handled.
-
-**Do:** when you build a check, run it against the thing that built it. The
-question is not "does this work" but "does this watch me". Installing a gate
-across a fleet is the moment to ask whether the fleet includes the toolchain.
+**Signal:** you can describe the failure fluently in a comment. Prose about a hazard is not
+a check for it, and the fluency is what makes it feel handled.
 
 ---
 
@@ -849,3 +851,126 @@ specifier-position and other-position. The 19 were visible in one pass over
 .../lib/cross-allow.yml`. It now walks up to `package.json` + `SKILL.md`, which survives
 any future regrouping.
 
+
+### G52 · `SKILL_DIR` cannot be sandboxed by `HOME`, so a test can delete a real repo file
+**Trigger:** `LEGACY_STATE|migrateLegacyState|relocateFile`
+**Fires on:** `LEGACY_STATE.live`
+
+A test can isolate the migration *destination* perfectly and still destroy the *source*.
+`PROPAGATE_STATE_DIR` and a temp `HOME` control where state goes; **`SKILL_DIR` is derived
+from `import.meta.url`** and resolves to the real checkout no matter what the environment
+says. So any test invoking the real `cli.mjs setup` hands the real repo in as the migration
+source.
+
+Anything in `LEGACY_STATE.live` has **move** semantics — copy then unlink. Put a file there
+that also has a permanent, version-controlled counterpart at `SKILL_DIR` and a correctly
+isolated test will delete it from the working tree, for real.
+
+That happened twice in one session to `cross-allow.yml`, which is `CROSS_ALLOW_SHIPPED`
+(`lib/core/config.mjs:444`) — the fallback `CROSS_ALLOW_PATH` resolves to for every install
+with no user copy. Both `lib/edges/cross-repo.mjs:70` and `cli.mjs:1315` `readFileSync` it
+with no existence guard, so a fresh clone threw ENOENT on every cross-repo path.
+
+**The reason it nearly shipped:** this machine HAS a user copy at
+`~/.propagate/cross-allow.yml`, which shadows the shipped one. `doctor` stayed green and
+the only things that noticed were the tests — because they point `PROPAGATE_STATE_DIR` at
+temp dirs and are therefore the sole stranger-simulators on the machine. A green `doctor`
+was not evidence; it was the shadow.
+
+**Fix shape:** `LEGACY_STATE.seedOnly` — copy-if-absent, source never touched. Use move
+semantics only for artifacts with no permanent counterpart in the repo.
+
+**Cost:** two real deletions of a tracked file, 13 failing tests, and a fresh-clone install
+that would have thrown on first cross-repo use. Caught by reading `git status`, not by any
+check.
+
+### G53 · A timing assertion that measures the whole command cannot see the bound it names
+**Trigger:** `elapsedMs|Date\.now\(\) - start`
+**Fires on:** `const elapsedMs = Date.now() - start`
+
+`graph-check.test.mjs` asserted `elapsedMs < 4000` against a 5s-sleeping stub, named itself
+*"a hung `claude mcp list` is bounded to ~2s"*, and measured **all of `doctor`** — the 2s
+bound plus every unrelated check. Doctor's floor in that fixture is ~2.6s, so the assertion
+lived ~1.4s from flipping and duly flipped when the fixture got heavier.
+
+It then failed *before* reaching the assertion that actually tests the guarantee (that the
+`timed out after 2s` line is emitted), so the failure could not distinguish "the bound
+broke" from "doctor got slower". Two separate agents read it as flakiness under load; with
+the machine idle it still failed.
+
+**The bound was intact the whole time** — verified by hand: 2600ms total, message present.
+
+**Fix shape:** widen the *signal*, not the budget. Stub sleep 5s → 60s, assert `< 15000`.
+A held bound costs ~3s, a broken one ~45s, and no growth in doctor's other checks spans
+that. Raising 4000 → 8000 would have gone green while quietly losing the ability to detect
+a broken bound.
+
+**Cost:** two lanes misdiagnosing it as CPU contention, and a real risk of it being
+"fixed" by relaxing the number until the check could no longer fail.
+
+### G54 · A subagent debugging the real CLI writes to the real store unless every env var is set
+**Trigger:** `bootstrap\s+--apply|--baseline-from-git`
+**Fires on:** `node cli.mjs bootstrap --baseline-from-git --apply`
+
+`PROPAGATE_SEARCH_ROOTS` and `PROPAGATE_STATE_DIR` both **default to production**. A command
+run to "see what it does" therefore operates on the real tree and the real append-only store,
+and `--apply` is often set deliberately — so no safety-flag gate stands between you and the
+write. `rule:safety-flag-needs-a-test`'s corollary is the one that applies: **never run a
+command to find out what it would do.**
+
+2026-08-20: a lane debugging a dirty-tree assertion appended **7 events** to the live store
+this way (1347 → 1354), then tried to truncate the store to undo it — blocked by the
+permission classifier, which is the only reason nothing was lost. Recorded as `docs/ISSUES.md`
+**N39**; the events were kept, because they were evidence-backed and truncating an append-only
+store is worse than the events.
+
+**The trap in the remedy.** The instinct on discovering spurious appends is to delete them.
+That instinct has now fired four times in this repo and been acted on twice. For an
+append-only store the question is never "how do I remove this" but "is what it asserts true":
+evidence-backed events that closed nothing should stay.
+
+**How to actually avoid it — and the first version of this advice was WRONG.** This entry
+originally said "export both vars once, before touching the CLI at all". That does not work
+in Claude Code: **shell state does not persist between Bash tool calls.** A lane followed it
+exactly, exported in one call, and its next call went out with both vars unset and landed on
+the real tree. The export has to be in the SAME call as the command:
+
+```sh
+export PROPAGATE_STATE_DIR="$(mktemp -d)"; node cli.mjs <cmd>
+```
+
+Isolating `PROPAGATE_STATE_DIR` is the load-bearing half — every write risk is gated by it.
+Exporting `PROPAGATE_SEARCH_ROOTS` too has a side effect worth knowing:
+`tests/portability/config-file.test.mjs` inherits `process.env` and asserts env-unset
+behaviour, so it fails when that var is exported in the parent shell. Isolate the state dir
+always; isolate the search roots only for the command that needs it.
+
+One forgotten prefix on one command is all it takes, and the write is silent and successful.
+
+**Cost:** 7 events on a production ledger that cannot be removed without violating its
+central invariant, plus an attempted truncation of the only copy.
+
+### G55 · Narrowing `PROPAGATE_SEARCH_ROOTS` does not scope a run — it changes what the edges ARE
+**Trigger:** `PROPAGATE_SEARCH_ROOTS=`
+**Fires on:** `PROPAGATE_SEARCH_ROOTS="$HOME/.claude/skills" node cli.mjs bootstrap`
+
+The obvious way to limit a `bootstrap` or `verify` to one project is to point
+`PROPAGATE_SEARCH_ROOTS` at it. **That silently changes edge identity.** `edgeId` hashes the
+absolute downstream path and a `nodeId` built from the traversed `repoRoot`'s basename, so a
+narrower root produces a disjoint set of edges that all read `NEVER_VERIFIED` — and every
+command reports on them with total confidence.
+
+Matching the directory basename is **not** enough; the absolute path is hashed too. Measured
+2026-08-21: three routes to one repo, three disjoint id sets, 17 edges each.
+
+**The symptom that should stop you:** a scoped dry run reporting *more* never-verified edges
+than the unscoped one. Under a narrower root propagate showed `17 NEVER_VERIFIED` where the
+real tree showed 9 never-verified, 6 clean, 2 reversed. That is not a stricter view of the
+same edges; it is a different set wearing the same names.
+
+**How to check before you write:** snapshot `reconcile --json` edge ids under the normal root,
+run your scoped command as a dry run, and **diff the id lists**. Identical ids mean you are
+looking at the same couplings. Anything else means you are about to create new ones.
+
+**Cost:** would have written 8 baselines against duplicate edges and doubled propagate's edge
+set. Caught by a diff, not by any check. Recorded as `docs/ISSUES.md` N40.

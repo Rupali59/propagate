@@ -1,6 +1,6 @@
 # propagate — State
 
-Last updated: 2026-08-14
+Last updated: 2026-08-20
 
 > Navigation: "What's the current status?" → this file. "Why did we choose X?" →
 > `docs/DECISIONS.md`. "How do I use it?" → `SKILL.md`. "Where do I start
@@ -67,6 +67,150 @@ Per `~/.claude/plans/status-temporal-plum.md` §3 (release mechanics, defined no
   passing as more than "clean this run."
 
 ## Now (in flight)
+
+### 2026-08-21 — N39's fix attempted, blocked, and the blocker is bigger than the fix
+
+Trying to finish propagate's partial baseline surfaced **N40**: `edgeId` hashes the
+**absolute** downstream path, and `nodeId` uses the *traversed* repo basename — so one repo
+reached by three routes yields three disjoint edge sets. Matching the directory basename is
+not enough; the absolute path is hashed too.
+
+`bootstrap`'s only scoping mechanism is `PROPAGATE_SEARCH_ROOTS`, so **scoping a run changes
+what the edges are**. The scoped dry run reported `17 NEVER_VERIFIED · 8 baselineable` with
+full confidence; applying it would have written 8 baselines against duplicate edges and
+silently doubled propagate's edge set. Caught by diffing edge ids against a pre-change
+snapshot — no check would have caught it. `docs/GOTCHAS.md` **G55**.
+
+`workspace: true` was added to propagate's sidecar and **reverted**: edge ids were proven
+identical across the change (all 17), but it left `doctor` red for want of a ledger and did
+not unblock scoping.
+
+**What did get fixed:** both REVERSED edges, which turned out to be real drift caused in
+this session — `docs/GOTCHAS.md` grew from G51 to G55 and two declared downstreams noticed.
+`docs/AUDIT-2026-08.md` gained a dated 2026-08-21 addendum dispositioning G48–G55 (its
+2026-08-17 tables deliberately untouched — a point-in-time audit that gets rewritten stops
+being evidence), closed `both-reconciled`; the metrics edge closed `no-change-needed`.
+propagate's own edges are now **8 CLEAN, 9 NEVER_VERIFIED, 0 REVERSED**.
+
+**The addendum's own finding:** G48–G51 carry no `**Trigger:**`; G52–G55 all do. Entries
+written once the trigger became part of authoring an entry are delivered; those written
+before it are not. G48 (an enforcement point that does not watch itself) has now fired four
+times and is the corpus's strongest PROMOTE-to-a-rule candidate.
+
+
+### 2026-08-20 — Phase 2 wedge landed: a reconciliation now says when, on what ref, by whom
+
+Answers the question that prompted it — *at what status/decision point was a branch's record
+last reconciled?* — which was previously **unanswerable**: `observed_on_ref` was the literal
+`"working-tree"` on all 1347 events, no field held a commit, `by` had one distinct value, and
+`reconcile()` persisted nothing about a run.
+
+- **Step 0 · the reviewed design was rescued.** `/plan-eng-review`'s output — decisions
+  **D3–D9** — existed only in a session transcript after its plan file was overwritten. Now
+  `docs/deferred/2026-08-20-two-tier-ref-aware-ledger.md`, with the design's `--all-refs`
+  cost estimate corrected (it was wrong by ~100x: `git ls-tree -r` returns a blob SHA per
+  file in one spawn, and a blob SHA *is* the content identity).
+- **W1 · `observed_on_ref` is honest (D3).** `lib/edges/provenance.mjs` centralizes the rule
+  across the three call sites that each carried `row.source.ref || "working-tree"`: a
+  resolved ref, a genuine working-tree read, and a **failed lookup** are now three different
+  answers. New additive event fields `observed_at_commit`, `observed_on_branch`,
+  `observed_dirty`, `by_kind`. `observed_dirty` is load-bearing — a dirty tree means the
+  content hashed was never at that commit.
+- **W2 · the graph index's event join was silently broken.** `graph-index.mjs` mapped
+  `event_id: e.id ?? null` against a field written as `event_id`, so every indexed event had
+  a NULL id and `v_edge_history` could not cite a specific event. Verified on a copy of the
+  real store: now **0 null ids**. Previously-dropped `by` / `observed_on_ref` /
+  `source_content` / `downstream_content` are carried through, plus SQL-NULL-safe columns
+  for W1's fields.
+- **W3 · run records and `propagate why`.** `lib/core/runs.mjs` appends one record per
+  reconcile — **from the caller**, because `reconcile()`'s read-only contract is what makes
+  derived state safe across merges. `propagate why <edge>` renders the disposition-change
+  chain (`--all` for everything), distinguishing `unknown-edge` / `no-events` / `found`, and
+  renders *"position not recorded"* for pre-W1 events rather than guessing.
+
+**The acceptance test failed honestly, and that is the finding.** `why` **cannot** answer the
+branch question it was built for: `PanditPawanKaushik`'s `worktree-client-answers-propagation`
+carries 40 v1 ledger rows with 1 open, and v1 rows have **no `edge_id` at all** while `why`
+reads the v2 event store. Two independent gaps — a schema mismatch and `why`'s lack of
+ref-awareness (D9, deferred). No bridge was fabricated to make the item pass.
+
+**Two GOTCHAS learned the hard way, both new.** **G53** fired twice: a timing test asserted a
+proxy for its claim (*"doctor finished under 4s"* for *"the 2s bound held"*; *"under 3s"* for
+*"the cache was used"*), and both proxies flipped when doctor grew by ~0.26s. Both now assert
+the claim itself — the stub records its invocations, so one call across two runs **is** the
+cache working. **G54**, and its own first version was wrong: a lane's unscoped
+`bootstrap --apply` appended 7 events to the live store, and the advice to "export the safety
+vars once per session" does not work here because shell state does not persist between tool
+calls.
+
+**Live store: 1354 events** (1347 + the 7 from N39, kept deliberately — evidence-backed,
+closed nothing). Suite green, `doctor` 0, `rules check` 0; derive counts with `npm test`.
+
+**Open:** propagate's own repo is **partially** baselined — 7 edges by accident, the rest not.
+That is worse than either extreme. See `docs/ISSUES.md` N39.
+
+
+### 2026-08-20 — Phase 1 landed: this machine is now a clean reference install
+
+`release --check` reports **READY**, all four gates green. It reported
+`✗ stranger-install` and `· make-public-check (could-not-run)` before this phase. Derive
+the current numbers with `node cli.mjs release --check`; do not restate them here.
+
+Four lanes, plus the identity map. Each lane's load-bearing claims were re-measured on the
+parent before acceptance (`rule:delegation-criteria` §4), which caught two wrong ones.
+
+- **P1 · gate-4 ledger creation.** `doctor` never reached clean on a fresh workspace:
+  `init`/`setup` scaffold the sidecar, `bootstrap --apply` writes only the v2 event store,
+  and nothing created the v1 ledger pair. Fixed in `lib/core/discovery.mjs`'s
+  `makeWorkspaceRecord`, gated to the `setup`/`init`/`bootstrap` verbs via
+  `ledgerScaffoldingAllowed()` — an unconditional first version wrote untracked ledger
+  files as a side effect of a plain read-only `check --changed`, caught by the G43 test.
+  `.github/workflows/test.yml` lost its `|| true`. Live-tree rows unchanged: 746 distinct,
+  0 open.
+- **P2 · state migration.** `LEGACY_STATE.live` now covers `events/` (directory-aware),
+  `graph-index.db`, `graph-index.cypher`, `notified.jsonl` — discharging G12 for the
+  artifact whose loss is unrecoverable. `archiveEventBackups()` moves stray
+  `*.jsonl.pre-truncate-*` out of the state-dir root. **Incident:** `cross-allow.yml` was
+  added to `live` per the original brief and, run for real, deleted the repo's shipped
+  fallback twice. New `LEGACY_STATE.seedOnly` (copy-if-absent, source never touched) is the
+  fix; `docs/GOTCHAS.md` **G52** is the hazard.
+- **P3 · hooks + plists.** The 5 pre-commit hooks under the astro-platform workspace no
+  longer fail open — a missing `cli.mjs` prints one line instead of skipping silently
+  (G48 shape); `PROPAGATE_CLI` overrides, `PROPAGATE_SKIP=1` still bypasses. All three
+  plists now generate via `resolveStableNodeBin()`, so they stop baking in a Homebrew
+  Cellar version — the installed monitor plist was one `brew upgrade node` from failing
+  silently. The digest plist had no generator at all; `writeDigestPlist()` +
+  `digest.mjs --install` closes that. **Files written, `launchctl` never invoked** — the
+  loaded definitions are still the old ones until a human reloads them.
+- **P4 · undiscoverable-ledger report.** `findLedgersUnder` had zero production callers
+  (G48). Now an informational `doctor` section that can never fail the run, with every
+  non-finding case named (`no-roots` / `walk-failed` / `none-found`), reusing `openCount()`
+  rather than reimplementing the fold. Cost measured at ≈0.26s.
+- **Identity map.** `~/.propagate/identity-map.json`, outside the repo by design, aliases
+  derived from each workspace's `persona/profile.yaml`. Verified by building the public
+  tree and grepping it independently of the tool's own check: zero real-name hits, clone
+  URL intact. Three of eight workspaces have a directory name that is *not* the identity,
+  so a map keyed on directory names alone would have published the person.
+
+**Two measurements corrected, both worth keeping.** A parent-side count of open ledger rows
+reported 42; the instrument was wrong — `drift` rows carry their own `status` and were
+hardcoded as open. The real figure is 0. Separately, two lanes diagnosed a failing timing
+test as CPU contention; it still failed on an idle machine. The 2s bound was intact
+throughout — the test measured *all* of `doctor` against a budget ~1.4s above its floor.
+`docs/GOTCHAS.md` **G53**.
+
+**Finding, not fixed (P4):** `findUnownedLedgers` (`lib/edges/ledger.mjs`, commit
+`b9c1075`, predating the plan) already walks the same tree with its own SKIP set and is
+wired into `doctor` as a *hard-failing* check. The two mechanisms overlap for nearly every
+real input and diverge only on `.gstack`. They should be reconciled onto one walk.
+
+**Finding (P4):** the worktree ledger this lane was built to surface no longer exists on
+disk — `.claude/worktrees/` was emptied 2026-08-15, before this session. The rows are not
+lost: branch `worktree-client-answers-propagation` still carries 40 distinct rows with **1
+open**, readable via `git show <ref>:<path>` with no checkout. That is **N25** in its
+purest form — one path holding two different ledgers depending on the ref — and the
+concrete argument for Phase 2.
+
 
 ### 2026-08-20 — Lane B done: `make-public.mjs` watchlist completeness
 

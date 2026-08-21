@@ -1542,3 +1542,91 @@ the corresponding public-repo paths, `kind: cross-repo`. Until then this entry i
 honest record that step 3 is a procedure a human runs, not a coupling propagate
 watches, and `release --check` passing must not be read as more than that.
 
+
+### N39 · A subagent's unscoped `bootstrap --apply` wrote 7 events to the live store — **S2** — **ACCEPTED, NOT REVERTED**
+
+**2026-08-20.** A Phase 2 lane debugging a dirty-tree test ran `bootstrap --apply` without
+setting `PROPAGATE_SEARCH_ROOTS` / `PROPAGATE_STATE_DIR`. It hit the real search roots and
+the real store, appending **7 events** (1347 → 1354) against propagate's own edges:
+`lib/core/setup.mjs`, `VERSION` ×3, `lib/graph/graph.mjs`, `lib/report/metrics.mjs` ×2.
+
+The lane then attempted `cp` + `head -n 1347 > tmp && mv` to truncate the store back. **The
+permission classifier blocked it and nothing was applied** — no bytes were lost, no backup
+was written, the file stayed at 1354.
+
+**Why this was ACCEPTED rather than reverted**, on the maintainer's decision:
+
+- All 7 carry `reason: "baseline-from-git: co-committed at <sha>"` — they are
+  **evidence-backed**, produced by the mechanism designed to produce exactly them.
+- All 7 edges had **zero prior events** (`NEVER_VERIFIED`). Nothing a human had open was
+  closed; the edges moved from unverified to baselined on real git evidence.
+- Truncating an append-only store to delete evidence-backed events is the more damaging
+  act. It would have been the **fourth** violation of append-only in this repo's history and
+  the third time done as a remedy — see `rule:safety-flag-needs-a-test`.
+
+**How it differs from the 2026-08-17 incident** that rule documents: that one appended
+events asserting verifications nobody performed *and nothing evidenced*, and silently closed
+**3 real worklist items**. This one closed nothing and every event has evidence. The defect
+here is **authorization, not truth** — nobody chose to baseline propagate's own repo at that
+moment.
+
+**The route, which is the actual defect:** `--apply` was set deliberately, so no flag gate
+would have helped. What was missing is that a test-time invocation of the real CLI defaults
+to the real roots and the real store. See `docs/GOTCHAS.md` **G54**.
+
+**Attempted fix 2026-08-21, and it is BLOCKED — see N40.** Scoping `bootstrap` to propagate
+alone requires a narrower `PROPAGATE_SEARCH_ROOTS`, and under any narrower root every edge
+gets a different id, so the run would have created duplicates rather than baselining the
+real ones. Adding `workspace: true` to propagate's sidecar was tried and reverted: it left
+`doctor` red (no ledger) and did not unblock scoping, because edge identity is tied to the
+absolute access path, not to the workspace.
+
+**Current state, measured 2026-08-21:** propagate's 17 own edges are **8 CLEAN, 9
+NEVER_VERIFIED, 0 REVERSED**. The 2 formerly-REVERSED edges were resolved by hand
+(`d1ae5ac0` both-reconciled, `0775c32e` no-change-needed). The 9 never-verified stay
+blocked on N40.
+
+### N40 · Edge identity is tied to the absolute access path, so the same coupling has different ids by route — **S1** — **OPEN**
+
+**2026-08-21.** `edgeId(nodeId, downstreamPath, why)` (`lib/edges/events.mjs:117`) hashes the
+**absolute** downstream path (`lib/edges/reconcile.mjs:297`), and `nodeId` is
+`basename(repoRoot):relPath` where `repoRoot` is the path **as traversed**, not realpath'd
+(`lib/edges/reconcile.mjs:82-87`).
+
+So one repo reached by three routes yields three disjoint edge sets. Measured on propagate's
+own 17 edges:
+
+| Route | `node_id` prefix | ids |
+|---|---|---|
+| `~/Documents/GitHub/propagate-skill` (hub symlink) | `propagate-skill` | the store's — e.g. `79b71dbb` |
+| `~/.claude/skills/propagate` (real dir) | `propagate` | all 17 different |
+| `/tmp/<x>/propagate-skill` (same basename, different mount) | `propagate-skill` | **still all 17 different** |
+
+The third row is the important one: **matching the basename is not sufficient**, because the
+absolute downstream path is also hashed. Only the exact original root reproduces the ids.
+
+**What it cost, nearly.** Fixing propagate's partial baseline (N39) meant scoping `bootstrap`
+to propagate alone, which requires a narrower `PROPAGATE_SEARCH_ROOTS`. Under any narrower
+root every edge reads `NEVER_VERIFIED` — not because it is, but because it is a *different
+edge*. The dry run reported `17 edges NEVER_VERIFIED · 8 baselineable` with full confidence.
+Applying it would have written 8 baselines against duplicate edges and left the real 17
+untouched, **silently doubling propagate's edge set**. Caught only by diffing the id lists
+against a pre-change snapshot.
+
+**Consequences beyond this incident:**
+- `bootstrap` cannot be scoped to one workspace when several share a search root — its only
+  scoping mechanism changes edge identity.
+- Moving a checkout, or reaching it through a different symlink, orphans every verification
+  in it. The events remain; nothing matches them.
+- This is the same family as **N36** (the commit gate dead under symlinked paths), which was
+  fixed with a realpath-pair strategy in `resolveChangedFile`. Edge identity has the same
+  defect and no such fix.
+
+**Not fixed here, deliberately.** Any fix re-keys existing edges — realpath'ing `repoRoot`
+would change `nodeId` for every edge reached via a symlink, and making `downstreamPath`
+repo-relative would re-key all 801. That is a migration (close-and-re-emit, never rewrite),
+not a patch, and it needs its own plan.
+
+**Interaction with N39:** propagate's own repo therefore stays partially baselined — 9
+`NEVER_VERIFIED`, 6 `CLEAN`, 2 `REVERSED`. The mechanical fix is blocked until this is
+resolved or `bootstrap` gains a per-workspace filter that does not go through search roots.

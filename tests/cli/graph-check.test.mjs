@@ -187,7 +187,7 @@ async function makeSlowClaudeStub() {
   const stubPath = path.join(binDir, "claude");
   await writeFile(
     stubPath,
-    "#!/bin/sh\nsleep 5\necho 'code-review-graph  ✓ Connected'\n",
+    "#!/bin/sh\necho x >> \"$(dirname \"$0\")/calls\"\nsleep 60\necho 'code-review-graph  ✓ Connected'\n",
     "utf8",
   );
   await chmod(stubPath, 0o755);
@@ -211,9 +211,15 @@ test("doctor: a hung `claude mcp list` is bounded to ~2s and reported as an expl
     const elapsedMs = Date.now() - start;
     const out = result.stdout + result.stderr;
 
+    // The stub sleeps 60s. An UNBOUNDED doctor would be killed by runDoctor's own
+    // 20s spawn timeout; a bounded one returns after ~2s plus doctor's other work.
+    // The margin is deliberately wide: this must fail when the BOUND breaks, not when
+    // doctor's unrelated checks get slower. A 4s budget against a 5s stub left ~1.4s
+    // of headroom over doctor's floor and flipped on fixture weight, not on the bound
+    // (measured 2026-08-20: bound intact, message emitted, yet the assertion failed).
     assert.ok(
-      elapsedMs < 4000,
-      `doctor took ${elapsedMs}ms against a 5s-sleeping stub — the 2s bound did not hold`,
+      elapsedMs < 15000,
+      `doctor took ${elapsedMs}ms against a 60s-sleeping stub — the 2s bound did not hold`,
     );
     assert.match(out, /graph integration check timed out after 2s — status unknown/);
     // Must not ALSO print the pass line for the same section.
@@ -247,7 +253,15 @@ test("doctor: a warm cache (within TTL) skips the subprocess entirely — second
     const elapsedMs = Date.now() - start;
     const out = result.stdout + result.stderr;
 
-    assert.ok(elapsedMs < 3000, `warm-cache doctor run took ${elapsedMs}ms — cache was not used`);
+    // Assert the CLAIM ("skips the subprocess entirely"), not a proxy for it. The stub
+    // records each invocation, so one call across two runs IS the cache working.
+    //
+    // This previously asserted `elapsedMs < 3000` over ALL of doctor, whose floor in this
+    // fixture is ~2.6-2.9s — ~100-400ms of headroom. Adding a 0.26s doctor check flipped
+    // it, with no cache involved. docs/GOTCHAS.md G53, second instance.
+    const calls = (await readFile(path.join(binDir, "calls"), "utf8").catch(() => "")).split("\n").filter(Boolean).length;
+    assert.equal(calls, 1, `the stub ran ${calls}x across two doctor runs — the cache was not honoured`);
+    assert.ok(elapsedMs < 15000, `warm-cache run took ${elapsedMs}ms — far beyond doctor's floor`);
     assert.match(out, /graph integration check timed out after 2s — status unknown/);
     assert.match(out, /cached \d+m ago/, "warm-cache run must say it's reporting a cached result");
   } finally {

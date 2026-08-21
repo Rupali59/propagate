@@ -63,15 +63,44 @@ jobs:
 
       - name: fresh-machine install reaches doctor-clean
         # The stranger simulation: a HOME with nothing in it, the documented setup
-        # sequence, and a doctor that must go green. This is the test that would have
-        # caught "installs, finds nothing, reports success".
+        # sequence (setup -> bootstrap --apply -> doctor), and a doctor that must go
+        # green. This is the test that would have caught "installs, finds nothing,
+        # reports success" AND the gate-4 bug it actually found: nothing in the
+        # install path ever created the per-workspace ledger JSONL/MD pair for a
+        # workspace with no prior v1 rows (docs/ISSUES.md N38-adjacent; fixed in
+        # lib/core/discovery.mjs's makeWorkspaceRecord, 2026-08-20).
+        #
+        # The fixture declares one REAL edge (not `sources: {}`) and commits it,
+        # because `bootstrap --apply`'s baseline-from-git needs a co-committed
+        # source+downstream pair to write even one event — an empty sidecar can
+        # never make doctor's "event store non-empty" check pass, independent of
+        # the ledger-creation bug this step exists to catch. Removing `|| true` is
+        # the test: this step must now fail the job if doctor is not clean.
         run: |
           export HOME="$(mktemp -d)"
           export PROPAGATE_STATE_DIR="$HOME/.propagate"
           mkdir -p "$HOME/code/demo"
-          printf 'workspace: true\nsources: {}\n' > "$HOME/code/demo/.propagates.yml"
+          cd "$HOME/code/demo"
+          git init -q
+          git config user.email "stranger@example.com"
+          git config user.name "stranger"
+          printf '# source\n' > SOURCE.md
+          printf '# downstream\n' > DOWNSTREAM.md
+          cat > .propagates.yml <<'EOF'
+          workspace: true
+          sources:
+            SOURCE.md:
+              propagates_to:
+                - path: DOWNSTREAM.md
+                  why: fresh-machine CI fixture
+                  kind: prose
+          EOF
+          git add -A
+          git commit -q -m "init"
+          cd - >/dev/null
           node cli.mjs setup --roots "$HOME/code"
-          node cli.mjs doctor || true   # red before bootstrap is CORRECT; see SKILL.md step 3
+          node cli.mjs bootstrap --baseline-from-git --apply
+          node cli.mjs doctor
 
       # NOTE: the private-path gate that used to live here has been removed, and its
       # removal is deliberate rather than a retreat. THIS repo is the private working copy
