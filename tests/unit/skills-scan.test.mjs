@@ -23,6 +23,7 @@ import {
   INSTALLER,
   classifyInstaller,
   readFrontmatterName,
+  readFrontmatterFields,
   readSkillUsage,
   readSkillLock,
   scanSkills,
@@ -315,6 +316,311 @@ test("summarize counts installers, never-invoked and orphans", () => {
     assert.equal(s.byInstaller[INSTALLER.HANDMADE], 2);
     assert.equal(s.neverInvoked, 1);
     assert.equal(s.orphanUsageKeys, 1);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// completeness — step 8 of the resilient-valiant plan.
+//
+// A fully synthetic marketplaceDir/settingsPath/searchRoots, injected the
+// same way skillsDir/lock/usage/transcripts already are, so these never touch
+// the real ~/.claude or ~/Documents/GitHub -- the thing predicate 7 exists to
+// audit is exactly "is this directory reachable from a search root", so the
+// fixture has to construct that relationship, not assume it.
+// ─────────────────────────────────────────────────────────────────────────
+
+function completenessFixture() {
+  const root = mkdtempSync(path.join(tmpdir(), "skills-completeness-"));
+  const skills = path.join(root, "claude-skills");
+  const searchRoot = path.join(root, "search-root");
+  const marketplace = path.join(root, "marketplace");
+  mkdirSync(skills, { recursive: true });
+  mkdirSync(searchRoot, { recursive: true });
+  mkdirSync(path.join(marketplace, "quarantine", "skills"), { recursive: true });
+  mkdirSync(path.join(marketplace, "tathya", "skills"), { recursive: true });
+  mkdirSync(path.join(marketplace, ".claude-plugin"), { recursive: true });
+  writeFileSync(
+    path.join(marketplace, ".claude-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "tathya",
+      plugins: [
+        { name: "quarantine", source: "./quarantine" },
+        { name: "tathya", source: "./tathya" },
+        { name: "url-plugin", source: { source: "url", url: "https://example.com/url-plugin.git" } },
+      ],
+    }),
+  );
+  const settingsPath = path.join(root, "settings.json");
+  writeFileSync(
+    settingsPath,
+    JSON.stringify({
+      enabledPlugins: {
+        "tathya@tathya": true,
+        "quarantine@tathya": false,
+        "url-plugin@tathya": true,
+      },
+    }),
+  );
+  return { root, skills, searchRoot, marketplace, settingsPath };
+}
+
+function scanCompleteness(f, extra = {}) {
+  const scan = scanSkills({
+    skillsDir: f.skills,
+    lock: {},
+    usage: {},
+    marketplaceDir: f.marketplace,
+    settingsPath: f.settingsPath,
+    searchRoots: [f.searchRoot],
+    maxDepth: 2,
+    ...extra,
+  });
+  return Object.fromEntries(scan.skills.map((s) => [s.id, s.completeness]));
+}
+
+test("completeness: a fully-shipped, fully-enabled, reachable skill is all-true", () => {
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "good"), { recursive: true });
+    writeFileSync(
+      path.join(f.skills, "good", "SKILL.md"),
+      `---\nname: good\ndescription: Use when testing completeness end to end.\n---\n\nbody\n`,
+    );
+    writeFileSync(path.join(f.skills, "good", ".propagates.yml"), "edges: []\n");
+    mkdirSync(path.join(f.marketplace, "tathya", "skills", "good"));
+    // Reachable ONLY via a marked symlink from the search root -- this is the
+    // real shape (~/.claude/skills/<x> reached via a ~/Documents/GitHub link),
+    // not a coincidence of directory nesting.
+    symlinkSync(path.join(f.skills, "good"), path.join(f.searchRoot, "good-link"));
+
+    const c = scanCompleteness(f).good;
+    assert.deepEqual(c, {
+      skillMd: true,
+      frontmatter: true,
+      nameMatchesDir: true,
+      descriptionStatesWhen: true,
+      shipped: true,
+      enabled: true,
+      sidecarReachable: true,
+      testsGreen: "n/a",
+    });
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: no frontmatter at all fails structural predicates, never throws", () => {
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "no-frontmatter"), { recursive: true });
+    writeFileSync(path.join(f.skills, "no-frontmatter", "SKILL.md"), `# /no-frontmatter\n\njust prose\n`);
+
+    const c = scanCompleteness(f)["no-frontmatter"];
+    assert.equal(c.skillMd, true, "SKILL.md exists even though it has no frontmatter");
+    assert.equal(c.frontmatter, false);
+    assert.equal(c.nameMatchesDir, "n/a", "no declared name to compare -- not a false failure");
+    assert.equal(c.descriptionStatesWhen, false);
+    assert.equal(c.shipped, false);
+    assert.equal(c.enabled, "n/a", "cannot be enabled if not shipped");
+    assert.equal(c.sidecarReachable, "n/a", "no .propagates.yml at all -- not a false failure");
+    assert.equal(c.testsGreen, "n/a");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: description stating WHAT, not WHEN, fails descriptionStatesWhen", () => {
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "bad-desc"), { recursive: true });
+    writeFileSync(
+      path.join(f.skills, "bad-desc", "SKILL.md"),
+      `---\nname: bad-desc\ndescription: Check Motherboard and plugin service status.\n---\n\nbody\n`,
+    );
+    const c = scanCompleteness(f)["bad-desc"];
+    assert.equal(c.frontmatter, true, "well-formed frontmatter -- the defect is only in the wording");
+    assert.equal(c.descriptionStatesWhen, false);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: a YAML block-scalar description is still read, not literal '|'", () => {
+  // gstack-design-layer's real shape: `description: |` then indented lines.
+  // A single-line regex reads the value as the literal string "|" and would
+  // report descriptionStatesWhen:false for every skill written this way.
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "block-desc"), { recursive: true });
+    writeFileSync(
+      path.join(f.skills, "block-desc", "SKILL.md"),
+      [
+        "---",
+        "name: block-desc",
+        "description: |",
+        "  Multi-line intro that does not itself say when.",
+        "  Use when the plan calls for exactly this shape.",
+        "---",
+        "",
+        "body",
+        "",
+      ].join("\n"),
+    );
+    const fields = readFrontmatterFields(path.join(f.skills, "block-desc", "SKILL.md"));
+    assert.equal(fields.present, true);
+    assert.match(fields.description, /Use when the plan/);
+
+    const c = scanCompleteness(f)["block-desc"];
+    assert.equal(c.frontmatter, true);
+    assert.equal(c.descriptionStatesWhen, true);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: a frontmatter name that disagrees with the directory is reported false, not corrected", () => {
+  const f = completenessFixture();
+  try {
+    // Real shape: dir gstack-health, frontmatter name: health.
+    writeSkill(path.join(f.skills, "gstack-mismatch"), "gstack-mismatch", "mismatch");
+    const c = scanCompleteness(f)["gstack-mismatch"];
+    assert.equal(c.nameMatchesDir, false);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: shipped via marketplace.json plugins[] (Tier A), not just a vendored dir (Tier B)", () => {
+  const f = completenessFixture();
+  try {
+    writeSkill(path.join(f.skills, "url-plugin"), "url-plugin");
+    const c = scanCompleteness(f)["url-plugin"];
+    assert.equal(c.shipped, true, "matched via marketplace.json's plugins[].name, not a skills/ dir listing");
+    assert.equal(c.enabled, true, "url-plugin@tathya is true in the fixture settings.json");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: shipped but disabled reads false, never n/a", () => {
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "quarantined"), { recursive: true });
+    writeFileSync(
+      path.join(f.skills, "quarantined", "SKILL.md"),
+      `---\nname: quarantined\ndescription: Use when this fixture needs a disabled-but-shipped case.\n---\n\nbody\n`,
+    );
+    mkdirSync(path.join(f.marketplace, "quarantine", "skills", "quarantined"));
+    const c = scanCompleteness(f).quarantined;
+    assert.equal(c.shipped, true);
+    assert.equal(c.enabled, false, "quarantine@tathya is false in the fixture settings.json");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: a .propagates.yml outside every search root is reported unreachable, never n/a", () => {
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "orphan-sidecar"), { recursive: true });
+    writeFileSync(
+      path.join(f.skills, "orphan-sidecar", "SKILL.md"),
+      `---\nname: orphan-sidecar\ndescription: Use when the sidecar is not reachable by any search root.\n---\n\nbody\n`,
+    );
+    writeFileSync(path.join(f.skills, "orphan-sidecar", ".propagates.yml"), "edges: []\n");
+    // Deliberately NOT symlinked from f.searchRoot -- this is the curate-docs
+    // defect the predicate exists to catch: an edge nothing can discover.
+    const c = scanCompleteness(f)["orphan-sidecar"];
+    assert.equal(c.sidecarReachable, false);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: MUTATION -- moving the sidecar out of reach flips sidecarReachable true -> false, and back", () => {
+  // rule:safety-flag-needs-a-test / rule:discernment-checks §1: a predicate
+  // never observed to change is not a verified predicate.
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "mutant"), { recursive: true });
+    writeFileSync(
+      path.join(f.skills, "mutant", "SKILL.md"),
+      `---\nname: mutant\ndescription: Use when verifying the mutation actually flips the predicate.\n---\n\nbody\n`,
+    );
+    writeFileSync(path.join(f.skills, "mutant", ".propagates.yml"), "edges: []\n");
+    const linkPath = path.join(f.searchRoot, "mutant-link");
+    symlinkSync(path.join(f.skills, "mutant"), linkPath);
+
+    assert.equal(scanCompleteness(f).mutant.sidecarReachable, true, "reachable before the mutation");
+
+    rmSync(linkPath); // sever the only path in from any search root
+    assert.equal(scanCompleteness(f).mutant.sidecarReachable, false, "must flip once the link is gone");
+
+    symlinkSync(path.join(f.skills, "mutant"), linkPath); // restore
+    assert.equal(scanCompleteness(f).mutant.sidecarReachable, true, "must flip back once restored");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: testsGreen is n/a without a tests/ dir, not-run with one but no --with-tests, and a real result when opted in", () => {
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "no-tests-dir"), { recursive: true });
+    writeSkill(path.join(f.skills, "no-tests-dir"), "no-tests-dir");
+
+    mkdirSync(path.join(f.skills, "has-tests"), { recursive: true });
+    writeSkill(path.join(f.skills, "has-tests"), "has-tests");
+    mkdirSync(path.join(f.skills, "has-tests", "tests"));
+    writeFileSync(
+      path.join(f.skills, "has-tests", "package.json"),
+      JSON.stringify({ name: "has-tests", scripts: { test: "node -e \"process.exit(0)\"" } }),
+    );
+
+    const withoutFlag = scanCompleteness(f);
+    assert.equal(withoutFlag["no-tests-dir"].testsGreen, "n/a");
+    assert.equal(withoutFlag["has-tests"].testsGreen, "not-run", "applicable but deliberately skipped this run");
+
+    const withFlag = scanCompleteness(f, { withTests: true });
+    assert.equal(withFlag["has-tests"].testsGreen, true);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completeness: testsGreen reports no-test-script rather than crashing when package.json has none", () => {
+  const f = completenessFixture();
+  try {
+    mkdirSync(path.join(f.skills, "no-script"), { recursive: true });
+    writeSkill(path.join(f.skills, "no-script"), "no-script");
+    mkdirSync(path.join(f.skills, "no-script", "tests"));
+    const c = scanCompleteness(f, { withTests: true })["no-script"];
+    assert.equal(c.testsGreen, "no-test-script");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("existing fields are untouched by adding completeness -- id/dangling/nameMismatch etc. keep their exact shape", () => {
+  const f = completenessFixture();
+  try {
+    writeSkill(path.join(f.skills, "unchanged"), "unchanged");
+    const scan = scanSkills({
+      skillsDir: f.skills,
+      lock: {},
+      usage: {},
+      marketplaceDir: f.marketplace,
+      settingsPath: f.settingsPath,
+      searchRoots: [f.searchRoot],
+    });
+    const s = scan.skills[0];
+    assert.equal(s.id, "unchanged");
+    assert.equal(s.dangling, false);
+    assert.equal(s.nameMismatch, false);
+    assert.equal(s.neverInvoked, true);
+    assert.ok("completeness" in s);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
