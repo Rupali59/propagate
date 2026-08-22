@@ -1,0 +1,17 @@
+{
+  "name": "curate-docs",
+  "description": "Use when a repo's markdown docs have drifted — orphaned or unreferenced docs, plans nobody triaged, an archive nobody drained, a docs/ directory nobody can navigate, stale architecture or spec docs, broken links between docs, \"which doc is current\", \"why does this doc exist\", or before answering an architecture or methodology question from docs you have not verified are current.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Rupali"
+  },
+  "homepage": "https://github.com/Rupali59/curate-docs-skill",
+  "repository": "https://github.com/Rupali59/curate-docs-skill",
+  "keywords": [
+    "documentation",
+    "citation-graph",
+    "orphans",
+    "triage"
+  ],
+  "license": "MIT"
+}
