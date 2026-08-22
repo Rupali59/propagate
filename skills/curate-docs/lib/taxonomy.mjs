@@ -16,6 +16,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
+
+/** This module's own directory — the anchor for the co-located propagate lookup. */
+const SELF_DIR = path.dirname(fileURLToPath(import.meta.url));
 import { pathToFileURL } from "node:url";
 
 export class TaxonomyUnavailable extends Error {
@@ -40,10 +44,36 @@ export class TaxonomyUnavailable extends Error {
  * The old path is retained, not replaced: an older propagate install still resolves. Both
  * appear in TaxonomyUnavailable.tried, so the next relocation prints every path attempted
  * rather than only the one someone remembered to update.
+ *
+ * `selfDir` is the co-located anchor, and it is INJECTABLE for two reasons that both trace
+ * back to the same hazard: the co-located candidate always resolves on this checkout, which
+ * makes "propagate is absent" unconstructible through env alone — the exact "a guard that
+ * cannot fire is worse than no guard" shape (rule:discernment-checks §1).
+ *   - An explicit third argument lets a unit test force a nonexistent anchor directly
+ *     (tests/taxonomy.test.mjs — "an absent propagate throws with the paths it tried").
+ *   - `CURATE_DOCS_SELF_DIR` lets a SUBPROCESS force the same thing via env alone, since a
+ *     spawned CLI can only be steered through env vars, not call-time arguments
+ *     (tests/report.test.mjs — "without propagate the tool still runs"). cli.mjs's `analyse()`
+ *     calls `loadTaxonomy()` with no arguments, so this default is what it actually gets.
  */
-export function propagateCandidates(env = process.env, home = os.homedir()) {
+export function propagateCandidates(
+  env = process.env,
+  home = os.homedir(),
+  selfDir = env.CURATE_DOCS_SELF_DIR || SELF_DIR,
+) {
   const rel = ["lib/report/doc-kind.mjs", "lib/doc-kind.mjs"];
   const c = [];
+
+  // CO-LOCATED FIRST (plan §2). Since the consolidation, propagate lives in the
+  // same repo as this file — curate-docs was vendored to skills/curate-docs/, so
+  // propagate's lib/ is three levels up. This candidate is the one that resolves
+  // on a CONSUMER machine, where none of the others exist: PROPAGATE_SKILL_DIR is
+  // unset and ~/.claude/skills/propagate is a symlink only the author has. That is
+  // exactly how `taxonomy: none` shipped while every local check passed.
+  for (const r of rel) c.push(path.resolve(selfDir, "../../..", r));
+
+  // Retained fallbacks: an explicit override (this skill's own tests set it) and
+  // the skill-mode install path, which is still how propagate reaches this machine.
   if (env.PROPAGATE_SKILL_DIR) {
     for (const r of rel) c.push(path.resolve(env.PROPAGATE_SKILL_DIR, r));
   }
@@ -61,8 +91,8 @@ const cache = new Map();
 
 /** @returns {Promise<{KINDS, kindOf, frontmatter, parseSupersedes, buildSupersessionIndex,
  *                     brokenPathCitations, source: string}>} */
-export async function loadTaxonomy(env = process.env, home = os.homedir()) {
-  const tried = propagateCandidates(env, home);
+export async function loadTaxonomy(env = process.env, home = os.homedir(), selfDir = env.CURATE_DOCS_SELF_DIR || SELF_DIR) {
+  const tried = propagateCandidates(env, home, selfDir);
   const key = tried.join("\0");
   if (cache.has(key)) return cache.get(key);
   const found = tried.find((p) => existsSync(p));

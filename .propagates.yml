@@ -58,7 +58,7 @@ sources:
         kind: prose
   propagates.schema.json:
     propagates_to:
-      - path: skills/reconcile/SKILL.md
+      - path: skills/propagate/sections/reconcile.md
         why: >-
           reconcile's `declare` workflow shows the sidecar shape a user must write. The
           schema is additionalProperties:false, so a field added here and not documented
@@ -84,7 +84,7 @@ sources:
         kind: code
   lib/rules/rules-check.mjs:
     propagates_to:
-      - path: skills/routing/SKILL.md
+      - path: skills/propagate/sections/routing.md
         why: >-
           routing documents what `rules check` exits non-zero on — including that it
           fails when it scanned NOTHING. That promise is a property of this file.
@@ -108,7 +108,7 @@ sources:
         kind: code
   lib/graph/graph.mjs:
     propagates_to:
-      - path: skills/routing/SKILL.md
+      - path: skills/propagate/sections/routing.md
         why: >-
           routing documents `graph`'s worklist semantics — that NEVER_VERIFIED is
           excluded by default but still blocks, and that the fix order is by source

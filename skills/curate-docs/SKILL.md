@@ -22,20 +22,26 @@ The decision is recorded **in the document**, and only then is the document move
 ```
 
 ```bash
-node ~/.claude/skills/curate-docs/cli.mjs <mode> <dir> [--extra-root <workspace>]
+node "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills/propagate}/skills/curate-docs/cli.mjs" <mode> <dir> [--extra-root <workspace>]
 ```
 
 **Pass `--extra-root <workspace>` for any sub-repo**, or correct cross-repo citations like
 `../STATE.md` get misreported.
 
-## Which skill
+## Which section to read
 
-| You are doing | Skill |
+These are **sections of this skill**, not separate skills — Read the file when its
+situation applies. They were nested at `skills/{design,eng}/SKILL.md`, a shape Claude Code
+discovers nowhere, so as skills they reached a session only via hand-made symlinks that
+declared the bare names `design` and `eng`.
+
+| You are doing | Read |
 |---|---|
-| Deciding what should happen to a doc — triaging an orphan, judging whether a plan landed, salvaging facts, checking what breaks if it goes | `design` |
-| Driving the tool — which mode, which flag, why a count or a refusal looks wrong | `eng` |
+| Deciding what should happen to a doc — triaging an orphan, judging whether a plan landed, salvaging facts, checking what breaks if it goes | `sections/design.md` |
+| Driving the tool — which mode, which flag, why a count or a refusal looks wrong | `sections/eng.md` |
 
-Steps 1 and 5 are mostly `eng`; steps 2–4 need `design` to decide and `eng` to execute.
+Steps 1 and 5 are mostly `sections/eng.md`; steps 2–4 need `sections/design.md` to decide
+and `sections/eng.md` to execute.
 
 ## Contract
 

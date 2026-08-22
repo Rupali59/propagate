@@ -14,14 +14,13 @@ every stream can see what moved, where, and on which branch. It never edits a
 downstream; it tells a human.
 <!-- premise:end -->
 
-**v1 launchd watcher retired 2026-08-14** (`docs/DECISIONS.md`) — drift is now
-derived from content on demand (`reconcile`, `check`, the daily digest), never
-a background poll.
+**v1 launchd watcher retired 2026-08-14, deleted 2026-08-22** (`docs/DECISIONS.md`) —
+drift derives from content on demand (`reconcile`, `check`, digest), never a poll.
 
-## Which skill
+## Sections
 
-- **`routing`** — which `cli.mjs` command answers what.
-- **`reconcile`** — `declare`/`drain` workflows, dispositions, fix order.
+- Read **`sections/routing.md`** — which `cli.mjs` command answers what.
+- Read **`sections/reconcile.md`** — `declare`/`drain` workflows, dispositions, fix order.
 
 ## Setup — once per machine, in this order
 

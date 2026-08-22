@@ -17,6 +17,7 @@ one hop deeper, for when you land in `docs/` directly.
 | [`DECISIONS.md`](./DECISIONS.md) | Why does it work this way — what changed, when, and what did it supersede? |
 | [`SYSTEMS.md`](./SYSTEMS.md) | What background components exist (watcher, digest), and what state are they in? |
 | [`LIFECYCLE.md`](./LIFECYCLE.md) | What state is a hazard in, how does it leave that state, and how does this work divide into lanes? The hazard machine and how it composes with the edge machine. |
+| **Hub propagation docs** (`~/Documents/GitHub/propagation/docs/`) | `ARCHITECTURE.md` — the end-to-end trace: where a coupling begins, how data accumulates, how it reconciles internally and **across repos** (the only write-up of the cross-repo path). `DEFECTS-2026-08-22.md` — the open findings list. These live with the workspace ledger, not with the tool. |
 | [`AUDIT-2026-08.md`](./AUDIT-2026-08.md) | Which gotchas can stop being things anyone has to remember — the disposition table, and the citation-vs-coverage correction. |
 
 ## Routing table (situations, not topics)
@@ -31,3 +32,4 @@ one hop deeper, for when you land in `docs/` directly.
 | a field on a ledger row looks unused, or you need the real (not spec'd) row shape | `DATA_MODEL.md` |
 | you want current status / what's in flight | `../STATE.md` |
 | you're adding a background component | `SYSTEMS.md` |
+| you need the whole path end to end, or anything about **cross-repo** edges | `~/Documents/GitHub/propagation/docs/ARCHITECTURE.md` |

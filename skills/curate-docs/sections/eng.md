@@ -1,9 +1,8 @@
----
-name: eng
-description: Use when you need to run a curate-docs command and aren't sure which mode answers your question, or when a run refused, printed a surprising count, or flagged a citation you believe is fine. Triggers on "which curate-docs mode", "curate-docs returned 0 orphans", "why is this reported dangling", "the doc report looks wrong", "curate-docs exited 4".
----
-
 # eng — the instrument half
+
+*Section of the parent skill — Read this file when the situation below applies. It is deliberately NOT a discoverable skill: as one it declared the bare name `eng`, which squats a generic global name.*
+
+**When this applies:** Use when you need to run a curate-docs command and aren't sure which mode answers your question, or when a run refused, printed a surprising count, or flagged a citation you believe is fine. Triggers on "which curate-docs mode", "curate-docs returned 0 orphans", "why is this reported dangling", "the doc report looks wrong", "curate-docs exited 4".
 
 Parent skill: `curate-docs` (premise, pipeline, Contract). This skill is how to drive the
 tool and how to tell a real finding from an artefact of the instrument.

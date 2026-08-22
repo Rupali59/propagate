@@ -1,9 +1,8 @@
----
-name: routing
-description: Use when you need to run a propagate `cli.mjs` command and aren't sure which one answers your question — checking status, health, rule conformance, install state, or what depends on what.
----
-
 # routing — which command answers which question
+
+*Section of the parent skill — Read this file when the situation below applies. It is deliberately NOT a discoverable skill: as one it declared the bare name `routing`, which squats a generic global name.*
+
+**When this applies:** Use when you need to run a propagate `cli.mjs` command and aren't sure which one answers your question — checking status, health, rule conformance, install state, or what depends on what.
 
 Parent skill: `propagate` (premise, Contract, Important Rules). Full flags for
 every command below: `docs/REFERENCE.md`.

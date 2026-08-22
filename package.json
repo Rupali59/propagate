@@ -12,9 +12,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs'",
+    "test": "npm run test:propagate && npm run test:curate-docs",
     "setup": "node cli.mjs setup",
-    "doctor": "node cli.mjs doctor"
+    "doctor": "node cli.mjs doctor",
+    "test:propagate": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs'",
+    "test:curate-docs": "npm test --prefix skills/curate-docs"
   },
   "dependencies": {
     "ajv": "^8.17.1",
@@ -30,6 +32,8 @@
     "cli.mjs",
     "digest.mjs",
     "index.mjs",
+    "hooks/",
+    "skills/",
     "lib/",
     "bin/",
     "docs/",

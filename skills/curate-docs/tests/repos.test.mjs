@@ -71,8 +71,12 @@ onRepo("SSJK-mb: CLAUDE.md seeds despite there being no root README", path.join(
   assert.match(out, /hub `[^`]*CLAUDE\.md/);
 });
 
-onRepo("propagate: SKILL.md seeds, and the result is not mostly orphans", path.join(os.homedir(), ".claude/skills/propagate"), () => {
-  const { code, out } = run(path.join(os.homedir(), ".claude/skills/propagate"));
+// 2026-08-22: was ~/.claude/skills/propagate, a symlink INTO this repo. The plugin
+// cutover deleted that symlink (propagate now ships as propagate@tathya), so the row
+// silently stopped running — which this file's own "no repo was silently skipped" guard
+// caught immediately. Point at the repo itself; it was always the real target.
+onRepo("propagate: SKILL.md seeds, and the result is not mostly orphans", path.join(GH, "propagate-skill"), () => {
+  const { code, out } = run(path.join(GH, "propagate-skill"));
   assert.equal(code, 0);
   assert.match(out, /hub `[^`]*SKILL\.md/);
   const [, docs, orphans] = /(\d+) markdown files[\s\S]*?\*\*(\d+) orphan\*\*/.exec(out);

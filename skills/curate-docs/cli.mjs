@@ -190,7 +190,7 @@ async function analyse(opts, root) {
 function kindFromConfig(abs, root, cfg) {
   const rel = path.relative(root, abs).split(path.sep).join("/");
   for (const [glob, kind] of Object.entries(cfg.kinds ?? {})) {
-    const rx = new RegExp("^" + glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, " ").replace(/\*/g, "[^/]*").replace(/ /g, ".*") + "$");
+    const rx = new RegExp("^" + glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "\u0000").replace(/\*/g, "[^/]*").replace(/\u0000/g, ".*") + "$");
     if (rx.test(rel)) return { kind, source: "config" };
   }
   return { kind: null, source: "undeclared" };

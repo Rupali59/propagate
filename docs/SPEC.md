@@ -177,8 +177,16 @@ Every close records `closed_by`. Three are legitimate:
 `commit-evidence` (strong only) · `drain` (human, via the interface §6 must provide) ·
 `wontfix` (human, requires `wontfix_reason`).
 
-There is currently **no supported close path at all** — `markStatus` has no production callers, and
-all 1,460 rows' transitions were written from outside the skill. §6 closes that hole.
+~~There is currently **no supported close path at all** — `markStatus` has no production callers, and
+all 1,460 rows' transitions were written from outside the skill.~~ **CLOSED — verified 2026-08-22.**
+§6 was built. `drain` (`cli.mjs:5106`) calls `markStatus` (`cli.mjs:3150`) and then **re-reads the
+ledger to confirm the row actually left `open`**, treating "did not throw" as insufficient
+evidence — the I1 no-silent-no-op rule. 9 tests in `tests/cli/drain.test.mjs`.
+
+This paragraph stood after the hole was closed, and a 2026-08-13 learning
+(`propagate-no-close-path`, confidence 9) still asserted the same thing on 2026-08-22 — enough
+to nearly justify building a second close path beside the working one. A stale claim about
+missing code is more expensive than a missing claim: it invites duplication.
 
 ---
 

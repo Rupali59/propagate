@@ -1,9 +1,8 @@
----
-name: reconcile
-description: Use when declaring a new coupling in a `.propagates.yml` sidecar, or when walking open propagation-drift rows to a close (apply, defer, or wontfix). Triggers on "declare this edge", "drain the ledger", "close this drift row", "what should I do with this open row".
----
-
 # reconcile — declare and drain
+
+*Section of the parent skill — Read this file when the situation below applies. It is deliberately NOT a discoverable skill: as one it declared the bare name `reconcile`, which squats a generic global name.*
+
+**When this applies:** Use when declaring a new coupling in a `.propagates.yml` sidecar, or when walking open propagation-drift rows to a close (apply, defer, or wontfix). Triggers on "declare this edge", "drain the ledger", "close this drift row", "what should I do with this open row".
 
 Parent skill: `propagate` (premise, Contract, Important Rules — including
 "fix root-to-leaf" and "close through `cli drain`, never by hand", which this

@@ -1,9 +1,8 @@
----
-name: design
-description: Use when deciding what should happen to a document — triaging an orphan, judging whether a plan landed or was dropped, salvaging facts before anything is archived, or working out what breaks if a doc goes away. Triggers on "should this doc exist", "did this plan ship", "is this still true", "what depends on this doc", "can I archive this".
----
-
 # design — the judgment half
+
+*Section of the parent skill — Read this file when the situation below applies. It is deliberately NOT a discoverable skill: as one it declared the bare name `design`, which squats a generic global name.*
+
+**When this applies:** Use when deciding what should happen to a document — triaging an orphan, judging whether a plan landed or was dropped, salvaging facts before anything is archived, or working out what breaks if a doc goes away. Triggers on "should this doc exist", "did this plan ship", "is this still true", "what depends on this doc", "can I archive this".
 
 Parent skill: `curate-docs` (premise, pipeline, Contract). This skill is what happens
 *after* the instrument has produced a verdict and *before* anything is written or removed.

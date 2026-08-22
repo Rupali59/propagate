@@ -59,7 +59,11 @@ jobs:
         # PROPAGATE_STATE_DIR keeps the run off any real state. Without it the suite
         # appends to a production watcher log — measured at 1170 bytes per run before
         # this was fixed.
-        run: npm test
+        #
+        # test:propagate, not test: root `test` now chains BOTH suites so a local
+        # `npm test` covers the whole repo, but curate-docs has its own job below and
+        # running it twice per node version would only slow the matrix down.
+        run: npm run test:propagate
 
       - name: fresh-machine install reaches doctor-clean
         # The stranger simulation: a HOME with nothing in it, the documented setup
@@ -125,3 +129,45 @@ jobs:
             echo "::error::make-public should exit 2 without an identity map, got $code"; exit 1
           fi
           echo "refuses to build without an identity map, as designed"
+
+  # curate-docs was vendored in at skills/curate-docs/ (2026-08-22). It is a SEPARATE JOB,
+  # not another matrix axis on `test`, for two reasons: the steps below `suite` there are
+  # propagate-specific (fresh-machine install, make-public) and must not run twice per node
+  # version; and a separate job cannot be masked by a propagate failure, which sequential
+  # steps in one job would be.
+  #
+  # It deliberately does NOT check out propagate-skill as a sibling or set
+  # PROPAGATE_SKILL_DIR. Since the merge, curate-docs resolves propagate's doc-kind.mjs
+  # from a CO-LOCATED relative path (skills/curate-docs/lib/taxonomy.mjs). The old workflow
+  # did check out this very repo as a sibling, which after the merge would be a
+  # self-referential clone of the repo it already lives in.
+  curate-docs:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    name: curate-docs node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # Root deps only. curate-docs vendors nothing of its own and resolves `yaml` by
+      # walking up to the repo root's node_modules -- which is the arrangement the merge
+      # created, so CI must exercise it rather than paper over it with a local install.
+      - run: npm ci
+
+      - name: taxonomy resolves with NO author-only paths
+        # The load-bearing check. Before the merge this could only fail on a consumer
+        # machine: PROPAGATE_SKILL_DIR unset and no ~/.claude/skills/propagate symlink meant
+        # `taxonomy: none`, and the author's laptop passed via the symlink. An empty HOME
+        # reproduces a stranger's machine exactly.
+        run: |
+          export HOME="$(mktemp -d)"
+          node -e "import('./skills/curate-docs/lib/taxonomy.mjs').then(m=>m.loadTaxonomy()).then(t=>{const n=Object.keys(t.KINDS).length; if(!n) throw new Error('no kinds'); console.log('taxonomy resolved, kinds='+n);}).catch(e=>{console.error('FAIL: '+e.name);process.exit(1)})"
+
+      - name: suite
+        run: npm test --prefix skills/curate-docs

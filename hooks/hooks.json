@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "FOUR registrations, not three hooks. gotcha-guard.mjs is registered TWICE, against",
+    "different matchers (Edit|Write and Bash), because it guards two different hazard",
+    "classes. A verification phrased as 'all three hooks fire' counts it once and would",
+    "pass green while the Bash matcher silently stopped firing — the same shape as the",
+    "doc-authority defect this plugin exists to have fixed. Count registrations.",
+    "",
+    "${CLAUDE_PLUGIN_ROOT} is resolved by Claude Code to this plugin's root, so these",
+    "paths survive the plugin being installed anywhere. The previous arrangement",
+    "hardcoded $HOME/.claude/hooks and $HOME/.claude/skills/propagate."
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/load-rules.mjs\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/doc-authority.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/gotcha-guard.mjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/gotcha-guard.mjs\""
+          }
+        ]
+      }
+    ]
+  }
+}
