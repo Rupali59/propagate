@@ -970,3 +970,39 @@ not count as an override, prose mentioning both words does not, and a longer id
 
 **Affects:** propagate-skill, Motherboard, Vipin Kaushik
 **Refs:** `lib/rules/rules-check.mjs`, `tests/cli/rules-check.test.mjs`
+
+## 2026-08-22: the consolidation merge orphans edge history, and that is accepted rather than mitigated
+**Affects:** propagate-skill, curate-docs-skill
+
+**Decision:** the planned subtree merge of `curate-docs-skill` into this repo will reset every
+edge id, orphaning all prior verification history. We accept this, record it here, and do **not**
+build an id remap.
+
+**Why the obvious mitigation does not work.** The consolidation plan sequenced "fix N40 first" on
+the stated grounds that stable edge identity would carry verification history across the move.
+Measured, that reasoning is wrong. `toNodeId` is already repo-relative — `basename(repoRoot):relPath`
+— and N40's defect was only that the *downstream* half was minted from an absolute path. Fixing that
+(done, same day) makes identity survive a **checkout moving between mounts**, which is the failure
+that actually fired twice when this repo was flipped hub <-> skills-folder. It does nothing for a
+subtree merge, because that move changes the repo-relative path itself: `docs/X.md` becomes
+`skills/propagate/docs/X.md`, and the repo basename changes too. Repo-relative identity cannot save a
+path whose repo-relative form is what moved.
+
+**Why not remap.** Neither existing tool covers it. `migrate-ledger` renumbers every id for what is
+only a file move (and its `--all-refs` mode is under an open S2, N41, for silently discarding
+differing dispositions). `relocate-ledger` moves the ledger file with ids untouched precisely
+*because* paths survive a same-workspace move — its own header says so. There is no
+`previous_edge_id` concept in the event schema. Building one would mean deliberately rewriting an
+append-only store, which is the exact operation that produced 11 spurious events and 3 falsely-closed
+edges on 2026-08-17 (docs/GOTCHAS.md G44, rule:safety-flag-needs-a-test).
+
+**Consequence, stated so it is not mistaken for something else.** After the merge, edges will read as
+unverified. That means "verified before the 2026-08 consolidation", not "never verified" — this entry
+is the distinction, since the store itself cannot express it. Re-verification is affordable at the
+current ledger size; it would not have been at ten times the size, and that is the condition under
+which this decision should be revisited.
+
+**Also landed with this:** `watcher.mjs` deleted (797 lines, retired 2026-08-14) along with the four
+test files that imported it and `watcher-retired.test.mjs`, whose assertions are preserved by the
+2026-08-14 entry above. Both reusable halves had already been relocated to `lib/edges/edges.mjs` and
+`lib/edges/cross-repo.mjs`, each independently covered, so no live behaviour lost its tests.

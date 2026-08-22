@@ -221,10 +221,10 @@ by a count, because a count in a doc rots faster than anything else in it
 | Item | Lane |
 |---|---|
 | ~~N29~~ · **RESOLVED 2026-08-17** — the skill's own `.propagates.yml` exists and `reconcile --all` resolves 9 edges under it. Verified 2026-08-17; this row was the stale copy, the issue was already closed | — |
-| **N31** · `renderMarkdown` has no live caller and would regress the tree if called — decide: fix its three false lines and wire it into `drain`, or retire it and adopt ManavDaehi's frozen-banner pattern | Code · ELIMINATE or DELIVER |
+| **N31** · `renderMarkdown` has no live caller and would regress the tree if called — decide: fix its three false lines and wire it into `drain`, or retire it and adopt ManavDaehi's frozen-banner pattern. **2026-08-22:** its sole caller `watcher.mjs` was deleted, so it is now provably dead rather than merely uncalled; decide with the `cli.mjs` split | Code · ELIMINATE or DELIVER |
 | **N30** · `ledger.unknown_types` — needs a disambiguation strategy for duplicate id `256` **and** a test pinning which row wins, not just folding the `manual` type | Code · DETECT · human call |
 | `doc-authority`'s `note:` path reaches nobody (stderr on exit 0) | Code · ELIMINATE |
-| `edge_id` churn — a rename or a `why` rewrite mints a new edge and discards its history | Code · design first, disposition unclear |
+| `edge_id` churn — a rename or a `why` rewrite mints a new edge and discards its history. **Narrowed 2026-08-22 (N40):** relocating a checkout no longer churns ids — the downstream half is repo-relative and all nine derivation sites share `edgeIdFor()`. Rename/`why`-rewrite churn remains, as does a checkout *renamed* on disk (`node_id` still embeds `basename(repoRoot)`) | Code · design first, disposition unclear for the remaining cases |
 | `UNMATCHED` is `ACTIONABLE` in `lib/graph.mjs:52` but declared a permanent adoption gauge in the hub sidecar — needs an exemption or a distinct state, else the worklist reads 1-of-N forever | Code · DETECT |
 
 **Mechanism**

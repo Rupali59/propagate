@@ -46,11 +46,11 @@ function pin({ stateDir, sourceAbs, downstreamAbs, why }) {
   const script = `
 import { contentId } from ${JSON.stringify(CONTENT_ID_LIB)};
 import { edgeId, appendEvent } from ${JSON.stringify(EVENTS_LIB)};
-import { toNodeId } from ${JSON.stringify(RECONCILE_LIB)};
+import { toNodeId, edgeIdFor } from ${JSON.stringify(RECONCILE_LIB)};
 const sourceAbs = ${JSON.stringify(sourceAbs)};
 const downstreamAbs = ${JSON.stringify(downstreamAbs)};
 const nodeId = toNodeId(sourceAbs);
-const eId = edgeId(nodeId, downstreamAbs, ${JSON.stringify(why)});
+const eId = edgeIdFor(nodeId, downstreamAbs, ${JSON.stringify(why)});
 const s = contentId(sourceAbs);
 const d = contentId(downstreamAbs);
 if (s.unresolvable || d.unresolvable) throw new Error("pin: side unresolvable — " + JSON.stringify({ s, d }));

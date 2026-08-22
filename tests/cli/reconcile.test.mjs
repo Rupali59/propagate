@@ -61,12 +61,12 @@ function pin({ stateDir, sourceAbs, downstreamAbs, why, disposition = "propagate
   const script = `
 import { contentId } from ${JSON.stringify(CONTENT_ID_LIB)};
 import { edgeId, appendEvent } from ${JSON.stringify(EVENTS_LIB)};
-import { toNodeId } from ${JSON.stringify(RECONCILE_LIB)};
+import { toNodeId, edgeIdFor } from ${JSON.stringify(RECONCILE_LIB)};
 
 const sourceAbs = ${JSON.stringify(sourceAbs)};
 const downstreamAbs = ${JSON.stringify(downstreamAbs)};
 const nodeId = toNodeId(sourceAbs);
-const eId = edgeId(nodeId, downstreamAbs, ${JSON.stringify(why)});
+const eId = edgeIdFor(nodeId, downstreamAbs, ${JSON.stringify(why)});
 const s = contentId(sourceAbs);
 const d = contentId(downstreamAbs);
 if (s.unresolvable || d.unresolvable) {
@@ -92,9 +92,9 @@ console.log(JSON.stringify({ edge_id: eId, ts: event.ts, node_id: nodeId }));
 function defer({ stateDir, sourceAbs, downstreamAbs, why, reason = "postponed" }) {
   const script = `
 import { edgeId, appendEvent } from ${JSON.stringify(EVENTS_LIB)};
-import { toNodeId } from ${JSON.stringify(RECONCILE_LIB)};
+import { toNodeId, edgeIdFor } from ${JSON.stringify(RECONCILE_LIB)};
 const nodeId = toNodeId(${JSON.stringify(sourceAbs)});
-const eId = edgeId(nodeId, ${JSON.stringify(downstreamAbs)}, ${JSON.stringify(why)});
+const eId = edgeIdFor(nodeId, ${JSON.stringify(downstreamAbs)}, ${JSON.stringify(why)});
 const event = await appendEvent({
   edge_id: eId,
   node_id: nodeId,

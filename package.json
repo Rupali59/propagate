@@ -30,7 +30,6 @@
     "cli.mjs",
     "digest.mjs",
     "index.mjs",
-    "watcher.mjs",
     "lib/",
     "bin/",
     "docs/",

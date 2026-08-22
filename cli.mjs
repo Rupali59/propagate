@@ -146,7 +146,7 @@ import { findLedgersUnder } from "./lib/edges/refs.mjs";
 import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
-import { reconcile, STATES, groupRows, inboundRows } from "./lib/edges/reconcile.mjs";
+import { reconcile, STATES, groupRows, inboundRows, edgeIdFor } from "./lib/edges/reconcile.mjs";
 import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
 import { resolveProvenance, resolveObservedRef } from "./lib/edges/provenance.mjs";
@@ -3595,7 +3595,7 @@ async function locateEdgeDeclaration(workspaces, row) {
 
           if (!isGlob) {
             const downstreamAbs = path.resolve(sidecarDir, d.path);
-            if (edgeId(row.node_id, downstreamAbs, d.why) === row.edge_id) {
+            if (edgeIdFor(row.node_id, downstreamAbs, d.why) === row.edge_id) {
               return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path };
             }
             continue;
@@ -3615,7 +3615,7 @@ async function locateEdgeDeclaration(workspaces, row) {
           }
           for (const m of matches) {
             const downstreamAbs = path.resolve(sidecarDir, m);
-            if (edgeId(row.node_id, downstreamAbs, d.why) === row.edge_id) {
+            if (edgeIdFor(row.node_id, downstreamAbs, d.why) === row.edge_id) {
               return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path };
             }
           }

@@ -185,7 +185,7 @@ the deferral isn't even printed. A doc declaring `path: lib/**/*.ts, kind: code`
 coverage in both watcher and gate while looking declared.
 
 Self-documented in five places (`SKILL.md:161,199-205,278`, `edges.mjs:161,216-218`,
-`tests/watcher/code-drift.test.mjs:59`) as "documented limitation, not a bug" — but the user-visible effect
+the since-deleted `code-drift` watcher test) as "documented limitation, not a bug" — but the user-visible effect
 is indistinguishable from a working edge.
 
 *Fix:* until implemented, `doctor` lists glob-code edges as **unenforced**.
@@ -533,14 +533,15 @@ UI over expanded glob edges must group by the generating glob (the same way `cor
 worktree-expanded rows today), so one glob decision reads as one queue item, not N.
 
 ### N23 · `WATCHER_LOG` is not test-scoped — `npm test` writes into the production log — **S2** — **impact moot 2026-08-14 (watcher retired)** — **RESOLVED 2026-08-20**
+**Structurally closed 2026-08-22** — `watcher.mjs` and the four test files that imported it were deleted outright (plan §0a), so the module-level `WATCHER_LOG` binding no longer exists and the defect cannot recur.
 
 **RESOLVED 2026-08-20** — measured: production `~/.propagate/watcher.log` does not exist after a full suite run; the suite writes to `$TMPDIR/propagate-test-state`. Commit `1f8ea73`.
 Same family as N13/N14 (a scoping variable exists but isn't universally applied) — **not** already
 closed by Phase B's `PROPAGATE_STATE_DIR` work, contrary to what that work's scope might suggest.
 `PROPAGATE_STATE_DIR` *can* relocate `WATCHER_LOG` (`lib/config.mjs:143`, covered by
-`tests/portability/config-state-dir.test.mjs`), but four test files —
-`tests/watcher/code-drift.test.mjs`, `tests/unit/cross-decision.test.mjs`, `tests/watcher/fire-paths.test.mjs`, and
-`tests/unit/cross-repo.integration.test.mjs` — import functions from `watcher.mjs` directly and invoke
+`tests/portability/config-state-dir.test.mjs`), but four test files (two under `tests/watcher/`,
+two under `tests/unit/`, all deleted 2026-08-22 together with `watcher.mjs` — recoverable from
+git history) imported functions from `watcher.mjs` directly and invoked
 them without setting `PROPAGATE_STATE_DIR`, so any call that logs (`watcher.mjs`'s internal `log()`
 at `:82-85`, which always writes to the imported `WATCHER_LOG` binding) appends into the real
 `~/.claude/skills/propagate/watcher.log` during `npm test`. Verified 2026-08-13: the production log
@@ -1586,7 +1587,26 @@ NEVER_VERIFIED, 0 REVERSED**. The 2 formerly-REVERSED edges were resolved by han
 (`d1ae5ac0` both-reconciled, `0775c32e` no-change-needed). The 9 never-verified stay
 blocked on N40.
 
-### N40 · Edge identity is tied to the absolute access path, so the same coupling has different ids by route — **S1** — **OPEN**
+### N40 · Edge identity is tied to the absolute access path, so the same coupling has different ids by route — **S1** — **PARTIALLY RESOLVED 2026-08-22**
+
+**PARTIALLY RESOLVED 2026-08-22.** The downstream half is now minted as a repo-relative node id
+(`lib/edges/reconcile.mjs:301`), with the two concrete-path matchers in `cli.mjs` moved to the same
+form; the unmatched-glob identity still keys on the pattern text and is unchanged. `edgeId` itself is
+untouched, so `tests/watcher/edge-id-stability.test.mjs` stays green — which exposed the real gap:
+that test freezes the HASH and cannot see a change to what the hash is FED, though the consequence is
+identical. `tests/watcher/edge-id-mount-independence.test.mjs` now asserts the property instead of the
+derivation, and was mutation-checked (stubbing `toNodeId` to return the absolute path turns it red on
+the N40 assertion specifically).
+
+**Residual, deliberately not fixed:** `node_id` still embeds `basename(repoRoot)`, so a checkout
+*renamed* on disk (`propagate-skill` -> `propagate`) still mints new ids. A stable repo identifier needs
+a decision about repos with no remote — larger than this change, and tracked here rather than silently
+claimed as done.
+
+**Note on the consolidation merge:** fixing this does **not** preserve edge history across the planned
+subtree merge. That move changes the repo-relative path itself (`docs/X.md` -> `skills/propagate/docs/X.md`),
+so ids change regardless of how identity is derived. Orphaning there is accepted and recorded in
+docs/DECISIONS.md rather than mitigated.
 
 **2026-08-21.** `edgeId(nodeId, downstreamPath, why)` (`lib/edges/events.mjs:117`) hashes the
 **absolute** downstream path (`lib/edges/reconcile.mjs:297`), and `nodeId` is

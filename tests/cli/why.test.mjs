@@ -75,12 +75,12 @@ function pinEvent({ stateDir, wsRoot, disposition = "propagated", reason = "test
   const realScript = `
 import { contentId } from ${JSON.stringify(CONTENT_ID_LIB)};
 import { edgeId, appendEvent } from ${JSON.stringify(EVENTS_LIB)};
-import { toNodeId } from ${JSON.stringify(RECONCILE_LIB)};
+import { toNodeId, edgeIdFor } from ${JSON.stringify(RECONCILE_LIB)};
 
 const sourceAbs = ${JSON.stringify(sourceAbs)};
 const downstreamAbs = ${JSON.stringify(downstreamAbs)};
 const nodeId = toNodeId(sourceAbs);
-const eId = edgeId(nodeId, downstreamAbs, ${JSON.stringify("why-cli fixture edge")});
+const eId = edgeIdFor(nodeId, downstreamAbs, ${JSON.stringify("why-cli fixture edge")});
 const s = contentId(sourceAbs);
 const d = contentId(downstreamAbs);
 const payload = {
@@ -114,12 +114,12 @@ function pinPreProvenanceEvent({ stateDir, wsRoot }) {
   const realScript = `
 import { contentId } from ${JSON.stringify(CONTENT_ID_LIB)};
 import { edgeId, appendEvent } from ${JSON.stringify(EVENTS_LIB)};
-import { toNodeId } from ${JSON.stringify(RECONCILE_LIB)};
+import { toNodeId, edgeIdFor } from ${JSON.stringify(RECONCILE_LIB)};
 
 const sourceAbs = ${JSON.stringify(sourceAbs)};
 const downstreamAbs = ${JSON.stringify(downstreamAbs)};
 const nodeId = toNodeId(sourceAbs);
-const eId = edgeId(nodeId, downstreamAbs, ${JSON.stringify("why-cli fixture edge")});
+const eId = edgeIdFor(nodeId, downstreamAbs, ${JSON.stringify("why-cli fixture edge")});
 const s = contentId(sourceAbs);
 const d = contentId(downstreamAbs);
 // Deliberately NO observed_at_commit / observed_on_branch / by_kind — the
@@ -204,10 +204,12 @@ test("why: an edge with no events (but currently declared) reports 'no-events', 
   try {
     // Compute the real edge_id without writing any event for it.
     const script = `
-import { edgeId } from ${JSON.stringify(EVENTS_LIB)};
-import { toNodeId } from ${JSON.stringify(RECONCILE_LIB)};
+import { toNodeId, edgeIdFor } from ${JSON.stringify(RECONCILE_LIB)};
+// Use production's OWN derivation (edgeIdFor). Rebuilding it by hand here is
+// how these two tests silently disagreed with the CLI through the N40 fix:
+// they kept minting the old absolute-path id and the CLI reported unknown-edge.
 const nodeId = toNodeId(${JSON.stringify(path.join(fx.wsRoot, "a.txt"))});
-console.log(edgeId(nodeId, ${JSON.stringify(path.join(fx.wsRoot, "b.txt"))}, ${JSON.stringify("why-cli fixture edge")}));
+console.log(edgeIdFor(nodeId, ${JSON.stringify(path.join(fx.wsRoot, "b.txt"))}, ${JSON.stringify("why-cli fixture edge")}));
 `;
     const idResult = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" });
     assert.equal(idResult.status, 0, idResult.stderr);
@@ -241,10 +243,12 @@ test("why: 'no-events' and 'unknown-edge' render genuinely different messages", 
   const fx = await makeFixtureWorkspace();
   try {
     const script = `
-import { edgeId } from ${JSON.stringify(EVENTS_LIB)};
-import { toNodeId } from ${JSON.stringify(RECONCILE_LIB)};
+import { toNodeId, edgeIdFor } from ${JSON.stringify(RECONCILE_LIB)};
+// Use production's OWN derivation (edgeIdFor). Rebuilding it by hand here is
+// how these two tests silently disagreed with the CLI through the N40 fix:
+// they kept minting the old absolute-path id and the CLI reported unknown-edge.
 const nodeId = toNodeId(${JSON.stringify(path.join(fx.wsRoot, "a.txt"))});
-console.log(edgeId(nodeId, ${JSON.stringify(path.join(fx.wsRoot, "b.txt"))}, ${JSON.stringify("why-cli fixture edge")}));
+console.log(edgeIdFor(nodeId, ${JSON.stringify(path.join(fx.wsRoot, "b.txt"))}, ${JSON.stringify("why-cli fixture edge")}));
 `;
     const idResult = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" });
     const declaredEdgeId = idResult.stdout.trim();
@@ -296,9 +300,9 @@ test("why: a post-wedge event with a recorded position never renders 'position n
     const script = `
 import { contentId } from ${JSON.stringify(CONTENT_ID_LIB)};
 import { edgeId, appendEvent } from ${JSON.stringify(EVENTS_LIB)};
-import { toNodeId } from ${JSON.stringify(RECONCILE_LIB)};
+import { toNodeId, edgeIdFor } from ${JSON.stringify(RECONCILE_LIB)};
 const nodeId = toNodeId(${JSON.stringify(sourceAbs)});
-const eId = edgeId(nodeId, ${JSON.stringify(downstreamAbs)}, ${JSON.stringify("why-cli fixture edge")});
+const eId = edgeIdFor(nodeId, ${JSON.stringify(downstreamAbs)}, ${JSON.stringify("why-cli fixture edge")});
 const s = contentId(${JSON.stringify(sourceAbs)});
 const d = contentId(${JSON.stringify(downstreamAbs)});
 const event = await appendEvent({
