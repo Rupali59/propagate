@@ -1,5 +1,79 @@
 # propagate — State
 
+## Open work — as of 2026-08-22 (post plugin rebuild)
+
+The plugin rebuild, ledger re-initialisation and the `propagate-skill` -> `propagate` rename
+are **done and pushed**. What follows is what is left, in the order it should be picked up.
+
+### 1. Verify plugin hook DISPATCH in a fresh session — BLOCKING for confidence, 5 min
+
+The four hook registrations were verified as *commands* (each runs, `doc-authority` exits 2 on
+a counsel-governed file from the plugin cache). What could NOT be verified in the session that
+installed them is whether Claude Code actually **dispatches** them, because they were
+registered mid-session. `~/.claude/settings.json` no longer carries the fallback registrations,
+so if dispatch does not work, the three hooks are silently inert.
+
+**Check:** in a new session, edit a file governed at `authority: counsel` (e.g.
+`Vipin Kaushik/VipinKaushik/app/(site)/privacy/page.tsx`) and confirm it BLOCKS. Also confirm
+rules are injected once, not twice.
+**Restore if broken:** `~/.propagate/uninstall-capture-2026-08-22.json` holds the 4 removed
+registrations verbatim.
+
+### 2. Settle the cross-repo ref shape — DESIGN DECISION, blocks Phase 3
+
+`reconcile.mjs:16` describes context as `(source @ refA, downstream @ refB)` — a ref per side —
+and rows carry `source.ref` / `downstream.ref` separately. Every EVENT carries a single
+`observed_on_ref` scalar, `"working-tree"` on all 1,912. **The row model solved cross-repo; the
+event model never caught up.** 113 edges (13.2%) span repos with independent branch sets.
+
+Must be settled BEFORE the first non-`working-tree` event is written: the store is append-only,
+so a wrong scalar on thousands of rows can only be closed-and-re-emitted.
+
+### 3. Open issues in `docs/ISSUES.md`
+
+| | Sev | Note |
+|---|---|---|
+| **N41** cross-branch dedupe discards a differing disposition | S2 | **Same work as `CONTESTED`** — not two tasks. Until then, do NOT run `migrate-ledger --all-refs` |
+| **N42** `renderMarkdown` has no live caller | S2 | Escalated: its only caller (`watcher.mjs`) was deleted, so it is now provably unreachable. Decide with the `cli.mjs` split |
+| **N35** `selftest` proves self-match, not wild-match | S2 | Third instance of "a check that reports success while blind" — see F1 and the hooks.json registration count |
+| **N38** private->public coupling has no watcher | S2 | Accepted while both repos are private; revisit before any public release |
+
+### 4. `cli.mjs` split — 5,141 lines, 27 commands
+
+Deliberately deferred past the merge so breakage had one cause, not three. `renderMarkdown`
+(N42) surfaces here. `digest.mjs` is 1,414 lines by comparison; curate-docs' CLI is 340.
+
+### 5. Recorded residuals — known, priced, not bugs
+
+- **N40 residual:** `node_id` embeds `basename(repoRoot)`, so a RENAMED checkout mints new ids.
+  Cost this rename 30 of 1,912 events (1.6%). A stable repo identifier needs a decision about
+  repos with no remote.
+- **G3:** a directory marketplace source still produces a **version-keyed copy** — it is NOT
+  live. Bump the version when content changes, or uninstall/reinstall.
+- **382 NEVER_VERIFIED edges** are three different problems: 263 no-co-commit (evidence absent),
+  113 cross-repo (evidence impossible), 6 bound-reached (raise `--bound`). See
+  `~/Documents/GitHub/propagation/docs/ARCHITECTURE.md` §8. **Do not baseline the 113 blind.**
+
+### 6. Outside this repo
+
+- **8 pre-existing dirty paths in the hub** — `GEMINI.md` deletion, two `rules/` edits,
+  `sync-plugin-internal-token.sh`, four untracked scripts. Not from this work; needs triage.
+- **60 of 75 skills in `~/.agents/skills` are installed but unreachable** (never symlinked).
+  Reuse `propagate skills` rather than writing a scanner.
+- **`~/.claude/skills/loki-mode`** points into Homebrew's `node_modules`; breaks on any
+  `npm -g` upgrade.
+- **Local `curate-docs-skill` checkout** kept deliberately — the GitHub repo is archived and
+  the checkout holds the only local copy of that history.
+
+### The lesson this session kept re-teaching
+
+Three separate figures were **stale by nine days** and each was used as if current:
+`markStatus has no production callers` (it has one, with verify-after-write), `~31%
+baselineable` (measured 55.5%), `35% cross-repo` (now 13.2%). All were correct when recorded.
+**A confidence score without a measurement date is not evidence** — and a stale claim that code
+is MISSING is the expensive direction, because it invites building a duplicate.
+
+
 Last updated: 2026-08-20
 
 > Navigation: "What's the current status?" → this file. "Why did we choose X?" →
