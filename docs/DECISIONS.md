@@ -1050,3 +1050,34 @@ disk". The rename made that path real, so the warning cleared by coincidence rat
 intent. Recorded so nobody reads it as a fix.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+
+## 2026-08-22: Rupali59/curate-docs-skill is archived
+
+**Affects:** propagate, curate-docs
+
+**Decision:** archive the standalone repo. Its content ships inside this plugin at
+`skills/curate-docs/`, and its marketplace entry has been removed.
+
+**Verified before archiving, not after.** Three files existed in the standalone and not in
+the vendored copy, and all three are deliberate supersessions:
+
+| Only in standalone | Superseded by |
+|---|---|
+| `skills/design/SKILL.md` | `sections/design.md` — H1 identical, body 484 -> 541 words (the when-line was added) |
+| `skills/eng/SKILL.md` | `sections/eng.md` — H1 identical, body 668 -> 721 words |
+| `.github/workflows/test.yml` | the merged matrix here, which runs `npm test --prefix skills/curate-docs` |
+
+Nothing was only-in-standalone in the sense of being lost. The repo was clean and fully
+pushed at the moment of archiving.
+
+**Archived, not deleted, and that is the point.** An archived GitHub repo stays clonable
+read-only, so `source: url` still resolves and the rollback survives. Deleting would have
+spent that safety margin for no gain. The local checkout at `~/Documents/GitHub/curate-docs-skill`
+is kept for now — it holds the only copy of that git history on this machine.
+
+**Side note recorded so it is not misread as a fix:** that repo's sidecar declared
+`../propagate/lib/report/doc-kind.mjs`, which `doctor` reported as declare-ahead. The
+propagate-skill -> propagate rename made that path real, so the warning cleared by
+coincidence.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
