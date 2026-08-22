@@ -91,8 +91,11 @@ Deliberately deferred past the merge so breakage had one cause, not three. `rend
 
 ### 6. Outside this repo
 
-- **8 pre-existing dirty paths in the hub** — `GEMINI.md` deletion, two `rules/` edits,
-  `sync-plugin-internal-token.sh`, four untracked scripts. Not from this work; needs triage.
+- **7 pre-existing dirty paths in the hub** — two `rules/` edits
+  (`every-project-carries-gotchas.md` +41 lines and `skill-routing.md` +1, both uncommitted
+  since 2026-08-17), `sync-plugin-internal-token.sh`, four untracked scripts. Not from this
+  work; needs triage. **The `GEMINI.md` deletion left this list 2026-08-22**, when Gemini was
+  retired tree-wide — that one was resolved, the other seven were not.
 - **60 of 75 skills in `~/.agents/skills` are installed but unreachable** (never symlinked).
   Reuse `propagate skills` rather than writing a scanner.
 - **`~/.claude/skills/loki-mode`** points into Homebrew's `node_modules`; breaks on any
