@@ -1750,7 +1750,7 @@ machine-refreshed and half hand-written reads as one thing."*
 
 **Unresolved and needed before the branch-node view reaches a human.**
 
-### N43 · The plugin cutover killed both launchd agents, and nothing noticed for two hours — **S2** — **RESOLVED 2026-08-22**
+### N43 · The plugin cutover broke ELEVEN referrers of one deleted directory — **S2** — **PARTIALLY RESOLVED 2026-08-22**
 
 **2026-08-22.** Both propagate launchd agents invoke a path the cutover deleted:
 
@@ -1842,6 +1842,56 @@ capture, so the cutover's own undo could not execute. Every path it now cites wa
 present, including the deliberately-kept local `curate-docs-skill` checkout (`8ea167a`,
 archived on GitHub). **A safety net is the one artifact whose correctness is never
 exercised until the moment it must work.**
+
+
+
+**TWO MORE REFERRERS FOUND AFTER THIS WAS CLOSED — the count was 2, it is 4.** Both surfaced
+by accident while doing unrelated Phase A work, neither by any probe:
+
+| Referrer | Symptom | Found by |
+|---|---|---|
+| `rules/_check.mjs` | `--selftest` exited 2 on every run since the cutover | running it |
+| `Vipin Kaushik/.githooks/pre-commit` | printed `propagate gate SKIPPED` on every commit | committing |
+
+**Every one of the four was individually well built.** Each names the path it tried; none
+fails silently; the pre-commit hook even offers `PROPAGATE_CLI` in its own error message, and
+its comment asserts *"The CLI path is derived, not hardcoded to one location (G48)"* directly
+above the line that hardcoded it. All four had **exactly one candidate**.
+
+That is the generalisation this issue should have carried from the start: a cutover that
+deletes a directory must enumerate the **referrers** of that directory, not the registrations
+it is replacing. The uninstall capture answers "what did I unregister" and cannot answer
+"what else pointed here". Both are now fixed the same way — an ordered candidate list ending
+in the legacy path, with the plugin cache **globbed** rather than version-pinned, because
+pinning reintroduces the identical bug on the next release.
+
+**THE CHEAP CHECK, FINALLY RUN — and "a fifth is likely" was an understatement.** One
+`grep -rl 'skills/propagate'` over the tree, which nobody had run in the eight hours since
+the cutover, found **eleven executable referrers**:
+
+| | Referrer | State |
+|---|---|---|
+| 1-2 | the two launchd agents | fixed |
+| 3 | `rules/_check.mjs` | fixed |
+| 4 | `Vipin Kaushik/.githooks/pre-commit` | fixed |
+| 5 | `Motherboard/propagation/bin/render-ledgers.sh` | fixed — hardcoded BOTH propagate and curate-docs |
+| 6-11 | **six more pre-commit hooks** — `VipinKaushik-mb`, `astroacharya`, `Astroclarity`, `marketing-intel`, `sanskrit-texts`, `VipinKaushik` | **OPEN** |
+
+**The propagate gate is silently not running in seven repos.** Every one is the same hook
+block, copied, each with the same single hardcoded candidate — so this is copy-drift, and the
+copies were identical right up until the moment the path they all shared stopped existing.
+
+Not fixed here because three of the six are on feature branches or dirty
+(`astroacharya` on `feat/muhurta-typed-endpoints`, `VipinKaushik` on
+`fix/privacy-slice5-regression`), and committing across six repos on unrelated branches is
+not this change's to make.
+
+Two `settings.local.json` files also match and are unaudited.
+
+**The lesson, restated because the first version of this entry got the scale wrong twice.**
+The uninstall capture answers *"what did I unregister"*. It cannot answer *"what else pointed
+here"*, and no probe asks. The grep costs one command and was not run until a fourth instance
+turned up by accident.
 
 **Still open, carried to a new issue:** nothing detects the phantom-`WatchPaths` class, and
 `watchPathsFor()` still hardcodes `docs/`.
