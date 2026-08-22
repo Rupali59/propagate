@@ -535,3 +535,77 @@ test("doctor treats a never-run monitor as informational, so a fresh install sta
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// v3 layout conformance — the ratchet for the migration plan.
+//
+// The predicate itself is unit-tested in tests/unit/v3-layout.test.mjs. What
+// THESE cover is the thing a unit test cannot: that doctor actually fails on
+// a non-conforming workspace, and that the failure NAMES what is absent.
+//
+// Measured against the live tree on the day it was written: 1 of 7 workspaces
+// conforming. A conformance check that is green before the conforming work has
+// happened is not checking anything, so the negative case is the one that
+// matters and it is asserted first.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("doctor FAILS on a HALF-migrated workspace, and names what is missing", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    // Half-migrated: state/ present, everything else absent. This is the state
+    // the check exists for — a workspace someone began moving and stopped.
+    await mkdir(path.join(root, "propagation", "state", "someproject"), { recursive: true });
+    await writeFile(path.join(root, "propagation", "state", "someproject", "STATE.md"), "# state\n");
+
+    const out = strip(runDoctor(root).stdout + runDoctor(root).stderr);
+    assert.match(out, /✗ workspaces conform to the v3 propagation layout/);
+    // Attribution, not a bare verdict: the operator has to know WHICH items to
+    // create, or the check tells them they are wrong without telling them how.
+    assert.match(out, /lacks[^\n]*refs\/snapshot\.json/);
+    assert.match(out, /half-migrated/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor does NOT fail a workspace nobody has begun migrating — it reports it as not begun", async () => {
+  // The negative control, and the one that matters most: requiring the full v3
+  // tree unconditionally makes every fresh install fail by definition until the
+  // migration completes. tests/cli/stranger-install.test.mjs caught exactly that
+  // within one run of the first version of this check.
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    const out = strip(runDoctor(root).stdout + runDoctor(root).stderr);
+    assert.doesNotMatch(
+      out,
+      /✗ workspaces conform to the v3 propagation layout/,
+      `an unmigrated workspace must not be a doctor failure:\n${out}`,
+    );
+    assert.match(out, /v3 migration[^\n]*not begun/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor PASSES the v3 check on a fully conforming workspace", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    const prop = path.join(root, "propagation");
+    await mkdir(path.join(prop, "refs"), { recursive: true });
+    await mkdir(path.join(prop, "state", "someproject"), { recursive: true });
+    await writeFile(path.join(prop, "README.md"), "# propagation\n");
+    await writeFile(path.join(prop, "INDEX.md"), "# index\n");
+    await writeFile(path.join(prop, "refs", "snapshot.json"), "{}\n");
+    await writeFile(path.join(prop, "refs", "lifecycle.jsonl"), "");
+    await writeFile(path.join(prop, "state", "someproject", "STATE.md"), "# state\n");
+
+    const out = strip(runDoctor(root).stdout + runDoctor(root).stderr);
+    assert.doesNotMatch(
+      out,
+      /✗ workspaces conform to the v3 propagation layout/,
+      `a conforming workspace must not be reported:\n${out}`,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -863,7 +863,7 @@ creating the pair since the 2026-08-20 gate-4 fix — it is one of
 
 1. **It created a SUPERSEDED layout, in both branches.** Measured on temp workspaces:
    no `docs/` -> `.propagation/ledger.*`; with `docs/` -> `docs/PROPAGATION_LEDGER.*`.
-   Neither is canonical (`docs/REFERENCE.md` §"Ledger layout"), so **`init` could not
+   Neither is canonical (`docs/REFERENCE.md` §"Propagation layout"), so **`init` could not
    produce the canonical layout at all**, and every stranger install minted a third
    layout while the 2026-08-21 consolidation was cleaning up the first two. This is the
    cause `docs/DECISIONS.md` recorded as contained but not removed — *"the location

@@ -1787,6 +1787,55 @@ async function doctor() {
   // header comment for why this is a separate mechanism from the hard-failing
   // "no unowned ledger files" check above, and rule:discernment-checks §2 for
   // why every non-finding case is named rather than left blank.
+  // ── v3 layout conformance ────────────────────────────────────────────────
+  //
+  // THE RATCHET for docs/plans/2026-08-22-v3-one-propagation-standard.md. Every
+  // later phase of that plan claims to bring a workspace to the standard; this
+  // is the only thing that can contradict the claim.
+  //
+  // Measured the day it was written: 1 of 7 conforming. That number is the
+  // point — a conformance check green before the conforming work has happened
+  // is not checking anything (rule:discernment-checks §1), so it was run
+  // against the live tree BEFORE any workspace was migrated and seen to fail on
+  // six of them.
+  //
+  // ONE label, not one per workspace: doctor-check-coverage.test.mjs parses
+  // literal check("...") strings out of this file, so a label templated with a
+  // workspace name would be invisible to that ratchet on every machine.
+  // The DETAIL carries the per-workspace attribution instead.
+  try {
+    const { conformanceReport } = await import("./lib/core/v3-layout.mjs");
+    const rep = conformanceReport(WORKSPACES);
+    // FAILS only for STARTED-but-incomplete. A workspace nobody has begun
+    // migrating is informational — see hasStartedV3 for why, and
+    // tests/cli/stranger-install.test.mjs for the run that caught the
+    // alternative within a minute of it being written.
+    check(
+      "workspaces conform to the v3 propagation layout",
+      rep.offenders.length === 0,
+      rep.offenders.length
+        ? `${rep.offenders.length} half-migrated — ` +
+          rep.offenders.map((o) => `${o.name} lacks ${o.missing.join(", ")}`).join("; ") +
+          `. A partial migration is the state that loses data. See docs/REFERENCE.md ` +
+          `§"Propagation layout".`
+        : `${rep.conforming}/${rep.total} conform`,
+    );
+    // Three states, not two: conforming / half-migrated / not begun. Collapsing
+    // the third into either of the others is what makes a migration report
+    // itself complete halfway through (rule:discernment-checks §2).
+    if (rep.notStarted.length > 0) {
+      info(
+        "v3 migration",
+        `${rep.conforming}/${rep.total} conform; ${rep.notStarted.length} not begun — ` +
+          rep.notStarted.map((o) => o.name).join(", "),
+      );
+    }
+  } catch (err) {
+    // Named, never swallowed: a conformance check that cannot run must not read
+    // as a conformance check that passed.
+    check("workspaces conform to the v3 propagation layout", false, `could not evaluate: ${err.message}`);
+  }
+
   console.log(`\n${BOLD}# Undiscoverable ledgers (informational)${RESET}`);
   console.log(
     `  ${DIM}ledgers findLedgersUnder() reaches that discovery would not — see lib/edges/refs.mjs header. Never a doctor failure.${RESET}`,

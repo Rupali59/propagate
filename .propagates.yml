@@ -140,6 +140,21 @@ sources:
           in the code gets re-litigated the first time someone disagrees with it.
         kind: prose
 
+  # Added 2026-08-22 with lib/core/v3-layout.mjs, per
+  # rule:refactor-updates-sidecar-same-commit. The module is REFERENCE.md's
+  # layout section made executable: V3_REQUIRED is the tree that section draws.
+  # Either side moving without the other means doctor enforces a standard the
+  # documentation does not describe, or documents one nothing enforces -- the
+  # promise-in-one-file-another-cannot-keep shape that
+  # rule:adversarial-review-reads-the-ledger exists to catch.
+  lib/core/v3-layout.mjs:
+    propagates_to:
+      - path: docs/REFERENCE.md
+        why: >-
+          V3_REQUIRED enumerates exactly the tree REFERENCE.md §"Propagation layout"
+          draws; adding or removing a required item there falsifies the section
+        kind: code
+
   lib/edges/events.mjs:
     propagates_to:
       - path: docs/DATA_MODEL.md

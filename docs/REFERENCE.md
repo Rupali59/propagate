@@ -90,30 +90,74 @@ runtime. What retired is the **mechanism that produced new rows this way**:
   `state.json` without firing drift (bootstrap behaviour) — moot now that
   nothing populates `state.json` from a live fire.
 
-## Ledger layout — one `propagation/` folder per workspace
+## Propagation layout — one `propagation/` folder per workspace
 
-**Every workspace, including the hub, keeps its propagation items in
-`<workspace>/propagation/`** — `ledger.jsonl` and its rendered `ledger.md`, plus migration
-manifests under `propagation/archive/`. One folder, at depth 1, **never per sub-project**: a
+**Canonical. Every workspace, including the hub, keeps all propagation items in
+`<workspace>/propagation/`** — one folder, at depth 1, **never per sub-project**: a
 sub-project's edges roll up to its workspace.
 
-This is canonical. Do not restate the path in a project doc — cite this section. Before
-2026-08-21 the location was decided by whether `docs/` happened to exist at first write, and
-`docs/DECISIONS.md` records the consequence: *"the location remains an accident of directory
-layout at first-write time; the guard contains the damage but does not remove the cause."*
-That produced three layouts at once across eight ledgers.
+**Do not restate these paths anywhere else — cite this section.** `rule:model-routing`
+named a literal path and was wrong the moment the layout moved on 2026-08-21.
 
-`docs/PROPAGATION_LEDGER.*` and `.propagation/ledger.*` are the superseded forms. Discovery
-still resolves them so nothing breaks, and `doctor` **fails** if a workspace has live ledger
+```
+<workspace>/propagation/
+  README.md              generated  — what this folder is; cites this section
+  INDEX.md               derived    — the state index
+  refs/
+    snapshot.json        derived    — branch registry: per project a base_ref, and per
+                                      ref its head, merge_state, upstream, upstream_track,
+                                      last_commit_iso, worktrees, is_active_line.
+                                      Carries schema_version.
+    lifecycle.jsonl      append-only — branch created / merged / pruned, each with
+                                      detected_by and evidence
+  state/<project>/
+    STATE.md             daily-open — what is true now
+    DECISIONS.md         append-only — why past choices were made
+    .sidecar.yml         which project these belong to; see below
+  archive/
+    ledger-v1.{jsonl,md} FROZEN     — the v1 drift rows, never appended
+```
+
+The workspace's own state lives at `state/workspace/`.
+
+### `.sidecar.yml`
+
+One per project directory under `state/`. A **separate file** — never a key in
+`.propagates.yml`, whose schema is `additionalProperties: false`, so an undeclared key
+silently kills every edge in the file it appears in.
+
+| Field | Why it is there |
+|---|---|
+| `project`, `repo_root` | Which project these files belong to, and where its repo is |
+| `remote` | The project's own git remote. Needed because these files live in the WORKSPACE repo, so `git remote get-url` run beside them answers for the wrong repo |
+| `active_line` | The canonical branch |
+| `ready`, `note` | `false` means the move is deliberately blocked, and why |
+| `pre_move.{sha,branch,history}` | Git history does **not** follow across a repo boundary. These make the old history findable |
+| `owns`, `stubs` | What this directory holds, and what pointer files were left behind |
+
+### Deviating
+
+A repo or workspace that genuinely differs declares it **in its own `CLAUDE.md`**, using
+the `overrides:` form `rule:description-standard` defines. Not here, and not in
+`propagation/README.md`: `rules-check.mjs` only scans files named `CLAUDE.md`, so a
+declaration anywhere else is inert decoration that *looks* machine-checked.
+
+Note the detector matches the literal token wherever it appears in a `CLAUDE.md` — so a
+file cannot *describe* a declaration it is removing without re-declaring it.
+
+### What this replaced
+
+`docs/PROPAGATION_LEDGER.*` and `.propagation/ledger.*` are superseded. Discovery still
+resolves them so nothing breaks, and `doctor` **fails** if a workspace has live ledger
 files at more than one candidate — a half-finished relocation is loud, not silent. Move one
 with `relocate-ledger`, never by hand: `git mv` alone makes discovery fall through to the
 `docs/`-exists heuristic and mint a fresh empty ledger while the real one goes unowned.
 
-**Who points here.** `rule:model-routing` tells every subagent brief to run `/propagate` so
-its work reaches the ledger, and references this section rather than naming a path — it named
-one until 2026-08-21 and was wrong the moment the layout moved. Both lifecycle checklists in
-`.templates/` do the same. All three are declared downstreams of this file, so a future layout
-change fires drift at them instead of leaving them stale.
+Until 2026-08-22 a **brand-new** workspace was given one of those superseded layouts —
+`docs/` if that directory happened to exist, `.propagation/` otherwise — so `init` could not
+produce the canonical layout at all. `docs/DECISIONS.md` had recorded that cause as
+contained but not removed. It is removed now; `makeWorkspaceRecord` pins `propagation/` for
+the no-ledger-anywhere case, and the pinning rule still wins for anything holding data.
 
 **Dated records keep the old path.** An archived session note or a `DECISIONS.md` entry
 describes what was true then; `rule:state-and-decisions` forbids editing past entries. Only
