@@ -1,0 +1,52 @@
+name: test
+
+# Adapted from propagate-skill/.github/workflows/test.yml — same shape (matrix, "does it
+# even load" check before the suite, npm ci against the committed lockfile), narrowed to
+# what curate-docs actually needs.
+#
+# ONE THING PROPAGATE'S WORKFLOW DID NOT NEED: curate-docs imports its taxonomy from
+# propagate at runtime (lib/taxonomy.mjs) and throws TaxonomyUnavailable if it can't find
+# it. A bare `npm ci` here would leave every non-mocked test failing on a fresh runner, so
+# this checks out propagate-skill as a sibling and points PROPAGATE_SKILL_DIR at it. The
+# "absent propagate" test in tests/taxonomy.test.mjs and tests/report.test.mjs cover the
+# loud-failure path directly with their own explicit env override — they don't depend on
+# this checkout, and would still pass without it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Rupali59/propagate-skill
+          path: .propagate-dep
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - run: npm ci
+
+      - name: does it even load
+        # A bad import specifier parses fine and fails at runtime, so `node --check` would
+        # not catch it. Loading the entry point is the check that does.
+        run: |
+          node -e "import('./cli.mjs').then(()=>console.log('ok   cli.mjs')).catch(e=>{console.error('FAIL cli.mjs: '+e.message);process.exit(1)})"
+
+      - name: suite
+        env:
+          PROPAGATE_SKILL_DIR: ${{ github.workspace }}/.propagate-dep
+        run: npm test

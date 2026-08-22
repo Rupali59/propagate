@@ -1,0 +1,78 @@
+# Declared couplings for curate-docs (rule:adversarial-review-reads-the-ledger).
+#
+# The edge that matters is the one to propagate: this skill imports six named exports from
+# a file it does not own. A rename there degrades every kind to `undeclared` here — which
+# lib/taxonomy.mjs turns into a loud failure rather than a quiet one, but the edge is what
+# makes the change visible BEFORE it fires.
+sources:
+  lib/taxonomy.mjs:
+    propagates_to:
+      - path: ../propagate/lib/report/doc-kind.mjs
+        why: >-
+          taxonomy.mjs imports KINDS, kindOf, frontmatter, parseSupersedes,
+          buildSupersessionIndex and brokenPathCitations from this file and asserts the
+          surface on load. Renaming or removing any of them breaks curate-docs. Repointed
+          2026-08-21 from ../propagate/lib/doc-kind.mjs — propagate reorganised lib/ into
+          subdirectories and this edge kept naming the old path, so it declared a coupling
+          to a file that no longer existed while the real one went unwatched. The edge was
+          never checked because this skill sat outside propagate's searchRoots; a hub
+          symlink now fixes that, which is the half that made the drift undetectable.
+        kind: code
+  lib/link-graph.mjs:
+    propagates_to:
+      - path: docs/GOTCHAS.md
+        why: >-
+          G5, G6 and G7 record exactly why the citation pattern is shaped as it is —
+          markdown links stripped before the backtick pass, leading ../ admitted, no slash
+          required, external as a fourth bucket. Widening or narrowing the pattern without
+          updating them re-opens a defect that has already been paid for.
+        kind: prose
+  docs/DECISIONS.md:
+    propagates_to:
+      - path: SKILL.md
+        why: >-
+          SKILL.md's workflow asserts the read-only posture and the "declare a state, not
+          add a link" verdict. Both are decisions recorded here; if one is superseded, the
+          workflow prose is asserting something no longer true.
+        kind: prose
+      - path: skills/eng/SKILL.md
+        why: >-
+          The read-only posture and the typed refusals moved here in the 2026-08-21 split.
+          Added as a second downstream rather than by editing the SKILL.md entry above,
+          because the edge id derives from the why text too — rewriting it would mint a new
+          edge and silently discard the original's verification.
+        kind: prose
+  lib/state.mjs:
+    propagates_to:
+      - path: docs/GOTCHAS.md
+        why: >-
+          G13 and G14 record why the archival act is `status:` and not `git mv`, and why
+          archiveDirs is separate from skipDirs. Changing the state model without updating
+          them re-opens the cascade those entries were paid for.
+        kind: prose
+      - path: SKILL.md
+        why: >-
+          SKILL.md documents the five-stage pipeline and the drain preconditions. Both are
+          enforced in code here; if the enforcement changes, the prose asserts a gate that
+          does not exist — the exact shape rule:safety-flag-needs-a-test is about.
+        kind: prose
+      - path: skills/eng/SKILL.md
+        why: >-
+          The drain preconditions moved here in the 2026-08-21 split; the parent kept only
+          the pipeline diagram. Without this edge a change to the enforcement in state.mjs
+          fires drift at a file that no longer states the gate.
+        kind: prose
+      - path: skills/design/SKILL.md
+        why: >-
+          The salvage step and the "impact before archiving" rule moved here in the
+          2026-08-21 split. state.mjs is what makes declaring the archival act, so a change
+          to that model must reach the skill that tells someone when to declare.
+        kind: prose
+  lib/discovery.mjs:
+    propagates_to:
+      - path: lib/config.mjs
+        why: >-
+          discovery calls isSkipped() and the shipped skipDirs/skipGlobs defaults live there.
+          propagate duplicated its ignore list across four files and they drifted; this edge
+          exists so that cannot happen here.
+        kind: code

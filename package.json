@@ -1,0 +1,9 @@
+{
+  "name": "curate-docs",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Markdown doc lifecycle: citation graph, orphan/staleness triage, declared state.",
+  "dependencies": { "yaml": "^2.4.0" },
+  "scripts": { "test": "node --test 'tests/*.test.mjs'" }
+}
