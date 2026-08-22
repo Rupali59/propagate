@@ -1,6 +1,6 @@
 {
   "name": "claude-propagate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "Use when a change to one file needs to reach files that must move with it \u2014 across branches, worktrees, or repos. Declares those couplings in a sidecar, derives drift from content on demand, and records every verification in an append-only ledger. Never edits a downstream; it tells a human.",
