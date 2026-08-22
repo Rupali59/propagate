@@ -1133,6 +1133,7 @@ async function doctor() {
   // read as broken. It becomes worth escalating only once someone loads it.
   try {
     const { MONITOR_LOG } = await import("./lib/report/monitor.mjs");
+    const { MONITOR_PLIST_PATH } = await import("./lib/core/plist.mjs");
     if (!existsSync(MONITOR_LOG)) {
       info("monitor", "never run — no ~/.propagate/monitor.log (expected until `monitor --install` is armed)");
     } else {
@@ -1144,6 +1145,61 @@ async function doctor() {
         "monitor",
         `${runs.length} run(s), ${notified} that notified, ${errored} that could not look — last: ${last.slice(0, 80)}`,
       );
+
+      // ── FRESHNESS, which the line above cannot express ──────────────────
+      //
+      // Printing the last run's timestamp is not a liveness probe: three
+      // hours stale and two minutes fresh render identically, and on
+      // 2026-08-22 this section reported "all green" while the agent had
+      // been failing every 1800s for hours (docs/ISSUES.md N43). Both this
+      // file and docs/SYSTEMS.md already described that failure in prose —
+      // "a monitor that has silently died is indistinguishable from a quiet
+      // week without that log" — which is exactly the fluency
+      // rule:enforcement-watches-itself warns makes a hazard feel handled.
+      //
+      // Gated on the PLIST, not on the log, and that gate is what makes a
+      // check() safe here: the monitor is generated but not armed by
+      // default, so an unarmed one must stay informational forever. Only an
+      // ARMED monitor that ran and then went quiet is a failure.
+      const armed = existsSync(MONITOR_PLIST_PATH);
+      if (armed) {
+        // 3x the 1800s StartInterval. Generous on purpose: a laptop asleep
+        // through one or two intervals is normal, six hours of silence is
+        // not.
+        const STALE_AFTER_MS = 3 * 1800 * 1000;
+        const stamp = Date.parse((last.match(/^\S+/) || [""])[0]);
+        const ageMs = Number.isNaN(stamp) ? null : Date.now() - stamp;
+
+        // monitor.log records only SUCCESSFUL runs. A crash goes to
+        // monitor.stderr.log, which nothing read — so a newer stderr is the
+        // ONLY on-disk tell that the agent is loaded and failing rather
+        // than merely idle. One mtime comparison; it would have surfaced
+        // N43 in seconds.
+        const stderrPath = MONITOR_LOG.replace(/monitor\.log$/, "monitor.stderr.log");
+        let crashing = false;
+        try {
+          crashing =
+            existsSync(stderrPath) &&
+            statSync(stderrPath).mtimeMs > statSync(MONITOR_LOG).mtimeMs;
+        } catch {
+          /* an unreadable stderr is not itself a monitor failure */
+        }
+
+        if (ageMs === null) {
+          check("monitor is running on schedule", false, `last log line carries no parseable timestamp: ${last.slice(0, 60)}`);
+        } else if (ageMs > STALE_AFTER_MS || crashing) {
+          const mins = Math.round(ageMs / 60000);
+          check(
+            "monitor is running on schedule",
+            false,
+            `armed but last successful run was ${mins} min ago (expected every 30 min)` +
+              (crashing ? `; monitor.stderr.log is NEWER than monitor.log — it is loaded and CRASHING` : "") +
+              `. Disarm with \`launchctl bootout gui/$(id -u)/${"com.tathya.propagate.monitor"}\` if this is deliberate.`,
+          );
+        } else {
+          check("monitor is running on schedule", true, `last run ${Math.round(ageMs / 60000)} min ago`);
+        }
+      }
     }
   } catch (err) {
     // info, not check: adding a check() label means adding a failing-case test

@@ -36,6 +36,9 @@ async function makeWorkspace(lines) {
   return { root, jsonlPath };
 }
 
+/** Strip ANSI so assertions match the check line, not its colour codes. */
+const strip = (t) => t.replace(/\x1B\[[0-9;]*m/g, "");
+
 function driftLine(id, overrides = {}) {
   return JSON.stringify({
     type: "drift",
@@ -409,4 +412,126 @@ test("decisionsAttributionReport: empty file is not allZero (no entries, not a b
   assert.equal(entries.length, 0);
   assert.equal(zero.length, 0);
   assert.equal(allZero, false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// The monitor liveness probe must be able to FAIL.
+//
+// Until 2026-08-22 it was `info(...)`, never `check(...)`, and it printed
+// the last run's timestamp WITHOUT comparing it to now — so a monitor three
+// hours dead on a 30-minute interval rendered identically to one that ran
+// two minutes ago. Both `cli.mjs` and `docs/SYSTEMS.md` described this
+// failure in prose; neither detected it. Measured 2026-08-22: the agent had
+// been failing every 1800s for hours while `doctor` printed "all green".
+//
+// The three-state discipline is preserved and is why the plist gates this:
+// the monitor is GENERATED but not ARMED by default, so "no log" and "no
+// plist" must stay informational or every fresh install fails forever. Only
+// an ARMED monitor (plist on disk) that has run and then gone quiet is a
+// failure.
+// ─────────────────────────────────────────────────────────────────────────
+
+const MONITOR_LABEL_FOR_TEST = "com.tathya.propagate.monitor";
+
+/** Seed a monitor.log whose last line is `ageMs` old, in the scoped state dir. */
+async function seedMonitorLog(stateDir, ageMs) {
+  const ts = new Date(Date.now() - ageMs).toISOString();
+  await writeFile(
+    path.join(stateDir, "monitor.log"),
+    `${ts} ran=1 rows=12 actionable=0 notified=0 suppressed=0 ms=800\n`,
+    "utf8",
+  );
+}
+
+/** Put a monitor plist in the scoped dir — PLIST_DIR follows STATE_DIR when scoped. */
+async function armMonitor(stateDir) {
+  await writeFile(path.join(stateDir, `${MONITOR_LABEL_FOR_TEST}.plist`), "<plist/>\n", "utf8");
+}
+
+test("doctor FAILS when an ARMED monitor has gone quiet, and names how long", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    await armMonitor(root);
+    await seedMonitorLog(root, 6 * 60 * 60 * 1000); // 6h, against a 30m interval
+    const result = runDoctor(root);
+    const out = strip(result.stdout + result.stderr);
+    // Assert the CHECK LINE, never the process exit code: this fixture fails
+    // doctor for unrelated reasons (makeWorkspace writes no ledger .md), so
+    // a status assertion here would pass whether or not the probe fired.
+    assert.match(out, /✗ monitor is running on schedule/, `probe must fail:\n${out}`);
+    assert.match(
+      out,
+      /✗ monitor is running on schedule[^\n]*\d/,
+      "the failure must quantify the staleness on its own line, not just assert it",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor PASSES the monitor check when an armed monitor ran recently", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    await armMonitor(root);
+    await seedMonitorLog(root, 60 * 1000); // one minute ago
+    const result = runDoctor(root);
+    const out = strip(result.stdout + result.stderr);
+    assert.doesNotMatch(
+      out,
+      /✗ monitor is running on schedule/,
+      `a fresh monitor must not be reported stale:\n${out}`,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor names a CRASHING monitor — stderr newer than the log is the only tell", async () => {
+  // monitor.log records only SUCCESSFUL runs; a crash goes to
+  // monitor.stderr.log, which nothing read. That one mtime comparison is
+  // what would have surfaced N43 in seconds instead of hours.
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    await armMonitor(root);
+    await seedMonitorLog(root, 6 * 60 * 60 * 1000);
+    await writeFile(path.join(root, "monitor.stderr.log"), "Error: Cannot find module\n", "utf8");
+    const result = runDoctor(root);
+    const out = strip(result.stdout + result.stderr);
+    assert.match(out, /✗ monitor is running on schedule/);
+    assert.match(
+      out,
+      /✗ monitor is running on schedule[^\n]*stderr/i,
+      "a crashing monitor must be distinguishable from a merely quiet one, on the check line",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor does NOT fail a stale log when the monitor is not armed — disarmed is not broken", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    await seedMonitorLog(root, 6 * 60 * 60 * 1000); // stale, but no plist
+    const result = runDoctor(root);
+    const out = strip(result.stdout + result.stderr);
+    assert.doesNotMatch(
+      out,
+      /✗ monitor is running on schedule/,
+      `an unarmed monitor must never be reported as a failure:\n${out}`,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor treats a never-run monitor as informational, so a fresh install stays green", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    const result = runDoctor(root); // no log, no plist
+    const out = strip(result.stdout + result.stderr);
+    assert.doesNotMatch(out, /✗ monitor is running on schedule/, `a fresh install must not fail here:\n${out}`);
+    assert.match(out, /never run/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
