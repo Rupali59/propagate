@@ -833,6 +833,15 @@ test("readEvents: an old 11-key event (verbatim from the live store, less the re
     assert.equal("observed_on_branch" in event, false);
     assert.equal("observed_dirty" in event, false);
     assert.equal("by_kind" in event, false);
+    // The ref pair (2026-08-22) is the same story: ABSENT on every one of
+    // the 1,912 events minted before it, and absent must stay absent.
+    // validateEvent requires it on APPEND; readEvents must never fabricate
+    // it on read, because "not recorded" and "read at the working tree" are
+    // different facts about where this content came from.
+    assert.equal("downstream_on_ref" in event, false);
+    assert.equal("downstream_at_commit" in event, false);
+    assert.equal("downstream_on_branch" in event, false);
+    assert.equal("downstream_dirty" in event, false);
     // Still folds: the pinning lookup reconcile() relies on (edge_id +
     // both content ids) still resolves correctly off this event.
     assert.equal(out.hasPair, true, "the legacy event must still participate in knownGoodPairs' fold");

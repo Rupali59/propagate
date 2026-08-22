@@ -256,3 +256,128 @@ test("resolveProvenance: an explicit ref bypasses ref resolution but position is
   assert.equal(out.observed_on_branch, "main", "position resolution reads the CURRENT repo state, independent of the explicit ref");
   assert.equal(out.by_kind, "bootstrap");
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// The downstream side — an edge has TWO sides and an event must name the
+// ref, commit, branch and dirty-state of both.
+//
+// Until 2026-08-22 `resolveProvenance` read `row.source` only, while the
+// payload built beside it wrote BOTH `source_content` and
+// `downstream_content`. For the ~13% of edges whose sides live in
+// different repos with independent branch lines, the downstream hash was
+// taken somewhere the ledger could not name.
+//
+// The load-bearing case is the two-repo one: a fixture where both sides
+// resolve to the same branch cannot tell a working pair apart from a
+// scalar copied twice.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("resolveProvenance: the two sides resolve INDEPENDENTLY — different repos, different branches", async () => {
+  const srcRepo = await makeTempRepo("provenance-src-");
+  const srcPath = path.join(srcRepo, "src.txt");
+  await writeFile(srcPath, "source\n");
+  git(["add", "."], srcRepo);
+  git(["commit", "-q", "-m", "src initial"], srcRepo);
+  const srcSha = git(["rev-parse", "HEAD"], srcRepo);
+
+  const dsRepo = await makeTempRepo("provenance-ds-");
+  git(["checkout", "-q", "-b", "production"], dsRepo);
+  const dsPath = path.join(dsRepo, "doc.md");
+  await writeFile(dsPath, "downstream\n");
+  git(["add", "."], dsRepo);
+  git(["commit", "-q", "-m", "ds initial"], dsRepo);
+  const dsSha = git(["rev-parse", "HEAD"], dsRepo);
+
+  assert.notEqual(srcSha, dsSha, "fixture guard: the two repos must have different HEADs");
+
+  const row = {
+    source: { path: srcPath, ref: null },
+    downstream: { path: dsPath, ref: null },
+  };
+  const out = resolveProvenance(row, "human");
+
+  assert.equal(out.observed_on_branch, "main");
+  assert.equal(out.observed_at_commit, srcSha);
+  assert.equal(out.downstream_on_branch, "production");
+  assert.equal(out.downstream_at_commit, dsSha);
+  assert.notEqual(
+    out.observed_at_commit,
+    out.downstream_at_commit,
+    "the pair must be able to DIFFER — equal values here would also pass if one side were copied twice",
+  );
+  assert.equal(out.downstream_on_ref, "working-tree");
+  assert.equal(out.downstream_dirty, false);
+});
+
+test("resolveProvenance: an explicit downstream ref is returned as-is, independent of the source ref", async () => {
+  const repo = await makeTempRepo();
+  const filePath = path.join(repo, "src.txt");
+  await writeFile(filePath, "hello\n");
+  git(["add", "."], repo);
+  git(["commit", "-q", "-m", "initial"], repo);
+
+  const row = {
+    source: { path: filePath, ref: "release/2026-08" },
+    downstream: { path: filePath, ref: "production" },
+  };
+  const out = resolveProvenance(row, "human");
+
+  assert.equal(out.observed_on_ref, "release/2026-08");
+  assert.equal(out.downstream_on_ref, "production");
+});
+
+test("resolveProvenance: a failed downstream lookup is null plus an error, and does NOT damage the source side", async () => {
+  const goodRepo = await makeTempRepo("provenance-good-");
+  const goodPath = path.join(goodRepo, "src.txt");
+  await writeFile(goodPath, "hello\n");
+  git(["add", "."], goodRepo);
+  git(["commit", "-q", "-m", "initial"], goodRepo);
+
+  // A repo with no commits yet is a real, reproducible way to make
+  // getGitContext return {context: null, error: <non-empty>} — same
+  // construction the source-side failure test above uses.
+  const emptyRepo = await makeTempRepo("provenance-empty-");
+  const emptyPath = path.join(emptyRepo, "doc.md");
+  await writeFile(emptyPath, "no commits yet\n");
+
+  const row = {
+    source: { path: goodPath, ref: null },
+    downstream: { path: emptyPath, ref: null },
+  };
+  const out = resolveProvenance(row, "human");
+
+  assert.equal(out.downstream_on_ref, null, "a failed lookup must never read as a successful working-tree read");
+  assert.ok(
+    typeof out.downstream_on_ref_error === "string" && out.downstream_on_ref_error.length > 0,
+    "a null downstream ref must be attributable",
+  );
+  assert.equal(out.observed_on_ref, "working-tree", "one side failing must not contaminate the other");
+  assert.equal(out.observed_on_branch, "main");
+});
+
+test("resolveProvenance: a clean row carries no downstream error keys", async () => {
+  const repo = await makeTempRepo();
+  const srcPath = path.join(repo, "src.txt");
+  const dsPath = path.join(repo, "doc.md");
+  await writeFile(srcPath, "hello\n");
+  await writeFile(dsPath, "world\n");
+  git(["add", "."], repo);
+  git(["commit", "-q", "-m", "initial"], repo);
+
+  const out = resolveProvenance(
+    { source: { path: srcPath, ref: null }, downstream: { path: dsPath, ref: null } },
+    "human",
+  );
+  assert.ok(!("downstream_on_ref_error" in out), "no error key on a clean resolution");
+  assert.ok(!("downstream_position_error" in out), "no error key on a clean resolution");
+});
+
+test("resolveProvenance: a row with no downstream at all still emits the field, never omits it", () => {
+  // UNMATCHED-glob rows have `downstream.path === null`. The field must
+  // still be present: an absent key means "this event predates the pair",
+  // which is a different fact from "there was nothing to resolve".
+  const out = resolveProvenance({ source: { path: undefined, ref: null }, downstream: { path: null, ref: null } }, "human");
+  assert.ok("downstream_on_ref" in out);
+  assert.equal(out.downstream_on_ref, "working-tree");
+  assert.equal(out.downstream_at_commit, null);
+});

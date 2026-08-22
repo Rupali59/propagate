@@ -889,6 +889,14 @@ scanning search roots for the artifact. Here there is exactly one path, one work
 owner — the divergence lives inside git, not on the filesystem, so no amount of scanning
 finds it.
 
+**Progress 2026-08-22 — option 3, half.** `reconcile` and `verify` now accept
+`--ref <ref>` / `--source-ref <ref>` / `--downstream-ref <ref>`, so a whole-project answer
+CAN be derived for a named branch regardless of what is checked out, and the resulting
+event records the ref of each side independently (`docs/DATA_MODEL.md` §10). What is still
+missing is the part this issue is really about: **nothing yet compares a ledger ACROSS
+refs, and no command warns that HEAD is not the repo's default branch.** Options 1 and 2
+below are untouched, and option 1 remains the one-line honesty fix that should not wait.
+
 **Options, in ascending cost:**
 1. **Qualify the output.** When `HEAD` is not the repo's default branch, append the branch
    to the status line: `SSJK-mb [r1-dashboard-rebuild] ✓ no open drift events`. Cheapest,
@@ -1710,3 +1718,141 @@ which is the conflation `rule:state-and-decisions` names: *"a file that is half
 machine-refreshed and half hand-written reads as one thing."*
 
 **Unresolved and needed before the branch-node view reaches a human.**
+
+### N43 · The plugin cutover killed both launchd agents, and nothing noticed for two hours — **S2** — **OPEN**
+
+**2026-08-22.** Both propagate launchd agents invoke a path the cutover deleted:
+
+| Agent | `ProgramArguments[1]` | Cadence |
+|---|---|---|
+| `com.tathya.propagate.monitor` | `~/.claude/skills/propagate/cli.mjs` | `StartInterval` 1800 |
+| `com.tathya.propagate.digest` | `~/.claude/skills/propagate/digest.mjs` | scheduled |
+
+That directory was one of the six `~/.claude/skills` symlinks removed when
+`propagate@tathya` was installed. Both have failed on every fire since:
+
+```
+Error: Cannot find module '/Users/rupali.b/.claude/skills/propagate/cli.mjs'
+  code: 'MODULE_NOT_FOUND'
+```
+
+`~/.propagate/monitor.stderr.log` grew to 32 KB of identical stack traces, last
+appended 16:05 — roughly two hours of a half-hourly job failing. **`monitor.log`
+and `monitor.stdout.log` both stopped at 13:36**, which is the tell: the
+component's own logs going quiet is indistinguishable from a quiet period, and
+the only file that knew was stderr, which nothing reads.
+
+**How it was found:** by chance, running `ls -la ~/.propagate/` while chasing an
+unrelated line-count discrepancy in the event store. Not by any probe.
+
+**Why this is `rule:enforcement-watches-itself`, again.** The cutover was careful
+about the hooks — it moved all four registrations to `${CLAUDE_PLUGIN_ROOT}` and
+captured the originals at `~/.propagate/uninstall-capture-2026-08-22.json` so
+they could be restored. Nothing enumerated the OTHER referrers of the directory
+it was deleting. The uninstall capture answers "what did I unregister", never
+"what else pointed here".
+
+**`docs/SYSTEMS.md` is where a liveness probe per background component is
+supposed to live.** Either these entries have no probe, or the probe has never
+run — the same defect the file exists to prevent. Fix that before fixing the
+plists, or the next cutover repeats this exactly.
+
+**The repoint is a real decision, not a typo fix:**
+- `~/.claude/plugins/cache/tathya/propagate/<version>/` is version-keyed, so a
+  plist pointing there breaks on every version bump — the same brittleness in a
+  new place.
+- `~/Documents/GitHub/propagate/` works and never moves, but makes two scheduled
+  jobs depend on a dev working tree, mid-edit and mid-rebase.
+
+Neither is obviously right. **Do not repoint without deciding which**, and record
+the choice in `docs/DECISIONS.md`.
+
+**Related:** the digest agent is the one `rule:safety-flag-needs-a-test` records
+for `--dry-run` running an armed deletion (G22). It has been inert since the
+cutover, which is accidentally safe and still wrong.
+
+### N44 · The RED phase of a validator test appended two events to the production ledger — **S2** — **RESOLVED 2026-08-22**
+
+Full hazard, signals and fix: `docs/GOTCHAS.md` **G56**. Recorded here for the ledger
+count, not restated.
+
+**What happened.** Two tests asserting `validateEvent` rejects an event missing
+`observed_on_ref` / `downstream_on_ref` were written before the rule existed — correct
+RED-first order — and run with `node --test tests/watcher/events.test.mjs`, to watch one
+file go red. With no rule to reject them **both events were written**, and only then did the
+assertion fail. `ℹ fail 2` was RED for exactly the stated reason *and* a silent write.
+
+**The mechanism is the launcher, not the assertion** (corrected 2026-08-22, hours after this
+entry was first written — the original blamed `assert.rejects(appendEvent(...))` in general,
+which is wrong and would have taught the wrong lesson). The store is scoped by the npm
+script, not by any test:
+
+```json
+"test:propagate": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs'"
+```
+
+`npm test` is safe and always was — the full run half an hour later touched nothing.
+`node --test <file>` is not. The same tests are safe or unsafe depending only on how the
+process was launched, and **all eight test files that call `appendEvent` have this
+property**; two were hardened. Hazard, signals and fix: `docs/GOTCHAS.md` **G56**.
+
+**Store 1912 -> 1914**, noticed an hour later by accident. The two events carry
+`edge_id e717028e` / `node_id VipinKaushik:lib/pricing.ts` — fixture values matching **0**
+declared edges, so nothing was falsely closed and nothing is recoverable-but-wrong. They
+remain in the append-only store; **removing them is not proposed**, since the 2026-08-17
+precedent for a deliberate append-only violation existed only because that incident had
+falsely closed three real worklist items. This one closed nothing.
+
+**Fixed** by scoping both tests through `withScopedStore` + `runInSubprocess`, and by
+retargeting G56's trigger to fire on any `node --test` Bash command — verified against a real
+payload, and verified NOT to fire on `npm test`, which is the discrimination that makes it
+useful rather than noise. Verified by mutation: removing the validator rule reproduces the
+RED condition exactly — same two tests, same message — **with the store line count unchanged
+at 1914**. That count is the assertion that distinguishes the fixed version from the one that
+"worked".
+
+**Residual, deliberately not fixed:** the safety property lives in a `package.json` string
+that no test asserts. A future edit to `test:propagate` could drop the scoping and every
+suite would still pass.
+
+### N45 · Two gotchas documented as auto-firing cannot fire, and `--selftest` passes anyway — **S2** — **OPEN**
+
+**2026-08-22.** `hooks/gotcha-guard.mjs:189` matches `Edit`/`Write`/`NotebookEdit` against
+**`input.file_path` only** — never the content being written. Only `Bash` exposes a content
+string (`input.command`). So a trigger describing a *code pattern* can never fire on the
+edit that introduces it.
+
+Measured across both `GOTCHAS.md` files — 10 entries carry a `**Trigger:**`:
+
+| Fires via | Count | Examples |
+|---|---|---|
+| `Bash` (command text) | 4 | `npm install`, `git push origin production`, `node cli.mjs bootstrap --apply` |
+| `Edit`/`Write` (file path) | 3 | `(site)/layout.tsx`, `tests/watcher/events.test.mjs` |
+| **Neither — inert** | **3** | `toLocaleString(undefined`, `unstable_cache`, `const elapsedMs = Date.now() - start` |
+
+**Two of the three inert ones are marked ⚡ in `Vipin Kaushik/CLAUDE.md`**, whose text says
+those entries fire automatically and are "put in front of you at the moment of risk". G4
+(hydration bomb) and G6 (`unstable_cache` serialises a `Date`) do not. Verified by feeding
+the guard a real `Edit` payload whose `new_string` contains each pattern: empty output for
+both, while a `Bash` control on the same tree fired a different entry — so the harness
+works and these two specifically cannot match.
+
+**`--selftest` reports success throughout**, because it asserts each trigger matches its own
+`**Fires on:**` **literal** — never that the literal can ever BE a subject the guard is
+handed. A check that validates a regex against a string of its author's choosing cannot
+detect that the string never occurs in production. `rule:discernment-checks` §1, and
+`rule:enforcement-watches-itself`'s exact corollary: the selftest is the mechanism that was
+supposed to make this impossible.
+
+**Two candidate fixes, and they are not equivalent:**
+1. **Extend `subjectOf`** to include `new_string`/`content` for Edit/Write. Makes
+   code-pattern triggers work as their authors clearly assumed. Cost: every entry's trigger
+   now matches against far more text, so false positives rise and existing path-triggers are
+   unaffected only by luck.
+2. **Extend `--selftest`** to assert each `Fires on:` literal is reachable — i.e. that it is
+   a plausible `file_path` or a plausible `command` for the tool classes `subjectOf`
+   handles — and fail the run for the ones that are not. Does not make G4/G6 work; makes
+   their deadness **loud** rather than silent.
+
+(2) is the one that matches this repo's stated posture — make "found nothing" and "looked at
+nothing" different outputs — and should land first regardless of whether (1) does.

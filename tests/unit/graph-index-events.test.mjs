@@ -55,6 +55,7 @@ async function buildFixtureIndex(overrides = {}) {
       reason: "test fixture",
       by: "rupali",
       observed_on_ref: "production",
+      downstream_on_ref: "main",
       source_content: "s".repeat(64),
       downstream_content: "d".repeat(64),
       ...overrides,
@@ -112,6 +113,16 @@ test("graph-index: positional/provenance fields survive the round trip", async (
     assert.equal(row.observed_on_ref, "production");
     assert.equal(row.source_content, "s".repeat(64));
     assert.equal(row.downstream_content, "d".repeat(64));
+    // The two ref columns must be INDEPENDENT, not one value written twice.
+    // The fixture deliberately uses different refs per side; asserting only
+    // that downstream_on_ref is non-null would pass just as happily if the
+    // ingest mapping had aliased it to the source's.
+    assert.equal(row.downstream_on_ref, "main");
+    assert.notEqual(
+      row.downstream_on_ref,
+      row.observed_on_ref,
+      "an edge has two ends; the columns must carry the ref of the end they name",
+    );
   } finally {
     await cleanup(ctx);
   }
@@ -173,6 +184,7 @@ test("graph-index: v_edge_history exposes event_id and provenance, not just edge
     assert.notEqual(row.event_id, null, "v_edge_history must expose a non-null event_id to join back to a specific event");
     assert.equal(row.by, "rupali");
     assert.equal(row.observed_on_ref, "production");
+    assert.equal(row.downstream_on_ref, "main", "v_edge_history must expose BOTH ends' refs, not just the source's");
   } finally {
     await cleanup(ctx);
   }
@@ -199,6 +211,7 @@ test("graph-index: byte-identical rebuild is preserved after the schema change",
       reason: "test fixture",
       by: "rupali",
       observed_on_ref: "production",
+      downstream_on_ref: "main",
       source_content: "s".repeat(64),
       downstream_content: "d".repeat(64),
     };

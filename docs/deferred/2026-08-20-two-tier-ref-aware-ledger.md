@@ -31,8 +31,16 @@ Scale it rests on: 111 branches, 34 worktree checkouts, 32 repos; 1347 events; 7
 
 1. **The store is already unified** — one file, 1347 events, all workspaces. Nothing to
    centralize; only to version.
-2. **The ref model is stubbed, not absent** — `observed_on_ref` on every event,
-   `source.ref`/`downstream.ref` on every row, all inert.
+2. ~~**The ref model is stubbed, not absent** — `observed_on_ref` on every event,
+   `source.ref`/`downstream.ref` on every row, all inert.~~ **Half closed 2026-08-22.**
+   The premise understated the problem: the row model carried a ref PER SIDE while the
+   event model carried a single scalar taken from the source, so the two were not merely
+   inert, they were different shapes. Events now carry `downstream_on_ref` and its three
+   position siblings (`validateEvent` requires both refs as present keys), and
+   `reconcile`/`verify` take `--ref` / `--source-ref` / `--downstream-ref`, wiring the
+   `refs: {source, downstream}` parameter that had existed unused since v2. Field set and
+   the absent/null/`"working-tree"` trichotomy: `docs/DATA_MODEL.md` §10. Still inert:
+   `--all-refs`, blocked by N41.
 3. **Reading a ref never checks out.**
 4. ~~The ledger should live outside anything that forks.~~ **Revised twice.** First to
    "sharding makes forking non-fatal". Then corrected by Rupali: **union merge solves
@@ -71,7 +79,7 @@ first**.
 
 | # | Issue | Sev/conf | Decision |
 |---|---|---|---|
-| **D3** | `observed_on_ref` must distinguish a failed lookup from a real working-tree read. `row.source.ref \|\| "working-tree"` written verbatim at three call sites | P1, 9/10 | **Distinguish, and centralize the rule.** One helper: resolved ref as-is, genuine working tree as `"working-tree"`, failed resolution as `null` plus the `error` `resolveSide` already returns |
+| **D3 — DONE** | `observed_on_ref` must distinguish a failed lookup from a real working-tree read. `row.source.ref \|\| "working-tree"` written verbatim at three call sites | P1, 9/10 | **Distinguish, and centralize the rule.** One helper: resolved ref as-is, genuine working tree as `"working-tree"`, failed resolution as `null` plus the `error` `resolveSide` already returns |
 | **D4** | Which tier records an edge that crosses tiers? Measured: **782 edges inside one tier, 11 crossing**, all global→workspace | P1, 9/10 | **The tier that owns the SOURCE owns the edge.** One writer per edge, no duplication; the workspace picture is a documented two-file read. *(Presentation remains open.)* |
 | **D5** | `CONTESTED` would be derived from a different input than every other state | P2, 8/10 | **`CONTESTED` becomes a flag on the row, not a ninth state.** The edge keeps its real content state and carries `contested: true` plus the conflicting dispositions; `graph` and `drain` opt in |
 | **D6** | `sync` puts a network operation behind an append that currently cannot fail; two launchd jobs run unattended | P1, 9/10 | **Append stays local and unconditional; `sync` separate and deferred**, safe to re-run, reports what it could not push rather than dropping it |

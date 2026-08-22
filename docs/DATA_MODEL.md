@@ -521,6 +521,79 @@ This is the evidence behind §6's causal claim, not a separate finding.
 
 ---
 
+## 10. The v2 event record
+
+**Added 2026-08-22.** Until this section existed the v2 event shape was
+documented in **no** document — §1-§9 above describe the v1 ledger census, and
+nothing under `docs/` or `propagation/docs/` mentioned `observed_at_commit` at
+all. `validateEvent` (`lib/edges/events.mjs`) was the sole authority for a
+record that four modules construct and three read. The sidecar edge
+`lib/edges/events.mjs -> docs/DATA_MODEL.md` was declared in advance for exactly
+this gap; changing the validator now fires drift back at this section.
+
+One event is one **observation of one edge at one moment**. It is never
+rewritten — the store is append-only, and a mistake is corrected by appending a
+new event, never by editing an old one.
+
+### Fields
+
+| Field | Required | Meaning |
+|---|---|---|
+| `event_id` | stamped | ULID, minted by `appendEvent` |
+| `ts` | stamped | ISO-8601, minted by `appendEvent` |
+| `edge_id` | **yes** | `sha8(node_id, toNodeId(downstream), why)` |
+| `node_id` | **yes** | `basename(repoRoot):relPath` of the source |
+| `disposition` | **yes** | one of `DISPOSITIONS` |
+| `reason` | `wontfix`, `baselined` | free text; `baselined` must name its evidence |
+| `by` / `by_kind` | `by_kind` on new events | actor, and which of `BY_KINDS` it was |
+| `source_content` | pinning only | sha256 of the source's bytes |
+| `downstream_content` | pinning only | sha256 of the downstream's bytes |
+| `observed_on_ref` | **yes** | the ref the **source** was read at |
+| `observed_at_commit` / `observed_on_branch` / `observed_dirty` | new events | the source's git position |
+| `downstream_on_ref` | **yes** | the ref the **downstream** was read at |
+| `downstream_at_commit` / `downstream_on_branch` / `downstream_dirty` | new events | the downstream's git position |
+
+"Pinning" means every disposition except `deferred`, which records that someone
+**looked** and must not re-pin. Note `deferred` still carries both refs: where
+you looked is a fact even when you pinned nothing.
+
+### Why the ref is a pair
+
+An edge has two ends, and for **13.2% of declared edges those ends are in
+different repos with independent branch lines** — there is no single ref such an
+edge was "observed at". Before 2026-08-22 the record held two content hashes and
+one ref, so the downstream hash of every cross-repo edge was taken somewhere the
+ledger could not name.
+
+The source-side fields keep their unprefixed names rather than becoming
+`source_*`. That asymmetry is deliberate: renaming them would orphan the 1,912
+events already in the store, and the store cannot be rewritten. **Unprefixed
+means the source end.**
+
+### Absent, null, and `"working-tree"` are three different facts
+
+This is the part to get right when reading the store:
+
+| Value | Means |
+|---|---|
+| field **absent** | an event minted before that field's lane landed. It does not know. |
+| `null` | resolution was attempted and **genuinely failed** — see the adjacent `*_error` field |
+| `"working-tree"` | an honest read of the working tree |
+
+`validateEvent` therefore checks the two ref fields for **key presence**, not
+truthiness — unlike the content checks beside it, where a falsy hash is always
+wrong. `null` is a legal, meaningful value; omission is not. A reader that
+collapses these (`event.downstream_on_ref || "working-tree"`) reintroduces
+exactly the defect `lib/edges/provenance.mjs` was written to remove — see that
+module's header for the three call sites that did it first.
+
+**Nothing is backfilled.** All 1,912 events minted before 2026-08-22 keep their
+absent downstream fields, because their downstream ref is genuinely unknown and
+inventing `"working-tree"` would fabricate the evidence the field exists to
+record.
+
+---
+
 ## What this document does not do
 
 No recommendations, no fixes, no roadmap — that's a later pass (see the plan

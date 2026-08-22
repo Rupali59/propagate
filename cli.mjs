@@ -3320,6 +3320,62 @@ async function recordReconcileRun(workspaces, stats) {
   }
 }
 
+/**
+ * Parse the ref-pair flags shared by `reconcile` and `verify`.
+ *
+ * `reconcile()` has ALWAYS destructured `opts.refs = {source, downstream}`
+ * (reconcile.mjs:250-252) and threaded a ref per side into every row.
+ * Nothing ever SET it, so all 1,912 events in the store read "working-tree"
+ * on both ends. This is the flag half that connects the two.
+ *
+ * ONE definition, two commands. `verify` needs it as much as `reconcile`
+ * does — a ref that can be reconciled but never verified could never reach
+ * an event, so the pair would be unobservable in the store it exists for.
+ * lib/edges/provenance.mjs's header records what happened the last time
+ * this kind of rule was written out at each call site instead: three copies
+ * of `row.source.ref || "working-tree"`, collapsing a failed lookup into a
+ * successful read.
+ *
+ * Two flags rather than one, because the sides are genuinely independent:
+ * ~13% of declared edges join files in different repos with unrelated
+ * branch lines, and "the ref" is not something those edges have. `--ref` is
+ * the both-sides shorthand for the single-repo case and is REJECTED
+ * alongside the specific flags rather than silently losing to one of them.
+ *
+ * @param {string[]} args
+ * @returns {{source?: string, downstream?: string}}
+ */
+function parseRefFlags(args) {
+  const refArg = (flag) => {
+    const i = args.indexOf(flag);
+    if (i === -1) return null;
+    const v = args[i + 1];
+    if (!v || v.startsWith("--")) {
+      console.error(`${RED}error:${RESET} ${flag} requires a ref (got ${JSON.stringify(v ?? null)})`);
+      process.exit(2);
+    }
+    return v;
+  };
+  const bothRef = refArg("--ref");
+  let sourceRef = refArg("--source-ref");
+  let downstreamRef = refArg("--downstream-ref");
+  if (bothRef && (sourceRef || downstreamRef)) {
+    console.error(
+      `${RED}error:${RESET} --ref is shorthand for both sides; it cannot be combined with ` +
+        `--source-ref/--downstream-ref. Give the two explicitly instead.`,
+    );
+    process.exit(2);
+  }
+  if (bothRef) {
+    sourceRef = bothRef;
+    downstreamRef = bothRef;
+  }
+  const refs = {};
+  if (sourceRef) refs.source = sourceRef;
+  if (downstreamRef) refs.downstream = downstreamRef;
+  return refs;
+}
+
 async function reconcileCmd() {
   const args = process.argv.slice(3);
   const json = args.includes("--json");
@@ -3332,7 +3388,13 @@ async function reconcileCmd() {
     process.exit(2);
   }
 
+  const refs = parseRefFlags(args);
+
   if (inbound) {
+    if (refs.source || refs.downstream) {
+      console.error(`${RED}error:${RESET} --inbound does not take a ref yet (docs/ISSUES.md N25)`);
+      process.exit(2);
+    }
     await reconcileInbound({ json, groupBy });
     return;
   }
@@ -3340,7 +3402,7 @@ async function reconcileCmd() {
   const cur = currentWorkspace();
   const workspaces = showAll || !cur ? WORKSPACES : [cur];
 
-  const { rows, stats } = await reconcile(workspaces);
+  const { rows, stats } = await reconcile(workspaces, { refs });
   await recordReconcileRun(workspaces, stats);
   const { groups, ungrouped } = groupRows(rows, groupBy);
 
@@ -3410,7 +3472,10 @@ async function whyCmd() {
       ? `branch=${e.position.branch ?? "(detached)"} commit=${e.position.commit ? e.position.commit.slice(0, 8) : "?"}${e.position.dirty ? " [dirty]" : ""}`
       : `${DIM}${e.position.note}${RESET}`;
     console.log(`  ${e.ts}  ${BOLD}${e.disposition}${RESET}  ${where}`);
-    console.log(`    ${DIM}by=${e.by ?? "?"} by_kind=${e.by_kind ?? "(not recorded)"} ref=${e.observed_on_ref ?? "?"}${RESET}`);
+    console.log(
+      `    ${DIM}by=${e.by ?? "?"} by_kind=${e.by_kind ?? "(not recorded)"} ` +
+        `src-ref=${e.observed_on_ref ?? "?"} ds-ref=${e.downstream_on_ref ?? "(not recorded)"}${RESET}`,
+    );
     if (e.reason) console.log(`    ${e.reason}`);
     console.log();
   }
@@ -3935,7 +4000,7 @@ async function verifyCmd() {
   // to — a selector naming an edge in a different workspace must still
   // resolve, not silently miss.
   const workspaces = WORKSPACES;
-  const { rows } = await reconcile(workspaces);
+  const { rows } = await reconcile(workspaces, { refs: parseRefFlags(process.argv.slice(3)) });
   const selected = selectVerifyRows(rows, opts);
 
   if (selected.length === 0) {
@@ -5135,7 +5200,7 @@ if (_invokedDirectly) {
     await monitorCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
     process.exit(2);
   }
 }

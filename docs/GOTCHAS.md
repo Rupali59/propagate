@@ -974,3 +974,71 @@ looking at the same couplings. Anything else means you are about to create new o
 
 **Cost:** would have written 8 baselines against duplicate edges and doubled propagate's edge
 set. Caught by a diff, not by any check. Recorded as `docs/ISSUES.md` N40.
+
+### G56 · `node --test <file>` writes to the PRODUCTION ledger — only `npm test` scopes the store
+**Trigger:** `node\s+--test\s`
+**Fires on:** `node --test tests/watcher/events.test.mjs`
+
+**The store is scoped by the npm SCRIPT, not by the tests.**
+
+```json
+"test:propagate": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs'"
+```
+
+`EVENTS_DIR` is a module-level const resolved from `STATE_DIR` **at import time**
+(`lib/edges/events.mjs`), so it is fixed by the environment the process started with. Run
+`npm test` and every `appendEvent` lands in a tmpdir. Run `node --test tests/x.test.mjs`
+directly — to iterate on one file, which is the obvious thing to do — and the same calls
+target `~/.propagate/events/`. Nothing in the test files themselves prevents it.
+
+That is invisible for the many tests that only read. It bites the ones that write, and
+worst of all it bites `assert.rejects(appendEvent(...))`, which calls the live writer and
+relies on **validation** — not isolation — to stop the write. That is fine once the rule
+under test exists. It is not fine while you are writing it.
+
+**The trap is that RED looks correct.** On 2026-08-22 two new tests asserting
+`validateEvent` rejects an event missing `observed_on_ref` / `downstream_on_ref` were run
+before the rule was implemented — via `node --test tests/watcher/events.test.mjs`, to see
+them go red on one file. `appendEvent` accepted both, **appended them to
+`~/.propagate/events/2026-08.jsonl`**, and only then failed the assertion. The output read
+`ℹ fail 2` — RED, for exactly the stated reason — and the ledger had silently grown by two.
+The full `npm test` run half an hour later touched nothing, which is the confusing part:
+the same tests are safe or unsafe depending only on how the process was launched.
+
+The tell was a line count, noticed by accident an hour later while looking for something
+else: the store had gone 1912 -> 1914 with no `verify` run in between. Nothing reported it.
+Re-running the same file afterwards showed the store unchanged, because by then the rule
+existed and the writes were correctly refused — so the evidence disappears as soon as the
+feature lands.
+
+**Fix, in order.** First: **run `npm test`, not `node --test`.** If you must iterate on one
+file, pass the variable yourself —
+`PROPAGATE_STATE_DIR=$(mktemp -d) node --test tests/watcher/events.test.mjs`.
+
+Second, belt-and-braces for the tests that write: scope the store inside the test and assert
+on the message, never on the throw alone:
+
+```js
+await withScopedStore(async (stateDir) => {
+  const script = `… try { await appendEvent(…) } catch (err) { … } …`;
+  const out = runInSubprocess(script, { ...process.env, PROPAGATE_STATE_DIR: stateDir });
+  assert.equal(out.threw, true);
+  assert.match(out.message, /"downstream_on_ref"/);
+});
+```
+
+Then mutate the guard away and confirm the tests go red **while the store line count stays
+put** — that is the assertion that distinguishes this from the version that "worked".
+
+**A test proving a guard rejects something must never be the thing that runs unguarded
+against production.** Same family as `rule:safety-flag-needs-a-test`, one level up: there
+the flag failed to gate the write, here the *test for the gate* was the write.
+
+**The general form is worse than the instance.** The safety property lives in a string in
+`package.json` that no test asserts and no reader of the test files can see. Any of the
+eight test files that call `appendEvent` has this behaviour; only two were hardened.
+
+**Cost:** 2 junk events in an append-only store, permanently. Cheap only by luck —
+`edge_id e717028e` / `node_id VipinKaushik:lib/pricing.ts` are fixture values matching **0**
+declared edges, so nothing was falsely closed. The 2026-08-17 instance of the same family
+cost 11 spurious events and 3 real worklist items silently closed. Recorded as N44.

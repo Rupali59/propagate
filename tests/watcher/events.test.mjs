@@ -66,6 +66,7 @@ function baseEvent(overrides = {}) {
     reason: "updated the pricing table to match",
     by: "rupali",
     observed_on_ref: "production",
+    downstream_on_ref: "main",
     ...overrides,
   };
 }
@@ -247,6 +248,78 @@ test("throws when downstream_content is missing on a pinning disposition", async
   await assert.rejects(appendEvent(event), (err) => {
     assert.match(err.message, /"downstream_content"/);
     return true;
+  });
+});
+
+// ── the ref pair ─────────────────────────────────────────────────────────
+//
+// An event pins a pair of content hashes; it must name the ref each half
+// was observed at. Before 2026-08-22 it named only the source's, so the
+// downstream hash of a cross-repo edge was taken somewhere the ledger
+// could not identify.
+//
+// These check key PRESENCE, not truthiness, because `null` is a
+// MEANINGFUL value here (a genuine resolution failure, carrying its own
+// `*_error`) — unlike a content hash, where falsy is always wrong.
+
+// SCOPED, deliberately. `assert.rejects(appendEvent(...))` calls the REAL
+// appendEvent against the REAL store — EVENTS_DIR is a module-level const
+// resolved from STATE_DIR at import time. That is harmless once the rule
+// being tested exists, and NOT harmless during the RED phase: on
+// 2026-08-22 these two tests were written before the validator rule, so
+// appendEvent accepted both events, WROTE THEM TO THE PRODUCTION LEDGER,
+// and then failed its assertion — reading as "RED for the right reason"
+// while appending two junk events to an append-only store.
+//
+// A test asserting that a guard rejects something must never be the thing
+// that runs unguarded against production. Scope the store, and the RED
+// phase costs nothing. See docs/GOTCHAS.md.
+test("throws when downstream_on_ref is missing on a pinning disposition", async () => {
+  await withScopedStore(async (stateDir) => {
+    const event = baseEvent({ disposition: "propagated" });
+    delete event.downstream_on_ref;
+    const script = `
+      import { appendEvent } from ${JSON.stringify(EVENTS_LIB_PATH)};
+      try { await appendEvent(${JSON.stringify(event)}); console.log(JSON.stringify({ threw: false })); }
+      catch (err) { console.log(JSON.stringify({ threw: true, message: err.message })); }
+    `;
+    const out = runInSubprocess(script, { ...process.env, PROPAGATE_STATE_DIR: stateDir });
+    assert.equal(out.threw, true, "a pinning event with no downstream_on_ref must be rejected");
+    assert.match(out.message, /"downstream_on_ref"/);
+    assert.match(out.message, /propagated/);
+  });
+});
+
+test("throws when observed_on_ref is missing — the source half of the same pair", async () => {
+  await withScopedStore(async (stateDir) => {
+    const event = baseEvent({ disposition: "no-change-needed" });
+    delete event.observed_on_ref;
+    const script = `
+      import { appendEvent } from ${JSON.stringify(EVENTS_LIB_PATH)};
+      try { await appendEvent(${JSON.stringify(event)}); console.log(JSON.stringify({ threw: false })); }
+      catch (err) { console.log(JSON.stringify({ threw: true, message: err.message })); }
+    `;
+    const out = runInSubprocess(script, { ...process.env, PROPAGATE_STATE_DIR: stateDir });
+    assert.equal(out.threw, true, "an event with no observed_on_ref must be rejected");
+    assert.match(out.message, /"observed_on_ref"/);
+  });
+});
+
+test("a NULL downstream_on_ref is accepted — a failed lookup is a fact, not an omission", async () => {
+  await withScopedStore(async (stateDir) => {
+    const event = baseEvent({
+      disposition: "propagated",
+      downstream_on_ref: null,
+      downstream_on_ref_error: "git rev-parse failed: not a git repository",
+    });
+    const script = `
+      import { appendEvent } from ${JSON.stringify(EVENTS_LIB_PATH)};
+      const stamped = await appendEvent(${JSON.stringify(event)});
+      console.log(JSON.stringify(stamped));
+    `;
+    const stamped = runInSubprocess(script, { ...process.env, PROPAGATE_STATE_DIR: stateDir });
+    assert.equal(stamped.downstream_on_ref, null);
+    assert.match(stamped.downstream_on_ref_error, /not a git repository/);
   });
 });
 

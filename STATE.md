@@ -7,27 +7,62 @@ are **done and pushed**. What follows is what is left, in the order it should be
 
 ### 1. Verify plugin hook DISPATCH in a fresh session — BLOCKING for confidence, 5 min
 
-The four hook registrations were verified as *commands* (each runs, `doc-authority` exits 2 on
+The four hook registrations were verified as *commands* (each runs; `doc-authority` exits 2 on
 a counsel-governed file from the plugin cache). What could NOT be verified in the session that
 installed them is whether Claude Code actually **dispatches** them, because they were
 registered mid-session. `~/.claude/settings.json` no longer carries the fallback registrations,
 so if dispatch does not work, the three hooks are silently inert.
 
-**Check:** in a new session, edit a file governed at `authority: counsel` (e.g.
-`Vipin Kaushik/VipinKaushik/app/(site)/privacy/page.tsx`) and confirm it BLOCKS. Also confirm
-rules are injected once, not twice.
+**Measured 2026-08-22, post-compact, SAME process — NOT dispatching, and the absence is
+attributable.** A `/compact` fires `SessionStart:compact` but does not reload plugin config, so
+this is the predicted result for a plugin installed mid-session, *not* evidence of a defect. It
+is recorded because "did not fire" and "was never loaded" are different facts and only one of
+them is a bug. What the CLI *does* report: `propagate@tathya` enabled in `settings.json`,
+`plugin details` → `Hooks (2) SessionStart, PreToolUse`. **Still open. Needs a real process
+restart.**
+
+**Check — three observables, one per registration block.** Do not phrase this as "the hooks
+fire": there are four registrations across three blocks, and a single-observable check passes
+green while one matcher is dead (this is why `hooks.json` opens with a comment counting
+registrations rather than hooks).
+
+| Block | Probe | Expected — exact string |
+|---|---|---|
+| `SessionStart` | start a new session | context contains `## Canonical rules (16 loaded from ~/.claude/rules/)` |
+| `PreToolUse` / `Bash` | run any command containing `PROPAGATE_SEARCH_ROOTS=` | systemMessage `gotcha · G55 · Narrowing PROPAGATE_SEARCH_ROOTS …` |
+| `PreToolUse` / `Edit\|Write` | edit a file at `authority: counsel` (e.g. `Vipin Kaushik/VipinKaushik/app/(site)/privacy/page.tsx`) | the edit is BLOCKED (exit 2) |
+
+All three were **absent** on 2026-08-22 in-process. Rules are still reaching context, but via
+CLAUDE.md-style file injection — *not* via the loader, whose heading above is its fingerprint.
+Do not read "the rules are loaded" as "SessionStart dispatched"; that is the instrument
+answering a wider question than the one asked (`rule:discernment-checks` §4).
+
+Also confirm rules are injected **once**, not twice.
 **Restore if broken:** `~/.propagate/uninstall-capture-2026-08-22.json` holds the 4 removed
 registrations verbatim.
 
-### 2. Settle the cross-repo ref shape — DESIGN DECISION, blocks Phase 3
+### 2. ~~Settle the cross-repo ref shape~~ — SETTLED AND SHIPPED 2026-08-22
 
-`reconcile.mjs:16` describes context as `(source @ refA, downstream @ refB)` — a ref per side —
-and rows carry `source.ref` / `downstream.ref` separately. Every EVENT carries a single
-`observed_on_ref` scalar, `"working-tree"` on all 1,912. **The row model solved cross-repo; the
-event model never caught up.** 113 edges (13.2%) span repos with independent branch sets.
+Events now carry a ref **pair**. `observed_*` keeps meaning the source end (renaming it would
+orphan 1,912 events for cosmetic symmetry); `downstream_on_ref` and its three position siblings
+join it, resolved independently. `validateEvent` requires both as **present keys**, not truthy
+values — `null` is meaningful (resolution failed, carrying its own `*_error`), so absent, `null`
+and `"working-tree"` stay three distinguishable facts. `reconcile` and `verify` both take
+`--ref` / `--source-ref` / `--downstream-ref` via one shared `parseRefFlags()`.
 
-Must be settled BEFORE the first non-`working-tree` event is written: the store is append-only,
-so a wrong scalar on thousands of rows can only be closed-and-re-emitted.
+Settled before the first non-`working-tree` event was written, which was the whole constraint.
+**Nothing backfilled** — the 1,912 existing events keep their absent downstream fields, because
+their downstream ref is genuinely unknown.
+
+Field set and the trichotomy: `docs/DATA_MODEL.md` §10 (the v2 event schema, which until this
+change was documented in **no** file). Architecture: `propagation/docs/ARCHITECTURE.md` §5b.
+
+Re-measured while doing it: **114 of 860 edges (13.3%)** are cross-repo, not the 113/13.2% this
+file previously claimed; 468 CLEAN / 392 NEVER_VERIFIED.
+
+**Still open, and NOT what this item was about:** nothing compares a ledger across refs, and no
+command warns that HEAD is not the default branch — `ISSUES.md` N25 options 1 and 2.
+`--all-refs` stays blocked by N41.
 
 ### 3. Open issues in `docs/ISSUES.md`
 

@@ -82,6 +82,7 @@ const event = await appendEvent({
   reason: ${JSON.stringify(reason)},
   by: "test",
   observed_on_ref: "main",
+  downstream_on_ref: "main",
 });
 console.log(JSON.stringify({ edge_id: eId, ts: event.ts, node_id: nodeId }));
 `;
@@ -101,6 +102,8 @@ const event = await appendEvent({
   disposition: "deferred",
   reason: ${JSON.stringify(reason)},
   by: "test",
+  observed_on_ref: "working-tree",
+  downstream_on_ref: "working-tree",
 });
 console.log(JSON.stringify({ edge_id: eId, ts: event.ts }));
 `;
@@ -523,6 +526,97 @@ sources:
     assert.equal(row.state, "NEVER_VERIFIED", "an empty store reconciles to NEVER_VERIFIED — the honest starting position");
   } finally {
     await rm(searchRoot, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 5. The ref PAIR — each side resolved at its own ref.
+//
+// reconcile() has always accepted `refs: {source, downstream}`; until
+// 2026-08-22 nothing set it, so the whole path was unexercised. The test
+// that matters is the one where the two refs DIFFER and the downstream ref
+// names content that is NOT what is on disk — a fixture where both sides
+// share a ref would pass just as happily if `downstream` were ignored and
+// the source's ref used for both.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("reconcile — each side is resolved at its OWN ref, not the source's applied twice", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "reconcile-refpair-"));
+  const stateDir = await scopedStateDir();
+  try {
+    const repoA = path.join(parent, "repo-a");
+    const repoB = path.join(parent, "repo-b");
+    await mkdir(repoA, { recursive: true });
+    await mkdir(repoB, { recursive: true });
+    for (const dir of [repoA, repoB]) {
+      git(["init", "-q", "-b", "main"], dir);
+      git(["config", "user.email", "test@example.com"], dir);
+      git(["config", "user.name", "Test"], dir);
+    }
+
+    await writeFile(path.join(repoA, "src.txt"), "src v1\n");
+    await writeFile(
+      path.join(repoA, ".propagates.yml"),
+      `sources:
+  src.txt:
+    propagates_to:
+      - path: ../repo-b/dst.txt
+        why: "ref-pair pairing"
+`,
+    );
+    await commitAll(repoA, "initial a");
+
+    // repo-b carries DIFFERENT content on `production` than on `main`, and
+    // is left checked out on `main`. So "the working tree", "main" and
+    // "production" are three distinguishable answers for one path.
+    await writeFile(path.join(repoB, "dst.txt"), "dst on main\n");
+    await commitAll(repoB, "initial b");
+    git(["checkout", "-q", "-b", "production"], repoB);
+    await writeFile(path.join(repoB, "dst.txt"), "dst on production\n");
+    await commitAll(repoB, "production b");
+    git(["checkout", "-q", "main"], repoB);
+
+    const sourceAbs = path.join(repoA, "src.txt");
+
+    const refFree = rowFor(runReconcile({ stateDir, workspaceRoots: [repoA] }), sourceAbs);
+    const paired = rowFor(
+      runReconcile({
+        stateDir,
+        workspaceRoots: [repoA],
+        refs: { source: "main", downstream: "production" },
+      }),
+      sourceAbs,
+    );
+
+    // The row must carry the ref it was actually resolved at, per side.
+    assert.equal(paired.source.ref, "main");
+    assert.equal(paired.downstream.ref, "production");
+    assert.notEqual(
+      paired.source.ref,
+      paired.downstream.ref,
+      "the pair must be able to differ — equal refs cannot detect one side being applied to both",
+    );
+
+    // And the ref must have been USED, not merely recorded: `production`
+    // holds different bytes than the checked-out working tree.
+    assert.ok(refFree.downstream.contentId, "fixture guard: the ref-free read must resolve");
+    assert.ok(paired.downstream.contentId, "the downstream side must resolve at its ref");
+    assert.notEqual(
+      paired.downstream.contentId,
+      refFree.downstream.contentId,
+      "resolving the downstream at `production` must hash production's bytes, not the working tree's",
+    );
+
+    // The source is on the same ref as its working tree, so its hash must
+    // NOT have moved — proving the downstream ref did not leak across.
+    assert.equal(
+      paired.source.contentId,
+      refFree.source.contentId,
+      "the downstream ref must not change how the source side is read",
+    );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
     await rm(stateDir, { recursive: true, force: true });
   }
 });

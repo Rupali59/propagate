@@ -92,6 +92,7 @@ const payload = {
   reason: ${JSON.stringify(reason)},
   by: "test",
   observed_on_ref: "main",
+  downstream_on_ref: "main",
   ${byKind ? `by_kind: ${JSON.stringify(byKind)},` : ""}
 };
 const event = await appendEvent(payload);
@@ -132,6 +133,7 @@ const event = await appendEvent({
   disposition: "no-change-needed",
   by: "legacy",
   observed_on_ref: "working-tree",
+  downstream_on_ref: "working-tree",
 });
 console.log(JSON.stringify({ edge_id: eId, event }));
 `;
@@ -284,6 +286,11 @@ test("why: an event with no observed_at_commit/observed_on_branch renders 'posit
     assert.match(result.shown[0].position.note, /position not recorded/);
     assert.equal(result.shown[0].position.commit, undefined);
     assert.equal(result.shown[0].position.branch, undefined);
+    // The downstream end is the same story one lane later: an event minted
+    // before the ref pair genuinely does not know where its downstream was
+    // read, and must SAY so rather than render blank or borrow the source's.
+    assert.equal(result.shown[0].downstreamPosition.recorded, false);
+    assert.match(result.shown[0].downstreamPosition.note, /downstream position not recorded/);
   } finally {
     await cleanup(fx);
   }
@@ -314,9 +321,13 @@ const event = await appendEvent({
   reason: "post-wedge, position known",
   by: "test",
   observed_on_ref: "working-tree",
+  downstream_on_ref: "working-tree",
   observed_at_commit: "abc123def456",
   observed_on_branch: "main",
   observed_dirty: false,
+  downstream_at_commit: "999fff888eee",
+  downstream_on_branch: "production",
+  downstream_dirty: true,
   by_kind: "human",
 });
 console.log(JSON.stringify({ edge_id: eId }));
@@ -333,6 +344,18 @@ console.log(JSON.stringify({ edge_id: eId }));
     assert.equal(out.shown[0].position.recorded, true);
     assert.equal(out.shown[0].position.branch, "main");
     assert.equal(out.shown[0].position.commit, "abc123def456");
+    // Both ends, and they must NOT be the same values — the design's stated
+    // success criterion is that `why` names the branch each decision was
+    // made on, and a decision about a cross-repo edge was made on two.
+    assert.equal(out.shown[0].downstreamPosition.recorded, true);
+    assert.equal(out.shown[0].downstreamPosition.branch, "production");
+    assert.equal(out.shown[0].downstreamPosition.commit, "999fff888eee");
+    assert.equal(out.shown[0].downstreamPosition.dirty, true);
+    assert.notEqual(
+      out.shown[0].downstreamPosition.branch,
+      out.shown[0].position.branch,
+      "the two ends must be rendered independently, not one value shown twice",
+    );
   } finally {
     await cleanup(fx);
   }

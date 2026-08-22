@@ -58,6 +58,7 @@ await appendEvent({
   edge_id: eId, node_id: nodeId,
   source_content: s.id, downstream_content: d.id, source_git_blob: s.gitBlob,
   disposition: "propagated", reason: "test pin", by: "test", observed_on_ref: "main",
+  downstream_on_ref: "main",
 });
 console.log("ok");
 `;
