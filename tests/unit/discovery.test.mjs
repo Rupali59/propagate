@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { discoverWorkspacesSync, isWorkspaceMarker, liveLedgerCandidates } from "../../lib/core/discovery.mjs";
@@ -39,7 +40,7 @@ test("parent and child both flagged: both are returned (real nesting)", async ()
   assert.deepEqual(roots, [root, childDir].sort());
 });
 
-test("REGRESSION: flagged parent with an unflagged docs/ sidecar yields exactly one workspace, ledger pinned under docs/", async () => {
+test("REGRESSION: flagged parent with an unflagged docs/ sidecar yields exactly one workspace, ledger canonical", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "disc-"));
   await makeMarker(root, FLAGGED);
   const docsDir = path.join(root, "docs");
@@ -49,10 +50,19 @@ test("REGRESSION: flagged parent with an unflagged docs/ sidecar yields exactly 
 
   assert.equal(workspaces.length, 1, "the docs/ sidecar must not mint a second workspace");
   assert.equal(workspaces[0].root, root);
+  // CHANGED 2026-08-22. This assertion used to read
+  // `docs/PROPAGATION_LEDGER.jsonl`, with the rationale "docs/ exists, so
+  // the legacy convention applies (no existing ledger to pin to)". That
+  // sentence describes the accident, not a requirement: with NO ledger
+  // anywhere, the mere presence of a docs/ directory decided the ledger's
+  // home. New workspaces now pin the canonical layout instead.
+  //
+  // This test's REGRESSION subject -- one marker in docs/ must not mint a
+  // second workspace -- is the assertion above and is untouched.
   assert.equal(
     workspaces[0].ledgerJsonl,
-    path.join(root, "docs", "PROPAGATION_LEDGER.jsonl"),
-    "docs/ exists, so the legacy convention applies (no existing ledger to pin to)",
+    path.join(root, "propagation", "ledger.jsonl"),
+    "a brand-new workspace pins the canonical layout regardless of whether docs/ exists",
   );
 });
 
@@ -199,4 +209,73 @@ test("liveLedgerCandidates: reports every existing candidate ledger .jsonl for a
   assert.equal(found.length, 2, "both candidates now live — the phantom-ledger state");
   assert.ok(found.includes(docsJsonl));
   assert.ok(found.includes(propagationJsonl));
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// A BRAND-NEW workspace must land at the CANONICAL layout.
+//
+// docs/REFERENCE.md §"Ledger layout" is canonical: every workspace keeps its
+// propagation items in `<workspace>/propagation/`, and
+// `docs/PROPAGATION_LEDGER.*` / `.propagation/ledger.*` are the SUPERSEDED
+// forms. Until 2026-08-22 `makeWorkspaceRecord`'s fallback produced one of
+// the two superseded layouts for every new workspace — `docs/` if that
+// directory happened to exist, `.propagation/` otherwise — so `init` could
+// never create the canonical one.
+//
+// That is the cause docs/DECISIONS.md described as contained but not
+// removed: "the location remains an accident of directory layout at
+// first-write time; the guard contains the damage but does not remove the
+// cause." Three layouts across eight ledgers came from exactly this.
+//
+// The PINNING rule is untouched and is what makes this safe to change: a
+// workspace with a live ledger at either superseded path still pins there.
+// Only the no-ledger-anywhere case moves.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("discovery: a brand-new workspace with NO docs/ pins the canonical propagation/ layout", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "disc-canon-nodocs-"));
+  try {
+    await writeFile(path.join(root, ".propagates.yml"), "workspace: true\n\nsources: {}\n");
+    const { workspaces } = discoverWorkspacesSync([root]);
+    const ws = workspaces.find((w) => w.root === root);
+    assert.ok(ws, "the marked root must be discovered");
+    assert.equal(ws.ledgerJsonl, path.join(root, "propagation", "ledger.jsonl"));
+    assert.equal(ws.ledgerMd, path.join(root, "propagation", "ledger.md"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("discovery: a brand-new workspace WITH docs/ still pins propagation/, not docs/", async () => {
+  // The docs/-exists heuristic is the specific accident being removed: the
+  // mere presence of a docs/ directory decided the ledger's home.
+  const root = await mkdtemp(path.join(tmpdir(), "disc-canon-docs-"));
+  try {
+    await mkdir(path.join(root, "docs"), { recursive: true });
+    await writeFile(path.join(root, ".propagates.yml"), "workspace: true\n\nsources: {}\n");
+    const { workspaces } = discoverWorkspacesSync([root]);
+    const ws = workspaces.find((w) => w.root === root);
+    assert.equal(ws.ledgerJsonl, path.join(root, "propagation", "ledger.jsonl"));
+    assert.ok(
+      !existsSync(path.join(root, "docs", "PROPAGATION_LEDGER.jsonl")),
+      "a superseded ledger must not be created alongside the canonical one",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("discovery: an EXISTING superseded ledger is still pinned — the move never relocates live data", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "disc-canon-pin-"));
+  try {
+    await mkdir(path.join(root, "docs"), { recursive: true });
+    const live = path.join(root, "docs", "PROPAGATION_LEDGER.jsonl");
+    await writeFile(live, '{"id":1,"status":"open"}\n');
+    await writeFile(path.join(root, ".propagates.yml"), "workspace: true\n\nsources: {}\n");
+    const { workspaces } = discoverWorkspacesSync([root]);
+    const ws = workspaces.find((w) => w.root === root);
+    assert.equal(ws.ledgerJsonl, live, "a live ledger must stay pinned where it is");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

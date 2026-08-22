@@ -836,7 +836,7 @@ Remaining, re-ordered against what actually shipped:
 Everything else is friction rather than error. **N8** dropped off this list entirely 2026-08-14 —
 moot, not fixed, once `watcher.mjs` (its only caller) was retired; see N8's entry.
 
-### N24 · `init` leaves a workspace that `doctor` immediately fails — **S2**
+### N24 · `init` leaves a workspace that `doctor` immediately fails — **S2** — **RESOLVED 2026-08-22**
 
 `cli.mjs init --workspace` writes `.propagates.yml` and verifies the directory is
 *discoverable*. It does **not** create `.propagation/ledger.{jsonl,md}`, so the two
@@ -855,6 +855,37 @@ did**.
 ledger files exist afterwards — `init` confirms discoverable, not complete"). Documenting
 a defect twice is not fixing it: `init` should create both ledger files, or run `doctor`
 before printing `init complete` and refuse to claim success while it fails.
+
+**RESOLVED 2026-08-22, and the diagnosis above was incomplete.** `init` had ALREADY been
+creating the pair since the 2026-08-20 gate-4 fix — it is one of
+`LEDGER_SCAFFOLDING_VERBS` (`lib/core/discovery.mjs:282`), so its own
+`discoverWorkspacesSync` call reaches `ensureLedgerPair`. Two things were actually wrong:
+
+1. **It created a SUPERSEDED layout, in both branches.** Measured on temp workspaces:
+   no `docs/` -> `.propagation/ledger.*`; with `docs/` -> `docs/PROPAGATION_LEDGER.*`.
+   Neither is canonical (`docs/REFERENCE.md` §"Ledger layout"), so **`init` could not
+   produce the canonical layout at all**, and every stranger install minted a third
+   layout while the 2026-08-21 consolidation was cleaning up the first two. This is the
+   cause `docs/DECISIONS.md` recorded as contained but not removed — *"the location
+   remains an accident of directory layout at first-write time; the guard contains the
+   damage but does not remove the cause."* `makeWorkspaceRecord` now pins
+   `propagation/` for the no-ledger-anywhere case only; the pinning rule is untouched, so
+   nothing holding data moves. Measured after the change: **all 7 live workspaces already
+   canonical, 0 relocated.**
+2. **It never asserted the pair.** `ensureLedgerPair` is deliberately best-effort and
+   silent, so a permission fault left no pair and `init complete.` printed anyway. `init`
+   now names the missing files and exits 1 — verified against a read-only directory, and
+   by mutation.
+
+**Two tests were pinning the accident**, each naming it in its own comment ("the legacy
+convention applies" / "the legacy `.propagation/ledger.{jsonl,md}` convention applies").
+Both kept their real subjects — one workspace not two, and a fresh machine reaching
+`doctor: all green`. That pairing is why this survived: the decision record said it was
+wrong, and the tests said it was expected.
+
+`.templates/NEW-PROJECT-CHECKLIST.md` §4's workaround ("verify the ledger files exist
+afterwards — `init` confirms discoverable, not complete") is now stale and should be
+dropped on its next edit; `init` confirms both.
 
 ### N25 · A ledger is read from the working tree, so its state is whatever branch is checked out — **S2**
 

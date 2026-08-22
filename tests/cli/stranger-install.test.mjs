@@ -98,6 +98,7 @@ test("RED regression: a fresh workspace's ledger pair does not pre-exist before 
     // Nothing has run `setup` yet — this just proves the fixture itself carries no
     // ledger, so the GREEN test below is actually exercising creation, not finding
     // files that were already there.
+    assert.equal(existsSync(path.join(m.wsRoot, "propagation", "ledger.jsonl")), false);
     assert.equal(existsSync(path.join(m.wsRoot, ".propagation", "ledger.jsonl")), false);
     assert.equal(existsSync(path.join(m.wsRoot, "docs", "PROPAGATION_LEDGER.jsonl")), false);
   } finally {
@@ -114,19 +115,35 @@ test("stranger sequence (setup -> bootstrap --apply -> doctor) reaches doctor-cl
     const bootstrap = run(["bootstrap", "--baseline-from-git", "--apply"], m.env);
     assert.equal(bootstrap.code, 0, `bootstrap --apply must succeed:\n${bootstrap.out}`);
 
-    // The gate-4 fix, asserted directly: the ledger pair now exists at the pinned
-    // location (docs/ exists nowhere in this fixture, so the legacy
-    // .propagation/ledger.{jsonl,md} convention applies).
+    // The gate-4 fix, asserted directly: the ledger pair now exists.
+    //
+    // PATHS CHANGED 2026-08-22, claim unchanged. This used to assert
+    // `.propagation/ledger.{jsonl,md}` with the rationale "docs/ exists
+    // nowhere in this fixture, so the legacy convention applies" — which
+    // describes the accident this test was inheriting, not a requirement.
+    // A brand-new workspace now pins the CANONICAL layout
+    // (docs/REFERENCE.md §"Ledger layout"), so a stranger install produces
+    // the same shape as every existing workspace instead of a third one.
+    //
+    // The gate-4 subject — a workspace with NO prior ledger gets a pair,
+    // rather than doctor failing its "ledger exists" checks forever on a
+    // fresh machine — is untouched.
     assert.equal(
-      existsSync(path.join(m.wsRoot, ".propagation", "ledger.jsonl")),
+      existsSync(path.join(m.wsRoot, "propagation", "ledger.jsonl")),
       true,
       "ledger JSONL must be created for a workspace with no prior ledger",
     );
     assert.equal(
-      existsSync(path.join(m.wsRoot, ".propagation", "ledger.md")),
+      existsSync(path.join(m.wsRoot, "propagation", "ledger.md")),
       true,
       "ledger MD must be created for a workspace with no prior ledger",
     );
+    // And the superseded layouts must NOT also appear — a stranger install
+    // that created two ledgers would trip doctor's "at most one live ledger
+    // file per workspace" check, which is the failure this whole file exists
+    // to keep out of fresh machines.
+    assert.equal(existsSync(path.join(m.wsRoot, ".propagation", "ledger.jsonl")), false);
+    assert.equal(existsSync(path.join(m.wsRoot, "docs", "PROPAGATION_LEDGER.jsonl")), false);
 
     const doctor = run(["doctor"], m.env);
     assert.equal(

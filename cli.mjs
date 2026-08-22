@@ -2491,6 +2491,48 @@ ${workspaceLine}sources: {}
       process.exit(1);
     }
     console.log(`${GREEN}✓${RESET} verified: discoverable as a workspace`);
+
+    // ── assert the ledger pair, do not assume it (docs/ISSUES.md N24) ──────
+    //
+    // `init` is one of LEDGER_SCAFFOLDING_VERBS, so the discovery call above
+    // reached `ensureLedgerPair` and SHOULD have created the pair. "Should"
+    // is the problem: `ensureLedgerPair` is deliberately best-effort and
+    // swallows its errors, so a read-only directory or a permission fault
+    // leaves no pair and says nothing — and `init complete.` printed anyway.
+    //
+    // N24 was filed twice on exactly this (Obsidian and Motherboard, both
+    // 2026-08-14, both doctor 1 -> 3, both fixed by hand) and
+    // .templates/NEW-PROJECT-CHECKLIST.md documents the workaround rather
+    // than the fix. A success banner that outranks a check that just failed
+    // is the inverse of the silent no-op this register exists to catch.
+    //
+    // Paths come from the workspace record discovery already built — no
+    // second resolution, and no restating the layout, which is canonical in
+    // docs/REFERENCE.md §"Ledger layout".
+    const created = workspaces.find((ws) => ws.root === abs);
+    const missing = [created.ledgerJsonl, created.ledgerMd].filter((p) => !existsSync(p));
+    if (missing.length > 0) {
+      console.error(
+        `\n${RED}✗ init incomplete:${RESET} the ledger pair was not created:`,
+      );
+      for (const m of missing) console.error(`    ${m}`);
+      console.error(
+        // Deliberately does NOT contain the success banner's own wording.
+        // The first draft explained itself as "`init complete.` is NOT being
+        // claimed" — which made the string appear in stderr and broke the
+        // test asserting the banner is absent. An error message that quotes
+        // the phrase it denies is indistinguishable from the success it is
+        // denying, to any check that greps for it.
+        `${DIM}the marker is written and the workspace IS discoverable, so this is not a ` +
+          `rollback — but success is NOT being claimed, because \`doctor\` will fail its ` +
+          `"ledger JSONL/MD exists" checks until these exist. Check directory permissions, ` +
+          `then re-run.${RESET}`,
+      );
+      process.exit(1);
+    }
+    console.log(
+      `${GREEN}✓${RESET} ledger pair created ${DIM}${path.dirname(created.ledgerJsonl)}${RESET}`,
+    );
   }
 
   console.log(`\n${GREEN}${BOLD}init complete.${RESET}`);

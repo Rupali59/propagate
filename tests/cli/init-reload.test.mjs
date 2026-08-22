@@ -25,7 +25,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, mkdir, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, readdir, writeFile, chmod } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -162,4 +162,68 @@ test("source wiring: init's body never calls regeneratePlist/reloadLaunchd; relo
 test("`reload` is wired into the mode dispatch chain", async () => {
   const src = await readFile(CLI_PATH, "utf8");
   assert.match(src, /mode === "reload"/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// `init` must ASSERT the ledger pair, not assume it — docs/ISSUES.md N24.
+//
+// N24 was filed after Obsidian and Motherboard both went doctor 1 -> 3 on
+// 2026-08-14, immediately after a "successful" init, and both were fixed by
+// hand. The defect is not that creation was missing — `init` is one of
+// LEDGER_SCAFFOLDING_VERBS, so discovery does create the pair. It is that
+// `ensureLedgerPair` is deliberately best-effort and silent, so when
+// creation fails `init complete.` printed anyway: a success banner
+// outranking a check that had just failed.
+//
+// The negative case is the one that matters. A test that only proves the
+// happy path leaves exactly the check N24 asked for unverified.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("init --workspace creates the CANONICAL propagation/ pair and says so", async () => {
+  const roots = await scopedRoots();
+  const target = path.join(roots.searchRoot, "canon-project");
+  await mkdir(target, { recursive: true });
+  try {
+    const result = runCli(["init", target, "--workspace"], roots);
+    const out = result.stdout + result.stderr;
+    assert.equal(result.status, 0, `init should succeed: ${out}`);
+    assert.match(out, /ledger pair created/);
+    assert.match(out, /init complete/);
+    assert.ok(existsSync(path.join(target, "propagation", "ledger.jsonl")));
+    assert.ok(existsSync(path.join(target, "propagation", "ledger.md")));
+    // The superseded layouts must NOT be created alongside it.
+    assert.ok(!existsSync(path.join(target, ".propagation", "ledger.jsonl")));
+    assert.ok(!existsSync(path.join(target, "docs", "PROPAGATION_LEDGER.jsonl")));
+  } finally {
+    await rm(roots.searchRoot, { recursive: true, force: true });
+    await rm(roots.stateDir, { recursive: true, force: true });
+  }
+});
+
+test("init --workspace REFUSES to print `init complete.` when the ledger pair cannot be created", async () => {
+  const roots = await scopedRoots();
+  const target = path.join(roots.searchRoot, "readonly-project");
+  await mkdir(target, { recursive: true });
+  // Write the marker first, then make the directory unwritable: `init` finds
+  // the marker already present, discovery resolves the workspace, and
+  // ensureLedgerPair's mkdir fails — silently, by design. This is the real
+  // shape of the N24 failure, not a mocked one.
+  await writeFile(path.join(target, ".propagates.yml"), "workspace: true\n\nsources: {}\n");
+  await chmod(target, 0o555);
+  try {
+    const result = runCli(["init", target, "--workspace"], roots);
+    const out = result.stdout + result.stderr;
+    assert.equal(result.status, 1, `init must exit non-zero when the pair is missing: ${out}`);
+    assert.match(out, /init incomplete/);
+    assert.match(out, /ledger\.jsonl/, "the failure must NAME the missing file");
+    assert.doesNotMatch(
+      out,
+      /init complete/,
+      "a success banner must never outrank a check that just failed — this is N24 itself",
+    );
+  } finally {
+    await chmod(target, 0o755);
+    await rm(roots.searchRoot, { recursive: true, force: true });
+    await rm(roots.stateDir, { recursive: true, force: true });
+  }
 });
