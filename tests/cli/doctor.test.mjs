@@ -609,3 +609,68 @@ test("doctor PASSES the v3 check on a fully conforming workspace", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Canonical rules — the second caller of the same detector.
+//
+// The SessionStart hook detects restatements silently and automatically
+// (tests/hooks/load-rules-drift.test.mjs); this is the on-demand report.
+// Because ONE detector now has TWO callers, the failing case must be
+// exercised through BOTH or one path rots unnoticed — which is the whole
+// reason `rules check` sat in no gate for weeks and nobody noticed.
+// ─────────────────────────────────────────────────────────────────────────
+
+const FIXTURE_RULE = `---
+id: fixture-doctor-rule
+scope: global
+status: active
+fingerprint: "the sky is plaid on tuesdays"
+supersedes: []
+---
+
+**the sky is plaid on tuesdays.** A fixture rule whose fingerprint is a phrase
+no real file contains by accident.
+`;
+
+/** runDoctor with HOME scoped too, so ~/.claude/rules resolves into the fixture. */
+function runDoctorWithHome(root, home) {
+  return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root, HOME: home },
+  });
+}
+
+test("doctor FAILS when a CLAUDE.md restates a canonical rule, and names the file", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  const home = await mkdtemp(path.join(tmpdir(), "doctor-rules-home-"));
+  try {
+    await mkdir(path.join(home, ".claude", "rules"), { recursive: true });
+    await writeFile(path.join(home, ".claude", "rules", "fixture-doctor-rule.md"), FIXTURE_RULE);
+    await writeFile(path.join(root, "CLAUDE.md"), "# p\n\nRemember: the sky is plaid on tuesdays.\n");
+
+    const out = strip(runDoctorWithHome(root, home).stdout + runDoctorWithHome(root, home).stderr);
+    assert.match(out, /✗ canonical rules are not restated/);
+    assert.match(out, /fixture-doctor-rule/, "must name WHICH rule");
+    assert.match(out, /file\(s\)/, "must say how many files were scanned, not just how many findings");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor does NOT fail the rules check on a machine with no rules layer", async () => {
+  // The stranger-install property again: a machine that never installed the
+  // rules layer must reach doctor-clean, not fail for the absence of an
+  // optional component.
+  const { root } = await makeWorkspace([driftLine("001")]);
+  const home = await mkdtemp(path.join(tmpdir(), "doctor-norules-home-"));
+  try {
+    const out = strip(runDoctorWithHome(root, home).stdout + runDoctorWithHome(root, home).stderr);
+    assert.doesNotMatch(out, /✗ canonical rules are not restated/, `no rules layer must not fail:\n${out}`);
+    assert.match(out, /canonical rules[^\n]*not installed/, "absence must be named, not silent");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});

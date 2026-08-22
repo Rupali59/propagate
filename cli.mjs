@@ -1836,6 +1836,95 @@ async function doctor() {
     check("workspaces conform to the v3 propagation layout", false, `could not evaluate: ${err.message}`);
   }
 
+  // ── canonical rules ──────────────────────────────────────────────────────
+  //
+  // `rules check` worked for weeks while sitting in NO gate -- not here, not
+  // CI, not the release gates. A drift detector computed only on request is
+  // indistinguishable from one that does not exist
+  // (rule:enforcement-watches-itself #5). It now has TWO callers: the
+  // SessionStart hook detects silently and automatically; this reports on
+  // demand. Same division as gotchas -- the guard pushes, a census reports.
+  //
+  // GATED ON THE RULES LAYER BEING INSTALLED, like the v3 and monitor checks:
+  // ~/.claude/rules present is the "armed" signal. A machine that never
+  // installed it must reach doctor-clean.
+  try {
+    const rulesDir = path.join(HOME_DIR, ".claude", "rules");
+    if (!existsSync(rulesDir)) {
+      info("canonical rules", `not installed — no ${rulesDir.replace(HOME_DIR, "~")}`);
+    } else {
+      const { checkRules } = await import("./lib/rules/rules-check.mjs");
+      const r = checkRules({ rulesDir, roots: SEARCH_ROOTS });
+      // THREE outcomes, not two — the third time this session that collapsing
+      // "not applicable" into "broken" produced a wrong failure (Phase A's
+      // conformance check and the monitor probe were the other two).
+      //
+      //   no-files-scanned : the roots hold no CLAUDE.md. Nothing to check is
+      //                      not a failure -- every scoped test fixture and
+      //                      every fresh install looks like this.
+      //   roots-missing    : a CONFIGURED root has vanished, so the scan was
+      //                      incomplete. That is a real problem and a
+      //                      different fact from having nothing to scan.
+      if (r.diagnostic === "no-files-scanned") {
+        info("canonical rules", `nothing to check — no CLAUDE.md under ${SEARCH_ROOTS.length} search root(s)`);
+      } else if (r.diagnostic && r.diagnostic !== "ok") {
+        check(
+          "canonical rules are not restated",
+          false,
+          `check could not run: ${r.diagnostic}` +
+            (r.missing?.length ? ` (missing roots: ${r.missing.join(", ")})` : "") +
+            ` — the scan was incomplete, which is NOT the same as finding nothing`,
+        );
+      } else {
+        check(
+          "canonical rules are not restated",
+          r.findings.length === 0,
+          r.findings.length
+            ? `${r.findings.length} restatement(s) across ${r.filesScanned} file(s): ` +
+              r.findings
+                .slice(0, 5)
+                .map((f) => `${f.file}${f.lines?.length ? `:${f.lines[0]}` : ""} (rule:${f.rule})`)
+                .join("; ") +
+              (r.findings.length > 5 ? ` (+${r.findings.length - 5} more)` : "")
+            : `${r.rules.length} rule(s), ${r.filesScanned} file(s) scanned, ${r.overrides.length} declared deviation(s)`,
+        );
+      }
+    }
+  } catch (err) {
+    check("canonical rules are not restated", false, `could not evaluate: ${err.message}`);
+  }
+
+  // ── skill frontmatter (INFORMATIONAL, deliberately) ──────────────────────
+  //
+  // scanSkills() already computes both predicates -- `frontmatter` and
+  // `descriptionStatesWhen` are two of its eight completeness fields. Nothing
+  // surfaced them, which is why three skills once sat unused across 3,755
+  // sessions purely for want of a `description:`.
+  //
+  // NOT a check(), and the measurement is why. Of 45 installed skills, 35
+  // have a description that is not WHEN-phrased and 2 have no frontmatter at
+  // all -- and BOTH of the latter are symlinks into ~/.agents/skills, i.e.
+  // third-party. Failing doctor for a description someone else wrote is a
+  // check the operator cannot act on, which is how a gate becomes noise.
+  // The two counts are reported separately because they are different facts:
+  // no description means the skill cannot autotrigger AT ALL; a non-WHEN
+  // description merely matches requests less well.
+  try {
+    const { scanSkills } = await import("./lib/skills/skills-scan.mjs");
+    const scan = await scanSkills({ withTests: false });
+    const list = scan.skills ?? scan;
+    const noFm = list.filter((sk) => sk?.completeness?.frontmatter === false).map((sk) => sk.id);
+    const notWhen = list.filter((sk) => sk?.completeness?.descriptionStatesWhen === false).length;
+    info(
+      "skill frontmatter",
+      `${list.length} scanned; ${noFm.length} with no name+description (cannot autotrigger)` +
+        (noFm.length ? `: ${noFm.join(", ")}` : "") +
+        `; ${notWhen} whose description is not WHEN-phrased`,
+    );
+  } catch (err) {
+    info("skill frontmatter", `not evaluated: ${err.message}`);
+  }
+
   console.log(`\n${BOLD}# Undiscoverable ledgers (informational)${RESET}`);
   console.log(
     `  ${DIM}ledgers findLedgersUnder() reaches that discovery would not — see lib/edges/refs.mjs header. Never a doctor failure.${RESET}`,

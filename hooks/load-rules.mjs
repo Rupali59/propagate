@@ -86,7 +86,7 @@ if (loaded.length === 0) {
     `⚠️  RULES LOADED: 0 of ${files.length} file(s) in ~/.claude/rules/.\n` +
     `No canonical rule applied to this session. Either no rule matches cwd (${cwd}) ` +
     `or the rule files lost their frontmatter \`id:\`. Do NOT assume "no rules apply" — ` +
-    `verify with: node ~/.claude/hooks/load-rules.mjs | head -40` +
+    `verify with: node "$CLAUDE_PLUGIN_ROOT/hooks/load-rules.mjs" | head -40` +
     (problems.length ? `\nParse failures: ${problems.join("; ")}` : ""),
   );
   process.exit(0);
@@ -107,7 +107,63 @@ const warn = problems.length
   ? `\n\n⚠️  ${problems.length} rule file(s) failed to parse and were skipped: ${problems.join("; ")}`
   : "";
 
-emit(`${header}\n${body}${warn}`);
+/**
+ * RESTATEMENT DETECTION, run here because this is already the one thing that
+ * walks the rules directory every session.
+ *
+ * `rules check` existed and worked for weeks while sitting in NO gate — not
+ * doctor, not CI, not the release gates. It was computed only when someone
+ * asked, which for a drift detector is indistinguishable from not existing.
+ * That is rule:enforcement-watches-itself #5: "an update checker was written,
+ * verified across five behaviours, and invoked by nothing."
+ *
+ * SILENT WHEN CLEAN. This is a SessionStart hook; anything it prints lands in
+ * every session's context forever. A detector that speaks when there is
+ * nothing to say becomes the thing everyone scrolls past, which is precisely
+ * how the monitor's `info` line went unread while the agent was dead. Same
+ * posture as gotcha-guard: fire at the moment of risk, otherwise nothing.
+ *
+ * Measured 2026-08-22: 98ms over 48 CLAUDE.md files, plus ~40ms of import.
+ * That is affordable per session; if it ever is not, the fix is to move it,
+ * not to make it quieter.
+ *
+ * A FAILURE HERE IS REPORTED, NEVER SWALLOWED. If the detector cannot run,
+ * this says so — a rules layer that cannot be checked must not read as a
+ * rules layer with nothing wrong.
+ */
+let drift = "";
+try {
+  const { checkRules } = await import("../lib/rules/rules-check.mjs");
+  const { SEARCH_ROOTS } = await import("../lib/core/config.mjs");
+  const r = checkRules({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS });
+  // `no-files-scanned` means the roots hold no CLAUDE.md. That is "nothing to
+  // check", not "the check broke" — and staying silent for it is required, not
+  // merely nice: this hook runs at EVERY session start, including sessions
+  // opened anywhere without a CLAUDE.md, and a warning there would train the
+  // reader to ignore the one that matters. `roots-missing` is different: a
+  // configured root has vanished, so the scan was incomplete.
+  if (r.diagnostic && r.diagnostic !== "ok" && r.diagnostic !== "no-files-scanned") {
+    drift =
+      `\n\n⚠️  RULES CHECK could not run: ${r.diagnostic}` +
+      (r.missing?.length ? ` (missing roots: ${r.missing.join(", ")})` : "") +
+      `. The scan was INCOMPLETE — this is not "no drift".`;
+  } else if (r.diagnostic !== "no-files-scanned" && r.findings.length > 0) {
+    const lines = r.findings
+      .slice(0, 10)
+      .map((f) => `  - ${f.file}${f.lines?.length ? `:${f.lines[0]}` : ""} restates rule:${f.rule}`);
+    drift =
+      `\n\n⚠️  ${r.findings.length} RESTATEMENT(S) of a canonical rule, across ` +
+      `${r.filesScanned} file(s) scanned:\n${lines.join("\n")}` +
+      (r.findings.length > 10 ? `\n  (+${r.findings.length - 10} more)` : "") +
+      `\nReference the rule as \`rule:<id>\` instead, or declare a deviation in that ` +
+      `file's own CLAUDE.md. Copying is what produced 9 divergent copies of ` +
+      `tool-priority making 4 mutually exclusive claims.`;
+  }
+} catch (err) {
+  drift = `\n\n⚠️  RULES CHECK did not run: ${err?.message ?? err}. Nothing was checked.`;
+}
+
+emit(`${header}\n${body}${warn}${drift}`);
 
 function emit(text) {
   process.stdout.write(JSON.stringify({
