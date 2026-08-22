@@ -137,6 +137,14 @@ Own git repo, remote `Rupali59/propagate-skill`.
   Installing is now two commands — `npm install` then `propagate setup`, which refuses to
   report success unless discovery finds a workspace (`docs/REFERENCE.md` § Install).
 
+- [`docs/plans/2026-08-22-v3-one-propagation-standard.md`](docs/plans/2026-08-22-v3-one-propagation-standard.md)
+  — **APPROVED, NOT STARTED.** One propagation standard across all 7 workspaces. Retires the
+  v1 ledger shape and the v2 event shape; promotes `Vipin Kaushik/propagation/`'s branch
+  registry and `state/<project>/` layout, which nothing currently reads. Carries the
+  measurements verbatim: 1,834 v1 rows / 453 open against 860 derived edges / 0 drifted, the
+  14-vs-9 hygiene fork with 5 diverged libs, and the four orphans. Phase A's conformance
+  check must be shown to FAIL on 6 of 7 workspaces before any migration runs.
+
 - [`docs/plans/2026-08-22-background-jobs-and-init.md`](docs/plans/2026-08-22-background-jobs-and-init.md)
   — **DONE.** The event ref pair (`fd322cd`), `init`'s canonical ledger layout (`eddfb35`),
   and a monitor liveness probe that can fail (`7dc0729`). Carries the launchd evidence for
