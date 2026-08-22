@@ -1750,7 +1750,7 @@ machine-refreshed and half hand-written reads as one thing."*
 
 **Unresolved and needed before the branch-node view reaches a human.**
 
-### N43 · The plugin cutover killed both launchd agents, and nothing noticed for two hours — **S2** — **OPEN**
+### N43 · The plugin cutover killed both launchd agents, and nothing noticed for two hours — **S2** — **RESOLVED 2026-08-22**
 
 **2026-08-22.** Both propagate launchd agents invoke a path the cutover deleted:
 
@@ -1801,6 +1801,50 @@ the choice in `docs/DECISIONS.md`.
 **Related:** the digest agent is the one `rule:safety-flag-needs-a-test` records
 for `--dry-run` running an armed deletion (G22). It has been inert since the
 cutover, which is accidentally safe and still wrong.
+
+---
+
+**RESOLVED 2026-08-22.** Both plists regenerated from the repo working tree
+(`~/Documents/GitHub/propagate`), chosen over the version-keyed plugin cache because that
+path never moves and both jobs are read-only derivations writing only to `~/.propagate/`.
+`SKILL_DIR` self-locates (`config.mjs:77-93`), so this was a regeneration, not a patch.
+Rupali ran the four `launchctl bootout`/`bootstrap` commands; the tool never touches
+launchd (`plist.mjs`'s stated contract).
+
+**Measured after the reload:**
+
+| | Before | After |
+|---|---|---|
+| digest | last ran 2026-08-21 10:47 local | **17:21:06** — `DAILY.md` gained a section, `lastRunAt` matches |
+| monitor | `MODULE_NOT_FOUND` every 1800s | **17:30:04** — 860 rows, 0 actionable, 3452 ms |
+| `doctor` | "all green" while both were dead | `✓ monitor is running on schedule  last run 0 min ago` |
+
+**Two things the reload surfaced that the diagnosis had not:**
+
+1. **`WatchPaths` went 20 -> 12**, and all eight dropped paths still exist on disk:
+   `Keerti-portfolio`, `keerti-job-radar`, `Manav-portfolio`, `SSJK-mb` and their `docs/`.
+   They stopped being *workspaces* in the 2026-08-21 consolidation ("one folder, at depth
+   1, never per sub-project"). So the old plist carried **two** independent staleness
+   problems and only one announced itself: the dead script path produced 35 KB of stderr,
+   the eight phantom watch paths produced nothing, because watching a directory that no
+   longer needs watching is not an error.
+2. **The crash tell is sticky, and self-clears.** `monitor.stderr.log` stays newer than
+   `monitor.log` from a crash until the next SUCCESSFUL run, so between a fix and the next
+   interval the probe still reports "loaded and CRASHING". Observed here: stderr 17:26:01
+   (the old job's last firing, between the plist rewrite at 17:19 and the bootout), cleared
+   by the 17:30:04 success. The window is bounded by one interval and errs toward alarming
+   rather than silent, which is the right direction for a liveness probe. Documented, not
+   fixed.
+
+The rollback was repaired first — `~/.propagate/uninstall-capture-2026-08-22.json` cited
+`~/Documents/GitHub/propagate-skill`, a path removed by the rename that FOLLOWED the
+capture, so the cutover's own undo could not execute. Every path it now cites was verified
+present, including the deliberately-kept local `curate-docs-skill` checkout (`8ea167a`,
+archived on GitHub). **A safety net is the one artifact whose correctness is never
+exercised until the moment it must work.**
+
+**Still open, carried to a new issue:** nothing detects the phantom-`WatchPaths` class, and
+`watchPathsFor()` still hardcodes `docs/`.
 
 ### N44 · The RED phase of a validator test appended two events to the production ledger — **S2** — **RESOLVED 2026-08-22**
 
@@ -1887,3 +1931,31 @@ supposed to make this impossible.
 
 (2) is the one that matches this repo's stated posture — make "found nothing" and "looked at
 nothing" different outputs — and should land first regardless of whether (1) does.
+
+
+### N46 · `watchPathsFor()` hardcodes `docs/`, and stale watch paths are undetectable — **S3** — **OPEN**
+
+**2026-08-22, found while resolving N43.** `lib/core/plist.mjs:261-269` builds the monitor's
+`WatchPaths` as `ws.root` plus `ws.root/docs` if that directory exists. Two problems, both
+low-severity and neither worth fixing blind:
+
+1. **`docs/` is hardcoded** and the ledgers moved to `propagation/` on 2026-08-21. But
+   widening it would be **the wrong fix for the obvious want**: the monitor never reads a
+   ledger (`monitor.mjs:21` — "it writes no drift rows. Not to a ledger"), so waking it on a
+   ledger change buys nothing. The job that reads ledgers is the **digest**, which is
+   time-triggered and needs no `WatchPaths` at all.
+2. **Stale entries are invisible.** Regenerating on 2026-08-22 silently dropped 8 of 20
+   paths — sub-projects that stopped being workspaces in the consolidation. Nothing reported
+   the plist as stale; a directory that no longer needs watching produces no error, so this
+   class of drift is silent by construction. `doctor` has a `plist WatchPaths` check for the
+   RETIRED watcher and none for the monitor.
+
+**Also worth knowing before anyone invests here:** launchd `WatchPaths` is **not recursive**
+— it fires on changes to entries *in* the named directory, not deep beneath it. So `ws.root`
+never caught a nested source edit either, and the real trigger has always been
+`StartInterval 1800`. The whole `WatchPaths` mechanism is less load-bearing than its size in
+the plist suggests.
+
+**Recommendation:** re-derive `WatchPaths` from what the monitor actually reads (sidecars and
+the source files they name), or drop them entirely and rely on the interval. Do not simply
+add `propagation/`.

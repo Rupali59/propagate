@@ -137,6 +137,13 @@ Own git repo, remote `Rupali59/propagate-skill`.
   Installing is now two commands — `npm install` then `propagate setup`, which refuses to
   report success unless discovery finds a workspace (`docs/REFERENCE.md` § Install).
 
+- [`docs/plans/2026-08-22-background-jobs-and-init.md`](docs/plans/2026-08-22-background-jobs-and-init.md)
+  — **DONE.** The event ref pair (`fd322cd`), `init`'s canonical ledger layout (`eddfb35`),
+  and a monitor liveness probe that can fail (`7dc0729`). Carries the launchd evidence for
+  N43 **verbatim** — `launchctl` exit codes, log mtimes, `lastRunAt` — because those
+  measurements became unreconstructable the moment the plists were regenerated and the logs
+  started moving again.
+
 Plans live in `docs/plans/`, not `~/.claude/plans/` — session scratch rots, and `lib/graph.mjs`
 carried a citation to an overwritten one for weeks.
 
