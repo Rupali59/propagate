@@ -75,8 +75,8 @@ onRepo("SSJK-mb: CLAUDE.md seeds despite there being no root README", path.join(
 // cutover deleted that symlink (propagate now ships as propagate@tathya), so the row
 // silently stopped running — which this file's own "no repo was silently skipped" guard
 // caught immediately. Point at the repo itself; it was always the real target.
-onRepo("propagate: SKILL.md seeds, and the result is not mostly orphans", path.join(GH, "propagate-skill"), () => {
-  const { code, out } = run(path.join(GH, "propagate-skill"));
+onRepo("propagate: SKILL.md seeds, and the result is not mostly orphans", path.join(GH, "propagate"), () => {
+  const { code, out } = run(path.join(GH, "propagate"));
   assert.equal(code, 0);
   assert.match(out, /hub `[^`]*SKILL\.md/);
   const [, docs, orphans] = /(\d+) markdown files[\s\S]*?\*\*(\d+) orphan\*\*/.exec(out);

@@ -1006,3 +1006,47 @@ which this decision should be revisited.
 test files that imported it and `watcher-retired.test.mjs`, whose assertions are preserved by the
 2026-08-14 entry above. Both reusable halves had already been relocated to `lib/edges/edges.mjs` and
 `lib/edges/cross-repo.mjs`, each independently covered, so no live behaviour lost its tests.
+
+## 2026-08-22: the repo is renamed propagate-skill -> propagate, orphaning 30 edges
+
+**Affects:** propagate, workspace-hub
+
+**Decision:** rename the repository, the local checkout and the GitHub remote from
+`propagate-skill` to `propagate`. Accept that ~30 events lose their edge identity.
+
+**Why now.** The repo stopped being a skill today. It is a plugin that CONTAINS two skills
+(`propagate`, `curate-docs`) plus three hooks. Every other identifier already said
+`propagate` — `.claude-plugin/plugin.json`'s `name`, the `tathya` marketplace entry, and both
+routers' frontmatter. The repo name was the last thing contradicting them, and `-skill`
+encoded a packaging decision that has now changed once.
+
+**The cost, measured before deciding.** `toNodeId()` derives `basename(repoRoot):relPath`, so
+the directory name is part of every edge id in this repo. Constructing the same file under
+both names confirms it: `propagate-skill:docs/A.md` vs `propagate:docs/A.md`. That is N40's
+deliberately-unfixed residual, and this is exactly the case it predicted.
+
+Blast radius **30 of 1,912 events (1.6%)** — the ledger is dominated by other repos
+(PanditPawanKaushik 1014, Vipin Kaushik 334, SSJK-mb 97). The 477 baselines written earlier
+today are almost all in other repos and are unaffected. Had the ratio been reversed this
+rename would not have been worth it.
+
+**Why not fix N40's residual first.** A stable repo identifier needs a decision about repos
+with no remote, of which this tree has several. Renaming 30 edges is cheaper than designing
+that now, and the residual stays recorded rather than silently paid.
+
+**What was updated, and what deliberately was not.** 106 mentions across 45 files; only
+**four were functional**: the marketplace `source`, the `skills-marketplace/propagate-skill`
+symlink, a declared edge in `rules/.propagates.yml` (`../propagate-skill/docs/GOTCHAS.md`),
+and two paths in `skills/curate-docs/tests/repos.test.mjs`. Plus three metadata URLs.
+
+The rest are **history and stay unrewritten** — `docs/DECISIONS.md`, `docs/ISSUES.md`,
+`propagation/ledger.md` and the Obsidian dailies describe a repo that WAS called
+`propagate-skill` at the time they were written. Rewriting an append-only record to match a
+later name is the failure those files exist to prevent.
+
+**Side effect worth naming:** `curate-docs-skill/.propagates.yml` declared
+`../propagate/lib/report/doc-kind.mjs`, which `doctor` reported as "declare-ahead, not on
+disk". The rename made that path real, so the warning cleared by coincidence rather than by
+intent. Recorded so nobody reads it as a fix.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

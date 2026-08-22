@@ -26,7 +26,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Rupali59/propagate-skill.git"
+    "url": "git+https://github.com/Rupali59/propagate.git"
   },
   "files": [
     "cli.mjs",
