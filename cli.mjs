@@ -603,7 +603,9 @@ async function watcherJsonBlock() {
  * entry: a quiet ledger on a healthy watcher is a distinct, valid state).
  */
 async function ledgerJsonBlock(jsonlPath) {
-  const exists = existsSync(jsonlPath);
+  // null => no hub declared, so there is no cross-ledger path to test. Asking
+  // existsSync(null) is the DEP0187 warning that review 2026-08-23 caught.
+  const exists = jsonlPath !== null && jsonlPath !== undefined && existsSync(jsonlPath);
   const { rows, malformed, unknownTypes } = exists
     ? await readLedgerWithStats(jsonlPath)
     : { rows: [], malformed: 0, unknownTypes: {}, manual: [] };
@@ -2005,7 +2007,6 @@ async function doctor() {
       const { selftestProblems } = await import("./lib/gotchas/parse.mjs");
       const { globSync } = await import("node:fs");
       const seenDocs = new Set();
-      gotchasScanned = 0;
       for (const ws of WORKSPACES) {
         let found = [];
         let gotchasExtra = [];
@@ -2026,6 +2027,17 @@ async function doctor() {
         } catch {
           continue;
         }
+        // 0 ONLY ONCE A GLOB HAS ACTUALLY RUN. This assignment used to sit above
+        // the loop, so zero discovered workspaces rendered
+        // "0 GOTCHAS.md of 0 docs scanned — none adopted yet" — a confident
+        // report of a scan that never happened, three lines under a comment
+        // promising the opposite. Review 2026-08-23 reproduced it with an
+        // unconfigured HOME.
+        //
+        // "Found nothing" and "looked at nothing" are different facts and only
+        // one is a pass (rule:discernment-checks §2) — which is the rule this
+        // census exists to enforce, failing inside its own implementation.
+        if (gotchasScanned === null) gotchasScanned = 0;
         // `found` feeds every metric; `gotchasExtra` feeds only the gotchas tally.
         // Set, not Array.includes: the membership test runs once per doc, and
         // an array scan inside that loop is O(docs x extras) for no reason.
