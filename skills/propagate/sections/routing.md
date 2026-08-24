@@ -47,8 +47,20 @@ pair declared twice, globs matching nothing.
 referencing it as `rule:<id>`. A declared `overrides: <id>` is printed but
 never failed — the escape hatch exists precisely so divergence stays visible.
 **It exits non-zero when it scanned NOTHING**, not only when it found
-something — "no files scanned" is not a clean result. `selftest` proves every
-rule's fingerprint can actually fire against that rule's own body.
+something — "no files scanned" is not a clean result.
+
+**A file that references a rule AND restates it is counted, not excused.** It
+still does not fail the run, because flipping every such file to a failure at
+once is how a gate gets bypassed rather than fixed — but the count is printed
+per rule, because a pointer sitting beside a stale copy is what a half-finished
+conversion looks like, and it used to be invisible (19 files, measured
+2026-08-24, while the summary line read "0 restatement(s) across 0 file(s)").
+
+`selftest` proves every rule's fingerprint can fire against that rule's own
+body — **which is not the same as firing on how the claim is phrased in the
+wild**, and that gap is `docs/ISSUES.md` N35. Use `rules list` for the per-rule
+restated / referenced / status table and the unexercised count; a rule nothing
+restates and nothing references is an UNKNOWN, not a pass.
 
 ## Out of scope here
 
