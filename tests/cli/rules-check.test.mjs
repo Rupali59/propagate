@@ -280,3 +280,69 @@ test("ruleCoverage reports, per rule, how many files match and how many referenc
   }
 });
 
+
+/**
+ * A REFERENCE DOES NOT NEUTRALISE A RESTATEMENT — and the scan silently assumed
+ * it did.
+ *
+ *     if (raw.includes(`rule:${r.id}`)) continue; // references it — clean
+ *
+ * The intent is sound: a file pointing at the canonical rule is doing the right
+ * thing, and a rule id appearing beside a hub-local fact is not a copy. But the
+ * exemption is BLANKET, so a file that references a rule in one line and carries
+ * a stale forty-line copy of it in another is excused entirely.
+ *
+ * That is not a hypothetical shape. It is the most likely one: nobody deletes a
+ * copy and adds a pointer in the same edit, so "pointer added, copy left behind"
+ * is exactly what a half-finished conversion looks like — and it is what
+ * produced the nine divergent copies of tool-priority making four mutually
+ * exclusive claims that this whole directory exists to prevent.
+ *
+ * MEASURED ON THE REAL TREE, 2026-08-24: `rules check` reported **0
+ * restatement(s) across 0 file(s)** while **19 files restate a rule they also
+ * reference**. Zero of the nineteen were reported, and `rules list` reported 25
+ * raw matches at the same moment — two commands answering one question with 0
+ * and 25.
+ *
+ * The verdict is deliberately NOT changed here: excusing them keeps the exit
+ * code quiet, and flipping nineteen files to failures in one commit is how a
+ * gate gets bypassed rather than fixed. What changes is that they stop being
+ * invisible — rule:discernment-checks §2, an unknown must not read as a clean
+ * result.
+ */
+test("a file that restates AND references a rule is counted, not silently excused", async () => {
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "graph before grep");
+    // References the rule — and then restates it anyway, three lines down.
+    f.claudeMd("half-converted", "# x\n\nTool priority: `rule:tool-priority`\n\n## Notes\nAlways graph before grep.\n");
+    const { checkRules } = await import("../../lib/rules/rules-check.mjs");
+    const r = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+
+    assert.equal(r.findings.length, 0, "still not a failure — the exit code stays quiet");
+    assert.equal(
+      (r.referencedRestatements ?? []).length,
+      1,
+      `it must be COUNTED, got ${JSON.stringify(r.referencedRestatements)}`,
+    );
+    assert.match(r.referencedRestatements[0].file, /half-converted/);
+    assert.equal(r.referencedRestatements[0].rule, "tool-priority");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a file that only references a rule is NOT counted — the tally must mean something", async () => {
+  // Otherwise every well-converted file joins the list and the number stops
+  // pointing at anything.
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "graph before grep");
+    f.claudeMd("clean", "# x\n\nTool priority: `rule:tool-priority`\n");
+    const { checkRules } = await import("../../lib/rules/rules-check.mjs");
+    const r = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    assert.deepEqual(r.referencedRestatements ?? [], [], "a pointer with no copy is simply clean");
+  } finally {
+    f.cleanup();
+  }
+});

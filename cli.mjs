@@ -2499,6 +2499,23 @@ async function rulesCmd() {
   console.log(
     `\n  ${res.findings.length} restatement(s) across ${new Set(res.findings.map((f) => f.file)).size} file(s)\n`,
   );
+  // NOT a failure, and NOT silence either. A file that references a rule AND
+  // restates it was excused entirely until 2026-08-24 — measured then at 19
+  // files while the line above read "0 restatement(s) across 0 file(s)". The
+  // exit code deliberately stays quiet; what changed is that the number exists.
+  if (res.referencedRestatements?.length) {
+    const byRule = new Map();
+    for (const x of res.referencedRestatements) byRule.set(x.rule, (byRule.get(x.rule) ?? 0) + 1);
+    console.log(
+      `  ${YELLOW}${res.referencedRestatements.length} file(s)${RESET} restate a rule they also reference ` +
+        `${DIM}— excused, not checked. Each is a pointer and a copy in one file, which is what a\n` +
+        `  half-finished conversion looks like. See docs/ISSUES.md N35.${RESET}`,
+    );
+    for (const [rule, n] of [...byRule].sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${DIM}${rule.padEnd(36)} ${n}${RESET}`);
+    }
+    console.log("");
+  }
   process.exit(res.exitCode);
 }
 

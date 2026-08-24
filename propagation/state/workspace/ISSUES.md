@@ -1469,6 +1469,51 @@ already recorded: `nextjs-dev-server-port` matched the helper script's name and 
 
 ---
 
+**RE-MEASURED 2026-08-24, and this entry's own list was stale.** Run `propagate rules list`
+rather than trusting the names below:
+
+* **6 unexercised, not 7:** `adversarial-review-reads-the-ledger`, `browser-only-when-asked`,
+  `discernment-checks`, `enforcement-watches-itself`, `every-project-carries-gotchas`,
+  `no-waiting-on-deploys`.
+* `delegation-criteria`, `model-routing` and `safety-flag-needs-a-test` are **no longer**
+  unexercised — they now read adopted or firing. `enforcement-watches-itself` newly is, and
+  is not in the list above. Four of the eight names were wrong within five days, which is the
+  ordinary rot rate for a count in a state file and the reason `rules list` exists.
+
+**A SHARPER DEFECT, found while measuring this one and fixed in the same pass.** `rules
+check` reported **0 restatement(s) across 0 file(s)** while `rules list` reported **25**
+matches — two commands answering one question with 0 and 25.
+
+Cause: `checkRules` carried
+
+```js
+if (raw.includes(`rule:${r.id}`)) continue; // references it — clean
+```
+
+A blanket exemption. Sound in intent — a file pointing at the canonical rule is doing the
+right thing, and a rule id beside a hub-local fact is not a copy — but it excused a file that
+references a rule in one line and keeps a stale copy in another. **That is the most likely
+shape, not a hypothetical:** nobody deletes the copy and adds the pointer in the same edit,
+so "pointer added, copy left behind" is precisely what a half-finished conversion looks like,
+and it is how nine divergent copies of `tool-priority` came to make four mutually exclusive
+claims.
+
+Measured: **19 files restate a rule they also reference** — `tool-priority` 11,
+`secrets-source-of-truth` 6, `safety-flag-needs-a-test` 1, `state-and-decisions` 1. None was
+reported.
+
+They are now **counted and printed, per rule, and still not failed**. Flipping nineteen files
+to failures in one commit is how a gate gets bypassed rather than fixed; the exit code stays
+quiet and the number now exists. `referencedRestatements` is present-and-empty on a clean
+tree, never absent.
+
+**STILL OPEN:** the per-rule known-positive probe this issue was filed for. Nothing here
+proves any of the six unexercised fingerprints can fire on real phrasing — that remains
+judgment work, one rule at a time, against a real sample. What changed is that a second way
+of being blind was closed, and the stale names above were corrected.
+
+---
+
 ### N36 · The commit-time gate is silently dead for any repo under a symlinked path — **S1** — **RESOLVED 2026-08-20**
 
 **Found by running the edge lifecycle end to end**, which no unit test did. One fixture —
