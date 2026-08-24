@@ -34,6 +34,7 @@ import {
   isPointerStub,
   isWorkspaceRoot,
   orphanedByMigration,
+  sidecarsNamingMoves,
 } from "../../lib/migrate/workspace.mjs";
 
 /** Recursive snapshot of every file path + content under `root`. */
@@ -67,6 +68,7 @@ async function workspace(t, { projects = {}, own = {} } = {}) {
   return ws;
 }
 
+const SIDECAR = "sources:\n  STATE.md:\n    propagates_to:\n      - path: README.md\n        why: the summary must not diverge from state\n        kind: prose\n";
 const REAL_STATE = `# STATE — a real one\n${"line\n".repeat(60)}`;
 const STUB = "# STATE.md — moved\n\nThis file now lives at `../propagation/state/p/STATE.md`.\n";
 
@@ -306,4 +308,33 @@ test("two sources claiming ONE destination is a conflict, not two moves", async 
   const before = treeSnapshot(ws);
   await assert.rejects(() => migrateWorkspace({ workspace: ws, apply: true }), /unresolved conflict/);
   assert.deepEqual(treeSnapshot(ws), before, "a refused migration must leave the tree byte-identical");
+});
+
+test("sidecarsNamingMoves matches the RELATIVE path, not the bare basename", async (t) => {
+  // Two defects in one function, and it had zero callers so neither could be
+  // observed (review 2026-08-23, F10):
+  //   - it matched `text.includes(basename)`, and `STATE.md` appears in most of
+  //     the ~29 sidecars in this tree, so unrelated ones were flagged;
+  //   - the inner loop pushed one hit PER MOVE, so a single sidecar repeated.
+  // Both matter because the output is a to-do list a person works through.
+  const ws = await workspace(t, {
+    projects: {
+      alpha: { "STATE.md": REAL_STATE, ".propagates.yml": SIDECAR },
+      beta: { "STATE.md": REAL_STATE, ".propagates.yml": SIDECAR },
+    },
+  });
+
+  const plan = await migrateWorkspace({ workspace: ws });
+  assert.equal(plan.moves.length, 2, "sanity: both STATE.md files move");
+
+  const hits = sidecarsNamingMoves(plan, [ws]);
+  assert.equal(hits.length, 2, `each sidecar must be named ONCE, for its own file — got ${hits.length}`);
+
+  // The pairing is the point: alpha's sidecar must be tied to alpha's file.
+  for (const h of hits) {
+    const sidecarProject = path.basename(path.dirname(h.sidecar));
+    const movedProject = path.basename(path.dirname(h.names));
+    assert.equal(sidecarProject, movedProject, `${sidecarProject}'s sidecar was matched to ${movedProject}'s file`);
+    assert.ok(h.suggested, "each hit must carry the replacement path, or it is not actionable");
+  }
 });

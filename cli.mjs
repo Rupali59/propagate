@@ -2091,12 +2091,27 @@ async function doctor() {
         `${gotchasFiles} GOTCHAS.md of ${gotchasScanned} docs scanned` +
           (gotchasFiles === 0 ? " — none adopted yet" : ""),
       );
+      // "no entries parsed" is a FORMAT problem, not an inert-trigger problem.
+      const unreadable = gotchasInert.filter((g) => g.problems.some((p) => /0 carry a \*\*Trigger/.test(p)));
+      const inertEntries = gotchasInert.filter((g) => !unreadable.includes(g));
       if (gotchasInert.length) {
         // The failure the file exists to prevent, reported as green. Name the file
         // AND the entry: "2 inert" without the offender is not actionable.
         info(
           "gotchas inert",
-          `${gotchasInert.length} of ${gotchasFiles} file(s) carry an entry that cannot fire`,
+          // TWO DIFFERENT FACTS, and collapsing them hid the worse one. A file
+          // whose entries parse but cannot fire is one problem; a file the
+          // parser cannot read AT ALL is another, and the second is bigger
+          // because nothing in it is reachable.
+          //
+          // Measured 2026-08-24: the single flagged file was
+          // PanditPawanKaushik/docs/gemstone-storefront/shopify/GOTCHAS.md —
+          // 478 lines of real, current hazards using `### 1.1` headings instead
+          // of `### G1 ·`, so parseEntries returns ZERO entries. Reporting that
+          // as "carries an entry that cannot fire" describes a file that has no
+          // entries to fire, and buries the fact that the whole file is dark.
+          `${unreadable.length} unreadable, ${inertEntries.length} with an entry that cannot fire` +
+            ` (of ${gotchasFiles} file(s))`,
         );
         for (const g of gotchasInert.slice(0, 3)) {
           info("", `${shortPath(g.file)} — ${g.problems[0]}`);
@@ -2710,7 +2725,7 @@ async function migrateCmd(argv = []) {
     process.exit(2);
   }
 
-  const { migrateWorkspace, planMigration, orphanedByMigration } = await import("./lib/migrate/workspace.mjs");
+  const { migrateWorkspace, planMigration, orphanedByMigration, sidecarsNamingMoves } = await import("./lib/migrate/workspace.mjs");
 
   let plan;
   try {
@@ -2767,6 +2782,33 @@ async function migrateCmd(argv = []) {
     for (const o of losing.slice(0, 8)) console.log(`    ${DIM}${o.edge_id}  ${short(o.source)}${RESET}`);
     console.log(`  ${DIM}Their events remain in the append-only store; nothing resolves them again.${RESET}`);
     console.log(`  ${DIM}Re-baseline afterwards, recorded AS a re-baseline naming this migration.${RESET}`);
+  }
+
+  // Declared edges that name a path this migration moves. REPORTS, never
+  // rewrites — a sidecar key is relative to its own directory and the same
+  // basename recurs across ~29 files, so blind substitution is how a working
+  // declaration becomes a wrong one silently.
+  //
+  // Rendered BEFORE the dry-run return, deliberately: this is the list you act
+  // on when deciding whether to --apply, so printing it only after the move had
+  // already happened would be the wrong half of the workflow.
+  //
+  // Wired 2026-08-24. sidecarsNamingMoves had ZERO callers since it was written
+  // — correct, tested by nothing, unreachable, so the capability the plan's M2
+  // step 4 requires was indistinguishable from one never built
+  // (rule:enforcement-watches-itself §2).
+  try {
+    const naming = sidecarsNamingMoves(plan, SEARCH_ROOTS.length ? SEARCH_ROOTS : [plan.workspace]);
+    for (const h of naming) {
+      console.log(`  ${YELLOW}sidecar${RESET}  ${short(h.sidecar)} names ${short(h.names)}`);
+      console.log(`          ${DIM}-> update that entry to ${h.suggested}${RESET}`);
+    }
+    if (!naming.length && plan.moves.length) {
+      console.log(`  ${DIM}sidecar  no declared edge names a moved path${RESET}`);
+    }
+  } catch (err) {
+    // A failed scan must never read as "nothing to update".
+    console.log(`  ${YELLOW}sidecar${RESET}  scan failed — ${err.message} ${DIM}(UNKNOWN, not zero)${RESET}`);
   }
 
   if (!apply) {
