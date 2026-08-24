@@ -2100,3 +2100,39 @@ level up: there the test wrote to the store, here it writes to the tree.
 **How it surfaced.** Twelve `✗ ledger JSONL/MD exists` failures cleared between two `doctor`
 runs with no scaffolding verb in between. All six files carried the same mtime to the second,
 which is what proved a single command did it rather than six.
+
+## N47 · `migrate --apply` fails PARTWAY on an untracked artifact — the exact state it warns about — S2
+
+**2026-08-24, hit during v3 Phase E on `Tushar`.**
+
+```
+refused: Command failed: git mv Tushar/docs/GOTCHAS.md
+         Tushar/propagation/state/workspace/GOTCHAS.md
+```
+
+`docs/GOTCHAS.md` was untracked (`??` — never `git add`ed, not ignored), and
+`git mv` requires a tracked file. By then THREE artifacts had already moved and
+were staged as renames, and the four scaffold files had not been written. The
+workspace was left half-migrated — which `migrate`'s own conformance message
+calls *"the state that loses data"*.
+
+**Nothing was lost**, verified by checksum: all four Tushar artifacts matched at
+their old or new path, and `git add` + a re-run completed it cleanly.
+
+**The defect is the ORDER, not the failure.** `planMigration` already refuses up
+front for two whole-run preconditions — "not inside a git repository" and
+"unresolved conflicts" — precisely so a doomed run writes nothing. Untracked
+sources belong in that same preflight: they are knowable before the first `git
+mv`, from `git status --porcelain` or `git ls-files --error-unmatch`, and they
+are per-file rather than per-run, so the check must name every offender rather
+than stopping at the first.
+
+**Not a conflict, and should not be reported as one.** A conflict is two real
+files where one must win; this is one real file the repo has never been told
+about. The fix is `git add`, and the message should say so.
+
+**Blast radius as measured:** of the 8 workspaces migrated in Phase E, exactly
+one hit this. The other seven had every artifact tracked.
+
+**Until fixed:** run the dry run, then `git status --porcelain -uall` in the
+target repo and `git add` any artifact showing `??` before `--apply`.
