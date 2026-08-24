@@ -177,10 +177,46 @@ summary is below. Each phase is independently shippable.
 |---|---|---|
 | **A** | Spec + conformance check + rewrite `rule:state-and-decisions` | **The check must FAIL on 6 of 7 workspaces today.** A conformance check green before the work is not checking. |
 | **B** | Branch registry — **reuse, do not port** — and fix N41 | `enumerateRefs` already spawns `worktree list --porcelain` AND `for-each-ref`; the 4 missing fields come from widening one format string at zero extra spawns |
-| **C** | Absorb **9** hygiene libs, leave **6** | The 6 (`dep-audit`, `link-check`, `size-caps`, `memory-diff`, `worker-routing`, `dep-audit-selftest`) are not propagation |
+| **C** | ~~Absorb **9** hygiene libs, leave **6**~~ — **re-measured 2026-08-24, see below** | The 6 (`dep-audit`, `link-check`, `size-caps`, `memory-diff`, `worker-routing`, `dep-audit-selftest`) are not propagation |
 | **D** | Freeze v1, version the events | Triage the 453 open rows *first*; reuse `relocateLedger` + `migrate-ledger.mjs` (679 lines, already written) |
 | **E** | Migrate all 7 workspaces | `ledgerFingerprint` before and after is the rollback. 0-row workspaces first, `Vipin Kaushik` (791) last |
 | **F** | The four orphans | `curate-docs-skill` is moved or excluded, **never deleted** — the repaired N43 rollback cites it |
+
+
+**Phase C, as executed (2026-08-24).** The "9 absorb / 6 leave" split counted libs across
+ALL workspaces; `worker-routing` is PanditPawanKaushik-only and absent from
+`Vipin Kaushik/scripts/hygiene/lib/`, where C was actually done. Measured there:
+
+| | libs |
+|---|---|
+| Registered in `collect.sh` | `size-caps`, `state-shape`, `state-staleness`, `decisions-scan`, `dep-audit`, `memory-diff`, `link-check`, `state-index` |
+| Live transitive deps | `worktree-resolver` (4 consumers), `active-lines` (3), `ref-resolver` (1), `canonical-guard` (**live — `.githooks/pre-commit:75`, and `core.hooksPath=.githooks`**) |
+| Unregistered, deliberately kept | `branch-registry` — the independent oracle that caught `merge_state` being null |
+
+**Three libs were classified wrong on the first pass and corrected by re-measuring.**
+`rg -l <name>.sh` conflates docs, comments and invocations, and `collect.sh` dispatches
+via `run_lib "$name"` -> `bash "$LIB/$name.sh"`, which no literal-path grep resolves.
+
+**Nothing was absorbed or deleted.** Two readers were repointed and one narrowed, which is
+what the phase was for:
+
+- **`state-staleness`** — read pointer stubs, and had three separate ways to go green
+  without measuring (stub path; silent `|| return 0` on absence; `results==0` -> green).
+  Now enumerates `propagation/state/` via sidecars, reads `ready:false` projects from
+  their ACTIVE LINE via `git show`, and emits `scanned`/`skipped` always — zero is an
+  error, never a green.
+- **`decisions-check.sh`** — hardcoded stub paths. Now discovers, names every file it
+  scanned (a bare "6 clean" cannot distinguish six logs from six signposts), reports
+  absent declared targets instead of `continue`-ing, and gates deferred projects:
+  **6 -> 7 files**, VipinKaushik's 430-line DECISIONS.md checked for the first time.
+- **`state-shape`** — **slated for retirement and NOT retired.** The claim that
+  propagate's v3 conformance covers it is false: `V3_REQUIRED` is workspace-level and
+  asserts nothing per-project. Its `STATE.md` / `docs/DECISIONS.md` assertions were
+  vacuous (a pointer stub satisfies presence) and are removed; `docs/plans/README.md` is
+  checked by **nothing else in the tree**, and retiring the lib would have silently closed
+  a live red — `marketing-intel` is missing it while the other six projects have it.
+  The name stays deliberately: `state-shape` is a ledger category in CONTEXT-BUDGET.md and
+  a `transition_id` component in the v1->v2 SQLite contract.
 
 ### The three decisions the review changed
 
