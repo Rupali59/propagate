@@ -125,7 +125,14 @@ test("--apply moves the artifact and creates state/workspace/", async (t) => {
   assert.equal(r.applied, true);
   assert.ok(existsSync(path.join(ws, "propagation", "state", "workspace")), "state/workspace/ is always created");
   assert.ok(existsSync(path.join(ws, "propagation", "state", "alpha", "STATE.md")), "the artifact landed");
-  assert.equal(existsSync(path.join(ws, "alpha", "STATE.md")), false, "…and left project level");
+  // CHANGED 2026-08-24. The old path is no longer EMPTY — it holds a pointer
+  // stub, which `rule:state-and-decisions` requires and the manual 2026-08-21
+  // migration always wrote. Asserting absence here was asserting the defect.
+  // What must be true is that the CONTENT moved and what remains is a signpost.
+  const leftBehind = path.join(ws, "alpha", "STATE.md");
+  assert.ok(existsSync(leftBehind), "a stub stays, so every referrer keeps resolving");
+  assert.equal(isPointerStub(leftBehind), true, "…and it is a stub, not the state");
+  assert.doesNotMatch(readFileSync(leftBehind, "utf8"), /^## Now/m, "the content is gone from the old path");
 });
 
 // ---------------------------------------------------------------------------
@@ -564,4 +571,43 @@ test("a self-declared pointer stub is detected even when its heading does not sa
   const real = path.join(dir, "REAL.md");
   await writeFile(real, "# Motherboard — State\n\n## Now\n- T1: something in flight\n- T2: moved the API to a new port\n");
   assert.equal(isPointerStub(real), false, "prose that merely uses the word `moved` is not a stub");
+});
+
+/**
+ * A MOVE MUST LEAVE A POINTER STUB. The rule says so; the tool did not.
+ *
+ * `rule:state-and-decisions` states the trade in as many words: "a fresh clone
+ * of a project repo gets a pointer stub rather than its state. The stub names
+ * the workspace path and the pre-move SHA." The 2026-08-21 manual migration of
+ * `Vipin Kaushik` and `Motherboard` left exactly those — which is why
+ * `isPointerStub` exists at all, to recognise them on a later pass.
+ *
+ * `migrate` wrote the `.sidecar.yml` at the DESTINATION and nothing at the
+ * source. So every link, gate and doc pointing at the old path broke silently.
+ *
+ * Measured 2026-08-24, after applying it to ten workspaces before noticing:
+ * PanditPawanKaushik's own `check-doc-links` gate blocked the commit with 17
+ * broken relative links, every one of them at a path this migration had just
+ * emptied. The other nine carry the same latent breakage; PPK is simply the one
+ * with a gate that reads links.
+ *
+ * The stub is not politeness. It is what makes the move non-destructive to
+ * everything that referenced the file, and the rule already promised it.
+ */
+test("every moved artifact leaves a pointer stub naming its new home", async (t) => {
+  const hub = await hubFixture(t, { undeclaredHasArtifact: false });
+  await migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" });
+
+  const old = path.join(hub, "plainproj", "STATE.md");
+  assert.ok(existsSync(old), "the old path must still resolve, or every referrer breaks");
+  assert.equal(isPointerStub(old), true, "and it must be recognisable as a stub, not mistaken for state");
+
+  const body = readFileSync(old, "utf8");
+  assert.match(body, /propagation\/state\/plainproj\/STATE\.md/, "it must name the target");
+  assert.match(body, /git log --follow/, "and how to reach the history that did not travel");
+
+  // The real file is at the destination, and the stub is NOT it.
+  const moved = readFileSync(path.join(hub, "propagation", "state", "plainproj", "STATE.md"), "utf8");
+  assert.match(moved, /# plain/, "the destination holds the real content");
+  assert.notEqual(body, moved, "the stub is a signpost, not a copy");
 });
