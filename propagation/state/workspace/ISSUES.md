@@ -2028,7 +2028,11 @@ the plist suggests.
 the source files they name), or drop them entirely and rely on the interval. Do not simply
 add `propagation/`.
 
-## N46 · ~~S2~~ · **RESOLVED 2026-08-24** · `npm test` scaffolded ledger pairs into REAL workspaces
+## N48 · ~~S2~~ · **RESOLVED 2026-08-24** · `npm test` scaffolded ledger pairs into REAL workspaces
+
+> **Renumbered from N46 on 2026-08-24.** N46 was already taken by the `watchPathsFor()`
+> entry above — I filed against a live id without checking, which is how two issues end up
+> answering to one name and one of them stops being findable.
 
 **Reproduction, and it is exact:**
 
@@ -2101,7 +2105,9 @@ level up: there the test wrote to the store, here it writes to the tree.
 runs with no scaffolding verb in between. All six files carried the same mtime to the second,
 which is what proved a single command did it rather than six.
 
-## N47 · `migrate --apply` fails PARTWAY on an untracked artifact — the exact state it warns about — S2
+## N49 · ~~S2~~ · **RESOLVED 2026-08-24** · `migrate --apply` failed PARTWAY on an untracked artifact
+
+> **Renumbered from N47 on 2026-08-24**, for the same reason as N48.
 
 **2026-08-24, hit during v3 Phase E on `Tushar`.**
 
@@ -2134,5 +2140,16 @@ about. The fix is `git add`, and the message should say so.
 **Blast radius as measured:** of the 8 workspaces migrated in Phase E, exactly
 one hit this. The other seven had every artifact tracked.
 
-**Until fixed:** run the dry run, then `git status --porcelain -uall` in the
-target repo and `git add` any artifact showing `??` before `--apply`.
+**RESOLVED.** `migrateWorkspace` now preflights every planned move with
+`git ls-files --error-unmatch` and refuses before the first `git mv`, beside the two
+whole-run refusals that were already there for the same reason.
+
+It names EVERY offender. Unlike "not a git repository" this is per-file, so stopping at the
+first would turn one re-run into N, each discovering the next. The test asserts two untracked
+artifacts and checks both appear.
+
+The message says `git add`, not "conflict": a conflict is two real files where one must win,
+this is one real file the repo was never told about, and the two need different fixes.
+
+Asserted on the TREE — a refused run leaves it byte-identical — and paired with a test that a
+fully tracked workspace still migrates, so the preflight cannot pass by blocking everything.

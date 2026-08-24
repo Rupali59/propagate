@@ -611,3 +611,66 @@ test("every moved artifact leaves a pointer stub naming its new home", async (t)
   assert.match(moved, /# plain/, "the destination holds the real content");
   assert.notEqual(body, moved, "the stub is a signpost, not a copy");
 });
+
+/**
+ * N49 — an UNTRACKED artifact must be refused up front, never halfway through.
+ *
+ * `git mv` requires a tracked file. On Tushar (v3 Phase E, 2026-08-24) the run
+ * died on the third artifact:
+ *
+ *     refused: Command failed: git mv Tushar/docs/GOTCHAS.md …
+ *
+ * By then TWO artifacts had already moved and the scaffold files had not been
+ * written — the half-migrated state migrate's own conformance message calls
+ * "the state that loses data". Nothing was lost, verified by checksum, and
+ * `git add` plus a re-run finished it. The defect is the ORDER.
+ *
+ * `migrateWorkspace` already refuses up front for two whole-run preconditions,
+ * precisely so a doomed run writes nothing. Untracked sources are knowable the
+ * same way, before the first `git mv`.
+ *
+ * AND IT MUST NAME EVERY OFFENDER. Unlike "not a git repository", this is
+ * per-file: stopping at the first turns one re-run into N re-runs, each
+ * discovering the next one.
+ *
+ * NOT a conflict. A conflict is two real files where one must win; this is one
+ * real file the repo has never been told about, and the fix is `git add`.
+ */
+test("N49: an untracked artifact is refused BEFORE anything moves, naming every one", async (t) => {
+  const hub = await mkdtemp(path.join(tmpdir(), "untracked-"));
+  t.after(() => rm(hub, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", hub]);
+  const g = (...a) => execFileSync("git", ["-C", hub, ...a], { stdio: ["ignore", "pipe", "pipe"] });
+  g("config", "user.email", "t@e.st");
+  g("config", "user.name", "t");
+
+  // One TRACKED artifact and TWO untracked ones, so the message can be checked
+  // for completeness rather than just for firing.
+  await mkdir(path.join(hub, "tracked"), { recursive: true });
+  await writeFile(path.join(hub, "tracked", "STATE.md"), "# tracked\n");
+  g("add", "-A");
+  g("commit", "-qm", "seed");
+  for (const p of ["loose-a", "loose-b"]) {
+    await mkdir(path.join(hub, p), { recursive: true });
+    await writeFile(path.join(hub, p, "STATE.md"), `# ${p}\n`);
+  }
+
+  const before = treeSnapshot(hub);
+  await assert.rejects(
+    () => migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" }),
+    (err) => {
+      assert.match(err.message, /untracked/i, "must say what is wrong");
+      assert.match(err.message, /loose-a/, "must name the first offender");
+      assert.match(err.message, /loose-b/, "and the second — stopping at the first means N re-runs");
+      assert.match(err.message, /git add/, "and the fix, because it is not a conflict");
+      return true;
+    },
+  );
+  assert.equal(treeSnapshot(hub), before, "a refused run must write NOTHING — asserted on the tree");
+});
+
+test("N49: a fully tracked workspace still migrates — the preflight must not block the good case", async (t) => {
+  const hub = await hubFixture(t, { undeclaredHasArtifact: false });
+  await migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" });
+  assert.ok(existsSync(path.join(hub, "propagation", "state", "plainproj", "STATE.md")));
+});
