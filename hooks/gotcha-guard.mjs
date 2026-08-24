@@ -42,7 +42,7 @@
  * "never fired" is distinguishable from "never ran". Probe with --selftest.
  */
 
-import { readFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -190,7 +190,29 @@ function main() {
  * there is ONE parser rather than two that disagree about the entry count —
  * which is the number the census exists to report.
  */
-const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+/**
+ * realpathSync on BOTH sides, and that is the whole fix. Node's ESM loader
+ * realpaths `import.meta.url`; `process.argv[1]` is left as typed. So invoking
+ * through a symlink made the two disagree and this guard silently decided it
+ * was an import — no hook ran, no selftest printed, exit 0.
+ *
+ * That is not hypothetical here: `skills-marketplace/propagate` IS a symlink to
+ * `../propagate` (the hub CLAUDE.md documents it as how the plugin is served),
+ * and hooks.json invokes `${CLAUDE_PLUGIN_ROOT}/hooks/gotcha-guard.mjs`. So on
+ * the served path the guard AND its liveness probe were both dead, reporting
+ * success — a check that cannot fire, in the check whose job is to fire.
+ *
+ * realpathSync throws on a missing path; argv[1] always exists when set, but the
+ * try/catch keeps a deleted-mid-run script from bricking the hook.
+ */
+const isDirectRun = (() => {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  }
+})();
 
 if (isDirectRun) {
   try {

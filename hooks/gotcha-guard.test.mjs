@@ -225,3 +225,45 @@ test("importing the guard does not execute it", async () => {
   assert.equal(r.status, 0, `import exited ${r.status}: ${r.stderr}`);
   assert.match(r.stdout, /IMPORTED/, "the import must resolve, not exit early");
 });
+
+// ---------------------------------------------------------------------------
+// The entrypoint guard must survive a symlinked invocation
+// ---------------------------------------------------------------------------
+
+test("invoked through a SYMLINK the guard still runs — it must not decide it was imported", async (t) => {
+  // The defect this pins, found by review 2026-08-23 and reproduced before fixing:
+  // Node's ESM loader realpaths `import.meta.url` but leaves `process.argv[1]` as
+  // typed, so `path.resolve(argv[1]) === fileURLToPath(import.meta.url)` was FALSE
+  // through a symlink. The guard concluded "imported", ran nothing, and exited 0.
+  //
+  // That is the served path, not a hypothetical: `skills-marketplace/propagate` is a
+  // symlink to `../propagate`, and hooks.json invokes
+  // `${CLAUDE_PLUGIN_ROOT}/hooks/gotcha-guard.mjs`. Both the guard and its own
+  // --selftest liveness probe were dead there, reporting success.
+  //
+  // Asserts OUTPUT, not exit code: the broken version also exited 0. Exit code was
+  // exactly what made it invisible (rule:discernment-checks §1).
+  const { mkdtemp, symlink, rm } = await import("node:fs/promises");
+  const { execFileSync } = await import("node:child_process");
+  const { tmpdir } = await import("node:os");
+  const path = (await import("node:path")).default;
+  const { fileURLToPath } = await import("node:url");
+
+  const real = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
+  const dir = await mkdtemp(path.join(tmpdir(), "guard-symlink-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  // Symlink the whole hooks dir, mirroring how the marketplace links the plugin root.
+  const link = path.join(dir, "hooks-link");
+  await symlink(real, link);
+
+  const viaLink = execFileSync(process.execPath, [path.join(link, "gotcha-guard.mjs"), "--selftest"], {
+    encoding: "utf8",
+    env: { ...process.env, PROPAGATE_STATE_DIR: dir },
+  });
+  assert.match(
+    viaLink,
+    /entries|guard can fire|source/i,
+    "a symlinked invocation produced NO output — the entrypoint guard treated it as an import",
+  );
+});
