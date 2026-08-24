@@ -2072,7 +2072,7 @@ three inert entries measured on 2026-08-22 spanned both files; run it from each 
 see that workspace's own.
 
 
-### N46 · `watchPathsFor()` hardcodes `docs/`, and stale watch paths are undetectable — **S3** — **OPEN**
+### N46 · ~~S3~~ · **RESOLVED 2026-08-24** · `watchPathsFor()` hardcoded `docs/`, and stale watch paths were undetectable
 
 **2026-08-22, found while resolving N43.** `lib/core/plist.mjs:261-269` builds the monitor's
 `WatchPaths` as `ws.root` plus `ws.root/docs` if that directory exists. Two problems, both
@@ -2098,6 +2098,36 @@ the plist suggests.
 **Recommendation:** re-derive `WatchPaths` from what the monitor actually reads (sidecars and
 the source files they name), or drop them entirely and rely on the interval. Do not simply
 add `propagation/`.
+
+**RESOLVED 2026-08-24 — dropped, not re-derived.** The second option, for the reasons this
+entry already lists: launchd `WatchPaths` is not recursive, so it never caught the nested
+source edits anyone assumed it did; the monitor reads no ledger; and `StartInterval 1800` has
+always been the real trigger. Re-deriving would keep a non-recursive mechanism alive and hand
+it a fresh directory to rot against.
+
+`watchPathsFor()` now returns `[]` and the template emits **no `WatchPaths` key at all** — an
+empty array is still a declaration, and a declaration is something a later regeneration can
+quietly repopulate.
+
+**Two things fell out of it that were not in the plan:**
+
+* `writeMonitorPlist` REFUSED when the derived array was empty — "a monitor watching nothing
+  is worse than no monitor", true while WatchPaths were the mechanism and now the opposite.
+  It would have blocked every regeneration from here. Re-aimed at the condition it was
+  actually protecting against: zero discovered workspaces.
+* `renderMonitorPlist` extracted as a pure function, because the only way to assert "declares
+  no WatchPaths" was previously to write the real file into `~/Library/LaunchAgents`.
+
+**And problem 2's real cause was not what the entry said.** It reads "`doctor` has a `plist
+WatchPaths` check for the RETIRED watcher and none for the monitor" — accurate, and the
+consequence is sharper than "none": the existing check reads the retired watcher's path,
+which does not exist, so it reported `n/a` **forever** while the live monitor's plist went
+stale in both directions. A check aimed at the wrong file reads as a pass. It now also reads
+the monitor's plist and asserts the emptiness.
+
+Measured on the live artifact: **12 stale paths**, cleared by regenerating. `StartInterval
+1800` preserved; the plist is written but deliberately not loaded — arming launchd stays the
+human's step.
 
 ## N48 · ~~S2~~ · **RESOLVED 2026-08-24** · `npm test` scaffolded ledger pairs into REAL workspaces
 

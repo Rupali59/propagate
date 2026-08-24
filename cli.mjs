@@ -1738,6 +1738,32 @@ async function doctor() {
         `${PLIST_PATH} does not exist; the watcher was retired 2026-08-14 (docs/DECISIONS.md). Its replacement's health is asserted under "v2 replacement" below.`,
       );
     }
+
+    // THE MONITOR'S plist, which is the one that exists. N46: the check above
+    // reads the RETIRED watcher's path, so it reported `n/a` forever while the
+    // live monitor's plist went stale in BOTH directions — watching 13 `docs/`
+    // directories the v3 migration had emptied, and missing the six workspaces
+    // declared on 2026-08-24. A check aimed at the wrong file reads as a pass.
+    //
+    // WatchPaths are retired (lib/core/plist.mjs watchPathsFor), so the correct
+    // content is NONE. Any entry is stale by construction, and saying which
+    // makes the fix obvious rather than mysterious.
+    const { MONITOR_PLIST_PATH } = await import("./lib/core/plist.mjs");
+    if (existsSync(MONITOR_PLIST_PATH)) {
+      const mxml = await readFile(MONITOR_PLIST_PATH, "utf8");
+      const stale = parsePlistWatchPaths(mxml);
+      check(
+        "monitor plist declares no WatchPaths",
+        stale.length === 0,
+        stale.length
+          ? `${stale.length} stale path(s) — WatchPaths were retired 2026-08-24 (N46): launchd never ` +
+            `watched them recursively, and \`docs/\` stopped holding state on 2026-08-21. ` +
+            `Regenerate the plist to clear them.`
+          : "",
+      );
+    } else {
+      info("monitor plist", `${MONITOR_PLIST_PATH} does not exist — the monitor was never armed here`);
+    }
   } catch (err) {
     check("plist WatchPaths matches discovered workspaces", false, err.message);
   }

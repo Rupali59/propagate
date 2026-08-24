@@ -178,3 +178,50 @@ test("nestedUnderOf: top-level workspace has no ancestor", () => {
   const hub = { root: "/hub" };
   assert.equal(nestedUnderOf(hub, [hub]), null);
 });
+
+/**
+ * N46 — `WatchPaths` is dropped, and the monitor's plist is the one checked.
+ *
+ * `watchPathsFor` built `ws.root` plus `ws.root/docs`. Three measured facts, all
+ * from the issue and re-verified 2026-08-24, say that mechanism should not exist:
+ *
+ * 1. **launchd `WatchPaths` is not recursive.** It fires on changes to entries
+ *    IN the named directory, never deep beneath it — so `ws.root` never caught a
+ *    nested source edit, and the real trigger has always been
+ *    `StartInterval 1800`.
+ * 2. **`docs/` stopped holding state on 2026-08-21**, and the v3 migration
+ *    emptied it in all 13 workspaces. The installed plist watches 13 such
+ *    directories.
+ * 3. **It was stale in BOTH directions and nothing said so** — missing the six
+ *    workspaces declared on 2026-08-24, while watching directories that no
+ *    longer hold what they were watched for. A regeneration on 2026-08-22
+ *    silently dropped 8 of 20 paths.
+ *
+ * The monitor also reads no ledger (`monitor.mjs:21`), so waking it on a ledger
+ * change buys nothing; the job that reads ledgers is time-triggered.
+ *
+ * So: dropped, not widened. The issue says explicitly "do not simply add
+ * `propagation/`" — that would keep a non-recursive mechanism alive and give it
+ * a fresh directory to go stale against.
+ *
+ * AND THE CHECK NOW READS THE RIGHT FILE. `doctor`'s `plist WatchPaths` check
+ * pointed at the RETIRED watcher's plist, which does not exist, so it reported
+ * `n/a` forever while the monitor's plist — which does exist and was stale both
+ * ways — was never examined. A check aimed at the wrong file is the same as no
+ * check, and reads as a pass.
+ */
+test("N46: watchPathsFor returns nothing — the mechanism is retired, not widened", async () => {
+  const { watchPathsFor } = await import("../../lib/core/plist.mjs");
+  assert.deepEqual(
+    watchPathsFor([{ root: "/tmp/ws-a" }, { root: "/tmp/ws-b" }]),
+    [],
+    "any non-empty return means the non-recursive mechanism is back",
+  );
+});
+
+test("N46: a generated monitor plist declares no WatchPaths key at all", async () => {
+  const { renderMonitorPlist } = await import("../../lib/core/plist.mjs");
+  const xml = renderMonitorPlist({ stateDir: "/tmp/state" });
+  assert.doesNotMatch(xml, /<key>WatchPaths<\/key>/, "an empty array would still be a key to go stale against");
+  assert.match(xml, /StartInterval/, "the interval is the trigger, and must remain");
+});
