@@ -31,8 +31,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { SKILL_DIR, STATE_DIR, STATE_PATH, WATCHER_LOG, HEARTBEAT_PATH } from "../../lib/core/config.mjs";
+
+// RECURSIVE, and the whole suite — not this directory. tests/ gained
+// subdirectories on 2026-08-20, and a non-recursive read here would inspect a
+// sixth of the suite and then report a confident verdict about the rest, which
+// is the failure tests/cli/doctor-check-coverage.test.mjs warns about and once
+// committed itself.
+const TESTS_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const TEST_FILES = readdirSync(TESTS_ROOT, { recursive: true }).filter((f) => String(f).endsWith(".mjs"));
 
 const under = (dir, p) => p === dir || p.startsWith(dir + path.sep);
 
@@ -86,3 +95,58 @@ test("SKILL_DIR points at the skill root, identified by a marker it must contain
   }
 });
 
+
+/**
+ * …AND THE SUITE MUST NOT WRITE THE OPERATOR'S WORKSPACE TREE EITHER.
+ *
+ * This file's original scope was state files. N46 is the same principle one
+ * level out: `fresh-machine.test.mjs` isolated HOME and PROPAGATE_STATE_DIR —
+ * so config and the event store were safe — and then handed the REAL hub to a
+ * scaffolding verb:
+ *
+ *     const roots = path.join(process.env.HOME, "Documents", "GitHub");
+ *     run(["setup", "--roots", roots]);
+ *
+ * `process.env.HOME` there is the TEST RUNNER's home, not the isolated one.
+ * `setup` is one of LEDGER_SCAFFOLDING_VERBS, so `verifyDiscovery` walked the
+ * real tree and `ensureLedgerPair` ran in every workspace it found.
+ *
+ * IT WAS INVISIBLE FOR AS LONG AS IT DID NOTHING. `ensureLedgerPair` creates
+ * the pair only iff NEITHER file exists, so on a tree where every workspace
+ * already had one it was a silent no-op. Declaring six new workspaces on
+ * 2026-08-24 created six directories where it was not, and twelve `doctor`
+ * failures cleared themselves between two runs with no scaffolding verb in
+ * between. That is what surfaced it.
+ *
+ * The invariant is narrow on purpose: a test may READ the real tree, and some
+ * must. It may not build a path from the runner's HOME and hand it to a
+ * command, because there is no way to tell from the call site whether that
+ * command writes.
+ */
+test("no test builds a path from the RUNNER's HOME — read the real tree, never target it", () => {
+  const offenders = [];
+  for (const rel of TEST_FILES) {
+    const src = readFileSync(path.join(TESTS_ROOT, rel), "utf8");
+    // `HOME: home` (setting an isolated HOME for a child) is the correct
+    // pattern and must not match. Only READING process.env.HOME to build a
+    // path does.
+    for (const m of src.matchAll(/process\.env\.HOME/g)) {
+      const line = src.slice(0, m.index).split("\n").length;
+      const text = src.split("\n")[line - 1].trim();
+      if (/HOME:\s/.test(text)) continue; // assigning an isolated HOME — fine
+      // COMMENTS ARE NOT CODE, and skipping them is not a hole: a line behind
+      // `//` or ` * ` does not execute, so it cannot target anything. Without
+      // this the rule cannot be WRITTEN DOWN without tripping itself — the
+      // docstring above quotes the offending line verbatim, on purpose, and
+      // four of the first run's five hits were this file explaining the rule.
+      if (/^\s*(\/\/|\*|\/\*)/.test(text)) continue;
+      offenders.push(`${rel}:${line}  ${text}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `these tests derive a path from the runner's real HOME:\n  ${offenders.join("\n  ")}\n` +
+      `Build fixtures under tmpdir, or write the config directly into the isolated HOME. N46.`,
+  );
+});

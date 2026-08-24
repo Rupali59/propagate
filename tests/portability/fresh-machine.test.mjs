@@ -24,11 +24,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { renderConfig } from "../../lib/core/setup.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "cli.mjs");
+
+// The operator's real hub, for the one test that must READ it. Named and
+// derived once, via os.homedir() rather than process.env.HOME, so it can never
+// be confused with the isolated HOME a child is given. It is only ever passed
+// to read-only verbs — see the N46 note at its use site.
+const REAL_HUB = path.join(homedir(), "Documents", "GitHub");
 
 /** Run the CLI with a throwaway HOME. Returns {stdout, stderr, code} and never throws. */
 function runIsolated(args, { searchRoots } = {}) {
@@ -222,14 +230,38 @@ test("an UNCONFIGURED cross-repo allowlist is not a doctor failure", () => {
   const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
   const home = mkdtempSync(path.join(tmpdir(), "propagate-xallow-"));
   try {
-    const env = { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") };
-    // Real roots: the failure needs actual repos carrying cross edges to appear at all.
-    const roots = path.join(process.env.HOME, "Documents", "GitHub");
+    const stateDir = path.join(home, ".propagate");
+    const env = { ...process.env, HOME: home, PROPAGATE_STATE_DIR: stateDir };
     const run = (args) => {
       const r = spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8" });
       return strip(`${r.stdout ?? ""}${r.stderr ?? ""}`);
     };
-    run(["setup", "--roots", roots]);
+
+    // THE CONFIG IS WRITTEN, NOT `setup`-ed. This is N46, and the distinction is
+    // the whole fix.
+    //
+    // The assertion below needs the real tree — an unconfigured allowlist can
+    // only be shown not to fail if there are actual repos carrying cross edges
+    // to be outside it. Reading the real tree is fine and is what `doctor` does.
+    //
+    // But this used to reach it by running `setup --roots <real hub>`, and
+    // `setup` is one of LEDGER_SCAFFOLDING_VERBS: it walked the operator's tree
+    // and created a ledger pair in every workspace that lacked one. Isolating
+    // HOME and PROPAGATE_STATE_DIR protected the config and the event store; it
+    // could not protect the tree the command was deliberately pointed at.
+    //
+    // Silent for as long as it did nothing — `ensureLedgerPair` writes only iff
+    // NEITHER file exists — and it surfaced on 2026-08-24 the moment six newly
+    // declared workspaces gave it somewhere to act.
+    //
+    // Writing the config file directly reaches the same state with a read-only
+    // verb. `renderConfig` is imported rather than hand-rolled so the format
+    // cannot drift from what `setup` actually writes.
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      path.join(stateDir, "config.yml"),
+      renderConfig({ roots: [REAL_HUB], scheduler: "none", hub: REAL_HUB }),
+    );
     const out = run(["doctor"]);
     assert.doesNotMatch(
       out,

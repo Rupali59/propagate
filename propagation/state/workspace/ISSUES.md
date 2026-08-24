@@ -2010,7 +2010,7 @@ the plist suggests.
 the source files they name), or drop them entirely and rely on the interval. Do not simply
 add `propagation/`.
 
-## N46 · `npm test` scaffolds ledger pairs into the operator's REAL workspaces — S2
+## N46 · ~~S2~~ · **RESOLVED 2026-08-24** · `npm test` scaffolded ledger pairs into REAL workspaces
 
 **Reproduction, and it is exact:**
 
@@ -2024,11 +2024,43 @@ Bisected 2026-08-24 by deleting one empty ledger and re-running each group, then
 `tests/cli` no · `tests/unit` no · **`tests/portability` YES** → **`fresh-machine.test.mjs`**,
 alone, out of that directory's 18 files.
 
-**Why it is not obvious.** Only `setup`, `init` and `bootstrap` scaffold
-(`lib/core/discovery.mjs:282`), and this file spawns neither — every case runs `status` or
-`doctor`. `runIsolated` sets `HOME` to a tmpdir and `delete`s `PROPAGATE_SEARCH_ROOTS`. The
-route from there to the real tree has NOT been established, and it should be before anything
-is changed.
+**CAUSE, established by tracing `ensureLedgerPair` rather than by reasoning.** The earlier
+version of this entry said the route was unknown and that it should be found before anything
+changed. It was found:
+
+```
+argv: [node, cli.mjs, setup, --roots, /Users/rupali.b/Documents/GitHub]
+HOME: /var/folders/.../propagate-xallow-VqE9xi          <- isolated, correctly
+stack: ensureLedgerPair <- makeWorkspaceRecord <- walk <- discoverWorkspacesSync
+       <- verifyDiscovery <- setupCmd
+```
+
+One test in that file hands the **real hub** to `setup`, a scaffolding verb:
+
+```js
+const roots = path.join(process.env.HOME, "Documents", "GitHub");  // the RUNNER's home
+run(["setup", "--roots", roots]);
+```
+
+It is deliberate — the assertion needs real repos carrying cross edges to exist at all — and
+`process.env.HOME` there is the test runner's home, not the isolated one the child is given.
+Isolating HOME and `PROPAGATE_STATE_DIR` protected the config and the event store. Neither
+could protect the tree the command was explicitly pointed at.
+
+**It was silent for as long as it did nothing.** `ensureLedgerPair` writes only iff NEITHER
+file exists, so on a tree where every workspace already had a pair it was a no-op on every run.
+Declaring six new workspaces gave it somewhere to act, and twelve `doctor` failures cleared
+themselves between two runs.
+
+**FIX.** The config is now written directly into the isolated HOME via `renderConfig` —
+imported, so the format cannot drift from what `setup` writes — and only `doctor`, a read-only
+verb, is spawned. The real tree is still READ, which is what the assertion needs.
+
+**Ratchet, so it cannot come back:** `state-isolation.test.mjs` now fails if any test derives a
+path from the runner's `process.env.HOME`. Comments are skipped — a line behind `//` cannot
+target anything, and without that the rule could not be written down without tripping itself
+(four of the first run's five hits were the entry explaining it). Verified it still fires on
+real code by appending one line and watching it go red.
 
 **What was ruled out, so nobody re-does it:** `setup.test.mjs` (fully sandboxed — HOME,
 `PROPAGATE_STATE_DIR`, and `PROPAGATE_SEARCH_ROOTS=""`), `hub-root.test.mjs`,
