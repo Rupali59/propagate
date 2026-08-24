@@ -277,3 +277,33 @@ test("--apply creates every item it previewed, and conformance actually flips", 
   assert.ok(Array.isArray(snap.refs) && snap.refs.length > 0, "a repo with a branch must yield at least one ref");
   assert.ok(existsSync(path.join(ws, "propagation", "refs", "lifecycle.jsonl")), "the lifecycle log must exist even when empty");
 });
+
+test("two sources claiming ONE destination is a conflict, not two moves", async (t) => {
+  // ARTIFACT_LOCATIONS is ["", "docs"], so <project>/STATE.md and
+  // <project>/docs/STATE.md compute the same destination. Every existence check
+  // in planMigration runs against the PRE-migration tree, so before this guard
+  // both looked free and both landed in `moves`.
+  //
+  // Measured 2026-08-23: --apply moved the first, `git mv` refused the second
+  // with "destination exists", and the command exited 1 HAVING ALREADY MUTATED
+  // the tree. A half-migrated workspace is exactly what the precondition block
+  // exists to prevent, and it could not, because the hazard is invisible in any
+  // single artifact — it only exists between two of them.
+  //
+  // Asserts the TREE, not the message: an exception that arrives after the
+  // damage is not a refusal (rule:safety-flag-needs-a-test).
+  const ws = await workspace(t, {
+    projects: { alpha: { "STATE.md": REAL_STATE, "docs/STATE.md": REAL_STATE.replace("Now", "Now (docs copy)") } },
+  });
+
+  const plan = await migrateWorkspace({ workspace: ws });
+  assert.equal(plan.moves.length, 0, "neither source may be planned as a move");
+  assert.equal(plan.conflicts.length, 2, "both sources must be reported, so the person sees the pair");
+  for (const c of plan.conflicts) {
+    assert.match(c.reason, /2 sources claim one destination/, `conflict must name the cause: ${c.reason}`);
+  }
+
+  const before = treeSnapshot(ws);
+  await assert.rejects(() => migrateWorkspace({ workspace: ws, apply: true }), /unresolved conflict/);
+  assert.deepEqual(treeSnapshot(ws), before, "a refused migration must leave the tree byte-identical");
+});

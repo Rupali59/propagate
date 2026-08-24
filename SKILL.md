@@ -27,7 +27,7 @@ drift derives from content on demand (`reconcile`, `check`, digest), never a pol
 | # | Command | Establishes |
 |---|---|---|
 | 1 | `npm install` in the skill directory | dependencies |
-| 2 | `node cli.mjs setup --hub <dir>` | where your code lives — search roots, marketplace and ports registry all derive from it. `--roots <a>[:<b>]` for a split layout. Exits non-zero unless discovery finds ≥1 workspace |
+| 2 | `node cli.mjs setup --hub <dir>` | where your code lives. Exits non-zero unless discovery then finds ≥1 workspace |
 | 3 | `node cli.mjs bootstrap --baseline-from-git --apply` | the verification baseline. **Skip this and every edge reads `NEVER_VERIFIED`**, `doctor` red. Dry-run without `--apply` |
 | 4 | `node cli.mjs doctor` | confirms 2 and 3 took |
 
