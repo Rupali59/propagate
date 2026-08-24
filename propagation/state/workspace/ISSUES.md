@@ -1587,7 +1587,7 @@ trade this register exists to prevent.
 
 ---
 
-### N38 · The private→public coupling has no watcher — `release --check` step 3 is a procedure, not a check — **S2** — **OPEN**
+### N38 · The private→public coupling has no watcher — `release --check` step 3 is a procedure, not a check — **S2** — **BLOCKED** (precondition unmet, re-verified 2026-08-24)
 
 Raised while defining release mechanics
 (`~/.claude/plans/status-temporal-plum.md` §4, "named, deferred, not faked"). Recorded
@@ -1626,6 +1626,23 @@ like `cli.mjs`/`lib/**` (or a narrower set, per N37's god-file lesson) →
 the corresponding public-repo paths, `kind: cross-repo`. Until then this entry is the
 honest record that step 3 is a procedure a human runs, not a coupling propagate
 watches, and `release --check` passing must not be read as more than that.
+
+**Re-verified 2026-08-24 — the precondition is still unmet, measured not assumed:**
+
+| | |
+|---|---|
+| `Rupali59/propagate` | `"visibility": "PRIVATE"` |
+| a public propagate repo | absent from `gh repo list --visibility public` (20 repos) |
+| `cross-allow.yml` `partner_roots` | `Motherboard`, `Tathya`, `SSJK-mb` — no public propagate |
+
+**Relabelled OPEN → BLOCKED, and the distinction is the point.** "Open because nobody
+did it" and "open because it cannot be done yet" are different facts, and a register that
+renders them identically is the same conflation this repo keeps paying for. Nothing here
+is waiting on effort. The trigger is external: the public repo coming into existence.
+
+**Do not close this by declaring the edge against a path that does not exist,** and do not
+close it by widening `partner_roots` to make the declaration validate. The entry above
+records that exact draft being caught in adversarial review once already.
 
 
 ### N39 · A subagent's unscoped `bootstrap --apply` wrote 7 events to the live store — **S2** — **ACCEPTED, NOT REVERTED**
