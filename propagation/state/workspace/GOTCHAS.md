@@ -1123,3 +1123,32 @@ verdict — `rule:discernment-checks` §4, verify the instrument.
 **Cost:** two false regressions during unrelated work, and a nearly-published claim that a bound
 had broken when it had not. **When you assert a timeout works, assert the side effect it
 produces — killed vs not — never the duration.**
+
+### G26 · Two snapshot formats both declare `schema_version: 1`
+**Trigger:** `snapshot\.json|buildSnapshot|diffSnapshots|branch-registry`
+**Fires on:** `node -e "JSON.parse(fs.readFileSync('propagation/refs/snapshot.json'))"`
+`lib/refs/snapshot.mjs` writes `{ schema_version, project, repo_root, refs: [ … ] }` — a FLAT
+array. The older `hygiene/branch-registry` writes
+`{ captured_at, captured_by, projects: { <name>: { refs: { <branch>: {…} } } }, schema_version: 1 }`
+— a NESTED map. Both say `1`. One is live at
+`Vipin Kaushik/propagation/refs/snapshot.json` with **36 refs across 7 projects**.
+
+**Measured 2026-08-24:** `diffSnapshots(shipped, mine)` returned **4 `created` and zero
+`pruned`**, because `prev?.refs ?? []` turned 36 existing refs into "there was nothing here".
+Those records append to `refs/lifecycle.jsonl`, which is append-only by design — the same
+damage N27 and N44 already cost this project twice.
+
+**The version field cannot save you when both writers claim it.** `assertKnownShape` now
+refuses a snapshot whose `refs` is not an array, and names the format it appears to be. A
+missing `refs` means UNREADABLE, never EMPTY.
+
+**Do not "fix" this by making the reader accept both.** Two producers of one artifact is the
+defect; a reader that normalises them hides it and doubles the surface. Phase B has to decide
+which writer owns `refs/`, and the other must stop writing there.
+
+**And beware the probe.** The first read of that file reported `refs: 0` — a top-level key it
+does not have — which is how the empty-snapshot theory survived two messages and got written
+into a source comment as fact. `rule:discernment-checks` §4: verify the instrument before
+believing a surprising number.
+**Cost:** caught before any lifecycle event was written. It would not have been, had `migrate`
+run against Vipin Kaushik first.

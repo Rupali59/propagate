@@ -213,3 +213,115 @@ test("appending twice does not rewrite the lifecycle log", async (t) => {
   assert.equal(lines.length, 2, "append-only means the first record survives the second write");
   assert.equal(JSON.parse(lines[0]).ref, "a");
 });
+
+// ---------------------------------------------------------------------------
+// A row's identity is (kind, ref) — not ref alone
+// ---------------------------------------------------------------------------
+
+test("a worktree and a branch sharing a ref name are TWO rows, not one", () => {
+  // enumerateRefs yields both a `worktree` row and a `branch` row for any
+  // checked-out branch, so `new Map(refs.map(r => [r.ref, r]))` silently kept
+  // whichever came last. Review 2026-08-23; visible in real output, where a
+  // fixture repo on `main` produced refs: [worktree main, branch feature-x,
+  // branch main] — two rows keyed `main`.
+  //
+  // Consequence: adding or removing a WORKTREE for a branch that already exists
+  // produces no lifecycle event at all, because the branch row masks it. The
+  // registry then reports "nothing changed" for a change it was built to record.
+  const prev = {
+    generated_at: "2026-08-23T00:00:00Z",
+    project: "p",
+    refs: [{ ref: "main", kind: "branch", head: "aaa" }],
+  };
+  const next = {
+    generated_at: "2026-08-24T00:00:00Z",
+    project: "p",
+    refs: [
+      { ref: "main", kind: "branch", head: "aaa" },
+      { ref: "main", kind: "worktree", head: "aaa", path: "/tmp/wt" },
+    ],
+  };
+
+  const events = diffSnapshots(prev, next);
+  const created = events.filter((e) => e.type === "created");
+  assert.equal(created.length, 1, `adding a worktree for an existing branch must fire one event, got ${JSON.stringify(events)}`);
+  assert.equal(created[0].kind, "worktree", "the event must say WHICH kind appeared, or it is unactionable");
+  assert.equal(created[0].ref, "main");
+});
+
+test("removing a worktree while the branch stays fires a prune for the worktree only", () => {
+  const prev = {
+    generated_at: "2026-08-23T00:00:00Z",
+    project: "p",
+    refs: [
+      { ref: "main", kind: "branch", head: "aaa" },
+      { ref: "main", kind: "worktree", head: "aaa", path: "/tmp/wt" },
+    ],
+  };
+  const next = {
+    generated_at: "2026-08-24T00:00:00Z",
+    project: "p",
+    refs: [{ ref: "main", kind: "branch", head: "aaa" }],
+  };
+
+  const events = diffSnapshots(prev, next);
+  const pruned = events.filter((e) => e.type === "pruned");
+  assert.equal(pruned.length, 1, `pruning a worktree must fire exactly one event, got ${JSON.stringify(events)}`);
+  assert.equal(pruned[0].kind, "worktree", "the branch survived — only the worktree went");
+});
+
+test("worktree rows say null for branch-only atoms — never \"\", which claims a question was asked", async (t) => {
+  // lib/edges/refs.mjs: `""` is ASKED-AND-NONE, absent is NEVER-ASKED, and
+  // upstream_track / last_commit_iso are branch-only. Coercing worktree rows to
+  // `""` made every one of them assert a question that was never put to git.
+  const dir = await mkdtemp(path.join(tmpdir(), "snap-null-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "config", "user.email", "t@e.st"]);
+  execFileSync("git", ["-C", dir, "config", "user.name", "t"]);
+  await writeFile(path.join(dir, "f.txt"), "x\n");
+  execFileSync("git", ["-C", dir, "add", "-A"]);
+  execFileSync("git", ["-C", dir, "commit", "-qm", "seed"]);
+
+  const snap = await buildSnapshot(dir, { now: "2026-08-24T00:00:00Z" });
+  const wt = snap.refs.find((r) => r.kind === "worktree");
+  assert.ok(wt, "a checked-out repo must yield a worktree row");
+  assert.equal(wt.upstream_track, null, "worktree rows never carry an upstream — null, not \"\"");
+  assert.equal(wt.last_commit_iso, null, "…same for last_commit_iso");
+
+  // And the branch row keeps `""` where git genuinely answered "no upstream",
+  // which is what makes the two states distinguishable at all.
+  const br = snap.refs.find((r) => r.kind === "branch");
+  assert.ok(br, "a repo with a commit must yield a branch row");
+  assert.notEqual(br.upstream_track, undefined, "branch rows must carry the field, even when empty");
+});
+
+test("a foreign snapshot shape is REFUSED, never read as an empty ref set", () => {
+  // Two incompatible formats both declare schema_version 1. This module writes
+  // { schema_version, project, repo_root, refs: [...] }; the pre-existing
+  // hygiene/branch-registry writes { captured_at, captured_by, projects: {
+  // <name>: { refs: { <branch>: {...} } } } } — and one is LIVE at
+  // "Vipin Kaushik/propagation/refs/snapshot.json" carrying 36 refs.
+  //
+  // Measured 2026-08-24 before the guard: diffSnapshots(shipped, mine) returned
+  // 4 `created` and ZERO `pruned`, because `prev?.refs ?? []` turned 36 existing
+  // refs into "there was nothing here". Those events append to a log that is
+  // append-only by design — the exact damage N27 and N44 already cost twice.
+  const foreign = {
+    schema_version: 1,
+    captured_at: "2026-08-24T03:54:16Z",
+    captured_by: "hygiene/branch-registry",
+    projects: { alpha: { base_ref: "origin/main", refs: { main: { head: "aaa" } } } },
+  };
+  const mine = { schema_version: 1, project: "p", generated_at: "2026-08-24T00:00:00Z", refs: [] };
+
+  assert.throws(
+    () => diffSnapshots(foreign, mine),
+    /refusing to diff|branch-registry/,
+    "a foreign shape must refuse loudly, not silently report every ref as created",
+  );
+
+  // A genuinely ABSENT previous snapshot is a different fact and stays legal:
+  // the first run has nothing to compare against, and everything is `created`.
+  assert.doesNotThrow(() => diffSnapshots(null, mine), "null prev is first-run, not corruption");
+});
