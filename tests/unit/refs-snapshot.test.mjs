@@ -35,6 +35,7 @@ import {
   diffSnapshots,
   classifyPruned,
   readLifecycle,
+  WORKSPACE_SNAPSHOT_SCHEMA,
   writeRegistry,
   refsDir,
 } from "../../lib/refs/snapshot.mjs";
@@ -126,50 +127,10 @@ const snapOf = (refs, extra = {}) => ({
   ...extra,
 });
 
-test("a branch appearing is `created`, and carries detected_by plus evidence", () => {
-  const ev = diffSnapshots(snapOf([]), snapOf([{ ref: "feat", kind: "branch", head: "aaa", merge_state: null }]));
-  assert.equal(ev.length, 1);
-  assert.equal(ev[0].type, "created");
-  assert.equal(ev[0].ref, "feat");
-  assert.ok(ev[0].detected_by, "a record without detected_by cannot be re-checked later");
-  assert.match(ev[0].evidence, /aaa/, "evidence must name what was observed");
-});
 
-test("a branch vanishing is `pruned`", () => {
-  const ev = diffSnapshots(snapOf([{ ref: "feat", kind: "branch", head: "aaa", merge_state: null }]), snapOf([]));
-  assert.equal(ev.length, 1);
-  assert.equal(ev[0].type, "pruned");
-  assert.match(ev[0].evidence, /absent now/);
-});
 
-test("unmerged -> merged is a `merged` transition", () => {
-  const ev = diffSnapshots(
-    snapOf([{ ref: "feat", kind: "branch", head: "aaa", merge_state: "unmerged" }]),
-    snapOf([{ ref: "feat", kind: "branch", head: "aaa", merge_state: "merged" }]),
-  );
-  assert.equal(ev.length, 1);
-  assert.equal(ev[0].type, "merged");
-});
 
-test("unknown -> merged is NOT a merge event", () => {
-  // The subtle one. The first run with a base ref flips every branch from null
-  // to merged/unmerged. Treating that as a transition would write a merge record
-  // for every already-merged branch in the repo, dated the day the registry was
-  // switched on — history invented by a change in observation.
-  const ev = diffSnapshots(
-    snapOf([{ ref: "feat", kind: "branch", head: "aaa", merge_state: null }]),
-    snapOf([{ ref: "feat", kind: "branch", head: "aaa", merge_state: "merged" }]),
-  );
-  assert.deepEqual(ev, [], "first-time observation is not a state change");
-});
 
-test("a detached worktree (ref null) is not diffed as a branch", () => {
-  const ev = diffSnapshots(
-    snapOf([{ ref: null, kind: "worktree", head: "aaa", merge_state: null }]),
-    snapOf([]),
-  );
-  assert.deepEqual(ev, [], "a null ref has no identity to track across snapshots");
-});
 
 // ---------------------------------------------------------------------------
 // writeRegistry — the safety gate
@@ -220,57 +181,7 @@ test("appending twice does not rewrite the lifecycle log", async (t) => {
 // A row's identity is (kind, ref) — not ref alone
 // ---------------------------------------------------------------------------
 
-test("a worktree and a branch sharing a ref name are TWO rows, not one", () => {
-  // enumerateRefs yields both a `worktree` row and a `branch` row for any
-  // checked-out branch, so `new Map(refs.map(r => [r.ref, r]))` silently kept
-  // whichever came last. Review 2026-08-23; visible in real output, where a
-  // fixture repo on `main` produced refs: [worktree main, branch feature-x,
-  // branch main] — two rows keyed `main`.
-  //
-  // Consequence: adding or removing a WORKTREE for a branch that already exists
-  // produces no lifecycle event at all, because the branch row masks it. The
-  // registry then reports "nothing changed" for a change it was built to record.
-  const prev = {
-    generated_at: "2026-08-23T00:00:00Z",
-    project: "p",
-    refs: [{ ref: "main", kind: "branch", head: "aaa" }],
-  };
-  const next = {
-    generated_at: "2026-08-24T00:00:00Z",
-    project: "p",
-    refs: [
-      { ref: "main", kind: "branch", head: "aaa" },
-      { ref: "main", kind: "worktree", head: "aaa", path: "/tmp/wt" },
-    ],
-  };
 
-  const events = diffSnapshots(prev, next);
-  const created = events.filter((e) => e.type === "created");
-  assert.equal(created.length, 1, `adding a worktree for an existing branch must fire one event, got ${JSON.stringify(events)}`);
-  assert.equal(created[0].kind, "worktree", "the event must say WHICH kind appeared, or it is unactionable");
-  assert.equal(created[0].ref, "main");
-});
-
-test("removing a worktree while the branch stays fires a prune for the worktree only", () => {
-  const prev = {
-    generated_at: "2026-08-23T00:00:00Z",
-    project: "p",
-    refs: [
-      { ref: "main", kind: "branch", head: "aaa" },
-      { ref: "main", kind: "worktree", head: "aaa", path: "/tmp/wt" },
-    ],
-  };
-  const next = {
-    generated_at: "2026-08-24T00:00:00Z",
-    project: "p",
-    refs: [{ ref: "main", kind: "branch", head: "aaa" }],
-  };
-
-  const events = diffSnapshots(prev, next);
-  const pruned = events.filter((e) => e.type === "pruned");
-  assert.equal(pruned.length, 1, `pruning a worktree must fire exactly one event, got ${JSON.stringify(events)}`);
-  assert.equal(pruned[0].kind, "worktree", "the branch survived — only the worktree went");
-});
 
 test("worktree rows say null for branch-only atoms — never \"\", which claims a question was asked", async (t) => {
   // lib/edges/refs.mjs: `""` is ASKED-AND-NONE, absent is NEVER-ASKED, and
@@ -298,103 +209,44 @@ test("worktree rows say null for branch-only atoms — never \"\", which claims 
   assert.notEqual(br.upstream_track, undefined, "branch rows must carry the field, even when empty");
 });
 
-test("a foreign snapshot shape is REFUSED, never read as an empty ref set", () => {
-  // Two incompatible formats both declare schema_version 1. This module writes
-  // { schema_version, project, repo_root, refs: [...] }; the pre-existing
-  // hygiene/branch-registry writes { captured_at, captured_by, projects: {
-  // <name>: { refs: { <branch>: {...} } } } } — and one is LIVE at
-  // "Vipin Kaushik/propagation/refs/snapshot.json" carrying 36 refs.
-  //
-  // Measured 2026-08-24 before the guard: diffSnapshots(shipped, mine) returned
-  // 4 `created` and ZERO `pruned`, because `prev?.refs ?? []` turned 36 existing
-  // refs into "there was nothing here". Those events append to a log that is
-  // append-only by design — the exact damage N27 and N44 already cost twice.
-  const foreign = {
-    schema_version: 1,
-    captured_at: "2026-08-24T03:54:16Z",
-    captured_by: "hygiene/branch-registry",
-    projects: { alpha: { base_ref: "origin/main", refs: { main: { head: "aaa" } } } },
-  };
-  const mine = { schema_version: 1, project: "p", generated_at: "2026-08-24T00:00:00Z", refs: [] };
-
-  assert.throws(
-    () => diffSnapshots(foreign, mine),
-    /refusing to diff|branch-registry/,
-    "a foreign shape must refuse loudly, not silently report every ref as created",
-  );
-
-  // A genuinely ABSENT previous snapshot is a different fact and stays legal:
-  // the first run has nothing to compare against, and everything is `created`.
-  assert.doesNotThrow(() => diffSnapshots(null, mine), "null prev is first-run, not corruption");
-});
 
 // ---------------------------------------------------------------------------
 // A first run is a BASELINE, not a mass creation
 // ---------------------------------------------------------------------------
 
-test("with no previous snapshot, one `baseline` event — never `created` per ref", () => {
-  // THE FALSE CLAIM THIS FIXES. `created` asserts a ref came into existence
-  // between two observations. On a first run there is no previous observation,
-  // so every ref got that label and none of it was true — the refs predated us;
-  // we merely started looking.
-  //
-  // The shell registry this module replaces got it right and its wording is
-  // adopted verbatim: "no prior snapshot; ref existence before this moment is
-  // unknown". 7 such events sit in Vipin Kaushik's lifecycle log today.
-  //
-  // rule:discernment-checks §2 — absence must be attributable. "I have no
-  // prior data" and "these are new" are different facts, and only one of them
-  // was being recorded.
-  const next = {
-    schema_version: 1,
-    project: "p",
-    generated_at: "2026-08-24T00:00:00Z",
-    refs: [
-      { ref: "main", kind: "branch", head: "aaa" },
-      { ref: "main", kind: "worktree", head: "aaa", path: "/tmp/wt" },
-      { ref: "feature", kind: "branch", head: "bbb" },
-    ],
-  };
 
-  const events = diffSnapshots(null, next);
-  assert.equal(events.length, 1, `a first run must emit exactly one event, got ${JSON.stringify(events)}`);
-
-  const [e] = events;
-  assert.equal(e.type, "baseline", "the first run is a baseline, not a creation");
-  assert.equal(e.ref_count, 3, "the baseline must carry how many refs it saw");
-  assert.equal(e.ref, null, "a baseline is about the whole snapshot, not one ref");
-  assert.match(
-    e.evidence,
-    /unknown/i,
-    "the baseline must state that existence before this moment is UNKNOWN — that is the whole point",
-  );
-  assert.equal(e.detected_by, "snapshot-diff");
-});
-
-test("an EMPTY previous snapshot is not the same as no previous snapshot", () => {
-  // `{refs: []}` means "we looked and there was nothing" — a real observation.
-  // `null` means "we never looked". Collapsing them would reintroduce the same
-  // defect one level along: a ref appearing after a genuinely empty snapshot IS
-  // created, and must not be relabelled a baseline.
-  const next = { project: "p", generated_at: "2026-08-24T00:00:00Z", refs: [{ ref: "main", kind: "branch", head: "aaa" }] };
-
-  const fromEmpty = diffSnapshots({ project: "p", refs: [] }, next);
-  assert.deepEqual(
-    fromEmpty.map((e) => e.type),
-    ["created"],
-    "a ref appearing after an empty-but-real snapshot is genuinely created",
-  );
-});
 
 // ---------------------------------------------------------------------------
 // Lost-work classification, ported from hygiene/branch-registry.sh
 // ---------------------------------------------------------------------------
 
-const pruneFrom = (prevRow) =>
-  diffSnapshots(
-    { project: "p", refs: [prevRow] },
-    { project: "p", generated_at: "2026-08-24T00:00:00Z", refs: [] },
-  ).find((e) => e.type === "pruned");
+/**
+ * Reshaped 2026-08-24 for the per-project snapshot `docs/REFERENCE.md` specifies.
+ * `classifyPruned` itself is UNCHANGED — it reads a ref's own fields, not the
+ * container — so every assertion below still tests exactly what it did before.
+ * Only the fixture's shape moved.
+ */
+const v2 = (projects, at = "2026-08-24T00:00:00Z") => ({
+  schema_version: WORKSPACE_SNAPSHOT_SCHEMA,
+  captured_at: at,
+  captured_by: "test",
+  workspace_root: "/ws",
+  projects,
+  skipped: [],
+});
+const pruneFrom = (prevRow) => {
+  const { ref = "feat", kind = "branch", path: wtPath, ...rest } = prevRow;
+  // A worktree row has no home in a ref map; it is a detached entry or an
+  // attribute. The kind:"worktree" case below asserts that distinction directly.
+  const before =
+    kind === "worktree"
+      ? { repo_root: "/ws/p", base_ref: null, error: null, refs: {}, detached_worktrees: [{ path: wtPath ?? "/wt", head: rest.head }] }
+      : { repo_root: "/ws/p", base_ref: "origin/main", error: null, refs: { [ref]: rest }, detached_worktrees: [] };
+  const after = { repo_root: "/ws/p", base_ref: "origin/main", error: null, refs: {}, detached_worktrees: [] };
+  return diffSnapshots(v2({ p: before }), v2({ p: after })).find(
+    (e) => e.type === "pruned" || e.type === "worktree-removed",
+  );
+};
 
 test("a pruned ref with unmerged commits and no upstream is LOST", () => {
   // The capability this whole port exists for. Commits unique to the ref, and
@@ -440,11 +292,15 @@ test("UNMEASURED merge_state is treated as unsafe, never as fine", () => {
   assert.match(e.evidence, /unmeasured|unknown/i, "and it must SAY the merge state was never established");
 });
 
-test("a worktree row that disappears is not a work-loss question at all", () => {
-  // Removing a worktree removes a checkout, not commits. Classifying it would
-  // be a category error, and `null` here is a real answer rather than a gap.
+test("a worktree that disappears is not a work-loss question at all", () => {
+  // Removing a worktree removes a checkout, not commits. Classifying it would be
+  // a category error. In the spec's shape this surfaces as `worktree-removed`
+  // rather than `pruned`, which makes the distinction structural instead of a
+  // field somebody has to remember to read.
   const e = pruneFrom({ ref: "main", kind: "worktree", head: "aaa", path: "/tmp/wt" });
-  assert.equal(e.work, null, "worktree removal carries no work-loss verdict");
+  assert.equal(e.type, "worktree-removed", "a checkout going away is not a prune");
+  assert.equal(e.work ?? null, null, "and it carries no work-loss verdict");
+  assert.equal(e.ref, null, "a detached worktree has no ref, and inventing one would be a lie");
 });
 
 // ---------------------------------------------------------------------------
@@ -452,12 +308,18 @@ test("a worktree row that disappears is not a work-loss question at all", () => 
 // ---------------------------------------------------------------------------
 
 test("every event this module writes declares `schema: 2`", async (t) => {
+  // The stamp is applied at the WRITE — the single choke point for what reaches
+  // the log — so an event built anywhere cannot arrive undeclared and be read as
+  // v1 history by the reader below.
   const dir = await mkdtemp(path.join(tmpdir(), "life-schema-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
 
-  const snap = { schema_version: 1, project: "p", generated_at: "2026-08-24T00:00:00Z", refs: [] };
-  const events = diffSnapshots(null, { ...snap, refs: [{ ref: "main", kind: "branch", head: "aaa" }] });
-  writeRegistry(dir, snap, events, { apply: true });
+  const snapshot = v2({
+    p: { repo_root: "/ws/p", base_ref: "origin/main", error: null, refs: { main: { head: "aaa", worktrees: [] } }, detached_worktrees: [] },
+  });
+  const events = diffSnapshots(null, snapshot);
+  assert.equal(events.length, 1, "a first run is one baseline");
+  writeRegistry(dir, snapshot, events, { apply: true });
 
   const lines = readFileSync(path.join(dir, "propagation", "refs", "lifecycle.jsonl"), "utf8")
     .split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -509,3 +371,25 @@ test("the real Vipin Kaushik log reads as 21 v1 events and zero current", () => 
   assert.equal(r.current.length, 0, "nothing has written schema:2 to VK yet");
   assert.ok(r.v1.length >= 21, `expected at least 21 v1 events, got ${r.v1.length}`);
 });
+
+// ---------------------------------------------------------------------------
+// MOVED 2026-08-24 — diff behaviour now lives with the shape it tests
+// ---------------------------------------------------------------------------
+//
+// Ten tests left this file for tests/unit/refs-workspace-snapshot.test.mjs when
+// `diffSnapshots` adopted the per-project shape `docs/REFERENCE.md:106-110`
+// specifies. NOT deleted: every property they asserted has an equivalent there,
+// against the real shape rather than the flat one this module briefly wrote —
+//
+//   created / pruned / merged / unknown->merged  -> the diff section
+//   baseline, and empty-prev != null-prev        -> "a project that appears is a
+//                                                   baseline for THAT project"
+//   worktree vs branch sharing a name (F7)       -> "adding a worktree ... fires
+//                                                   worktree-added, not a creation"
+//   detached worktree not diffed as a branch     -> "a DETACHED worktree is
+//                                                   tracked by path"
+//   foreign shape refused                        -> assertKnownShape now keys on
+//                                                   schema_version, tested there
+//
+// What stays HERE is the single-repo primitive: buildSnapshot, writeRegistry,
+// readLifecycle, and classifyPruned — none of which changed shape.

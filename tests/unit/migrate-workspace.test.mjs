@@ -274,9 +274,16 @@ test("--apply creates every item it previewed, and conformance actually flips", 
   // happened when buildSnapshot was called without await and
   // JSON.stringify(Promise) wrote `{}`. Presence is easy; content is the part
   // conformance cannot check for itself.
+  // RESHAPED 2026-08-24 to the per-project shape docs/REFERENCE.md:106-110
+  // specifies. The property is unchanged and is the one that matters: a required
+  // file that EXISTS but holds nothing satisfies conformance while delivering
+  // nothing, which is what happened when buildSnapshot was called without await
+  // and JSON.stringify(Promise) wrote `{}`.
   const snap = JSON.parse(readFileSync(path.join(ws, "propagation", "refs", "snapshot.json"), "utf8"));
-  assert.equal(snap.schema_version, 1, "snapshot must carry its schema version");
-  assert.ok(Array.isArray(snap.refs) && snap.refs.length > 0, "a repo with a branch must yield at least one ref");
+  assert.equal(snap.schema_version, 2, "snapshot must carry its schema version");
+  assert.ok(snap.projects && typeof snap.projects === "object", "the spec keys refs PER PROJECT");
+  const totalRefs = Object.values(snap.projects).reduce((n, pr) => n + Object.keys(pr.refs ?? {}).length, 0);
+  assert.ok(totalRefs > 0, `a repo with a branch must yield at least one ref, got ${JSON.stringify(Object.keys(snap.projects))}`);
   assert.ok(existsSync(path.join(ws, "propagation", "refs", "lifecycle.jsonl")), "the lifecycle log must exist even when empty");
 });
 

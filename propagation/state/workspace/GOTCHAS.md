@@ -1124,7 +1124,7 @@ verdict — `rule:discernment-checks` §4, verify the instrument.
 had broken when it had not. **When you assert a timeout works, assert the side effect it
 produces — killed vs not — never the duration.**
 
-### G26 · Two snapshot formats both declare `schema_version: 1`
+### G26 · One spec, one conforming implementation, and mine drifting from it
 **Trigger:** `snapshot\.json|buildSnapshot|diffSnapshots|branch-registry`
 **Fires on:** `node -e "JSON.parse(fs.readFileSync('propagation/refs/snapshot.json'))"`
 `lib/refs/snapshot.mjs` writes `{ schema_version, project, repo_root, refs: [ … ] }` — a FLAT
@@ -1142,9 +1142,22 @@ damage N27 and N44 already cost this project twice.
 refuses a snapshot whose `refs` is not an array, and names the format it appears to be. A
 missing `refs` means UNREADABLE, never EMPTY.
 
-**Do not "fix" this by making the reader accept both.** Two producers of one artifact is the
-defect; a reader that normalises them hides it and doubles the surface. Phase B has to decide
-which writer owns `refs/`, and the other must stop writing there.
+**CORRECTED 2026-08-24, and the correction is the lesson.** The entry above framed this as two
+rival formats needing a winner. It is not. `docs/REFERENCE.md:106-110` specified the shape
+BEFORE either implementation: *"per project a base_ref, and per ref its head, merge_state,
+upstream, upstream_track, last_commit_iso, worktrees, is_active_line."* Compared field by field
+as sets, the shell's file matches that **exactly** — 0 missing, 0 extra. The shell implements
+the spec. `lib/refs/snapshot.mjs` does not, on two axes: it describes ONE repo where the spec
+says per project (**2 refs of 36** on Vipin Kaushik), and it models a worktree as a peer row
+where the spec makes it an attribute of a ref.
+
+So there was never a format war. There was a canonical spec, a conforming implementation, and
+mine — which I wrote, and then wrote this gotcha blaming the collision instead of opening the
+spec. **Before declaring two things in conflict, check whether one of them is already
+specified.** The reconciliation you are about to design may already exist as a document.
+
+**The reader still must not accept both silently.** Keying on `schema_version` is how they are
+told apart — the shell's files are `1`, propagate's conforming output is `2`.
 
 **And beware the probe.** The first read of that file reported `refs: 0` — a top-level key it
 does not have — which is how the empty-snapshot theory survived two messages and got written
