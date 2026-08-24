@@ -515,3 +515,53 @@ test("the scaffolded refs registry records a baseline, not an empty log", async 
   );
   assert.ok(events.every((e) => e.schema), "every event carries its declared schema");
 });
+
+/**
+ * A STUB THAT DOES NOT SAY "moved" IN ITS HEADING IS STILL A STUB.
+ *
+ * `isPointerStub` matched `now lives at`, `— moved`, or `moved` in the H1. That
+ * catches `# DECISIONS — moved` and misses this, which is Motherboard's real
+ * `STATE.md` verbatim:
+ *
+ *     # Motherboard — State
+ *     > **Moved 2026-08-21 to [`propagation/state/motherboard/STATE.md`](…).**
+ *     > This is a pointer stub, not the state. …
+ *
+ * The heading is `— State`, not `— moved`; the body says "lives one directory
+ * over", not "now lives at". So a file that declares itself a pointer stub in
+ * those words was classified as REAL, and `migrate` planned to MOVE it — copying
+ * a 17-line signpost on top of the 143-line file it points at.
+ *
+ * That is the exact failure this suite's header records as already caught once
+ * ("a naive scan planned 15 moves and would have copied each stub OVER the real
+ * file it points at"), returning in a new shape because the destination
+ * directory name differed. Found 2026-08-24 by dry-running the real Motherboard,
+ * where the SAME migration produced `conflict` for one stub and `move` for the
+ * other — two stubs, two verdicts, which is what made it visible at all.
+ */
+test("a self-declared pointer stub is detected even when its heading does not say `moved`", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "stub-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const motherboardStyle = path.join(dir, "STATE.md");
+  await writeFile(
+    motherboardStyle,
+    "# Motherboard — State\n\n" +
+      "> **Moved 2026-08-21 to [`propagation/state/motherboard/STATE.md`](propagation/state/motherboard/STATE.md).**\n" +
+      ">\n" +
+      "> This is a pointer stub, not the state. A fresh clone gets this file; the content\n" +
+      "> lives one directory over.\n",
+  );
+  assert.equal(isPointerStub(motherboardStyle), true, "it says `pointer stub` in so many words");
+
+  // The heading form must keep working — this is a widening, not a replacement.
+  const headingStyle = path.join(dir, "DECISIONS.md");
+  await writeFile(headingStyle, "# DECISIONS — moved\n\n> **Moved to elsewhere.**\n");
+  assert.equal(isPointerStub(headingStyle), true, "the original form still matches");
+
+  // And a REAL state file must not be swept up. A detector that calls everything
+  // a stub deletes real state, which is worse than the bug it fixes.
+  const real = path.join(dir, "REAL.md");
+  await writeFile(real, "# Motherboard — State\n\n## Now\n- T1: something in flight\n- T2: moved the API to a new port\n");
+  assert.equal(isPointerStub(real), false, "prose that merely uses the word `moved` is not a stub");
+});
