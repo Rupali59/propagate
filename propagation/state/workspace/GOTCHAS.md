@@ -1096,8 +1096,14 @@ already configured** — not on a fresh fixture, where the old default was never
 were green while two integrations were dead, because each one declared its own hub.
 
 ### G25 · A wall-clock assertion cannot tell a broken bound from a busy machine
-**Trigger:** `elapsedMs|Date\.now\(\) - start|assert\.ok\(.*< ?\d{4}`
-**Fires on:** `assert.ok(elapsedMs < 15000, "the bound did not hold")`
+**No trigger, deliberately — 2026-08-24.** It carried one, matching `elapsedMs` and
+`assert.ok(… < NNNN)` against the literal
+`assert.ok(elapsedMs < 15000, "the bound did not hold")`. That is JavaScript source, and the
+guard is only ever handed a Bash `command` or an Edit/Write `file_path` — never file
+CONTENT. So the entry looked armed, passed `--selftest`, and could not fire. N45's fix now
+reports exactly this, and this is the first entry it caught.
+Most gotchas have no mechanical trigger and inventing one makes noise; a timing assertion
+lives in code, so this hazard belongs to review rather than to the guard.
 Three instances on one assertion. `< 4000` against a 5s stub flipped on fixture weight
 (2026-08-20). `< 15000` failed at **23406ms under load average 49** on 2026-08-23 — while a
 clean re-measure of the *identical* scenario took **3723ms, unkilled, message emitted**. The

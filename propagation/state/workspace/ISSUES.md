@@ -1958,7 +1958,7 @@ at 1914**. That count is the assertion that distinguishes the fixed version from
 that no test asserts. A future edit to `test:propagate` could drop the scoping and every
 suite would still pass.
 
-### N45 · Two gotchas documented as auto-firing cannot fire, and `--selftest` passes anyway — **S2** — **OPEN**
+### N45 · ~~S2~~ · **RESOLVED 2026-08-24 (fix 2)** · Gotchas documented as auto-firing could not fire, and `--selftest` passed anyway
 
 **2026-08-22.** `hooks/gotcha-guard.mjs:189` matches `Edit`/`Write`/`NotebookEdit` against
 **`input.file_path` only** — never the content being written. Only `Bash` exposes a content
@@ -1999,6 +1999,32 @@ supposed to make this impossible.
 
 (2) is the one that matches this repo's stated posture — make "found nothing" and "looked at
 nothing" different outputs — and should land first regardless of whether (1) does.
+
+**FIX (2) LANDED 2026-08-24.** `deliverableAs()` classifies each `**Fires on:**` literal as a
+path, a command, or neither, and `selftestProblems` reports the neithers as UNREACHABLE
+before it ever checks whether the regex matches. Reachability first: a trigger that matches an
+example the guard is never handed is dead however well the regex works.
+
+**It caught one on its first real run, and two FALSE POSITIVES before that** — the first
+version rejected `n=$(git cherry … )` and `amodels="${6:-{}}"` because their head token
+carries `=` and `$(`. Both are shell assignments and therefore perfectly ordinary Bash command
+lines. A wrong "this is dead" is worse than a missed one, since it invites deleting a working
+trigger; the classifier now recognises `name=value` as a command.
+
+The one true finding was **G25**, whose literal was
+`assert.ok(elapsedMs < 15000, "the bound did not hold")` — JavaScript source. Its
+`**Trigger:**` is removed with the reason recorded in the entry: most gotchas have no
+mechanical trigger, and a timing assertion lives in code, so that hazard belongs to review.
+
+**Fix (1) — extending `subjectOf` to include `new_string`/`content` — is NOT done and is not
+scheduled.** It would make every trigger match against far more text, and the entry's own
+analysis says the false-positive cost is unbudgeted. Deadness is now loud, which was the
+point.
+
+**Scope note worth keeping:** the guard reads GOTCHAS files from the working directory
+upward, so a selftest run inside `propagate` sees 2 sources and not `Vipin Kaushik`'s. The
+three inert entries measured on 2026-08-22 spanned both files; run it from each workspace to
+see that workspace's own.
 
 
 ### N46 · `watchPathsFor()` hardcodes `docs/`, and stale watch paths are undetectable — **S3** — **OPEN**

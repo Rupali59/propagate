@@ -240,3 +240,60 @@ test("the state directory is matched case-insensitively", async () => {
     `case-differing state dir must still resolve: ${JSON.stringify(found)}`,
   );
 });
+
+/**
+ * N45 — a trigger whose SUBJECT can never be delivered must be reported.
+ *
+ * The test above catches a trigger that cannot match its own example. This
+ * catches the subtler half: a trigger that matches its example perfectly, where
+ * the example is a string the guard is never handed.
+ *
+ * `subjectOf` (hooks/gotcha-guard.mjs:68) passes exactly two kinds of string to
+ * the matcher — `input.command` for Bash, and `input.file_path` for Edit /
+ * Write / NotebookEdit. **Never the content being written.** So a trigger
+ * describing a CODE PATTERN can never fire on the edit that introduces it.
+ *
+ * Measured 2026-08-22 across both GOTCHAS.md files: of 10 entries carrying a
+ * trigger, 4 fire via Bash, 3 via a file path, and THREE are inert —
+ * `toLocaleString(undefined`, `unstable_cache`, `const elapsedMs = Date.now()`.
+ * Two of the three are marked ⚡ in `Vipin Kaushik/CLAUDE.md`, whose text says
+ * they fire automatically and are "put in front of you at the moment of risk".
+ *
+ * `--selftest` passed throughout, because asserting a regex against a string of
+ * its author's choosing cannot detect that the string never occurs. That is
+ * `rule:enforcement-watches-itself`'s corollary exactly: the selftest was the
+ * mechanism meant to make this impossible.
+ *
+ * This does NOT make those entries work — it makes their deadness loud. N45
+ * argues that lands first regardless, and it is this repo's stated posture:
+ * "found nothing" and "looked at nothing" must read differently.
+ */
+test("N45: a Fires-on literal that is neither a path nor a command is reported UNREACHABLE", async () => {
+  const f = path.join(ROOT, "unreachable.md");
+  await writeFile(
+    f,
+    "# x\n\n### U1 · a code-pattern trigger\n**Trigger:** `unstable_cache`\n" +
+      "**Fires on:** `unstable_cache`\nA cached Date comes back a string.\n",
+  );
+  const problems = selftestProblems([f]);
+  assert.match(
+    problems.join("\n"),
+    /U1/,
+    `the inert entry must be named, got ${JSON.stringify(problems)}`,
+  );
+  assert.match(problems.join("\n"), /unreachable|never delivered|no tool call/i, problems.join("\n"));
+});
+
+test("N45: real path and command triggers stay QUIET — the check must not fire on everything", async () => {
+  // A check that flags every entry is the always-on banner G23 warns about, and
+  // it would make the seven live triggers indistinguishable from the three dead
+  // ones — which is the failure being fixed, inverted.
+  const f = path.join(ROOT, "reachable.md");
+  await writeFile(
+    f,
+    "# x\n\n### R1 · a path trigger\n**Trigger:** `layout\\.tsx`\n**Fires on:** `app/(site)/layout.tsx`\nbody.\n" +
+      "\n### R2 · a command trigger\n**Trigger:** `npm install`\n**Fires on:** `npm install --save-dev x`\nbody.\n" +
+      "\n### R3 · a bare-word command\n**Trigger:** `^rm\\s`\n**Fires on:** `rm -rf dist/`\nbody.\n",
+  );
+  assert.deepEqual(selftestProblems([f]), [], "all three are deliverable subjects");
+});

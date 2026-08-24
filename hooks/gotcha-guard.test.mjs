@@ -267,3 +267,4 @@ test("invoked through a SYMLINK the guard still runs — it must not decide it w
     "a symlinked invocation produced NO output — the entrypoint guard treated it as an import",
   );
 });
+
