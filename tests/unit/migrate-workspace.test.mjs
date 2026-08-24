@@ -80,7 +80,7 @@ test("dry run writes NOTHING — asserted on the tree, not on the return value",
   const ws = await workspace(t, { projects: { alpha: { "STATE.md": REAL_STATE } } });
   const before = treeSnapshot(ws);
 
-  const r = migrateWorkspace({ workspace: ws });
+  const r = await migrateWorkspace({ workspace: ws });
 
   assert.equal(r.applied, false);
   assert.ok(r.moves.length > 0, "the fixture must actually have work to do, or this proves nothing");
@@ -95,7 +95,7 @@ test("a non-repo workspace refuses BEFORE writing, rather than failing partway",
     projects: { alpha: { "STATE.md": REAL_STATE }, beta: { "STATE.md": REAL_STATE } },
   });
   const before = treeSnapshot(ws);
-  assert.throws(
+  await assert.rejects(
     () => migrateWorkspace({ workspace: ws, apply: true }),
     /not inside a git repository[\s\S]*Nothing was written/,
   );
@@ -108,7 +108,7 @@ test("an unresolved conflict refuses the whole migration, writing nothing", asyn
     own: { "propagation/state/p/STATE.md": "# a different real file\n" },
   });
   const before = treeSnapshot(ws);
-  assert.throws(() => migrateWorkspace({ workspace: ws, apply: true }), /conflict[\s\S]*Nothing was written/);
+  await assert.rejects(() => migrateWorkspace({ workspace: ws, apply: true }), /conflict[\s\S]*Nothing was written/);
   assert.equal(treeSnapshot(ws), before);
 });
 
@@ -119,7 +119,7 @@ test("--apply moves the artifact and creates state/workspace/", async (t) => {
   execFileSync("git", ["-C", ws, "config", "user.name", "t"]);
   execFileSync("git", ["-C", ws, "add", "-A"]);
   execFileSync("git", ["-C", ws, "commit", "-qm", "seed"]);
-  const r = migrateWorkspace({ workspace: ws, apply: true });
+  const r = await migrateWorkspace({ workspace: ws, apply: true });
   assert.equal(r.applied, true);
   assert.ok(existsSync(path.join(ws, "propagation", "state", "workspace")), "state/workspace/ is always created");
   assert.ok(existsSync(path.join(ws, "propagation", "state", "alpha", "STATE.md")), "the artifact landed");
@@ -231,4 +231,49 @@ test("orphanedByMigration names the edges that lose verification, and only those
   const losing = orphans.filter((o) => o.losesVerification);
   assert.equal(losing.length, 1, "only the CLEAN one loses a verification");
   assert.equal(losing[0].edge_id, "aaa");
+});
+
+// ---------------------------------------------------------------------------
+// --apply must PRODUCE what the dry run PREVIEWED
+// ---------------------------------------------------------------------------
+
+test("--apply creates every item it previewed, and conformance actually flips", async (t) => {
+  // Review 2026-08-23: planMigration put all four missing V3_REQUIRED items in
+  // plan.creates, and --apply mkdirSync'd only state/workspace. So migrate
+  // previewed four artifacts it never wrote, conformanceAfter still reported
+  // them missing, and the command could NEVER satisfy the ratchet it exists to
+  // satisfy. Root cause one level down: writeRegistry, the only producer of the
+  // refs pair, had zero production callers — correct, tested, unreachable.
+  // A real artifact, so `git commit` has something to commit — an empty fixture
+  // fails with "nothing to commit" and the test dies in setup rather than on
+  // the property under test.
+  const ws = await workspace(t, { projects: { alpha: { "STATE.md": REAL_STATE } } });
+  execFileSync("git", ["init", "-q", ws]);
+  execFileSync("git", ["-C", ws, "config", "user.email", "t@e.st"]);
+  execFileSync("git", ["-C", ws, "config", "user.name", "t"]);
+  execFileSync("git", ["-C", ws, "add", "-A"]);
+  execFileSync("git", ["-C", ws, "commit", "-qm", "seed"]);
+
+  const preview = await migrateWorkspace({ workspace: ws });
+  assert.equal(preview.applied ?? false, false, "sanity: the preview must not apply");
+  assert.ok(preview.creates.length >= 5, `expected the four V3 items plus state/workspace, got ${preview.creates.length}`);
+
+  const r = await migrateWorkspace({ workspace: ws, apply: true });
+
+  // EVERY previewed path exists. Asserting the set, not a sample: the bug was
+  // that four of five silently did not happen while one did.
+  for (const c of preview.creates) {
+    assert.ok(existsSync(c), `previewed create was never written: ${c}`);
+  }
+  assert.equal(r.conformanceAfter.conforms, true, `conformance did not flip: still missing ${r.conformanceAfter.missing?.join(", ")}`);
+
+  // CONTENT, not just presence. A required file that exists and is empty
+  // satisfies V3_REQUIRED while delivering nothing — which is exactly what
+  // happened when buildSnapshot was called without await and
+  // JSON.stringify(Promise) wrote `{}`. Presence is easy; content is the part
+  // conformance cannot check for itself.
+  const snap = JSON.parse(readFileSync(path.join(ws, "propagation", "refs", "snapshot.json"), "utf8"));
+  assert.equal(snap.schema_version, 1, "snapshot must carry its schema version");
+  assert.ok(Array.isArray(snap.refs) && snap.refs.length > 0, "a repo with a branch must yield at least one ref");
+  assert.ok(existsSync(path.join(ws, "propagation", "refs", "lifecycle.jsonl")), "the lifecycle log must exist even when empty");
 });

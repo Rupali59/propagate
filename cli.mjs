@@ -2740,7 +2740,7 @@ async function migrateCmd(argv = []) {
   const losing = orphans.filter((o) => o.losesVerification);
 
   if (asJson) {
-    const result = apply ? migrateWorkspace({ workspace, apply: true }) : { ...plan, applied: false };
+    const result = apply ? await migrateWorkspace({ workspace, apply: true }) : { ...plan, applied: false };
     console.log(JSON.stringify({ ...result, orphans }, null, 2));
     return;
   }
@@ -2776,13 +2776,25 @@ async function migrateCmd(argv = []) {
 
   let result;
   try {
-    result = migrateWorkspace({ workspace, apply: true, now: new Date().toISOString() });
+    result = await migrateWorkspace({ workspace, apply: true, now: new Date().toISOString() });
   } catch (err) {
     console.error(`\n${RED}refused:${RESET} ${err?.message ?? err}`);
     process.exit(1);
   }
   for (const s of result.sidecars ?? []) {
     console.log(`  ${s.written ? GREEN + "sidecar" + RESET : DIM + "sidecar" + RESET}  ${short(s.path)}${s.written ? "" : ` ${DIM}(${s.reason})${RESET}`}`);
+  }
+  for (const cr of result.created ?? []) {
+    console.log(
+      `  ${cr.written ? GREEN + "created" + RESET : DIM + "created" + RESET}  ${short(cr.path)}` +
+        `${cr.written ? "" : ` ${DIM}(${cr.reason})${RESET}`}`,
+    );
+  }
+  // A refs pair that could not be built is a REASON, not a silent gap. Without
+  // this line the run reported "still missing refs/snapshot.json" and left the
+  // reader to guess whether the workspace is not a repo, or the build failed.
+  if (result.registry?.error) {
+    console.log(`  ${YELLOW}refs${RESET}  not written — ${result.registry.error}`);
   }
   const c = result.conformanceAfter;
   console.log(`\n  ${c.conforms ? GREEN + "✓" + RESET : RED + "✗" + RESET} conforms after: ${c.conforms ? "yes" : `no — still missing ${c.missing.join(", ")}`}`);
