@@ -21,10 +21,18 @@ test("loads propagate's taxonomy and re-exports the surface we depend on", async
 });
 
 test("kinds are propagate's, not restated here", async () => {
+  // Pinning the full list is the point: this skill consumes propagate's taxonomy
+  // rather than keeping its own, so a kind appearing or vanishing upstream must
+  // land here as a red test and not as a silent behaviour change.
+  //
+  // `gotchas` added 2026-08-22, upstream, when `GOTCHAS.md` was registered as the
+  // third member of the STATE / DECISIONS / GOTCHAS set. Until then `kindOf()`
+  // returned `{kind: null, source: "undeclared"}` for every GOTCHAS.md in the
+  // tree. This test failing on that change is the coupling working.
   const t = await loadTaxonomy();
   assert.deepEqual(
     Object.keys(t.KINDS).sort(),
-    ["decision-log", "design", "functionality-spec", "ops", "page-spec", "plan", "router", "state"],
+    ["decision-log", "design", "functionality-spec", "gotchas", "issues", "ops", "page-spec", "plan", "router", "state"],
   );
 });
 

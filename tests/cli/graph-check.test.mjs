@@ -198,7 +198,12 @@ function runDoctor(root, { binDir, stateDir } = {}) {
   const env = { ...process.env, PROPAGATE_SEARCH_ROOTS: root };
   if (binDir) env.PATH = `${binDir}:${process.env.PATH}`;
   if (stateDir) env.PROPAGATE_STATE_DIR = stateDir;
-  return spawnSync(process.execPath, [CLI_PATH, "doctor"], { cwd: root, encoding: "utf8", env, timeout: 20_000 });
+  // 90s, deliberately far above the 60s stub sleep. This cap is NOT the assertion —
+  // it is only a runaway guard. When it was 20s it became the confound: under load,
+  // a doctor with an INTACT bound was killed at 22s and the test reported a broken
+  // bound. A harness timeout that can fire during normal operation is indistinguishable
+  // from the failure it is meant to surface.
+  return spawnSync(process.execPath, [CLI_PATH, "doctor"], { cwd: root, encoding: "utf8", env, timeout: 90_000 });
 }
 
 test("doctor: a hung `claude mcp list` is bounded to ~2s and reported as an explicit unknown, not a pass", async () => {
@@ -211,17 +216,30 @@ test("doctor: a hung `claude mcp list` is bounded to ~2s and reported as an expl
     const elapsedMs = Date.now() - start;
     const out = result.stdout + result.stderr;
 
-    // The stub sleeps 60s. An UNBOUNDED doctor would be killed by runDoctor's own
-    // 20s spawn timeout; a bounded one returns after ~2s plus doctor's other work.
-    // The margin is deliberately wide: this must fail when the BOUND breaks, not when
-    // doctor's unrelated checks get slower. A 4s budget against a 5s stub left ~1.4s
-    // of headroom over doctor's floor and flipped on fixture weight, not on the bound
-    // (measured 2026-08-20: bound intact, message emitted, yet the assertion failed).
-    assert.ok(
-      elapsedMs < 15000,
-      `doctor took ${elapsedMs}ms against a 60s-sleeping stub — the 2s bound did not hold`,
+    // THE MESSAGE IS THE BOUND. This is the only formulation that does not move
+    // with machine load, and it took four attempts to arrive at:
+    //
+    //   `< 4000` vs a 5s stub  — flipped on fixture weight (2026-08-20)
+    //   `< 15000`              — failed at 23406ms under load average 49 (2026-08-23)
+    //   `result.signal null`   — SAME DEFECT RELOCATED: doctor with an intact bound
+    //                            was killed at 22043ms by the harness's own 20s cap,
+    //                            so this "binary" fact was load-dependent too
+    //
+    // Why the message works where three duration proxies failed: with the bound
+    // INTACT, execSync aborts at 2s and doctor prints the timeout line. With the
+    // bound BROKEN, the 60s stub runs to completion and its output is parsed as an
+    // ordinary `claude mcp list` result — so this line is never printed, at any
+    // load, on any machine. The literal "2s" in the text pins the constant as well.
+    assert.doesNotMatch(
+      out,
+      /^$/,
+      `doctor produced no output at all after ${elapsedMs}ms (signal: ${result.signal}) — the harness cap fired, not the bound`,
     );
-    assert.match(out, /graph integration check timed out after 2s — status unknown/);
+    assert.match(
+      out,
+      /graph integration check timed out after 2s — status unknown/,
+      `the 2s bound did not fire — a 60s stub that runs to completion is parsed as a normal mcp list result (elapsed ${elapsedMs}ms, signal ${result.signal})`,
+    );
     // Must not ALSO print the pass line for the same section.
     assert.doesNotMatch(out, /✓.*code-review-graph MCP registered/);
 
@@ -261,7 +279,10 @@ test("doctor: a warm cache (within TTL) skips the subprocess entirely — second
     // it, with no cache involved. docs/GOTCHAS.md G53, second instance.
     const calls = (await readFile(path.join(binDir, "calls"), "utf8").catch(() => "")).split("\n").filter(Boolean).length;
     assert.equal(calls, 1, `the stub ran ${calls}x across two doctor runs — the cache was not honoured`);
-    assert.ok(elapsedMs < 15000, `warm-cache run took ${elapsedMs}ms — far beyond doctor's floor`);
+    // NO DURATION ASSERTION HERE AT ALL. `calls === 1` above already IS this test's
+    // claim ("skips the subprocess entirely"), exactly as its own comment argues —
+    // every timing line added on top was a proxy for a fact already asserted
+    // directly, and each one became a flake. elapsedMs survives only in messages.
     assert.match(out, /graph integration check timed out after 2s — status unknown/);
     assert.match(out, /cached \d+m ago/, "warm-cache run must say it's reporting a cached result");
   } finally {

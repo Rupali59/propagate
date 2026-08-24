@@ -20,14 +20,14 @@ sources:
         kind: code
   lib/link-graph.mjs:
     propagates_to:
-      - path: docs/GOTCHAS.md
+      - path: ../../propagation/state/curate-docs/GOTCHAS.md
         why: >-
           G5, G6 and G7 record exactly why the citation pattern is shaped as it is —
           markdown links stripped before the backtick pass, leading ../ admitted, no slash
           required, external as a fourth bucket. Widening or narrowing the pattern without
           updating them re-opens a defect that has already been paid for.
         kind: prose
-  docs/DECISIONS.md:
+  ../../propagation/state/curate-docs/DECISIONS.md:
     propagates_to:
       - path: SKILL.md
         why: >-
@@ -44,7 +44,7 @@ sources:
         kind: prose
   lib/state.mjs:
     propagates_to:
-      - path: docs/GOTCHAS.md
+      - path: ../../propagation/state/curate-docs/GOTCHAS.md
         why: >-
           G13 and G14 record why the archival act is `status:` and not `git mv`, and why
           archiveDirs is separate from skipDirs. Changing the state model without updating

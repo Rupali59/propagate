@@ -127,6 +127,19 @@ export const STALENESS = {
   plan: "declared-state",
   "decision-log": "append-only",
   router: "completeness",
+  // Deliberately "none", not omitted. Age is the wrong axis for a gotcha: G-A is as
+  // true today as the day it was paid for, and hazards do not expire. Its defect is
+  // INERTNESS — an entry whose trigger cannot fire — which is not an mtime question
+  // and is checked by `propagate doctor` via lib/gotchas/parse.mjs.
+  //
+  // Stated explicitly because the fallthrough below would give the same answer for
+  // the wrong reason: a kind whose rule is chosen by omission is indistinguishable
+  // from one nobody has thought about.
+  gotchas: "none",
+  // Also "none", and for a different reason than gotchas. An old OPEN issue is
+  // still open; age says nothing. Its defect is a status that no longer matches
+  // reality, which needs re-triage by a person and cannot be derived from mtime.
+  issues: "none",
   undeclared: "none",
 };
 

@@ -880,7 +880,12 @@ async function status() {
       ledgerCount++;
       wsOpen += await openCount(ws.ledgerJsonl);
     }
-    const ownedLedgers = [...WORKSPACES.map((w) => w.ledgerJsonl), CROSS_LEDGER_JSONL];
+    // CROSS_LEDGER_JSONL is null when no hub is configured — it is derived from
+    // the hub, and an unconfigured hub is a VALUE, not a path. Feeding that null
+    // to findUnownedLedgers threw `paths[0] must be of type string`, which the
+    // catch below reported under the WRONG check name ("no unreachable workspace
+    // markers"), so a config problem read as a marker problem.
+    const ownedLedgers = [...WORKSPACES.map((w) => w.ledgerJsonl), CROSS_LEDGER_JSONL].filter(Boolean);
     const unowned = await findUnownedLedgers(SEARCH_ROOTS, ownedLedgers);
     const orphans = [];
     const snapshots = [];
@@ -1496,10 +1501,18 @@ async function doctor() {
   // that shipped silently for weeks (all 8 live entries, 0 tokens) before
   // being caught by hand. Checks the skill's own docs/DECISIONS.md.
   try {
-    const decPath = path.join(SKILL_DIR, "docs", "DECISIONS.md");
+    // Both locations, new first. The plugin's own artifacts moved to
+    // propagation/state/workspace/ on 2026-08-23; the legacy path is retained so
+    // an older checkout still resolves, and so this check reports "not found"
+    // only when it genuinely is not there rather than when it merely moved.
+    const decCandidates = [
+      path.join(SKILL_DIR, "propagation", "state", "workspace", "DECISIONS.md"),
+      path.join(SKILL_DIR, "docs", "DECISIONS.md"),
+    ];
+    const decPath = decCandidates.find((c) => existsSync(c)) ?? decCandidates[0];
     decisionsPath = decPath;
     if (!existsSync(decPath)) {
-      console.log(`  ${DIM}(no docs/DECISIONS.md at ${decPath})${RESET}`);
+      console.log(`  ${DIM}(no DECISIONS.md — tried ${decCandidates.join(", ")})${RESET}`);
     } else {
       const text = await readFile(decPath, "utf8");
       const { entries, zero } = decisionsAttributionReport(text);
@@ -1755,7 +1768,9 @@ async function doctor() {
     // depth limit, or beside a sidecar that never set `workspace: true`. Such a
     // ledger contributes 0 to every total while looking exactly like "no drift".
     // Report it as unreachable rather than dropping it (rule:discernment-checks §2).
-    const ownedLedgers = [...WORKSPACES.map((w) => w.ledgerJsonl), CROSS_LEDGER_JSONL];
+    // .filter(Boolean): CROSS_LEDGER_JSONL is null when no hub is configured (see
+    // the sibling site above). Unfiltered, findUnownedLedgers threw on it.
+    const ownedLedgers = [...WORKSPACES.map((w) => w.ledgerJsonl), CROSS_LEDGER_JSONL].filter(Boolean);
     const unowned = await findUnownedLedgers(SEARCH_ROOTS, ownedLedgers);
     const orphans = [];
     const snapshots = [];
@@ -1780,7 +1795,11 @@ async function doctor() {
         : "",
     );
   } catch (err) {
-    check("no unreachable workspace markers", false, err.message);
+    // PROPAGATE_DEBUG_STACK exists because this catch reported a null-path
+    // TypeError from three frames down under the label "no unreachable workspace
+    // markers" — a config fault wearing a marker fault's name. err.message alone
+    // cost two wrong guesses at the source; the stack named it immediately.
+    check("no unreachable workspace markers", false, process.env.PROPAGATE_DEBUG_STACK ? err.stack : err.message);
   }
 
   // INFORMATIONAL, never a doctor failure — see undiscoverableLedgersReport's
@@ -1970,24 +1989,66 @@ async function doctor() {
     // a nested doc twice inflated an earlier census from 1339 to 2219.
     let docsProseOnly = 0;
     let docsSupersedesUnresolvable = 0;
+    // Gotchas liveness. `gotchas` is the one kind that can be present, current and
+    // correctly reconciled while delivering NOTHING: its entries carry executable
+    // triggers, and a trigger that cannot fire is a hazard documented but not
+    // delivered. N45 measured 3 of 10 inert while --selftest reported green.
+    // Staleness checks structurally cannot see this, so it is tallied here.
+    //
+    // `null` until the walk runs, never 0 — a 0 would assert "every hazard fires"
+    // on a scan that never happened (rule:discernment-checks §2).
+    let gotchasScanned = null;
+    let gotchasFiles = 0;
+    const gotchasInert = [];
     try {
       const { proseOnlySupersession, kindOf } = await import("./lib/report/doc-kind.mjs");
+      const { selftestProblems } = await import("./lib/gotchas/parse.mjs");
       const { globSync } = await import("node:fs");
       const seenDocs = new Set();
+      gotchasScanned = 0;
       for (const ws of WORKSPACES) {
         let found = [];
+        let gotchasExtra = [];
         try {
           found = globSync(path.join(ws.root, "**", "docs", "**", "*.md"));
+          // The propagation layout is NOT under a `docs/` directory, so the glob
+          // above cannot see it. Measured 2026-08-23: the moment two GOTCHAS.md
+          // files migrated to propagation/state/, this census fell 9 -> 7 and
+          // would have reported the migration as REDUCING adoption. A metric that
+          // moves because the file moved is measuring the walk, not the tree.
+          //
+          // Kept SEPARATE from `found`, deliberately. Folding these 21 files into
+          // the shared loop pushed docs.supersession_prose_only from 101 to 104 and
+          // tripped its ratchet — not because any doc got worse, but because the
+          // population grew under a baseline calibrated on the docs/ tree. Widening
+          // a scan must never look like a regression in a metric it does not own.
+          gotchasExtra = globSync(path.join(ws.root, "**", "propagation", "state", "*", "*.md"));
         } catch {
           continue;
         }
-        for (const d of found) {
+        // `found` feeds every metric; `gotchasExtra` feeds only the gotchas tally.
+        // Set, not Array.includes: the membership test runs once per doc, and
+        // an array scan inside that loop is O(docs x extras) for no reason.
+        const gotchasExtraSet = new Set(gotchasExtra);
+        for (const d of found.concat(gotchasExtra)) {
           if (d.includes("node_modules")) continue;
           const abs = path.resolve(d);
           if (seenDocs.has(abs)) continue;
           seenDocs.add(abs);
+          gotchasScanned++;
+          // ONE kindOf per doc. It reads the file to parse frontmatter, so the
+          // gotchas check and the supersedes loop calling it separately meant
+          // 1,326 redundant reads per `doctor` run — added by the gotchas census
+          // and invisible because the result was still correct.
+          const kind = kindOf(abs);
+          if (kind.kind === "gotchas") {
+            gotchasFiles++;
+            const problems = selftestProblems([abs]);
+            if (problems.length) gotchasInert.push({ file: abs, problems });
+          }
+          if (gotchasExtraSet.has(d)) continue; // ratchet-bearing metrics below own the docs/ tree only
           if (proseOnlySupersession(abs)) docsProseOnly++;
-          for (const t of kindOf(abs).supersedes) {
+          for (const t of kind.supersedes) {
             const [rel] = t.split("#");
             if (!existsSync(path.resolve(path.dirname(abs), rel))) docsSupersedesUnresolvable++;
           }
@@ -1997,6 +2058,39 @@ async function doctor() {
       // Leave both at 0 rather than crashing doctor; the expectations below treat
       // "0 because it never ran" the same as "0 because it is clean", which is the one
       // weakness here and is why the prose ratchet is a floor, not an equality.
+      //
+      // gotchasScanned deliberately does NOT share that weakness: it stays null if the
+      // walk threw before starting, so "looked at nothing" cannot render as "found
+      // nothing". Reproducing the known weakness in new code would be choosing it.
+    }
+
+    // INFORMATIONAL, not a check(). Not every repo needs a GOTCHAS.md — a doc-only
+    // husk has no hazards to record — so failing a build on adoption would train
+    // people to ignore the line. What must never happen is silence: the count was
+    // last measured by hand, written into rule:every-project-carries-gotchas, and
+    // was five days stale by the time anyone read it. Derive it, do not restate it.
+    if (gotchasScanned === null) {
+      info("gotchas", "not scanned — the doc walk did not run, so adoption is UNKNOWN, not zero");
+    } else {
+      // Always name the denominator. "3 files" is not checkable later; "3 of 412
+      // docs scanned" is, and it is the difference between a fact and a number.
+      info(
+        "gotchas",
+        `${gotchasFiles} GOTCHAS.md of ${gotchasScanned} docs scanned` +
+          (gotchasFiles === 0 ? " — none adopted yet" : ""),
+      );
+      if (gotchasInert.length) {
+        // The failure the file exists to prevent, reported as green. Name the file
+        // AND the entry: "2 inert" without the offender is not actionable.
+        info(
+          "gotchas inert",
+          `${gotchasInert.length} of ${gotchasFiles} file(s) carry an entry that cannot fire`,
+        );
+        for (const g of gotchasInert.slice(0, 3)) {
+          info("", `${shortPath(g.file)} — ${g.problems[0]}`);
+        }
+        if (gotchasInert.length > 3) info("", `… and ${gotchasInert.length - 3} more`);
+      }
     }
 
     // Graph shape. Derived here rather than in the loop above because it needs
@@ -2264,6 +2358,12 @@ async function setupCmd(argv = []) {
   const force = flags.includes("--force");
   const rootsIdx = argv.indexOf("--roots");
   const rootsArg = rootsIdx >= 0 ? argv[rootsIdx + 1] : undefined;
+  // `--hub` is the ONE declared fact. searchRoots, marketplaceDir and portsFile
+  // all derive from it, so a hub that moves is a one-line change rather than a
+  // hunt for four restatements of the same path (which is how portsFile went
+  // stale twice on 2026-08-23).
+  const hubIdx = argv.indexOf("--hub");
+  const hubArg = hubIdx >= 0 ? argv[hubIdx + 1] : undefined;
 
   const emit = (payload, lines, code) => {
     if (asJson) console.log(JSON.stringify(payload, null, 2));
@@ -2292,6 +2392,34 @@ async function setupCmd(argv = []) {
     );
   }
 
+  // --- 1b. the hub ----------------------------------------------------------
+  // Explicit --hub wins. Otherwise, when exactly ONE root was found, that root
+  // IS the hub — inferring from two or more would be a guess, and a guessed hub
+  // silently mis-derives three other paths.
+  let hub = null;
+  let hubFrom = null;
+  if (hubArg && !hubArg.startsWith("--")) {
+    hub = path.resolve(hubArg.replace(/^~(?=$|\/)/, HOME_DIR));
+    hubFrom = "--hub";
+  } else if (roots.length === 1) {
+    hub = roots[0];
+    hubFrom = `inferred from the single root (${rootsFrom})`;
+  }
+  if (hub && !existsSync(hub)) {
+    emit(
+      { ok: false, reason: "hub-missing", hub },
+      [
+        `${RED}setup failed:${RESET} hub root does not exist: ${hub}`,
+        `${DIM}A declared hub that is not on disk mis-derives searchRoots, marketplaceDir and portsFile at once.${RESET}`,
+      ],
+      1,
+    );
+  }
+  if (!hub) {
+    console.log(`${YELLOW}note:${RESET} ${roots.length} roots found — the hub is ambiguous, so none was recorded.`);
+    console.log(`${DIM}Declare it: setup --hub <path>. Without it, hub-derived paths stay unset rather than guessed.${RESET}`);
+  }
+
   // --- 2. write config.yml (never clobber silently) --------------------------
   const existed = existsSync(CONFIG_PATH);
   let wrote = false;
@@ -2300,7 +2428,7 @@ async function setupCmd(argv = []) {
     console.log(`${DIM}re-run with --force to regenerate it from --roots.${RESET}`);
   } else {
     mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-    writeFileSync(CONFIG_PATH, renderConfig({ roots, scheduler: SCHEDULER }), "utf8");
+    writeFileSync(CONFIG_PATH, renderConfig({ roots, scheduler: SCHEDULER, hub }), "utf8");
     wrote = true;
     console.log(`${existed ? "overwrote" : "wrote"}: ${CONFIG_PATH}`);
   }
@@ -2547,6 +2675,107 @@ async function migrateLedgerCmd(argv = []) {
  *
  * Dry-run by default; `--apply` writes.
  */
+/**
+ * `migrate` — bring a workspace to the v3 propagation layout.
+ *
+ * Dry-run by default, mirroring `relocate-ledger`. The preview and the write
+ * come from the SAME plan object, so what it shows is what it would do.
+ *
+ * It prints four categories rather than one list, because collapsing them is
+ * how this command would destroy state: a pointer stub migrated over the real
+ * file it points at, or two genuine files silently reconciled by whichever was
+ * written last.
+ */
+async function migrateCmd(argv = []) {
+  const asJson = argv.includes("--json");
+  const apply = argv.includes("--apply");
+  const wsIdx = argv.indexOf("--workspace");
+  const workspace = wsIdx >= 0 ? argv[wsIdx + 1] : argv.find((a) => !a.startsWith("--"));
+
+  if (!workspace) {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs migrate <workspace> [--apply] [--json]`);
+    console.error(`${DIM}Dry-run by default. --apply performs the moves.${RESET}`);
+    process.exit(2);
+  }
+
+  const { migrateWorkspace, planMigration, orphanedByMigration } = await import("./lib/migrate/workspace.mjs");
+
+  let plan;
+  try {
+    plan = planMigration(workspace);
+  } catch (err) {
+    console.error(`${RED}error:${RESET} ${err?.message ?? err}`);
+    process.exit(1);
+  }
+
+  // The accepted loss, enumerated BEFORE anything moves. Edge identity embeds
+  // the path (lib/edges/reconcile.mjs:99), so a moved file's verification
+  // becomes unreachable. Naming it is what separates an accepted trade from a
+  // silent one.
+  // ATTRIBUTABLE, never silently empty. The first version of this called a
+  // function that does not exist and swallowed the ReferenceError, so the
+  // guardrail reported "no verifications at risk" for every workspace — the
+  // exact silent-zero this command exists to prevent, written into the command
+  // itself. If the enumeration cannot run, it says so and the operator decides.
+  let orphans = [];
+  let orphanError = null;
+  try {
+    const { rows } = await reconcile(WORKSPACES);
+    orphans = orphanedByMigration(rows, plan);
+  } catch (err) {
+    orphanError = err?.message ?? String(err);
+  }
+  const losing = orphans.filter((o) => o.losesVerification);
+
+  if (asJson) {
+    const result = apply ? migrateWorkspace({ workspace, apply: true }) : { ...plan, applied: false };
+    console.log(JSON.stringify({ ...result, orphans }, null, 2));
+    return;
+  }
+
+  const short = (p) => String(p).replace(`${HOME_DIR}/Documents/GitHub/`, "");
+  console.log(`${BOLD}migrate${RESET} ${short(plan.workspace)}${apply ? "" : `  ${DIM}(dry run)${RESET}`}`);
+  console.log(`  ${DIM}conforms before:${RESET} ${plan.conformanceBefore.conforms ? "yes" : `no — missing ${plan.conformanceBefore.missing.join(", ")}`}`);
+
+  for (const c of plan.creates) console.log(`  ${GREEN}create${RESET}  ${short(c)}`);
+  for (const m of plan.moves) {
+    console.log(`  ${GREEN}move${RESET}    ${short(m.from)}`);
+    console.log(`          ${DIM}-> ${short(m.to)}${m.crossRepo ? "  (cross-repo: history stays behind)" : ""}${RESET}`);
+  }
+  for (const a of plan.alreadyMigrated) console.log(`  ${DIM}skip    ${short(a.from)} — ${a.reason}${RESET}`);
+  for (const c of plan.conflicts) console.log(`  ${RED}conflict${RESET} ${short(c.from)} — ${c.reason}`);
+
+  if (orphanError) {
+    console.log(
+      `\n  ${RED}could not enumerate at-risk verifications${RESET} ${DIM}(${orphanError})${RESET}\n` +
+        `  ${DIM}This is UNKNOWN, not zero. Moving files changes edge identity; do not --apply until this resolves.${RESET}`,
+    );
+  } else if (losing.length) {
+    console.log(`\n  ${YELLOW}${losing.length} verified edge(s) will lose their baseline${RESET} ${DIM}— edge identity embeds the path${RESET}`);
+    for (const o of losing.slice(0, 8)) console.log(`    ${DIM}${o.edge_id}  ${short(o.source)}${RESET}`);
+    console.log(`  ${DIM}Their events remain in the append-only store; nothing resolves them again.${RESET}`);
+    console.log(`  ${DIM}Re-baseline afterwards, recorded AS a re-baseline naming this migration.${RESET}`);
+  }
+
+  if (!apply) {
+    console.log(`\n  ${DIM}nothing written. re-run with --apply${RESET}`);
+    return;
+  }
+
+  let result;
+  try {
+    result = migrateWorkspace({ workspace, apply: true, now: new Date().toISOString() });
+  } catch (err) {
+    console.error(`\n${RED}refused:${RESET} ${err?.message ?? err}`);
+    process.exit(1);
+  }
+  for (const s of result.sidecars ?? []) {
+    console.log(`  ${s.written ? GREEN + "sidecar" + RESET : DIM + "sidecar" + RESET}  ${short(s.path)}${s.written ? "" : ` ${DIM}(${s.reason})${RESET}`}`);
+  }
+  const c = result.conformanceAfter;
+  console.log(`\n  ${c.conforms ? GREEN + "✓" + RESET : RED + "✗" + RESET} conforms after: ${c.conforms ? "yes" : `no — still missing ${c.missing.join(", ")}`}`);
+}
+
 async function relocateLedgerCmd(argv = []) {
   const asJson = argv.includes("--json");
   const apply = argv.includes("--apply");
@@ -5398,6 +5627,8 @@ if (_invokedDirectly) {
     await migrateLedgerCmd(process.argv.slice(3));
   } else if (mode === "relocate-ledger") {
     await relocateLedgerCmd(process.argv.slice(3));
+  } else if (mode === "migrate") {
+    await migrateCmd(process.argv.slice(3));
   } else if (mode === "init") {
     await init(process.argv[3], process.argv.slice(4));
   } else if (mode === "reload") {

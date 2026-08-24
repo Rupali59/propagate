@@ -138,7 +138,13 @@ test("a citation resolving to a real file outside the repo is external, not a de
 test("the skill's own test tree is not mistaken for its documentation", () => {
   const skillRoot = path.join(HERE, "..");
   const rels = discoverDocs(skillRoot).map((d) => path.relative(skillRoot, d).split(path.sep).join("/"));
-  assert.ok(rels.includes("STATE.md") && rels.includes("docs/GOTCHAS.md"));
+  // Was STATE.md + docs/GOTCHAS.md. Those moved to the plugin's own
+  // propagation/state/curate-docs/ on 2026-08-23 and now sit OUTSIDE this skill
+  // root, so discoverDocs cannot see them. The assertion still has to prove real
+  // docs are discovered — otherwise the "no tests leaked" check below would pass
+  // vacuously on an empty list.
+  assert.ok(rels.length > 0, "no docs discovered at all — the leak check below would be vacuous");
+  assert.ok(rels.includes("SKILL.md") && rels.includes("README.md"), `expected real docs, got ${rels}`);
   assert.ok(rels.every((r) => !r.startsWith("tests/")), `test tree leaked: ${rels.filter((r) => r.startsWith("tests/"))}`);
   assert.ok(rels.every((r) => !r.includes("node_modules")));
 });

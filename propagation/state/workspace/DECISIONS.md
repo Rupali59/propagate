@@ -1,4 +1,4 @@
-> Entry point: [`../SKILL.md`](../SKILL.md) · Index: [`README.md`](./README.md)
+> Entry point: [`../skills/propagate/SKILL.md`](../skills/propagate/SKILL.md) · Index: [`README.md`](./README.md)
 
 # propagate — Decisions
 

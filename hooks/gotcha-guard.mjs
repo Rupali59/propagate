@@ -42,140 +42,23 @@
  * "never fired" is distinguishable from "never ran". Probe with --selftest.
  */
 
-import { readFileSync, existsSync, appendFileSync, statSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { fileURLToPath } from "node:url";
 
-const HOME = os.homedir();
-
-/**
- * Overridable so the mutation checks can prove this guard is able to fail
- * without editing the live index — same reasoning as propagate's
- * PROPAGATE_STATE_DIR, and for the same reason: a check you can only exercise
- * by breaking production is a check nobody exercises.
- */
-const GLOBAL_INDEX = process.env.GOTCHA_GUARD_GLOBAL || path.join(HOME, ".claude", "gotchas-global.md");
-const LOG = process.env.GOTCHA_GUARD_LOG || path.join(HOME, ".claude", "gotcha-guard.log");
-
-/** Stop the upward walk here; tests point it at a fixture tree. */
-const CEILING = process.env.GOTCHA_GUARD_CEILING || HOME;
+// The parser lives in lib/ so the reconcile path can reuse it — see that file's
+// header for why the dependency points this way and not the other.
+import {
+  HOME,
+  LOG,
+  logLine,
+  parseEntries,
+  selftestProblems,
+  sourcesFor,
+} from "../lib/gotchas/parse.mjs";
 
 /** Cap on entries shown at once. Noise is a hiding place (propagate GOTCHAS G23). */
 const MAX_SHOWN = 3;
-
-// ---------------------------------------------------------------------------
-// parsing
-// ---------------------------------------------------------------------------
-
-/**
- * Extract triggered entries from one GOTCHAS-style file.
- *
- * An entry is a `### ` heading and everything up to the next `##`. Only entries
- * carrying a **Trigger:** line participate — silence for the rest is correct,
- * since most gotchas have no mechanical trigger and inventing one would fire
- * them constantly.
- *
- * @returns {{entries: object[], bad: {source: string, pattern: string, error: string}[]}}
- */
-function parseEntries(file) {
-  const bad = [];
-  let text;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    return { entries: [], bad };
-  }
-  const out = [];
-  // Split on ### headings, keeping the heading with its block.
-  const blocks = text.split(/\n(?=### )/);
-  for (const block of blocks) {
-    const m = block.match(/^### (.+)/);
-    if (!m) continue;
-    const trig = block.match(/\*\*Trigger:\*\*\s*`([^`]+)`/);
-    if (!trig) continue;
-    // An optional literal that this entry's trigger MUST match. See selftest:
-    // synthesising a matching string from a regex does not work in general
-    // (stripping metachars from `^\s*(grep|rg|ugrep)\s` yields "xgreprgugrepx",
-    // which matches nothing), and a probe that fails for the wrong reason is
-    // no better than one that cannot fail.
-    const fires = block.match(/\*\*Fires on:\*\*\s*`([^`]+)`/);
-    let re;
-    try {
-      re = new RegExp(trig[1], "i");
-    } catch (err) {
-      // A malformed trigger regex must not take the guard down, and must not
-      // vanish either.
-      //
-      // Reported, not merely logged. A regex that fails to compile drops its
-      // entry, and an entry that silently stops firing while the probe stays
-      // green is precisely the G1 failure this guard exists to prevent — the
-      // first version of this code logged it and reported "✓ the guard can
-      // fire" with one fewer hazard than the file declares.
-      logLine(`bad-trigger ${file} :: ${trig[1]}`);
-      bad.push({ source: file, pattern: trig[1], error: String(err && err.message) });
-      continue;
-    }
-    // Body: the lines that carry the hazard and its cost, trigger line removed.
-    // Body, with the REMEDY guaranteed present.
-    //
-    // The first version did `.slice(0, 6)`, which cut G-A mid-sentence and
-    // dropped its `**Instead:**` line entirely — so the guard delivered the
-    // hazard and the cost but not what to do, which is the only actionable part.
-    // A truncation that removes the remedy is worse than no truncation: it
-    // spends the interruption and withholds the payoff.
-    const lines = block
-      .replace(/^### .+\n/, "")
-      .replace(/\*\*Trigger:\*\*.*\n?/, "")
-      .replace(/\*\*Fires on:\*\*.*\n?/, "")
-      .split("\n")
-      .filter((l) => l.trim());
-    // The remedy is a BLOCK, not a line. Markdown wraps, so `**Instead:** …`
-    // routinely spans two or three lines; filtering line-by-line put the
-    // continuation of G-G's remedy *above* its own heading and dropped half of
-    // G-A's. Everything from the first remedy marker to the end of the entry
-    // belongs together, in order.
-    const isRemedyStart = (l) => /^\*\*(Instead|Do|Fix|Use)\b/i.test(l.trim());
-    const cut = lines.findIndex(isRemedyStart);
-    const rest = cut === -1 ? lines : lines.slice(0, cut);
-    const remedy = cut === -1 ? [] : lines.slice(cut);
-
-    const KEEP = 8;
-    const kept = rest.slice(0, KEEP);
-    if (rest.length > KEEP) kept.push(`… (${rest.length - KEEP} more line(s) — see the entry)`);
-    const body = [...kept, ...remedy].join("\n");
-    out.push({ title: m[1].trim(), trigger: re, firesOn: fires ? fires[1] : null, body, source: file });
-  }
-  return { entries: out, bad };
-}
-
-/** Every GOTCHAS file governing `startDir`, nearest first, plus the global index. */
-function sourcesFor(startDir) {
-  const found = [];
-  let dir = path.resolve(startDir);
-  const root = path.parse(dir).root;
-  for (;;) {
-    for (const rel of [path.join("docs", "GOTCHAS.md"), "GOTCHAS.md"]) {
-      const p = path.join(dir, rel);
-      if (existsSync(p)) found.push(p);
-    }
-    if (dir === root || dir === CEILING) break;
-    dir = path.dirname(dir);
-  }
-  if (existsSync(GLOBAL_INDEX)) found.push(GLOBAL_INDEX);
-  return found;
-}
-
-// ---------------------------------------------------------------------------
-// logging — so "never fired" and "never ran" are different facts
-// ---------------------------------------------------------------------------
-
-function logLine(msg) {
-  try {
-    appendFileSync(LOG, `${new Date().toISOString()} ${msg}\n`);
-  } catch {
-    /* logging must never be the thing that breaks the guard */
-  }
-}
 
 // ---------------------------------------------------------------------------
 // matching
@@ -209,75 +92,21 @@ function render(hits) {
 // selftest — the liveness probe (docs/SYSTEMS.md requires one from day one)
 // ---------------------------------------------------------------------------
 
+/** The CLI probe: derive sources from cwd, print, and set an exit code. */
 function selftest() {
-  const problems = [];
-
   const sources = sourcesFor(process.cwd());
-  if (sources.length === 0) problems.push("no GOTCHAS source found from cwd — the guard can never fire here");
-
-  const parsed = sources.map(parseEntries);
-  const entries = parsed.flatMap((r) => r.entries);
-  const bad = parsed.flatMap((r) => r.bad);
-
-  for (const b of bad) {
-    problems.push(
-      `${b.source.replace(HOME, "~")} — trigger \`${b.pattern}\` does not compile (${b.error}), so that entry ` +
-        `is silently absent from every match. A dropped hazard must never leave the probe green.`,
-    );
-  }
-
-  if (entries.length === 0) {
-    problems.push(
-      `${sources.length} source file(s) found but 0 carry a **Trigger:** line — ` +
-        `the guard would run forever and never fire, which reads as "no hazards"`,
-    );
-  }
-
-  // Per-entry proof that the trigger can fire, using the literal the entry
-  // itself declares. This is the G1 discipline applied once per hazard rather
-  // than once for the file: a single synthesised sample only ever proves that
-  // *one* regex works, and the first version of this probe did not even manage
-  // that — it stripped metachars off `^\s*(grep|rg|ugrep)\s` into
-  // "xgreprgugrepx" and reported the matcher broken when the matcher was fine.
-  //
-  // An entry with no **Fires on:** is reported, not silently tolerated: it is
-  // an untested trigger, which is the thing this whole file exists to prevent.
-  for (const e of entries) {
-    if (!e.firesOn) {
-      problems.push(`${e.title} — has a **Trigger:** but no **Fires on:** literal, so nothing proves it can fire`);
-      continue;
-    }
-    if (!e.trigger.test(e.firesOn)) {
-      problems.push(
-        `${e.title} — its own **Fires on:** literal (${JSON.stringify(e.firesOn)}) does NOT match its trigger ` +
-          `${e.trigger}. Either the regex is wrong or the example is; this entry would never fire.`,
-      );
-    }
-  }
-
-  // The converse of "can it fire": no single trigger may match EVERY declared
-  // example. One that does is not a hazard filter, it is an always-on banner —
-  // and a guard that fires on everything is one nobody reads (G23).
-  //
-  // Checked PER TRIGGER, not "do all entries match this example". The first
-  // version asked the latter and let a `.` trigger through, because only two of
-  // four entries happened to match the sample it was given.
-  const examples = entries.map((e) => e.firesOn).filter(Boolean);
-  if (examples.length > 1) {
-    for (const e of entries) {
-      if (examples.every((x) => e.trigger.test(x))) {
-        problems.push(
-          `${e.title} — its trigger ${e.trigger} matches all ${examples.length} declared examples. ` +
-            `That is an always-on banner, not a hazard filter.`,
-        );
-      }
-    }
-  }
+  const problems = selftestProblems(sources);
+  // Parse once per source and reuse. The split into selftestProblems briefly made
+  // this three passes over every file — once inside the probe, once for the total,
+  // once per line of the listing. Nobody would have noticed, which is the point:
+  // work that only shows up as a slightly slower probe never gets attributed.
+  const parsed = sources.map((s) => ({ source: s, count: parseEntries(s).entries.length }));
+  const entryCount = parsed.reduce((n, p) => n + p.count, 0);
 
   console.log(`gotcha-guard selftest`);
   console.log(`  sources : ${sources.length}`);
-  for (const s of sources) console.log(`            ${s.replace(HOME, "~")} (${parseEntries(s).entries.length} triggered)`);
-  console.log(`  entries : ${entries.length} with a **Trigger:** line`);
+  for (const p of parsed) console.log(`            ${p.source.replace(HOME, "~")} (${p.count} triggered)`);
+  console.log(`  entries : ${entryCount} with a **Trigger:** line`);
   console.log(`  log     : ${existsSync(LOG) ? `${readFileSync(LOG, "utf8").split("\n").filter(Boolean).length} invocations recorded` : "never run"}`);
   if (problems.length) {
     console.log(`\n${problems.length} problem(s):`);
@@ -351,9 +180,23 @@ function main() {
   process.exit(0);
 }
 
-try {
-  main();
-} catch (err) {
-  logLine(`ERROR ${err && err.message}`);
-  process.exit(0); // fail open — never block a tool call on this guard's bug
+/**
+ * Run ONLY when executed directly.
+ *
+ * Without this, `import`ing the module to reuse `parseEntries` /
+ * `selftestProblems` would run the guard: it reads stdin (blocking, since an
+ * importer has no hook payload to send) and calls `process.exit`, which would
+ * take the importing process down. The census imports this file precisely so
+ * there is ONE parser rather than two that disagree about the entry count —
+ * which is the number the census exists to report.
+ */
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+  try {
+    main();
+  } catch (err) {
+    logLine(`ERROR ${err && err.message}`);
+    process.exit(0); // fail open — never block a tool call on this guard's bug
+  }
 }

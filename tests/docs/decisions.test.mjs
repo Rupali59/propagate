@@ -3,10 +3,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { parseDecisions, normalizeAffectsToken, zeroTokenEntries } from "../../lib/report/decisions.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DECISIONS_PATH = path.join(__dirname, "..", "..", "docs", "DECISIONS.md");
+// The plugin's own artifacts moved to propagation/state/workspace/ on 2026-08-23.
+// Both are tried so an older checkout still resolves and a genuine absence stays
+// distinguishable from a relocation.
+const DECISIONS_PATH = [
+  path.join(__dirname, "..", "..", "propagation", "state", "workspace", "DECISIONS.md"),
+  path.join(__dirname, "..", "..", "docs", "DECISIONS.md"),
+].find((c) => existsSync(c));
 
 test("parses BOTH heading forms (colon + em-dash) — G1", () => {
   const text = `

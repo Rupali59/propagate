@@ -398,3 +398,41 @@ test("emitRows / toSystemsRow match SYSTEMS.md's 9-column order and never fill a
   assert.match(cells[7], /BLANK/);
   assert.equal(cells[8], "n/a");
 });
+
+// ---------------------------------------------------------------------------
+// STANDALONE_SEEDS must not carry a null — the integration-config leak
+// ---------------------------------------------------------------------------
+
+test("no seed is null — a null leaks a garbage row and a Node deprecation", async () => {
+  // `INTEGRATIONS.portsFile` is built by `pick(env, key, legacy)`, which returns
+  // `legacy && existsSync(legacy) ? legacy : null`. So a legacy default naming a
+  // path that no longer exists resolves to NULL rather than to a dead path —
+  // graceful, and then the null is spread straight into STANDALONE_SEEDS.
+  //
+  // Two consequences, both live before this test:
+  //   1. `inventoryStandalone` emits `id: "standalone:null"`, status unknown,
+  //      evidence "file does not exist at null" — a row about nothing.
+  //   2. `existsSync(null)` raises Node's [DEP0187] deprecation and is slated to
+  //      THROW in a future release, which would take the whole inventory down.
+  //
+  // Asserting on the SEEDS rather than on the resolved ports path keeps this
+  // machine-independent: a checkout with no ports.yml at all must still pass.
+  const { STANDALONE_SEEDS } = await import("../../lib/report/inventory.mjs");
+  for (const [i, s] of STANDALONE_SEEDS.entries()) {
+    assert.ok(
+      typeof s === "string" && s.length > 0,
+      `STANDALONE_SEEDS[${i}] is ${JSON.stringify(s)} — an unresolved integration must be omitted, not carried as null`,
+    );
+  }
+});
+
+test("no standalone row is reported about a null path", async () => {
+  // The observable half of the same defect: even if a null survived into the
+  // seeds, the report must never contain a row whose subject is "null". A row
+  // that says "file does not exist at null" is noise that reads like a finding.
+  const { inventoryStandalone } = await import("../../lib/report/inventory.mjs");
+  const r = inventoryStandalone({});
+  for (const item of r.items) {
+    assert.ok(!String(item.id).includes("null"), `garbage row: ${item.id} — ${item.evidence}`);
+  }
+});

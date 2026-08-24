@@ -3,7 +3,7 @@
 # Propagate — specification
 
 What the skill is, what it guarantees, and how each guarantee is checked. Derived from
-[`ISSUES.md`](./ISSUES.md); constrained by [`DECISIONS.md`](./DECISIONS.md).
+[`ISSUES.md`](../propagation/state/workspace/ISSUES.md); constrained by [`DECISIONS.md`](../propagation/state/workspace/DECISIONS.md).
 
 Status: **target spec.** Reconciliation against the current implementation is a separate pass.
 

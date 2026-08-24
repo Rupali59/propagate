@@ -14,7 +14,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -232,4 +232,44 @@ test("refsForEdge — a side outside any repo resolves to repoRoot:null without 
   assert.equal(downstream.repoRoot, null);
   assert.equal(downstream.ref, null);
   assert.equal(downstream.error, null);
+});
+
+// ---------------------------------------------------------------------------
+// M1 — the two fields that are FREE on the existing for-each-ref spawn
+// ---------------------------------------------------------------------------
+
+test("branch entries carry upstreamTrack and lastCommitIso", async (t) => {
+  // The v3 plan doc claimed all four registry fields come from "widening one
+  // format string at zero extra spawns". Tested against git directly, only two
+  // do: %(upstream:track) and %(committerdate:iso-strict) are real atoms, while
+  // %(merged) and %(merge_state) are `fatal: unknown field name`. So these two
+  // are added HERE, on the spawn that already runs, and merge_state is bought
+  // separately by whoever needs it.
+  //
+  // Additive on purpose: bootstrap.mjs consumes enumerateRefs and must not pay
+  // for a second spawn it has no use for.
+  const dir = await mkdtemp(path.join(tmpdir(), "refs-atoms-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const git = (...a) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8" });
+  execFileSync("git", ["init", "-q", "-b", "main", dir]);
+  git("config", "user.email", "t@e.st");
+  git("config", "user.name", "t");
+  await writeFile(path.join(dir, "a.txt"), "a\n");
+  git("add", "-A");
+  git("commit", "-qm", "one");
+
+  const { refs, error } = await enumerateRefs(dir);
+  assert.equal(error, null);
+  const branch = refs.find((r) => r.kind === "branch" && r.ref === "main");
+  assert.ok(branch, `no main branch entry in ${JSON.stringify(refs)}`);
+
+  // No upstream configured: the field must be PRESENT and empty-string, not
+  // absent. "no upstream" and "we did not ask" are different facts, and only
+  // one of them is a missing key.
+  assert.equal(typeof branch.upstreamTrack, "string", "upstreamTrack must be present even with no upstream");
+  assert.match(
+    branch.lastCommitIso,
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+    `lastCommitIso must be iso-strict, got ${JSON.stringify(branch.lastCommitIso)}`,
+  );
 });

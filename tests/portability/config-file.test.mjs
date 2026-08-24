@@ -144,13 +144,23 @@ test("a malformed config.yml degrades to defaults and does NOT throw", () => {
   );
 });
 
-test("no config.yml reproduces today's behaviour exactly", () => {
+test("no config.yml discovers NOTHING — the built-in default was the hazard, not the feature", () => {
+  // INVERTED 2026-08-23, deliberately. This asserted that an unconfigured machine
+  // silently used `~/Documents/GitHub`. That default is exactly what `hubRoot`
+  // removed: it is a PLAUSIBLE WRONG ANSWER, so on any machine that is not this
+  // author's, discovery found zero workspaces and every downstream check then
+  // "passed" by not running — the failure this tool exists to catch, living in
+  // its own config (rule:enforcement-watches-itself).
+  //
+  // The contract is now the sentinel: unconfigured is a VALUE, and it must be
+  // visible rather than guessed. A marked repo sitting at the old default path
+  // must NOT be found, because nothing declared that path.
   const withNone = loadConfig({ mkTree: markedTree("Documents/GitHub/myrepo") });
-  assert.ok(withNone.ok, withNone.stderr);
+  assert.ok(withNone.ok, `module load must never throw when unconfigured:\n${withNone.stderr}`);
   assert.deepEqual(
     withNone.workspaces,
-    ["myrepo"],
-    "the built-in ~/Documents/GitHub default must still apply when nothing is configured",
+    [],
+    "an undeclared path must not be walked — that is what made zero-discovery read as healthy",
   );
 });
 

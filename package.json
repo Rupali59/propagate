@@ -15,7 +15,7 @@
     "test": "npm run test:propagate && npm run test:curate-docs",
     "setup": "node cli.mjs setup",
     "doctor": "node cli.mjs doctor",
-    "test:propagate": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs'",
+    "test:propagate": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs' 'hooks/**/*.test.mjs'",
     "test:curate-docs": "npm test --prefix skills/curate-docs"
   },
   "dependencies": {

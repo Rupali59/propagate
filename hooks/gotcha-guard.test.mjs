@@ -1,7 +1,10 @@
 /**
  * gotcha-guard — behaviour tests.
  *
- * Run: `node --test ~/.claude/hooks/`
+ * Run: `npm test`, or `node --test hooks/gotcha-guard.test.mjs` for this file alone.
+ * NOT `node --test hooks/` — Node 25 resolves a bare directory as a module and dies
+ * with MODULE_NOT_FOUND before running anything. And until 2026-08-22 these tests were
+ * outside `npm test`'s glob entirely, so all nine passed locally and ran nowhere.
  *
  * WHY THIS FILE EXISTS. The guard shipped 2026-08-17 with a `--selftest` that
  * checked *index integrity* — every trigger compiles, every trigger matches its
@@ -197,4 +200,28 @@ test("an unknown tool is ignored rather than matched against an empty subject", 
     env: { ...process.env, GOTCHA_GUARD_GLOBAL: f.globalIndex, GOTCHA_GUARD_CEILING: f.ceiling, GOTCHA_GUARD_LOG: path.join(f.dir, "log") },
   });
   assert.equal(r.stdout.trim(), "", "a `.*` trigger must not fire on a tool with no subject");
+});
+
+// ---------------------------------------------------------------------------
+// module hygiene — importing the hook must not RUN the hook
+// ---------------------------------------------------------------------------
+
+test("importing the guard does not execute it", async () => {
+  // The guard runs `main()` at module scope, which reads stdin and calls
+  // process.exit. An `isDirectRun` check gates that, so the reconcile path can
+  // import the module for its exports.
+  //
+  // Without the gate the failure is not an error, it is a HANG: an importer has
+  // no hook payload to send, so `readFileSync(0)` blocks forever and takes the
+  // importing process (doctor) with it. A hang reads as "slow", gets retried,
+  // and is diagnosed last — so it is asserted with a hard timeout rather than
+  // trusted to fail fast.
+  const r = spawnSync(
+    process.execPath,
+    ["-e", `import(${JSON.stringify(GUARD)}).then(() => { console.log("IMPORTED"); });`],
+    { encoding: "utf8", timeout: 10_000, input: "" },
+  );
+  assert.equal(r.signal, null, "importing the guard timed out — the entrypoint gate is not holding");
+  assert.equal(r.status, 0, `import exited ${r.status}: ${r.stderr}`);
+  assert.match(r.stdout, /IMPORTED/, "the import must resolve, not exit early");
 });

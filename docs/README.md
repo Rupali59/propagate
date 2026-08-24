@@ -13,8 +13,8 @@ one hop deeper, for when you land in `docs/` directly.
 | [`REFERENCE.md`](./REFERENCE.md) | Exact paths, the complete CLI surface and flags, ledger-resolution snippet, install/disable sequence, architecture summary. |
 | [`SPEC.md`](./SPEC.md) | What's the target design? What invariants does the system claim, and what's the evidence for the premise? |
 | [`DATA_MODEL.md`](./DATA_MODEL.md) | What does a ledger row *actually* contain on disk today — the four coexisting schemas, the fold, the orphan field census, and where that diverges from `SPEC.md` §4? |
-| [`ISSUES.md`](./ISSUES.md) | What's broken, tracked, or a known gap (e.g. no `cli drain`, the pre-push injection risk)? |
-| [`DECISIONS.md`](./DECISIONS.md) | Why does it work this way — what changed, when, and what did it supersede? |
+| [`ISSUES.md`](../propagation/state/workspace/ISSUES.md) | What's broken, tracked, or a known gap (e.g. no `cli drain`, the pre-push injection risk)? |
+| [`DECISIONS.md`](../propagation/state/workspace/DECISIONS.md) | Why does it work this way — what changed, when, and what did it supersede? |
 | [`SYSTEMS.md`](./SYSTEMS.md) | What background components exist (watcher, digest), and what state are they in? |
 | [`LIFECYCLE.md`](./LIFECYCLE.md) | What state is a hazard in, how does it leave that state, and how does this work divide into lanes? The hazard machine and how it composes with the edge machine. |
 | **Hub propagation docs** (`~/Documents/GitHub/propagation/docs/`) | `ARCHITECTURE.md` — the end-to-end trace: where a coupling begins, how data accumulates, how it reconciles internally and **across repos** (the only write-up of the cross-repo path). `DEFECTS-2026-08-22.md` — the open findings list. These live with the workspace ledger, not with the tool. |

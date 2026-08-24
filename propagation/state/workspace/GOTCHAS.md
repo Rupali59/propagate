@@ -1,4 +1,4 @@
-> Entry point: [`../SKILL.md`](../SKILL.md) · Index: [`README.md`](./README.md)
+> Entry point: [`../skills/propagate/SKILL.md`](../skills/propagate/SKILL.md) · Index: [`README.md`](./README.md)
 
 # Gotchas — running observations
 
@@ -1042,3 +1042,84 @@ eight test files that call `appendEvent` has this behaviour; only two were harde
 `edge_id e717028e` / `node_id VipinKaushik:lib/pricing.ts` are fixture values matching **0**
 declared edges, so nothing was falsely closed. The 2026-08-17 instance of the same family
 cost 11 spurious events and 3 real worklist items silently closed. Recorded as N44.
+
+### G57 · `rg` honours `.gitignore`, so it inherits the exact blind spot you reached for it to avoid
+**Trigger:** `\brg\s+(?!.*--no-ignore)`
+**Fires on:** `rg -l 'docs/GOTCHAS.md'`
+G-A records that `grep` here is a ugrep shim honouring `--ignore-files`, and that the hub
+`.gitignore` is `/*` — so a tree-wide search silently skips whole workspaces. `rg` is the
+tool people switch to *because* of G-A, and it has the same default: it respects
+`.gitignore` unless told not to.
+**Signal:** a plausible, low count. No error, no warning, no hint that anything was skipped.
+**Cost:** 2026-08-22, planning the GOTCHAS move. `rg -l 'docs/GOTCHAS.md'` returned **7**
+referrers; `rg --no-ignore -l` returned **87**. The 7 was about to be used to argue the
+move's blast radius was trivial.
+**Instead:** pass `--no-ignore` for any census over `~/Documents/GitHub`, and treat any
+count from a bare `rg`/`grep` as a floor, never a total. Re-measure a different way before
+publishing it — `rule:discernment-checks` §4.
+
+### G58 · `inventoryRepos()` cannot see a `.git` nested inside a `.git`
+**Trigger:** `inventoryRepos`
+**Fires on:** `const inv = inventoryRepos();`
+It enumerates the OUTERMOST repo only. `Vipin Kaushik/` and `Keerti/` are git repos that
+each contain further git repos (`marketing-intel`, `keerti-job-radar`), and those nested
+repos appear in **neither `items` nor `dropped`** — not counted, and not reported as
+skipped either.
+**Signal:** a repo you know exists is simply not in the output, and nothing says why. The
+`dropped` list looks healthy because it only records depth-bound misses.
+**Cost:** 2026-08-22, a gotchas census built on it reported **5 of 34** where an
+independent filename walk found **9**. Both numbers were defensible; only one was right.
+**Instead:** for anything scoped to projects, enumerate `<workspace>/propagation/state/*/`
+— that is the declared registry and needs no walking. Use `inventoryRepos` for repo health,
+not as a denominator.
+
+### G24 · Removing a config key's built-in default silently nulls every derived path
+**Trigger:** `(hubRoot|HUB_ROOT|searchRoots|SEARCH_ROOTS)`
+**Fires on:** `grep -n hubRoot lib/core/config.mjs`
+`hubRoot` replaced four independent restatements of `~/Documents/GitHub`, and the sentinel —
+**no built-in default, unconfigured resolves to `null`** — is deliberate: a plausible wrong hub
+finds zero workspaces and then reports healthy, which is the failure this tool exists to catch.
+
+But every install predating the key declares `searchRoots:` and no hub. On the author's own
+machine `marketplaceDir` and `portsFile` **both resolved before the change and both were `null`
+after** — two integrations silently off, `status` still green at 864 edges, because `null` reads
+as "not configured" rather than "configured wrong". That is the same sentinel failure arriving
+through the opposite door.
+
+Resolution is therefore four-state, not two: env → `hubRoot:` → **exactly one declared
+`searchRoots` entry (inferred, and the diagnostic says so)** → `null`. Two or more roots stay
+null; "which of these is the hub" has no answer that is not a guess.
+
+**When you delete a default, enumerate what derived from it and check each on a machine that is
+already configured** — not on a fresh fixture, where the old default was never in play.
+**Cost:** caught in-session by reading the derived values, not by any test. All 13 hub tests
+were green while two integrations were dead, because each one declared its own hub.
+
+### G25 · A wall-clock assertion cannot tell a broken bound from a busy machine
+**Trigger:** `elapsedMs|Date\.now\(\) - start|assert\.ok\(.*< ?\d{4}`
+**Fires on:** `assert.ok(elapsedMs < 15000, "the bound did not hold")`
+Three instances on one assertion. `< 4000` against a 5s stub flipped on fixture weight
+(2026-08-20). `< 15000` failed at **23406ms under load average 49** on 2026-08-23 — while a
+clean re-measure of the *identical* scenario took **3723ms, unkilled, message emitted**. The
+bound was intact every time.
+
+**The obvious fix was wrong, and this is the useful part of the entry.** "A broken bound means
+the child is killed, so assert `result.signal === null` — binary, not a duration" is correct
+reasoning and still load-dependent, because the *harness's own* 20s spawn cap fires under load
+too. It passed 8/8 in isolation and failed in the full suite at 22043ms with an intact bound.
+**Relocating a timing dependency reads exactly like removing one.**
+
+**What actually works is asserting the OBSERVABLE the bound produces.** With the bound intact,
+`execSync` aborts at 2s and doctor prints `graph integration check timed out after 2s`. With it
+broken, the 60s stub runs to completion and its output is parsed as an ordinary result, so that
+line never appears — at any load, on any machine. The harness cap moved to 90s and stopped being
+an assertion at all; it is now only a runaway guard, which is all a harness timeout should be.
+
+**Do not reason from the elapsed number either.** 23406ms exceeded the 20s spawn timeout, which
+looks exactly like "it was killed"; the conclusion "the bound held" was reached twice from
+arithmetic and was right only by luck. Re-measure on an idle machine before believing either
+verdict — `rule:discernment-checks` §4, verify the instrument.
+
+**Cost:** two false regressions during unrelated work, and a nearly-published claim that a bound
+had broken when it had not. **When you assert a timeout works, assert the side effect it
+produces — killed vs not — never the duration.**

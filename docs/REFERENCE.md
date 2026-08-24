@@ -113,12 +113,30 @@ named a literal path and was wrong the moment the layout moved on 2026-08-21.
   state/<project>/
     STATE.md             daily-open — what is true now
     DECISIONS.md         append-only — why past choices were made
+    GOTCHAS.md           on-demand  — what will bite you, and what it cost last time.
+                                      Added 2026-08-23, completing the three-file set.
+                                      Unlike the other two it is a PUSH artifact:
+                                      hooks/gotcha-guard.mjs resolves it on every
+                                      Bash/Edit/Write and puts the matching entry in
+                                      front of whoever is about to trigger it.
     .sidecar.yml         which project these belong to; see below
   archive/
     ledger-v1.{jsonl,md} FROZEN     — the v1 drift rows, never appended
 ```
 
 The workspace's own state lives at `state/workspace/`.
+
+**`GOTCHAS.md` resolves from BOTH layouts, deliberately.** `lib/gotchas/parse.mjs`'s
+`sourcesFor()` looks in `<repo>/docs/GOTCHAS.md` *and*
+`<workspace>/propagation/state/<project>/GOTCHAS.md`, nearest first. The migration is
+partial by design — measured 2026-08-23, **2 of 9 files could move**; four are blocked on
+their workspace gaining a `propagation/state/`, and three are standalone repos with no
+workspace, which are exempt. A resolver that understood only the new layout would stop
+delivering the other seven, and the failure would be silent.
+
+**Never leave a stub at the old path.** `parseEntries()` reads any `GOTCHAS.md` it finds,
+so a pointer stub parses as a real hazard file carrying zero triggered entries — present,
+adopted, and inert. Record the move in `.sidecar.yml`'s `owns` / `pre_move` instead.
 
 ### `.sidecar.yml`
 
@@ -358,6 +376,31 @@ regenerates it. `--json` emits the same result machine-readably.
 **Precedence is env > `config.yml` > built-in default.** `PROPAGATE_SEARCH_ROOTS`
 in your shell still wins over the file, so `setup` cannot silently change
 behaviour that already works on a machine that exports it.
+
+### `hubRoot` — the one declared fact
+
+`setup --hub <path>` records where your code lives. Three things derive from it and
+are **not** configured separately: `searchRoots` (when not declared), the skills
+marketplace directory, and the ports registry.
+
+It exists because that path was previously restated four times, each independently
+overridable and each defaulting to one author's layout — so `portsFile` had to be
+fixed twice in one day as the registry moved, and the restatements nobody remembered
+to update failed *silently*: they resolved to `null`, and `null` reads as "not
+configured" rather than "configured wrong".
+
+| Hub resolves from | When |
+|---|---|
+| `PROPAGATE_HUB_ROOT` | always wins |
+| `config.yml` `hubRoot:` | declared by `setup --hub` |
+| `config.yml` `searchRoots:` | **only when exactly one is declared** — an install predating this key. The diagnostic says `inferred` |
+| `null` | nothing declared, or two-plus roots (ambiguous) |
+
+**Unconfigured is a value, never a guess.** There is deliberately no built-in
+default: a plausible wrong hub finds zero workspaces and then reports healthy, which
+is the exact failure this tool exists to catch. Commands needing a hub exit non-zero
+naming `propagate setup --hub <path>`, and `HUB_ROOT_DIAGNOSTIC` carries the reason.
+Resolution never throws — a throw at config load bricks the CLI and the UI together.
 
 **Scheduling is optional.** `setup` records the platform default (`launchd` on
 macOS, `none` elsewhere). `none` is supported, not degraded — the v1 watcher is

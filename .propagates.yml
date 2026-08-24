@@ -116,7 +116,7 @@ sources:
           derivation changes, the promise in routing/SKILL.md is the thing that goes
           stale.
         kind: code
-      - path: docs/DECISIONS.md
+      - path: propagation/state/workspace/DECISIONS.md
         why: >-
           The 2026-08-17 entry states layering is longest-path-from-root and that
           cycles are condensed rather than dropped. Both are decisions the code has
@@ -133,7 +133,7 @@ sources:
           added or recalibrated in one and not the other is the "looks
           machine-checked and is not" failure.
         kind: code
-      - path: docs/GOTCHAS.md
+      - path: propagation/state/workspace/GOTCHAS.md
         why: >-
           Every EXPECTATIONS entry's `basis` cites a dated incident, and the long
           form of those incidents lives in GOTCHAS. A threshold whose story is only
@@ -153,6 +153,22 @@ sources:
         why: >-
           V3_REQUIRED enumerates exactly the tree REFERENCE.md §"Propagation layout"
           draws; adding or removing a required item there falsifies the section
+        kind: code
+
+  # Added 2026-08-23 with `hubRoot`, per rule:refactor-updates-sidecar-same-commit.
+  # config.mjs owns the resolution ORDER (env > hubRoot > single-searchRoot
+  # inference > null) and REFERENCE.md §"`hubRoot` -- the one declared fact" is
+  # the table drawing it. The whole reason hubRoot exists is that this path was
+  # restated four times and the stale copies failed silently as null; a doc that
+  # describes a different precedence than the code implements is that same defect
+  # relocated into prose, where nothing type-checks it.
+  lib/core/config.mjs:
+    propagates_to:
+      - path: docs/REFERENCE.md
+        why: >-
+          the hub resolution order and its sentinel behaviour are stated in both;
+          changing precedence, adding a source, or removing the null sentinel in
+          the code falsifies the table in that section
         kind: code
 
   lib/edges/events.mjs:
@@ -192,7 +208,7 @@ sources:
 
   docs/AUDIT-2026-08.md:
     propagates_to:
-      - path: docs/GOTCHAS.md
+      - path: propagation/state/workspace/GOTCHAS.md
         why: >-
           the audit assigns a disposition to each entry and records which are
           COVERED, RETIRED or DELIVERED. Entries added or superseded in GOTCHAS

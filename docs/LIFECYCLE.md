@@ -12,7 +12,7 @@ the work lanes from that. It is a map, not a mechanism — there is no
 
 **It restates nothing.** The edge states are defined in `lib/reconcile.mjs`'s
 module docstring, the dispositions in `lib/events.mjs`'s. Two copies of one
-state list is [G20](./GOTCHAS.md); `DATA_MODEL.md` §7 is this project's own
+state list is [G20](../propagation/state/workspace/GOTCHAS.md); `DATA_MODEL.md` §7 is this project's own
 cautionary tale of a doc that drifted from the code it described.
 
 ---

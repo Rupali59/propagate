@@ -284,3 +284,43 @@ test("a doc with no fences counts exactly as before", async () => {
   assert.ok(hit);
   assert.equal(hit.hits.length, 2, "both prose lines still count");
 });
+
+// ---------------------------------------------------------------------------
+// gotchas — the third member of the STATE / DECISIONS / GOTCHAS set
+// ---------------------------------------------------------------------------
+
+test("GOTCHAS.md resolves to the `gotchas` kind, not `undeclared`", () => {
+  // Until 2026-08-22 this returned {kind: null, source: "undeclared"} for every
+  // GOTCHAS.md in the tree: the taxonomy knew DECISIONS.md and STATE.md and not
+  // the third file of the same set. Everything downstream that branches on kind
+  // — curate-docs included — silently skipped them.
+  for (const p of ["docs/GOTCHAS.md", "GOTCHAS.md", "/abs/path/docs/GOTCHAS.md"]) {
+    const r = kindOf(p, () => "no frontmatter\n");
+    assert.equal(r.kind, "gotchas", p);
+    assert.equal(r.source, "filename", p);
+  }
+});
+
+test("`gotchas` is declared in KINDS with a lifecycle, like every other kind", () => {
+  // A kind byFilename() can return but KINDS does not describe is a half-registered
+  // kind: it classifies, and then no consumer can say what its staleness rule is.
+  assert.ok(Object.keys(KINDS).includes("gotchas"));
+  assert.match(KINDS.gotchas, /INERT/, "its lifecycle must name the failure unique to it");
+});
+
+test("registering gotchas did not steal any other filename", () => {
+  // The negative control. A `.includes("GOTCHAS")` style check would also have
+  // matched nothing else here, but this pins the neighbours explicitly so a future
+  // widening of the rule fails loudly rather than quietly reclassifying docs.
+  const cases = {
+    "docs/ISSUES.md": "issues",
+    "docs/TODO.md": "state",
+    "docs/STATE.md": "state",
+    "docs/DECISIONS.md": "decision-log",
+    "docs/README.md": "router",
+    "docs/TODOS.md": "state",
+  };
+  for (const [p, want] of Object.entries(cases)) {
+    assert.equal(kindOf(p, () => "no frontmatter\n").kind, want, p);
+  }
+});

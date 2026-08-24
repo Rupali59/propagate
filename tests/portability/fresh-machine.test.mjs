@@ -83,9 +83,15 @@ test("doctor already fails on zero discovery — assert it so it cannot regress"
   // hold is that the failure names the condition AND the action; the wording is
   // free to change.
   assert.match(out, /search root|workspace/i, "the failure must name the condition");
+  // `setup --hub` added 2026-08-23. The comment above says the wording is free to
+  // change and only the CONTRACT holds — but the regex enumerated two actions, so
+  // when `hubRoot` made "run `propagate setup --hub <path>`" the primary fix, this
+  // went red against a diagnostic that was strictly BETTER: it named the condition,
+  // the two config sources tried, and the exact command. A contract test that lists
+  // the acceptable answers is a phrase test wearing a contract's comment.
   assert.match(
     out,
-    /PROPAGATE_SEARCH_ROOTS|run `init`/,
+    /PROPAGATE_SEARCH_ROOTS|run `init`|setup --hub/,
     "…and the action — a diagnostic that does not say what to do is a dead end on a fresh machine",
   );
 });

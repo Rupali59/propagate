@@ -61,7 +61,14 @@ test("every tests/… path cited in a current doc resolves", () => {
 });
 
 test("every `Guarded by:` citation in GOTCHAS names something that exists", () => {
-  const body = readFileSync(path.join(REPO, "docs", "GOTCHAS.md"), "utf8");
+  // Moved to propagation/state/workspace/ 2026-08-23; the legacy path is kept so
+  // an older checkout still resolves rather than silently reading nothing.
+  const gotchasPath = [
+    path.join(REPO, "propagation", "state", "workspace", "GOTCHAS.md"),
+    path.join(REPO, "docs", "GOTCHAS.md"),
+  ].find((c) => existsSync(c));
+  assert.ok(gotchasPath, "GOTCHAS.md not found at either location — a missing file is not zero citations");
+  const body = readFileSync(gotchasPath, "utf8");
   const claims = [...body.matchAll(/^\*\*Guarded by:\*\* `([^`]+)`/gm)].map((m) => m[1]);
   assert.ok(claims.length > 0, "no Guarded by: claims parsed — the regex or the file shape changed");
 
