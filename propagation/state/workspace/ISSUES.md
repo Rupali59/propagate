@@ -1174,7 +1174,13 @@ tune the check until it passes." Teaching the reader a type it has been silently
 since 2026-06-20 (that is N1's whole cost) is arguably making the instrument honest rather
 than tuning it, but it is close enough to the line to be a human call, not an agent's.
 
-## N31 · S2 · `renderMarkdown` has no live caller, and would regress the tree if called
+## N31 · S2 · **BLOCKED (on Phase D)** · `renderMarkdown` has no live caller, and would regress the tree if called
+
+> **DUPLICATE OF N42**, filed five days apart on the same defect with different emphases —
+> N31 on the false lines it would emit, N42 on the prose it would destroy. Neither entry
+> knew about the other. Decide once, close both. (Recorded because I made the same mistake
+> today, filing a new issue against a live `N46`; a register with two names for one defect
+> is a register where one of them stops being findable.)
 
 **Filed 2026-08-17**, same handover.
 
@@ -1211,8 +1217,24 @@ re-rendering:
 | `Keerti/Keerti-portfolio/docs/PROPAGATION_LEDGER.md` | 0 |
 | `ManavDaehi/docs/PROPAGATION_LEDGER.md` | 5 (frozen historical render, banner says so) |
 
-**Decide one of two, do not leave it as is:** (a) fix the three false lines, drop the
-relative-date tripwire, and wire it into `drain`; or (b) retire `renderMarkdown`, delete
+**DEFERRED TO PHASE D, 2026-08-24 — and one of this entry's two arguments has expired.**
+
+`Watcher healthy` is **gone from the renderer**: `grep -c "Watcher healthy" lib/edges/ledger.mjs`
+returns 0, and the messages now read "drift is derived on demand, so a long gap may just mean
+nothing has been run." The "calling it would write falsehoods" half of this entry is stale.
+
+Still true, re-measured the same day: the relative-date tripwire (7 `daysAgo` references, so the
+output differs on the passage of time alone), and the prose — see N42 for the 39-line figure.
+
+The 9 files across the tree still carrying `Watcher writes drift rows` are **historical**: no
+code emits that string anywhere, and the six ledger pairs created 2026-08-24 are clean. Do not
+sweep them expecting to find a live writer.
+
+**Full option analysis and the decision live in N42.** See there.
+
+**Original text preserved below.** Decide one of two, do not leave it as is: (a) fix the three
+false lines, drop the relative-date tripwire, and wire it into `drain`; or (b) retire
+`renderMarkdown`, delete
 G40's prescription and `REFERENCE.md`'s snippet, and adopt ManavDaehi's frozen-banner
 pattern everywhere. The present state — a renderer nobody calls, that would lie if
 called, named by a gotcha as the remedy — is the worst of the three options.
@@ -1811,7 +1833,11 @@ the question cannot arise — never absent, so a caller reading `.length` need n
 
 **No longer blocks** sweeping `SSJK-mb` with `--all-refs`.
 
-### N42 · `renderMarkdown` has no live caller, and the file it renders is hand-written — **S2** — **OPEN**
+### N42 · `renderMarkdown` has no live caller, and the file it renders is hand-written — **S2** — **BLOCKED (on Phase D)**
+
+> **DUPLICATE OF N31.** One defect, filed twice, five days apart. This entry carries the
+> decision and the full option analysis; N31 carries the earlier false-lines argument, one
+> half of which has since expired.
 
 **2026-08-21.** `renderMarkdown` (`lib/edges/ledger.mjs`) now groups rows under per-branch
 headings, giving `source_worktree` its first reader. **Nothing calls it.** Its only caller
@@ -1827,6 +1853,39 @@ would destroy them.
 The file is doing two incompatible jobs — machine-rendered table and human explanation —
 which is the conflation `rule:state-and-decisions` names: *"a file that is half
 machine-refreshed and half hand-written reads as one thing."*
+
+---
+
+**DEFERRED TO PHASE D, decided 2026-08-24.** Phase D freezes the v1 ledger, and a frozen
+ledger's `.md` is a historical artifact by definition — so D determines the answer.
+Deciding it now risks deciding it twice.
+
+**Re-measured before deferring, so D inherits facts rather than assertions:**
+
+| Claim | Command | Result |
+|---|---|---|
+| emits `Watcher healthy` | `grep -c "Watcher healthy" lib/edges/ledger.mjs` | **0 — expired**, messages rewritten to "drift is derived on demand" |
+| date tripwire | `grep -c daysAgo lib/edges/ledger.mjs` | **7 — live.** Output differs on the passage of time alone |
+| prose at risk | `wc -l ManavDaehi/propagation/ledger.md` | **50 lines, 39 of them prose** explaining why the file is frozen |
+| stale watcher text in the tree | `rg -l "Watcher writes drift rows"` | **9 files, historical** — no code emits it; the six pairs created 2026-08-24 are clean |
+
+So the live objections are **only** the tripwire and the prose. The "it would write
+falsehoods" argument is gone.
+
+**The four options, so D does not re-derive them:**
+
+| | For | Against |
+|---|---|---|
+| **(a)** fix + wire into `drain`/`verify` | `.md` stops rotting; `source_worktree` branch grouping reaches a reader for the first time; the two docs that prescribe it become true | destroys ManavDaehi's 39 lines and the `Manav-portfolio` / `SSJK-mb` corrections unless (c) lands first |
+| **(b)** retire it | removes provably dead code and a documented-but-forbidden path; matches derive-on-demand; where D lands anyway | `.jsonl` becomes the only machine view and nobody reads it by eye; branch grouping stays invisible |
+| **(c)** split machine table from prose | one job per file; regeneration safe by construction | a third artifact per workspace, on a layout standardised 2026-08-24 |
+| **(d)** marked-region render | one file, prose safe, machine part fresh; `collect.sh` precedent | **RULED OUT** — `rule:state-and-decisions` forbids exactly this, and #25 records the marker splice silently no-opping when the markers are absent |
+
+**THE COST OF DEFERRING, stated rather than hidden:** `docs/GOTCHAS.md` G40 and
+`docs/REFERENCE.md:193` continue to prescribe calling a function that must not be called,
+while `SKILL.md` forbids the hand-close they describe. That contradiction stays live for as
+long as this is deferred. It is the price of not deciding twice, not an argument that the
+deferral is free.
 
 **Unresolved and needed before the branch-node view reaches a human.**
 
