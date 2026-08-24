@@ -1831,6 +1831,41 @@ async function doctor() {
     // migrating is informational — see hasStartedV3 for why, and
     // tests/cli/stranger-install.test.mjs for the run that caught the
     // alternative within a minute of it being written.
+    // LIFECYCLE ERA CENSUS. Reads every workspace's refs/lifecycle.jsonl and
+    // says which schema era its lines belong to. Wired here on the day
+    // readLifecycle was written, because a reader nobody calls is
+    // indistinguishable from one that was never built — the F3 defect this same
+    // session already paid for once (rule:enforcement-watches-itself §2).
+    //
+    // The FAILING condition is `refused`, not the presence of v1 lines. v1 is
+    // frozen history and legitimately sits there forever; a line declaring
+    // neither era is a shape nobody can account for.
+    try {
+      const { readLifecycle } = await import("./lib/refs/snapshot.mjs");
+      let cur = 0, v1 = 0, refused = [], scanned = 0;
+      for (const ws of WORKSPACES) {
+        const r = readLifecycle(ws.root);
+        if (r.reason === "absent") continue; // never registered — not a defect
+        scanned++;
+        cur += r.current.length;
+        v1 += r.v1.length;
+        for (const x of r.refused) refused.push(`${shortPath(r.file)}: ${x.reason}`);
+      }
+      if (scanned === 0) {
+        info("lifecycle events", "no workspace has a refs/lifecycle.jsonl yet — not scanned, not zero");
+      } else {
+        check(
+          "lifecycle lines are all accountable",
+          refused.length === 0,
+          refused.length ? `${refused.length} line(s) declare no schema: ${refused.slice(0, 3).join("; ")}` : "",
+        );
+        info("lifecycle events", `${cur} current (schema 2) · ${v1} frozen v1 · across ${scanned} workspace(s)`);
+      }
+    } catch (err) {
+      // Absence must be attributable: a failed census is UNKNOWN, not clean.
+      info("lifecycle events", `not scanned — ${err.message}`);
+    }
+
     check(
       "workspaces conform to the v3 propagation layout",
       rep.offenders.length === 0,

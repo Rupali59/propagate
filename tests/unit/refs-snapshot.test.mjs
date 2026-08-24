@@ -23,7 +23,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -33,6 +33,8 @@ import {
   SNAPSHOT_SCHEMA_VERSION,
   buildSnapshot,
   diffSnapshots,
+  classifyPruned,
+  readLifecycle,
   writeRegistry,
   refsDir,
 } from "../../lib/refs/snapshot.mjs";
@@ -324,4 +326,186 @@ test("a foreign snapshot shape is REFUSED, never read as an empty ref set", () =
   // A genuinely ABSENT previous snapshot is a different fact and stays legal:
   // the first run has nothing to compare against, and everything is `created`.
   assert.doesNotThrow(() => diffSnapshots(null, mine), "null prev is first-run, not corruption");
+});
+
+// ---------------------------------------------------------------------------
+// A first run is a BASELINE, not a mass creation
+// ---------------------------------------------------------------------------
+
+test("with no previous snapshot, one `baseline` event — never `created` per ref", () => {
+  // THE FALSE CLAIM THIS FIXES. `created` asserts a ref came into existence
+  // between two observations. On a first run there is no previous observation,
+  // so every ref got that label and none of it was true — the refs predated us;
+  // we merely started looking.
+  //
+  // The shell registry this module replaces got it right and its wording is
+  // adopted verbatim: "no prior snapshot; ref existence before this moment is
+  // unknown". 7 such events sit in Vipin Kaushik's lifecycle log today.
+  //
+  // rule:discernment-checks §2 — absence must be attributable. "I have no
+  // prior data" and "these are new" are different facts, and only one of them
+  // was being recorded.
+  const next = {
+    schema_version: 1,
+    project: "p",
+    generated_at: "2026-08-24T00:00:00Z",
+    refs: [
+      { ref: "main", kind: "branch", head: "aaa" },
+      { ref: "main", kind: "worktree", head: "aaa", path: "/tmp/wt" },
+      { ref: "feature", kind: "branch", head: "bbb" },
+    ],
+  };
+
+  const events = diffSnapshots(null, next);
+  assert.equal(events.length, 1, `a first run must emit exactly one event, got ${JSON.stringify(events)}`);
+
+  const [e] = events;
+  assert.equal(e.type, "baseline", "the first run is a baseline, not a creation");
+  assert.equal(e.ref_count, 3, "the baseline must carry how many refs it saw");
+  assert.equal(e.ref, null, "a baseline is about the whole snapshot, not one ref");
+  assert.match(
+    e.evidence,
+    /unknown/i,
+    "the baseline must state that existence before this moment is UNKNOWN — that is the whole point",
+  );
+  assert.equal(e.detected_by, "snapshot-diff");
+});
+
+test("an EMPTY previous snapshot is not the same as no previous snapshot", () => {
+  // `{refs: []}` means "we looked and there was nothing" — a real observation.
+  // `null` means "we never looked". Collapsing them would reintroduce the same
+  // defect one level along: a ref appearing after a genuinely empty snapshot IS
+  // created, and must not be relabelled a baseline.
+  const next = { project: "p", generated_at: "2026-08-24T00:00:00Z", refs: [{ ref: "main", kind: "branch", head: "aaa" }] };
+
+  const fromEmpty = diffSnapshots({ project: "p", refs: [] }, next);
+  assert.deepEqual(
+    fromEmpty.map((e) => e.type),
+    ["created"],
+    "a ref appearing after an empty-but-real snapshot is genuinely created",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Lost-work classification, ported from hygiene/branch-registry.sh
+// ---------------------------------------------------------------------------
+
+const pruneFrom = (prevRow) =>
+  diffSnapshots(
+    { project: "p", refs: [prevRow] },
+    { project: "p", generated_at: "2026-08-24T00:00:00Z", refs: [] },
+  ).find((e) => e.type === "pruned");
+
+test("a pruned ref with unmerged commits and no upstream is LOST", () => {
+  // The capability this whole port exists for. Commits unique to the ref, and
+  // the ref is gone: they survive nowhere.
+  const e = pruneFrom({ ref: "feat", kind: "branch", head: "aaa", merge_state: "unmerged", upstream_track: "" });
+  assert.equal(e.work, "lost");
+  assert.match(e.evidence, /nowhere else/i, `evidence must say what was lost: ${e.evidence}`);
+});
+
+test("…and LOST too when it was pushed but carried unpushed commits (`ahead`)", () => {
+  // `upstream` MUST be set here. Without it the no-upstream rule produces
+  // `lost` on its own and this test passes while saying nothing about `ahead` —
+  // it did exactly that until a mutation removing the ahead check stayed green
+  // (rule:discernment-checks §4: a check that passes for the wrong reason is as
+  // bad as one that cannot fail).
+  const e = pruneFrom({
+    ref: "feat", kind: "branch", head: "aaa",
+    merge_state: "unmerged", upstream: "origin/feat", upstream_track: "[ahead 2]",
+  });
+  assert.equal(e.work, "lost", "ahead means the remote does not have those commits either");
+  assert.match(e.evidence, /ahead/, "and the evidence must name the unpushed commits");
+});
+
+test("pruned, unmerged, pushed and not ahead is RECOVERABLE — named, not silently fine", () => {
+  const e = pruneFrom({
+    ref: "feat", kind: "branch", head: "aaa", merge_state: "unmerged", upstream_track: "", upstream: "origin/feat",
+  });
+  assert.equal(e.work, "recoverable");
+  assert.match(e.evidence, /origin\/feat/, "evidence must name where it can be recovered from");
+});
+
+test("pruned after being merged is SAFE — the commits are in the base ref", () => {
+  const e = pruneFrom({ ref: "feat", kind: "branch", head: "aaa", merge_state: "merged", upstream_track: "" });
+  assert.equal(e.work, "safe");
+});
+
+test("UNMEASURED merge_state is treated as unsafe, never as fine", () => {
+  // Ported deliberately, with the shell's reasoning: "we could not establish
+  // either. Absence must be attributable, so it is unsafe, not silently fine."
+  // A null merge_state with no upstream must NOT be waved through.
+  const e = pruneFrom({ ref: "feat", kind: "branch", head: "aaa", merge_state: null, upstream_track: "" });
+  assert.equal(e.work, "lost", "unmeasured + no upstream is unsafe, not unknown-and-ignored");
+  assert.match(e.evidence, /unmeasured|unknown/i, "and it must SAY the merge state was never established");
+});
+
+test("a worktree row that disappears is not a work-loss question at all", () => {
+  // Removing a worktree removes a checkout, not commits. Classifying it would
+  // be a category error, and `null` here is a real answer rather than a gap.
+  const e = pruneFrom({ ref: "main", kind: "worktree", head: "aaa", path: "/tmp/wt" });
+  assert.equal(e.work, null, "worktree removal carries no work-loss verdict");
+});
+
+// ---------------------------------------------------------------------------
+// The lifecycle log: one live producer, one frozen history
+// ---------------------------------------------------------------------------
+
+test("every event this module writes declares `schema: 2`", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "life-schema-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const snap = { schema_version: 1, project: "p", generated_at: "2026-08-24T00:00:00Z", refs: [] };
+  const events = diffSnapshots(null, { ...snap, refs: [{ ref: "main", kind: "branch", head: "aaa" }] });
+  writeRegistry(dir, snap, events, { apply: true });
+
+  const lines = readFileSync(path.join(dir, "propagation", "refs", "lifecycle.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].schema, 2, "an undeclared event is indistinguishable from the v1 shape");
+});
+
+test("readLifecycle separates CURRENT from frozen v1 history, and refuses the undeclared", async (t) => {
+  // Vipin Kaushik's log holds 21 events in the shell shape
+  // ({type:"branch_lifecycle", event:"created"}). That file is APPEND-ONLY, so
+  // it cannot be rewritten — the only honest move is a reader that says which
+  // era each line belongs to.
+  //
+  // This is NOT the "teach the reader both formats" G26 forbids. That rule is
+  // about two live PRODUCERS. Here there is one producer going forward and one
+  // frozen history, which is the freeze-v1 pattern already chosen for the ledger.
+  const dir = await mkdtemp(path.join(tmpdir(), "life-read-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const refs = path.join(dir, "propagation", "refs");
+  await mkdir(refs, { recursive: true });
+  await writeFile(
+    path.join(refs, "lifecycle.jsonl"),
+    [
+      JSON.stringify({ type: "branch_lifecycle", event: "baseline", project: "Astroclarity", ref_count: 3 }),
+      JSON.stringify({ type: "branch_lifecycle", event: "created", project: "Astroclarity", ref: "main" }),
+      JSON.stringify({ schema: 2, type: "created", ref: "feat", kind: "branch", project: "p" }),
+      JSON.stringify({ some: "shape", nobody: "declared" }),
+      "{ not json at all",
+    ].join("\n") + "\n",
+  );
+
+  const r = readLifecycle(dir);
+  assert.equal(r.current.length, 1, "only the schema:2 event is current");
+  assert.equal(r.v1.length, 2, "the shell events are readable history");
+  assert.equal(r.refused.length, 2, "an undeclared shape and a malformed line are BOTH refused");
+  for (const x of r.refused) {
+    assert.ok(x.reason, `a refusal must carry its reason, got ${JSON.stringify(x)}`);
+  }
+  assert.equal(r.total, 5, "every line is accounted for — none silently dropped");
+});
+
+test("the real Vipin Kaushik log reads as 21 v1 events and zero current", () => {
+  // The live case this contract exists for. If this ever reports `current > 0`
+  // without a migration having run, two producers are writing again.
+  const vk = "/Users/rupali.b/Documents/GitHub/Vipin Kaushik";
+  if (!existsSync(path.join(vk, "propagation", "refs", "lifecycle.jsonl"))) return; // not this machine
+  const r = readLifecycle(vk);
+  assert.equal(r.refused.length, 0, `the live log must be fully classified, refused: ${JSON.stringify(r.refused)}`);
+  assert.equal(r.current.length, 0, "nothing has written schema:2 to VK yet");
+  assert.ok(r.v1.length >= 21, `expected at least 21 v1 events, got ${r.v1.length}`);
 });
