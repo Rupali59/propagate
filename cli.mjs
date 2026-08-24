@@ -2919,11 +2919,15 @@ async function migrateRefsCmd(argv = []) {
 async function migrateCmd(argv = []) {
   const asJson = argv.includes("--json");
   const apply = argv.includes("--apply");
+  // Deliberately hoist a directory that looks like an undeclared workspace.
+  // Gated because the alternative — inferring it — is how a workspace's state
+  // gets pulled into its parent cross-repo, with its history left behind.
+  const force = argv.includes("--force");
   const wsIdx = argv.indexOf("--workspace");
   const workspace = wsIdx >= 0 ? argv[wsIdx + 1] : argv.find((a) => !a.startsWith("--"));
 
   if (!workspace) {
-    console.error(`${RED}error:${RESET} usage: node cli.mjs migrate <workspace> [--apply] [--json]`);
+    console.error(`${RED}error:${RESET} usage: node cli.mjs migrate <workspace> [--apply] [--force] [--json]`);
     console.error(`${DIM}Dry-run by default. --apply performs the moves.${RESET}`);
     process.exit(2);
   }
@@ -2932,7 +2936,7 @@ async function migrateCmd(argv = []) {
 
   let plan;
   try {
-    plan = planMigration(workspace);
+    plan = planMigration(workspace, { includeUndeclared: force });
   } catch (err) {
     console.error(`${RED}error:${RESET} ${err?.message ?? err}`);
     process.exit(1);
@@ -2958,7 +2962,7 @@ async function migrateCmd(argv = []) {
   const losing = orphans.filter((o) => o.losesVerification);
 
   if (asJson) {
-    const result = apply ? await migrateWorkspace({ workspace, apply: true }) : { ...plan, applied: false };
+    const result = apply ? await migrateWorkspace({ workspace, apply: true, force }) : { ...plan, applied: false };
     console.log(JSON.stringify({ ...result, orphans }, null, 2));
     return;
   }
@@ -2974,6 +2978,19 @@ async function migrateCmd(argv = []) {
   }
   for (const a of plan.alreadyMigrated) console.log(`  ${DIM}skip    ${short(a.from)} — ${a.reason}${RESET}`);
   for (const c of plan.conflicts) console.log(`  ${RED}conflict${RESET} ${short(c.from)} — ${c.reason}`);
+  // Rendered in the DRY RUN, so the operator sees this before choosing, rather
+  // than discovering it as a refusal after typing --apply.
+  for (const u of plan.undeclaredWorkspaces ?? []) {
+    console.log(`  ${YELLOW}undeclared workspace${RESET} ${short(u.from)}`);
+    console.log(`          ${DIM}${u.reason}${RESET}`);
+  }
+  if ((plan.undeclaredWorkspaces ?? []).length) {
+    const names = [...new Set(plan.undeclaredWorkspaces.map((u) => u.project))];
+    console.log(
+      `  ${DIM}--apply will REFUSE while these are undeclared. Add \`workspace: true\` to ` +
+        `${names.map((n) => `${n}/.propagates.yml`).join(", ")}, or pass --force to hoist them.${RESET}`,
+    );
+  }
 
   if (orphanError) {
     console.log(
@@ -3021,7 +3038,7 @@ async function migrateCmd(argv = []) {
 
   let result;
   try {
-    result = await migrateWorkspace({ workspace, apply: true, now: new Date().toISOString() });
+    result = await migrateWorkspace({ workspace, apply: true, force, now: new Date().toISOString() });
   } catch (err) {
     console.error(`\n${RED}refused:${RESET} ${err?.message ?? err}`);
     process.exit(1);

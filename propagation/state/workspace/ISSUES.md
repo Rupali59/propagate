@@ -2009,3 +2009,44 @@ the plist suggests.
 **Recommendation:** re-derive `WatchPaths` from what the monitor actually reads (sidecars and
 the source files they name), or drop them entirely and rely on the interval. Do not simply
 add `propagation/`.
+
+## N46 · `npm test` scaffolds ledger pairs into the operator's REAL workspaces — S2
+
+**Reproduction, and it is exact:**
+
+```bash
+/bin/rm -f ~/Documents/GitHub/Khushboo/propagation/ledger.{jsonl,md}
+npm test                       # or: node --test tests/portability/fresh-machine.test.mjs
+ls ~/Documents/GitHub/Khushboo/propagation/    # both files are back
+```
+
+Bisected 2026-08-24 by deleting one empty ledger and re-running each group, then each file:
+`tests/cli` no · `tests/unit` no · **`tests/portability` YES** → **`fresh-machine.test.mjs`**,
+alone, out of that directory's 18 files.
+
+**Why it is not obvious.** Only `setup`, `init` and `bootstrap` scaffold
+(`lib/core/discovery.mjs:282`), and this file spawns neither — every case runs `status` or
+`doctor`. `runIsolated` sets `HOME` to a tmpdir and `delete`s `PROPAGATE_SEARCH_ROOTS`. The
+route from there to the real tree has NOT been established, and it should be before anything
+is changed.
+
+**What was ruled out, so nobody re-does it:** `setup.test.mjs` (fully sandboxed — HOME,
+`PROPAGATE_STATE_DIR`, and `PROPAGATE_SEARCH_ROOTS=""`), `hub-root.test.mjs`,
+`relocate-ledger-cli.test.mjs` (its `"init"` hit is `git init`, not the CLI verb), and
+`reconcile`/`verify` (neither is a scaffolding verb).
+
+**What does NOT fix it:** adding `PROPAGATE_SEARCH_ROOTS` to the `test:propagate` script.
+Tried 2026-08-24 — it breaks 5 tests that legitimately exercise search-root resolution
+(`config.yml supplies searchRoots when the env var is unset`, `env beats file`, `maxDepth is
+configurable`, …) **and the leak persists anyway**. Reverted. The fix belongs in the test
+file, not in the npm script.
+
+**Severity S2, not S1, and the reason matters.** The files it creates are EMPTY ledger pairs —
+the same thing `init` would create deliberately — so nothing was corrupted and nothing lost.
+But it is a test suite writing into directories it does not own, and the next thing it writes
+may not be empty. Same family as G56 (`node --test` writing to the production event store) one
+level up: there the test wrote to the store, here it writes to the tree.
+
+**How it surfaced.** Twelve `✗ ledger JSONL/MD exists` failures cleared between two `doctor`
+runs with no scaffolding verb in between. All six files carried the same mtime to the second,
+which is what proved a single command did it rather than six.

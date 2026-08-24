@@ -345,3 +345,173 @@ test("sidecarsNamingMoves matches the RELATIVE path, not the bare basename", asy
     assert.ok(h.suggested, "each hit must carry the replacement path, or it is not actionable");
   }
 });
+
+/**
+ * FOURTH WAY THIS COMMAND COULD DESTROY STATE: an UNDECLARED workspace.
+ *
+ * `isWorkspaceRoot` detects a workspace by two markers — a `propagation/`
+ * folder, or `workspace: true`. Both are things a workspace acquires WHEN IT
+ * MIGRATES. A workspace that has not begun has neither, so "is a project" and
+ * "is a workspace nobody has migrated yet" are the same input, and the guard
+ * that calls this "the most destructive thing this module could get wrong"
+ * protects only the workspaces that already started.
+ *
+ * Measured on the real hub 2026-08-24: `Tushar/` (4 artifacts, 3 nested repos)
+ * and `Tathya/` (1 artifact, 3 nested repos) were both planned for hoisting
+ * into `GitHub/propagation/state/`, cross-repo, history left behind.
+ *
+ * THE SIGNAL IS CONTAINMENT: a directory that CONTAINS git repos is a
+ * workspace, not a project. Verified against all 12 unmarked hub children —
+ * zero misclassifications among those carrying artifacts.
+ *
+ * It is a SEPARATE predicate from `isWorkspaceRoot` on purpose. Declared and
+ * inferred are different facts: the declared one is authoritative and silent,
+ * the inferred one is a refusal that asks a human to declare. Merging them
+ * would make an inference indistinguishable from a decision.
+ */
+
+/** A hub containing: a declared workspace, an UNdeclared one, and a plain project. */
+async function hubFixture(t, { undeclaredHasArtifact = true } = {}) {
+  const hub = await mkdtemp(path.join(tmpdir(), "hub-"));
+  t.after(() => rm(hub, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", hub]);
+  const g = (...a) => execFileSync("git", ["-C", hub, ...a], { stdio: ["ignore", "pipe", "pipe"] });
+  g("config", "user.email", "t@e.st");
+  g("config", "user.name", "t");
+
+  // (a) DECLARED workspace — the existing marker path must keep skipping it.
+  await mkdir(path.join(hub, "declared", "propagation"), { recursive: true });
+  await writeFile(path.join(hub, "declared", "STATE.md"), "# declared state\n");
+
+  // (c) PLAIN project — an artifact, no nested repos. Must still migrate.
+  await mkdir(path.join(hub, "plainproj"), { recursive: true });
+  await writeFile(path.join(hub, "plainproj", "STATE.md"), "# plain\n");
+
+  // (b) UNDECLARED workspace — no marker, but it contains a git repo.
+  await mkdir(path.join(hub, "undeclared"), { recursive: true });
+  if (undeclaredHasArtifact) await writeFile(path.join(hub, "undeclared", "STATE.md"), "# real work\n");
+
+  // Commit the hub BEFORE the nested repo exists. `git add -A` refuses to index
+  // a nested repository that has no commit checked out ("does not have a commit
+  // checked out"), and committing one that does turns it into a gitlink — which
+  // is a different tree shape from the real hub, where the nested repos are
+  // simply untracked. Ordering it this way keeps the fixture matching reality:
+  // the hub's artifacts are tracked, the nested repo is not.
+  g("add", "-A");
+  g("commit", "-qm", "seed");
+
+  const nested = path.join(hub, "undeclared", "nested-proj");
+  await mkdir(nested, { recursive: true });
+  execFileSync("git", ["init", "-q", nested]);
+  return hub;
+}
+
+test("planMigration RECORDS an undeclared workspace and does not flag a plain project", async (t) => {
+  const hub = await hubFixture(t);
+  const plan = planMigration(hub);
+
+  const names = (plan.undeclaredWorkspaces ?? []).map((u) => u.project);
+  assert.deepEqual(names, ["undeclared"], `expected only "undeclared", got ${JSON.stringify(names)}`);
+
+  // The planner is documented pure — it must still plan the legitimate move, or
+  // the dry run cannot show the operator what is at stake.
+  assert.ok(
+    plan.moves.some((m) => m.project === "plainproj"),
+    "a plain project must still be planned for migration",
+  );
+});
+
+test("--apply REFUSES on an undeclared workspace, and the tree is byte-identical", async (t) => {
+  const hub = await hubFixture(t);
+  const before = treeSnapshot(hub);
+
+  await assert.rejects(
+    () => migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" }),
+    /undeclared/i,
+    "the refusal must name the offending directory",
+  );
+
+  // ASSERTED ON THE TREE, never on the message. rule:safety-flag-needs-a-test:
+  // a guard that trusts the tool's own description of itself is the failure it
+  // exists to catch.
+  assert.equal(treeSnapshot(hub), before, "a refused migration must write NOTHING");
+});
+
+test("--force proceeds, so the guard is provably a guard and not a dead branch", async (t) => {
+  // Without this the refusal test passes on a command that can never migrate at
+  // all — rule:discernment-checks §1, a check that cannot fail reports success.
+  const hub = await hubFixture(t);
+  const before = treeSnapshot(hub);
+
+  await migrateWorkspace({ workspace: hub, apply: true, force: true, now: "2026-08-24T00:00:00Z" });
+
+  assert.notEqual(treeSnapshot(hub), before, "--force wrote nothing — the refusal test proves nothing");
+  assert.ok(
+    existsSync(path.join(hub, "propagation", "state", "undeclared", "STATE.md")),
+    "--force must actually hoist the undeclared workspace it was asked to hoist",
+  );
+});
+
+test("an undeclared workspace with NO artifacts does not block the migration", async (t) => {
+  // `Rupali/` and `Anushka/` contain nested repos and zero state artifacts.
+  // Refusing there would make the hub permanently unmigratable over a directory
+  // that has nothing to lose — an alarm nobody can clear is an alarm nobody reads.
+  const hub = await hubFixture(t, { undeclaredHasArtifact: false });
+  const plan = planMigration(hub);
+  assert.deepEqual(plan.undeclaredWorkspaces ?? [], [], "nothing at stake, nothing to refuse");
+
+  await migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" });
+  assert.ok(existsSync(path.join(hub, "propagation", "state", "plainproj", "STATE.md")));
+});
+
+test("a DECLARED workspace is still skipped silently, by the marker and not the inference", async (t) => {
+  const hub = await hubFixture(t);
+  const plan = planMigration(hub);
+  assert.ok(!plan.moves.some((m) => m.project === "declared"), "declared workspaces are not projects");
+  assert.ok(
+    !(plan.undeclaredWorkspaces ?? []).some((u) => u.project === "declared"),
+    "and a declared workspace must never be reported as undeclared — declared beats inferred",
+  );
+});
+
+/**
+ * THE SCAFFOLDED REGISTRY MUST CARRY ITS BASELINE.
+ *
+ * `migrate` writes `refs/snapshot.json` and `refs/lifecycle.jsonl` as a pair,
+ * and passed `[]` for the events — so the log was created EMPTY. `migrate-refs`
+ * afterwards then sees a non-null previous snapshot and correctly emits
+ * nothing, so the baseline never lands by either route.
+ *
+ * A `baseline` event is not decoration. It is the record that says *ref
+ * existence before this moment is unknown* (G27's first instance). Without it
+ * the log has a hole exactly at its origin, and nothing distinguishes "this
+ * registry began here" from "nothing has ever happened".
+ *
+ * Measured on the real hub 2026-08-24: snapshot.json held 10 projects and 63
+ * refs while lifecycle.jsonl was 0 bytes. Vipin Kaushik, which was migrated by
+ * `migrate-refs` instead, carries one baseline per project.
+ */
+test("the scaffolded refs registry records a baseline, not an empty log", async (t) => {
+  const hub = await hubFixture(t, { undeclaredHasArtifact: false });
+  await migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" });
+
+  const lifePath = path.join(hub, "propagation", "refs", "lifecycle.jsonl");
+  assert.ok(existsSync(lifePath), "the pair must exist");
+
+  const events = readFileSync(lifePath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(events.length > 0, "an empty log at origin cannot say when observation began");
+  // `type`, NOT `event`. The two lifecycle schemas name the same thing
+  // differently and the first version of this test read the v1 field against a
+  // v2 log, so it failed with `[null]` on a file that was already correct:
+  //   v1 (frozen history)  { type: "branch_lifecycle", event: "baseline", … }
+  //   v2 (written now)     { type: "baseline", … }
+  // C1c froze v1 as readable history rather than rewriting it, so BOTH shapes
+  // exist on disk and a reader that knows only one reports a confident wrong
+  // answer — rule:discernment-checks §6.
+  assert.ok(
+    events.every((e) => e.type === "baseline"),
+    `a first capture is ALL baseline — never 'created', which would assert these refs came into ` +
+      `existence now. Got: ${JSON.stringify(events.map((e) => e.type))}`,
+  );
+  assert.ok(events.every((e) => e.schema), "every event carries its declared schema");
+});
