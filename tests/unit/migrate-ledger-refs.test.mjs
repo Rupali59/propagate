@@ -412,3 +412,82 @@ function countType(rawText, type) {
     .map((l) => JSON.parse(l))
     .filter((r) => r.type === type).length;
 }
+
+/**
+ * N41 — a CONTESTED row must be surfaced, never resolved by sort order.
+ *
+ * `--all-refs` dedupes on `(type, source, timestamp)` because ledger ids are
+ * per-file and meaningless across refs. When the same logical row carries a
+ * DIFFERENT final status on different branches, the dedupe keeps whichever ref
+ * sorts first and discards the rest with no report — so a human decision is
+ * overridden by alphabetical order, silently.
+ *
+ * `docs/deferred/2026-08-20-two-tier-ref-aware-ledger.md` D5 settled the shape:
+ * **`contested` is a FLAG on the row, not a ninth state.** The row keeps its
+ * real content state and carries the conflicting dispositions alongside, so a
+ * person can reconcile them deliberately — "like git workflow, decisions should
+ * be amended and reconciled if differentiated" (maintainer, 2026-08-21).
+ *
+ * Live exposure re-measured 2026-08-24, independently of the original report:
+ * exactly one row in `SSJK-mb`, `source=CLAUDE.md`, `open` on
+ * `feat/impersonate-lucide-icons` against `done` on the other four branches.
+ */
+test("N41: differing final status across refs is reported as contested, not silently dropped", async () => {
+  const { subRoot, fromPath, intoPath } = await makeGitWorkspace();
+  const TS = "2026-02-02T00:00:00.000Z";
+
+  // The SAME logical row (type+source+timestamp) on two branches — CLOSED on
+  // main, still OPEN on the feature branch. `main` sorts first, so today the
+  // feature branch's `open` is the value that disappears.
+  await commitLedgerOnBranch(subRoot, "main", [
+    row("001", TS, "lib/contested.ts"),
+    statusChange("001", "done", "2026-02-03T00:00:00.000Z"),
+  ]);
+  await commitLedgerOnBranch(subRoot, "feat/still-open", [row("001", TS, "lib/contested.ts")]);
+
+  const res = await migrateLedger({ fromPath, intoPath, apply: true, allRefs: true });
+
+  assert.ok(Array.isArray(res.contested), `result must carry a contested list, got ${typeof res.contested}`);
+  assert.equal(res.contested.length, 1, `expected exactly one contested row, got ${JSON.stringify(res.contested)}`);
+
+  const c = res.contested[0];
+  const byRef = Object.fromEntries(c.dispositions.map((d) => [d.ref, d.status]));
+  assert.deepEqual(byRef, { main: "done", "feat/still-open": "open" },
+    `both dispositions must be preserved, got ${JSON.stringify(byRef)}`);
+
+  // …AND it must reach the ledger, not only the return value. A report nobody
+  // stores is a report that vanishes with the terminal.
+  // `endsWith`, not `===`: migration RELOCATES source paths relative to the
+  // destination root, so this row reads `sub-project/lib/contested.ts`.
+  const raw = await readRaw(intoPath);
+  const migrated = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l))
+    .find((r) => r.source?.endsWith("lib/contested.ts") && r.type === "drift");
+  assert.ok(migrated, "the row must still migrate — contested is a flag, not a rejection");
+  assert.ok(migrated.contested, "the migrated row must carry the flag");
+  assert.equal(migrated.status, "open", "and keep its own content state, unchanged (D5: a flag, not a ninth state)");
+});
+
+test("N41: agreement across refs is NOT contested — the flag must be able to stay off", async () => {
+  // Otherwise every multi-branch row is flagged and the signal is worthless.
+  const { subRoot, fromPath, intoPath } = await makeGitWorkspace();
+  const TS = "2026-02-04T00:00:00.000Z";
+  const agreed = [row("001", TS, "lib/agreed.ts"), statusChange("001", "done", "2026-02-05T00:00:00.000Z")];
+
+  await commitLedgerOnBranch(subRoot, "main", agreed);
+  // The branch carries the SAME logical row with the SAME final status, plus one
+  // unrelated row. The extra row is not decoration: a branch cut from main whose
+  // ledger is byte-identical produces no diff, and `git commit` then fails with
+  // "nothing to commit" — the fixture, not the product.
+  await commitLedgerOnBranch(subRoot, "feat/same", [
+    ...agreed,
+    row("002", "2026-02-06T00:00:00.000Z", "lib/unrelated.ts"),
+  ]);
+
+  const res = await migrateLedger({ fromPath, intoPath, apply: true, allRefs: true });
+  assert.deepEqual(res.contested ?? [], [], `identical dispositions must not be contested: ${JSON.stringify(res.contested)}`);
+
+  const raw = await readRaw(intoPath);
+  const migrated = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l))
+    .find((r) => r.source?.endsWith("lib/agreed.ts") && r.type === "drift");
+  assert.ok(migrated && !migrated.contested, "an agreed row must carry no flag");
+});

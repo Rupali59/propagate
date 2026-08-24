@@ -2809,6 +2809,27 @@ async function migrateLedgerCmd(argv = []) {
     if (result.duplicateEventsCollapsed > 0) {
       console.log(`  ${result.duplicateEventsCollapsed} duplicate sighting(s) on other refs collapsed into their canonical row`);
     }
+    // N41 — CONTESTED rows, printed loudly and never folded into the collapse
+    // count above. A collapse is bookkeeping; this is two humans disagreeing
+    // about one edge, and the old behaviour resolved it by sort order and said
+    // nothing. It is a flag on the row, not a rejection: the row migrated, and
+    // what needs a person is the disagreement.
+    if (result.contested?.length) {
+      console.log(
+        `\n  ${YELLOW}${result.contested.length} CONTESTED row(s)${RESET} — the same logical row carries ` +
+          `different final statuses on different branches:`,
+      );
+      for (const c of result.contested) {
+        // dedupeKey is `type|source|timestamp` — see lib/edges/migrate-ledger.mjs.
+        const [, source, ts] = c.key.split("|");
+        console.log(`    ${source ?? c.key} ${DIM}${ts ?? ""}${RESET}`);
+        for (const d of c.dispositions) console.log(`      ${d.ref.padEnd(34)} ${d.status}`);
+      }
+      console.log(
+        `  ${DIM}The row migrated and carries a \`contested\` flag. Reconcile deliberately — ` +
+          `sort order is not a decision.${RESET}`,
+      );
+    }
     const multiRef = result.idMap.filter((r) => r.appearedOnRefs && r.appearedOnRefs.length > 1);
     if (multiRef.length > 0) {
       console.log(`  ${DIM}rows seen on more than one ref:${RESET}`);

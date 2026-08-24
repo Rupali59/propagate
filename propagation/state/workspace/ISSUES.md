@@ -1690,7 +1690,7 @@ not a patch, and it needs its own plan.
 `NEVER_VERIFIED`, 6 `CLEAN`, 2 `REVERSED`. The mechanical fix is blocked until this is
 resolved or `bootstrap` gains a per-workspace filter that does not go through search roots.
 
-### N41 · Cross-branch dedupe silently discards a differing disposition — **S2** — **OPEN**
+### N41 · ~~S2~~ · **RESOLVED 2026-08-24** · Cross-branch dedupe silently discarded a differing disposition
 
 **2026-08-21.** `migrate-ledger --all-refs` dedupes rows on `(type, source, timestamp)`
 because ledger ids are per-file and meaningless across refs. When the same logical row
@@ -1729,7 +1729,25 @@ ordering. `docs/deferred/…` D5 already settled the shape: **`contested` is a f
 row, not a ninth state** — the edge keeps its real content state and carries the conflicting
 dispositions alongside.
 
-**Blocks:** sweeping `SSJK-mb` with `--all-refs`, which is where the one instance lives.
+**RESOLVED 2026-08-24.** `flattenAndDedupe` now folds each ref's `status_change` rows into a
+per-ref final status BEFORE the duplicate filter drops them — which is precisely why the
+minority disposition used to vanish without trace. Where the refs disagree, the migrated row
+carries a `contested: [{ref, status}]` flag and `migrateLedger` returns a `contested` list;
+`migrate-ledger` prints it loudly, separately from the collapse count, because a collapse is
+bookkeeping and this is two humans disagreeing about one edge.
+
+**A FLAG, NOT A NINTH STATE**, per D5. The row still migrates and keeps its own content state.
+
+**Premise re-measured independently before building** (`rule:discernment-checks` §7), not
+taken from this entry: exactly one contested row in `SSJK-mb`, `source=CLAUDE.md`,
+`ts=2026-05-25T13:49:35.821Z`, `open` on `feat/impersonate-lucide-icons` against `done` on the
+other four. The live dry run now reports exactly that.
+
+`contested` is present-and-empty in ref mode when the refs agree, and empty in plain mode where
+the question cannot arise — never absent, so a caller reading `.length` need not distinguish
+"none" from "this build does not report them".
+
+**No longer blocks** sweeping `SSJK-mb` with `--all-refs`.
 
 ### N42 · `renderMarkdown` has no live caller, and the file it renders is hand-written — **S2** — **OPEN**
 
