@@ -262,3 +262,53 @@ test("a previous snapshot that never RECORDED detached worktrees claims no trans
   const ev2 = diffSnapshots(snap({ p: { ...before, detached_worktrees: [] } }), snap({ p: after }));
   assert.deepEqual(ev2.map((e) => e.type), ["worktree-added"], "looked-and-none is a real observation");
 });
+
+test("a pruned event carries the fields its verdict was derived FROM, not just prose", async () => {
+  const { diffSnapshots, classifyPruned } = await import("../../lib/refs/snapshot.mjs");
+  // The retired shell registry recorded merge_state_at_last_sighting,
+  // upstream_at_last_sighting and upstream_track_at_last_sighting as FIELDS, and
+  // branch-registry.sh:207-225 queries them with jq. Keeping the values only
+  // inside `evidence` prose means a consumer cannot re-derive `lost` vs
+  // `recoverable`, and this module's own header says an entry that cannot be
+  // re-checked is "an assertion nobody can re-check later".
+  const was = ref({ merge_state: "unmerged", upstream: "origin/feat", upstream_track: "[ahead 2]", head: "aaa" });
+  const prev = snap({ alpha: proj({ feat: was }) }, "2026-08-24T00:00:00Z");
+  const next = snap({ alpha: proj({}) }, "2026-08-24T07:00:00Z");
+
+  const [e] = diffSnapshots(prev, next).filter((x) => x.type === "pruned");
+  assert.equal(e.merge_state_at_last_sighting, "unmerged");
+  assert.equal(e.upstream_at_last_sighting, "origin/feat");
+  assert.equal(e.upstream_track_at_last_sighting, "[ahead 2]");
+
+  // The verdict must be re-derivable from those fields ALONE.
+  const recheck = classifyPruned({
+    kind: "branch", ref: e.ref,
+    merge_state: e.merge_state_at_last_sighting,
+    upstream: e.upstream_at_last_sighting,
+    upstream_track: e.upstream_track_at_last_sighting,
+  });
+  assert.equal(recheck.work, e.work, "the recorded fields must reproduce the recorded verdict");
+});
+
+test("`window_seconds` states WHEN it could have happened, instead of claiming `now`", async () => {
+  const { diffSnapshots } = await import("../../lib/refs/snapshot.mjs");
+  // A prune found by comparing two snapshots happened somewhere BETWEEN them.
+  // Stamping `at` alone asserts it happened at the later moment, which is false
+  // precision in an append-only record. The shell recorded window_seconds; so
+  // does this.
+  const prev = snap({ alpha: proj({ feat: ref() }) }, "2026-08-24T00:00:00Z");
+  const next = snap({ alpha: proj({}) }, "2026-08-24T07:00:00Z");
+
+  const [e] = diffSnapshots(prev, next).filter((x) => x.type === "pruned");
+  assert.equal(e.window_seconds, 7 * 3600, "the gap between the two captures");
+  assert.equal(e.at, "2026-08-24T07:00:00Z", "and `at` remains when it was DETECTED");
+});
+
+test("an unknown window is null, never 0 — 0 would claim instantaneous", async () => {
+  const { diffSnapshots } = await import("../../lib/refs/snapshot.mjs");
+  const prev = { ...snap({ alpha: proj({ feat: ref() }) }), captured_at: null };
+  const next = snap({ alpha: proj({}) }, "2026-08-24T07:00:00Z");
+
+  const [e] = diffSnapshots(prev, next).filter((x) => x.type === "pruned");
+  assert.equal(e.window_seconds, null, "no previous timestamp means the window is UNKNOWN");
+});
