@@ -273,3 +273,94 @@ test("branch entries carry upstreamTrack and lastCommitIso", async (t) => {
     `lastCommitIso must be iso-strict, got ${JSON.stringify(branch.lastCommitIso)}`,
   );
 });
+
+// ---------------------------------------------------------------------------
+// Remote-only branches — work that exists but is checked out nowhere locally
+// ---------------------------------------------------------------------------
+
+test("includeRemoteOnly adds branches that exist only on origin", async (t) => {
+  // THE DEFECT THIS CLOSES. `enumerateRefs` read refs/heads only, so a branch
+  // pushed and then deleted locally — or never checked out on this machine —
+  // was invisible. Measured on Vipin Kaushik 2026-08-24: 24 local heads against
+  // the shell registry's 36. The missing 12 were all remote-only, and the
+  // branch registry reported every one of them as PRUNED, classifying 5 as
+  // "recoverable" work that had been lost. Nothing had been deleted.
+  //
+  // ref-resolver.sh fixed this exact bug before mine reintroduced it, and said
+  // why in its own comment: "A branch nobody has checked out locally is still
+  // work that exists; it is exactly what a coordination tool must not miss."
+  //
+  // OPT-IN, because `bootstrap` and `migrate-ledger --all-refs` also call this
+  // and read a ledger file per ref — silently widening their population would
+  // change what they do.
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const path = (await import("node:path")).default;
+  const { enumerateRefs } = await import("../../lib/edges/refs.mjs");
+
+  const origin = await mkdtemp(path.join(tmpdir(), "origin-"));
+  const clone = await mkdtemp(path.join(tmpdir(), "clone-"));
+  t.after(() => rm(origin, { recursive: true, force: true }));
+  t.after(() => rm(clone, { recursive: true, force: true }));
+
+  execFileSync("git", ["init", "-q", "--bare", origin]);
+  const seed = await mkdtemp(path.join(tmpdir(), "seed-"));
+  t.after(() => rm(seed, { recursive: true, force: true }));
+  const g = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { stdio: ["ignore", "pipe", "pipe"] });
+  execFileSync("git", ["init", "-q", seed]);
+  g(seed, "config", "user.email", "t@e.st");
+  g(seed, "config", "user.name", "t");
+  await writeFile(path.join(seed, "f.txt"), "x\n");
+  g(seed, "add", "-A");
+  g(seed, "commit", "-qm", "seed");
+  g(seed, "branch", "only-on-origin");
+  g(seed, "remote", "add", "origin", origin);
+  g(seed, "push", "-q", "origin", "main", "only-on-origin");
+
+  execFileSync("git", ["clone", "-q", origin, clone]);
+  // The clone has `main` locally; `only-on-origin` exists on the remote alone.
+  const local = (await enumerateRefs(clone)).refs.filter((r) => r.kind === "branch").map((r) => r.ref);
+  assert.ok(!local.includes("only-on-origin"), `sanity: default enumeration is local-only, got ${local}`);
+
+  const both = (await enumerateRefs(clone, { includeRemoteOnly: true })).refs
+    .filter((r) => r.kind === "branch").map((r) => r.ref).sort();
+  assert.ok(both.includes("only-on-origin"), `remote-only branch must appear, got ${both}`);
+  assert.ok(both.includes("main"), "and local branches must still be there");
+  assert.equal(new Set(both).size, both.length, "a branch present both places must appear ONCE, not twice");
+});
+
+test("a remote-only branch names its upstream, and does not fake a tracking state", async (t) => {
+  // `upstream_track` is empty BY CONSTRUCTION for a remote ref — it has no
+  // local tracking state to be ahead or behind of. That is inapplicable, not
+  // "asked and none", and inventing `[ahead 0]` would be a fabricated fact.
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const path = (await import("node:path")).default;
+  const { enumerateRefs } = await import("../../lib/edges/refs.mjs");
+
+  const origin = await mkdtemp(path.join(tmpdir(), "origin2-"));
+  const seed = await mkdtemp(path.join(tmpdir(), "seed2-"));
+  const clone = await mkdtemp(path.join(tmpdir(), "clone2-"));
+  for (const d of [origin, seed, clone]) t.after(() => rm(d, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", "--bare", origin]);
+  const g = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { stdio: ["ignore", "pipe", "pipe"] });
+  execFileSync("git", ["init", "-q", seed]);
+  g(seed, "config", "user.email", "t@e.st");
+  g(seed, "config", "user.name", "t");
+  await writeFile(path.join(seed, "f.txt"), "x\n");
+  g(seed, "add", "-A");
+  g(seed, "commit", "-qm", "seed");
+  g(seed, "branch", "feat/remote");
+  g(seed, "remote", "add", "origin", origin);
+  g(seed, "push", "-q", "origin", "main", "feat/remote");
+  execFileSync("git", ["clone", "-q", origin, clone]);
+
+  const rows = (await enumerateRefs(clone, { includeRemoteOnly: true })).refs;
+  const remote = rows.find((r) => r.ref === "feat/remote");
+  assert.ok(remote, "the remote-only branch must be enumerated");
+  assert.equal(remote.upstream, "origin/feat/remote", "it must name where it lives");
+  assert.equal(remote.upstreamTrack, "", "and claim no local tracking state");
+  assert.ok(remote.head, "with a head, or it cannot be compared later");
+});

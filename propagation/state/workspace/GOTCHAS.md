@@ -1165,3 +1165,33 @@ into a source comment as fact. `rule:discernment-checks` §4: verify the instrum
 believing a surprising number.
 **Cost:** caught before any lifecycle event was written. It would not have been, had `migrate`
 run against Vipin Kaushik first.
+
+### G27 · Porting a tool's SHAPE while re-deriving its BEHAVIOUR loses what it learned
+**Trigger:** `enumerateRefs|refs/heads|for-each-ref|branch-registry|ref-resolver`
+**Fires on:** `git for-each-ref refs/heads`
+Three times in one session, replacing `hygiene/branch-registry.sh` with `lib/refs/`:
+
+| Re-derived wrong | What the shell already knew |
+|---|---|
+| first run labelled every ref `created` | it emits **`baseline`** — *"ref existence before this moment is unknown"* |
+| pruned refs carried no work verdict | **`classifyPruned`**, and *unmeasured is UNSAFE, not fine* |
+| enumeration read `refs/heads` only | it reads heads **AND** `refs/remotes/origin`, subtracting locals |
+
+**The third was the expensive one.** Measured 2026-08-24: 24 local heads against the shell's
+36. The 12 missing were all remote-only, so the diff reported **12 prunes — 5 classified
+`recoverable`, asserting lost work — against a repo where nothing had been deleted.** Caught
+only because `--apply` is a separate step; the events would otherwise be permanent in an
+append-only log (the N44 damage class, at 6x the size).
+
+`ref-resolver.sh:110` had fixed exactly this and left the reason in place: *"local ref and 7
+remote, so six of its own branches were invisible to the tool built to track them. A branch
+nobody has checked out locally is still work that exists."*
+
+**And the instrument lied twice on the way.** `git show-ref --verify refs/heads/<name>` said
+GONE for all 12 — true, and irrelevant: it answers "is there a LOCAL ref", which was never the
+question. Two independent sources agreeing on a *narrower* question is not corroboration
+(`rule:discernment-checks` §5, compare like with like).
+
+**When you replace a tool, read what it learned before writing what it does.** Its comments are
+the bug reports it already paid for. Port the population and the vocabulary first; the shape is
+the easy half.
