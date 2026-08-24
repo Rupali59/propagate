@@ -52,7 +52,18 @@ function runIsolated(args, { searchRoots } = {}) {
       return { stdout: e.stdout ?? "", stderr: e.stderr ?? "", code: e.status ?? 1, home };
     }
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    // maxRetries, because `force` does NOT cover ENOTEMPTY. The CLI under test
+    // can still be flushing to this tree when the child exits, so a bare rmSync
+    // loses the race intermittently and fails a test that already passed its
+    // assertions — a failure for the wrong reason, which rule:discernment-checks
+    // §4 rates as bad as a check that cannot fail. Observed 2026-08-24 on two
+    // consecutive full-suite runs, a DIFFERENT test in this file each time,
+    // both ENOTEMPTY from here and neither from the product.
+    //
+    // BOTH sites, not one. They are byte-identical, and a `count=1` replace
+    // hitting the wrong one of two identical blocks is itself a recorded
+    // failure in this tree (rule:discernment-checks §4).
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 
@@ -227,7 +238,115 @@ test("an UNCONFIGURED cross-repo allowlist is not a doctor failure", () => {
     );
     assert.match(out, /allowlist/i, "but it must still say the allowlist is unconfigured");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    // maxRetries, because `force` does NOT cover ENOTEMPTY. The CLI under test
+    // can still be flushing to this tree when the child exits, so a bare rmSync
+    // loses the race intermittently and fails a test that already passed its
+    // assertions — a failure for the wrong reason, which rule:discernment-checks
+    // §4 rates as bad as a check that cannot fail. Observed 2026-08-24 on two
+    // consecutive full-suite runs, a DIFFERENT test in this file each time,
+    // both ENOTEMPTY from here and neither from the product.
+    //
+    // BOTH sites, not one. They are byte-identical, and a `count=1` replace
+    // hitting the wrong one of two identical blocks is itself a recorded
+    // failure in this tree (rule:discernment-checks §4).
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
+/**
+ * `ref registry` — BOTH halves, because one without the other proves nothing.
+ *
+ * This section of doctor is deliberately informational: "prunable", "do NOT
+ * prune yet", "exists only on this machine" are all human judgement calls, not
+ * propagate defects, and making them red would leave doctor permanently red on
+ * a healthy workspace.
+ *
+ * But a section that can only ever be informational is a check that cannot
+ * fail, and the suite's own coverage ratchet exists to catch that. It caught
+ * this one. So the ONE genuine propagate defect in reach — a snapshot propagate
+ * itself wrote that will not parse — is a real ✗.
+ */
+test("ref registry FAILS on a snapshot that does not parse", () => {
+  const r = runIsolated(["doctor"], {
+    searchRoots: (h) => {
+      const root = path.join(h, "code");
+      const ws = path.join(root, "myrepo");
+      mkdirSync(path.join(ws, "propagation", "refs"), { recursive: true });
+      writeFileSync(path.join(ws, ".propagates.yml"), "workspace: true\nsources: {}\n");
+      // Propagate wrote this file. Truncated JSON here means propagate's own
+      // artifact is corrupt, which is not a branch anyone has to decide about.
+      writeFileSync(path.join(ws, "propagation", "refs", "snapshot.json"), '{"projects": {');
+      return root;
+    },
+  });
+  const out = `${r.stdout}${r.stderr}`;
+  assert.match(out, /ref registry/, "the section must run at all");
+  assert.match(out, /snapshot does not parse/, `expected a parse failure, got:\n${out}`);
+  // ASSERT THE VERDICT, NOT THE MESSAGE. The first version of this test checked
+  // only that the words appeared — so downgrading the `check(false)` to `info`
+  // left it green, and the suite's coverage ratchet ALSO stayed green because
+  // removing the check removes its label from the parse. Two guards, one blind
+  // spot, and the mutation check is what found it.
+  const line = out.split("\n").find((l) => l.includes("snapshot does not parse")) ?? "";
+  assert.ok(line.includes("✗"), `must be a FAILURE, not an informational line: ${JSON.stringify(line)}`);
+  assert.notEqual(r.code, 0, "and doctor must exit non-zero on it");
+});
+
+test("ref registry does NOT fail when there is simply no snapshot", () => {
+  // The other half. Six of seven workspaces have no ref snapshot; if absence
+  // were a failure, doctor would be red everywhere for a feature nobody has
+  // adopted yet. Absence must still be ATTRIBUTABLE, so it says what to run.
+  const r = runIsolated(["doctor"], {
+    searchRoots: (h) => {
+      const root = path.join(h, "code");
+      const ws = path.join(root, "myrepo");
+      mkdirSync(ws, { recursive: true });
+      writeFileSync(path.join(ws, ".propagates.yml"), "workspace: true\nsources: {}\n");
+      return root;
+    },
+  });
+  const out = `${r.stdout}${r.stderr}`;
+  assert.match(out, /no snapshot — run `propagate migrate-refs/, "absence must name its own fix");
+  assert.doesNotMatch(out, /snapshot does not parse/);
+});
+
+/**
+ * The PRUNED surface — the hook's red rule, which is why the hook could not
+ * just be deleted.
+ *
+ * `classifyPruned` computed this verdict and `migrate-refs` wrote it to
+ * lifecycle.jsonl from the day both landed. Nothing ever read it back, so a
+ * ref pruned while carrying work that exists nowhere else was recorded
+ * correctly and shown to nobody — which is indistinguishable from not
+ * detecting it (rule:enforcement-watches-itself: "grep for the callers of what
+ * you just built").
+ */
+test("a ref pruned CARRYING WORK is surfaced, and a safe prune is not", () => {
+  const rows = [
+    { type: "pruned", project: "p", ref: "gone-risky", work: "lost", evidence: "upstream=NONE, track=(none)" },
+    { type: "pruned", project: "p", ref: "gone-unclear", work: "unknown", evidence: "no previous row" },
+    // Both of these must stay silent, or the alarm is noise: `safe` means the
+    // commits are in the base, and `recoverable` means they are on the remote.
+    { type: "pruned", project: "p", ref: "gone-safe", work: "safe", evidence: "merge_state=merged" },
+    { type: "pruned", project: "p", ref: "gone-pushed", work: "recoverable", evidence: "pushed to origin/gone-pushed" },
+  ];
+  const r = runIsolated(["doctor"], {
+    searchRoots: (h) => {
+      const root = path.join(h, "code");
+      const ws = path.join(root, "myrepo");
+      mkdirSync(path.join(ws, "propagation", "refs"), { recursive: true });
+      writeFileSync(path.join(ws, ".propagates.yml"), "workspace: true\nsources: {}\n");
+      writeFileSync(
+        path.join(ws, "propagation", "refs", "snapshot.json"),
+        JSON.stringify({ schema_version: 2, projects: { p: { repo_root: "/p", base_ref: "origin/main", error: null, refs: {}, detached_worktrees: [] } } }),
+      );
+      writeFileSync(path.join(ws, "propagation", "refs", "lifecycle.jsonl"), rows.map((x) => JSON.stringify(x)).join("\n") + "\n");
+      return root;
+    },
+  });
+  const out = `${r.stdout}${r.stderr}`;
+  assert.match(out, /gone-risky.*PRUNED CARRYING WORK/, `lost work must be surfaced:\n${out}`);
+  assert.match(out, /gone-unclear.*work status UNKNOWN/, "unmeasured is not reassurance");
+  assert.doesNotMatch(out, /gone-safe/, "a merged prune is not an alarm");
+  assert.doesNotMatch(out, /gone-pushed/, "a recoverable prune is not an alarm");
+});

@@ -1451,6 +1451,108 @@ async function doctor() {
         `${pathProblems} directory-as-downstream failure${pathProblems === 1 ? "" : "s"} (see above)${pathWarns ? `, ${pathWarns} warn` : ""}`,
       );
     }
+
+    // BRANCH REGISTRY — live ref health.
+    //
+    // Ported from `hygiene/branch-registry.sh`, which computed these on every
+    // commit in Vipin Kaushik while its only caller filtered to RED and so
+    // printed NOTHING. Eleven correct, live findings that nobody had ever seen.
+    // They are surfaced here because that hook is being removed, and removing a
+    // detector without moving what it detected is how a capability disappears
+    // without anyone noticing (rule:enforcement-watches-itself).
+    //
+    // INFORMATIONAL, never a doctor failure. Every one of these describes a
+    // branch a human must decide about — "prunable", "do not prune yet",
+    // "exists only on this machine". None is a defect in propagate, and making
+    // them red would make `doctor` permanently red on a healthy workspace,
+    // which trains people to ignore it.
+    try {
+      const snapPath = path.join(ws.root, "propagation", "refs", "snapshot.json");
+      if (!existsSync(snapPath)) {
+        // Attributable absence. Silence here would be indistinguishable from a
+        // workspace whose refs are all healthy — the exact confusion that made
+        // `bootstrap` print `0 · 0 · 0` next to `✗ no workspaces`.
+        info("ref registry", "no snapshot — run `propagate migrate-refs <workspace> --apply`");
+      } else {
+        const { refFindings } = await import("./lib/refs/findings.mjs");
+        let snap;
+        try {
+          snap = JSON.parse(await readFile(snapPath, "utf8"));
+        } catch (err) {
+          // THIS is the failing case, and it is a real one: propagate wrote
+          // this file, so it being unreadable is propagate's defect, not a
+          // branch a human must decide about. Everything else in this section
+          // is informational precisely because it is somebody's judgement call;
+          // this is not.
+          //
+          // Routing it to `info` alongside the rest would leave the whole
+          // section unable to fail — a check that cannot fail reports success
+          // forever (GOTCHAS G1), and the suite's own coverage ratchet catches
+          // exactly that. It caught this.
+          check("ref registry", false, `snapshot does not parse: ${err?.message ?? err}`);
+          snap = undefined;
+        }
+        const { findings, scanned, reason } = snap === undefined ? { findings: [], scanned: null, reason: null } : refFindings(snap);
+        if (snap === undefined) {
+          // already reported above
+        } else if (reason) {
+          info("ref registry", reason);
+        } else if (findings.length === 0) {
+          // "Found nothing" says what it looked at. "Looked at nothing" is the
+          // branch above. They must not render the same.
+          check("ref registry", true, `${scanned.refs} refs across ${scanned.projects} projects, nothing to flag`);
+        } else {
+          check("ref registry", true, `${scanned.refs} refs across ${scanned.projects} projects`);
+          for (const f of findings) {
+            warn(`  ${f.project}/${f.ref ?? "(project)"}`, f.why);
+          }
+        }
+
+        // PRUNED REFS THAT MAY HAVE TAKEN WORK WITH THEM.
+        //
+        // This is the hook's RED rule, and it is the reason the hook could not
+        // simply be deleted. The live-state findings above describe branches
+        // that still exist; this describes branches that DO NOT, which is the
+        // only alarm here that fires for something no longer available to
+        // inspect. `classifyPruned` computes the verdict and `migrate-refs`
+        // writes it — but until now nothing read it back, so the verdict was
+        // recorded and never surfaced. A detector whose output nobody reads is
+        // the same as no detector (rule:enforcement-watches-itself).
+        //
+        // `unknown` is shown alongside `lost` deliberately. "We could not
+        // establish whether this ref's commits survive" is not reassurance;
+        // treating unmeasured as safe is exactly what the shell lib refused to
+        // do (rule:discernment-checks §2).
+        const lifePath = path.join(ws.root, "propagation", "refs", "lifecycle.jsonl");
+        if (existsSync(lifePath)) {
+          const raw = await readFile(lifePath, "utf8");
+          let unreadable = 0;
+          const atRisk = [];
+          for (const lineText of raw.split("\n")) {
+            if (!lineText.trim()) continue;
+            try {
+              const e = JSON.parse(lineText);
+              if (e.type === "pruned" && (e.work === "lost" || e.work === "unknown")) atRisk.push(e);
+            } catch {
+              // A malformed line is not zero lines. Counted, then reported —
+              // an append-only log that silently drops rows would let the
+              // count shrink without anyone noticing.
+              unreadable++;
+            }
+          }
+          if (unreadable) info("ref lifecycle", `${unreadable} unparseable line(s) in lifecycle.jsonl`);
+          for (const e of atRisk) {
+            warn(`  ${e.project}/${e.ref}`, `${e.work === "lost" ? "PRUNED CARRYING WORK" : "pruned, work status UNKNOWN"} — ${e.evidence ?? "no evidence recorded"}`);
+          }
+        }
+      }
+    } catch (err) {
+      // Reaching here means something other than a parse failure — an
+      // unreadable directory, an import error. Named, never silent, but not a
+      // vote: it says the probe could not run, which is a third state distinct
+      // from pass and fail (rule:discernment-checks §2).
+      info("ref registry", `probe could not run: ${err?.message ?? err}`);
+    }
   }
 
   console.log(`\n${BOLD}# Cross-repo${RESET}`);
@@ -2748,6 +2850,72 @@ async function migrateLedgerCmd(argv = []) {
  * file it points at, or two genuine files silently reconciled by whichever was
  * written last.
  */
+/**
+ * `migrate-refs <workspace> [--apply]` — adopt a v1 branch registry.
+ *
+ * WIRED BECAUSE IT WAS NOT. `lib/refs/migrate-refs.mjs` shipped correct, tested
+ * across six behaviours, and reachable from NOTHING outside its own test file —
+ * the first live conversion was performed by an ad-hoc script. That is
+ * `rule:enforcement-watches-itself` instance 6 word for word: "correct, tested,
+ * unreachable". A capability nobody can invoke is indistinguishable from one
+ * that was never built, and its tests pass either way.
+ *
+ * Dry-run by default, matching `migrate` and `relocate-ledger` rather than
+ * inventing a third preview posture (`rule:safety-flag-needs-a-test`: the two
+ * neighbours whose posture you reason by analogy from are exactly what produced
+ * three instances of an armed --dry-run in this tree).
+ */
+async function migrateRefsCmd(argv = []) {
+  const asJson = argv.includes("--json");
+  const apply = argv.includes("--apply");
+  const wsIdx = argv.indexOf("--workspace");
+  const workspace = wsIdx >= 0 ? argv[wsIdx + 1] : argv.find((a) => !a.startsWith("--"));
+
+  if (!workspace) {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs migrate-refs <workspace> [--apply] [--json]`);
+    console.error(`${DIM}Dry-run by default. --apply writes the snapshot and appends lifecycle events.${RESET}`);
+    process.exit(2);
+  }
+
+  const { migrateRefs } = await import("./lib/refs/migrate-refs.mjs");
+  let plan;
+  try {
+    plan = await migrateRefs({ workspace, apply });
+  } catch (err) {
+    // Includes the concurrent-writer abort and the unparseable-snapshot refusal.
+    // Both are refusals to proceed, not crashes, and both must reach the operator
+    // with their reason intact rather than as a stack trace.
+    console.error(`${RED}error:${RESET} ${err?.message ?? err}`);
+    process.exit(1);
+  }
+
+  if (asJson) {
+    console.log(JSON.stringify(plan, null, 2));
+    return;
+  }
+
+  const verb = apply ? (plan.unchanged ? "unchanged" : "applied") : "would apply";
+  console.log(`${verb}: ${plan.projects} projects · ${plan.refs} refs · previous snapshot ${plan.previous}`);
+  // Distinguish "no transitions" from "did not look" — the events array being
+  // empty after a real diff is a finding (agreement), not silence.
+  if (!plan.events.length) {
+    console.log(`${DIM}no ref transitions since the previous capture${RESET}`);
+  } else {
+    const byKind = {};
+    for (const e of plan.events) byKind[e.event] = (byKind[e.event] ?? 0) + 1;
+    console.log(
+      Object.entries(byKind)
+        .map(([k, n]) => `${k} ${n}`)
+        .join(" · "),
+    );
+    for (const e of plan.events.slice(0, 20)) {
+      console.log(`  ${e.event} ${e.project}/${e.ref ?? e.path}${e.classification ? ` (${e.classification})` : ""}`);
+    }
+    if (plan.events.length > 20) console.log(`  ${DIM}… ${plan.events.length - 20} more${RESET}`);
+  }
+  if (!apply) console.log(`${DIM}nothing written — re-run with --apply${RESET}`);
+}
+
 async function migrateCmd(argv = []) {
   const asJson = argv.includes("--json");
   const apply = argv.includes("--apply");
@@ -5730,6 +5898,8 @@ if (_invokedDirectly) {
     await relocateLedgerCmd(process.argv.slice(3));
   } else if (mode === "migrate") {
     await migrateCmd(process.argv.slice(3));
+  } else if (mode === "migrate-refs") {
+    await migrateRefsCmd(process.argv.slice(3));
   } else if (mode === "init") {
     await init(process.argv[3], process.argv.slice(4));
   } else if (mode === "reload") {
@@ -5768,7 +5938,7 @@ if (_invokedDirectly) {
     await monitorCmd();
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
     process.exit(2);
   }
 }

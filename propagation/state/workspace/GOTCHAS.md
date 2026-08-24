@@ -1169,7 +1169,7 @@ run against Vipin Kaushik first.
 ### G27 · Porting a tool's SHAPE while re-deriving its BEHAVIOUR loses what it learned
 **Trigger:** `enumerateRefs|refs/heads|for-each-ref|branch-registry|ref-resolver`
 **Fires on:** `git for-each-ref refs/heads`
-Three times in one session, replacing `hygiene/branch-registry.sh` with `lib/refs/`:
+**FIVE times** in one session, replacing `hygiene/branch-registry.sh` with `lib/refs/`:
 
 | Re-derived wrong | What the shell already knew |
 |---|---|
@@ -1195,3 +1195,43 @@ question. Two independent sources agreeing on a *narrower* question is not corro
 **When you replace a tool, read what it learned before writing what it does.** Its comments are
 the bug reports it already paid for. Port the population and the vocabulary first; the shape is
 the easy half.
+
+**Fourth and fifth, 2026-08-24, both in the same phase and both caught by comparing
+against the shell rather than by any test:**
+
+| Re-derived wrong | What the shell already knew |
+|---|---|
+| `merge_state` via `git branch --merged` | `ref-resolver.sh:21` — *"these repos squash-merge, so `--merged` and `origin/main..<ref>` both lie"*. Measured: `git cherry` agreed with the shell on **35 of 35** refs; `--merged` disagreed on **7** |
+| `upstream` never populated at all | `enumerateRefs` asked git for `upstream:track` and never `upstream:short`, so all 36 refs read `upstream: null` — i.e. **every pushed branch reported as "work exists only on this machine"** |
+
+**The fifth was found by comparing SETS, not counts.** The ported findings produced 46
+rows against the shell's 11. The 11 matched exactly and the 35 extras were one uniform
+rule, which named the bug in a single glance. `46 ≠ 11` on its own points nowhere —
+`rule:discernment-checks` §5, state what your measurement is *over*.
+
+**And the fourth was only visible because the pre-commit hook still existed.** The
+conversion was reported as a no-op on matching populations (36 = 36) and flag counts;
+the hook was computing 10 phantom `merged` transitions per commit and discarding them.
+The tool about to be deleted as dead weight is what caught it.
+
+### G58 · `branch-registry.sh` WRITES unless you set `BRANCH_REGISTRY_READONLY=1`
+**Trigger:** `^(?!.*BRANCH_REGISTRY_READONLY=1).*branch-registry\.sh`
+**Fires on:** `bash scripts/hygiene/lib/branch-registry.sh`
+The pre-commit hook invokes it read-only, so every *reference* to it in prose describes a
+read-only tool. The lib itself defaults the other way: `READONLY="${BRANCH_REGISTRY_READONLY:-0}"`
+(`:83`), and `:278` writes the snapshot whenever that is not `1`.
+
+**Signal:** the JSON it prints tells you, but only *after* the write — `"readonly": false,
+"snapshot_written": true`. There is no prompt and no error.
+
+**Cost:** 2026-08-24, verifying C1e. Run bare to check the two tools now agreed, it silently
+rewrote `propagation/refs/snapshot.json` from propagate's schema 2 back to its own schema 1.
+Recovered by re-running `propagate migrate-refs --apply` — v1 is a supported input, and the
+`merge_state` values were by then identical, so it cost a format regression and nothing else.
+It was cheap only because the fix had already landed; the same keystroke an hour earlier
+would have restored 36 `null`s over the values.
+
+**Instead:** `BRANCH_REGISTRY_READONLY=1 bash …`. And more generally — this is the fourth
+instance of `rule:safety-flag-needs-a-test`'s corollary, *never run a command to find out what
+it would do*. Reasoning by analogy from the neighbouring caller's posture is exactly what the
+other three did too.

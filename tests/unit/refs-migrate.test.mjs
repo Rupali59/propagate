@@ -171,3 +171,43 @@ test("a snapshot that changed under us ABORTS the write", async (t) => {
     "a writer racing us must abort the run, not silently win or lose",
   );
 });
+
+/**
+ * THE CLI PATH, not the library path.
+ *
+ * `migrateRefs` shipped correct, tested across six behaviours, and reachable
+ * from NOTHING outside this file — the first live conversion ran from an ad-hoc
+ * script. `rule:enforcement-watches-itself` instance 6 exactly: correct, tested,
+ * unreachable, and its tests pass either way.
+ *
+ * So the wrapper gets its own dry-run assertion rather than inheriting the
+ * library's. `rule:safety-flag-needs-a-test` §"Find every call site": all three
+ * armed-dry-run instances in this tree were ONE guarded path plus ONE unguarded
+ * path in the same command. A new entry point is a new unguarded path until
+ * something asserts otherwise, and the assertion is on the TREE, never on
+ * stdout — a guard that trusts the tool's own description of itself is the
+ * failure it exists to catch.
+ */
+test("`migrate-refs` WITHOUT --apply leaves the tree byte-identical", async (t) => {
+  const root = await fixture(t);
+  const before = treeSnapshot(root);
+  const cli = path.join(import.meta.dirname, "..", "..", "cli.mjs");
+
+  const out = execFileSync("node", [cli, "migrate-refs", root], { encoding: "utf8" });
+
+  assert.equal(treeSnapshot(root), before, "the dry run touched the workspace");
+  assert.match(out, /would apply/, "and it must say so, rather than reporting a write");
+});
+
+test("`migrate-refs --apply` DOES write — so the test above can fail", async (t) => {
+  // Without this, the assertion above passes on a command that does nothing at
+  // all, which is `rule:discernment-checks` §1: a check that cannot fail
+  // reports success forever.
+  const root = await fixture(t);
+  const before = treeSnapshot(root);
+  const cli = path.join(import.meta.dirname, "..", "..", "cli.mjs");
+
+  execFileSync("node", [cli, "migrate-refs", root, "--apply"], { encoding: "utf8" });
+
+  assert.notEqual(treeSnapshot(root), before, "--apply wrote nothing — the dry-run test proves nothing");
+});
