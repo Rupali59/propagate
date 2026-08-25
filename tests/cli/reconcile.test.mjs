@@ -450,6 +450,57 @@ test("reconcile — a newly matching glob file creates one NEVER_VERIFIED edge w
 // 7. An unresolvable side carries its reason.
 // ─────────────────────────────────────────────────────────────────────────
 
+test("reconcile — a not-found on one side must NOT mask a real unresolvable reason on the other", async () => {
+  // R1a / D12. `not-found` is the benign, expected case in the plan's own model
+  // ("this file doesn't exist at this ref"); `lfs-pointer` is the one
+  // content-id.mjs:37-43 says "hashes stably while the real content behind it
+  // changes freely — an edge would read CLEAN forever while silently wrong".
+  //
+  // The original precedence let ANY not-found win, so an LFS source paired with
+  // a merely-absent downstream reported NOT_PRESENT_ON_REF while the SAME row's
+  // `unresolvable` field said "lfs-pointer". The row contradicted itself, and
+  // the benign half is the one a reader acts on.
+  const repo = await makeRepo();
+  const stateDir = await scopedStateDir();
+  try {
+    await writeFile(
+      path.join(repo, "big.bin"),
+      "version https://git-lfs.github.com/spec/v1\n" +
+        "oid sha256:0000000000000000000000000000000000000000000000000000000000000000\n" +
+        "size 12345\n",
+    );
+    // NOTE: `gone.txt` is deliberately never created — that is the not-found side.
+    await writeFile(
+      path.join(repo, ".propagates.yml"),
+      `sources:
+  big.bin:
+    propagates_to:
+      - path: gone.txt
+        why: "lfs source, absent downstream"
+`,
+    );
+    await commitAll(repo, "initial");
+
+    const result = runReconcile({ stateDir, workspaceRoots: [repo] });
+    const row = rowFor(result, path.join(repo, "big.bin"));
+
+    assert.equal(
+      row.state,
+      "UNRESOLVABLE",
+      "an lfs-pointer source must not be downgraded to NOT_PRESENT_ON_REF because the downstream happens to be absent",
+    );
+    assert.equal(row.source.unresolvable, "lfs-pointer");
+    assert.equal(row.downstream.unresolvable, "not-found");
+    // The row must not contradict itself: whatever `state` says, `unresolvable`
+    // must name the reason that produced it.
+    assert.equal(row.unresolvable, "lfs-pointer");
+    assert.equal(result.stats.unresolvable, 1);
+  } finally {
+    await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
 test("reconcile — a downstream that is a directory reports UNRESOLVABLE with reason is-directory", async () => {
   const repo = await makeRepo();
   const stateDir = await scopedStateDir();

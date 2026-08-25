@@ -65,6 +65,10 @@ cautionary tale of a doc that drifted from the code it described.
                         │  NOT_PRESENT_ON_REF  absent at this ref  │
                         │  UNRESOLVABLE        no-repo / lfs /     │
                         │                      is-dir / read-error │
+                        │  ── and UNRESOLVABLE WINS ──             │
+                        │  a serious reason on EITHER side beats a │
+                        │  not-found on the other; the benign      │
+                        │  state is the one a reader acts on       │
                         └──────────────────────────────────────────┘
                                     │
                      repeated DIVERGED on one coupling
