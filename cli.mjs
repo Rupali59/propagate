@@ -232,6 +232,8 @@ function renderDoctorEntries(entries) {
       console.log(`  ${RED}\u2717${RESET} ${e.label}${d ? "  " + RED + d + RESET : ""}`);
     } else if (e.kind === "warn") {
       console.log(`  ${YELLOW}!${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+    } else if (e.kind === "header") {
+      console.log(`${e.leadingBlank ? "\n" : ""}${BOLD}${e.label}${RESET}`);
     } else if (e.kind === "note") {
       // Marker-less dim line — context about a check that could NOT run.
       console.log(`  ${DIM}${e.label}${RESET}`);
@@ -970,6 +972,8 @@ async function doctor() {
   let decisionsWithTokensCount = 0;
   let plistWatchpathsCount = 0;
   let stateTrackedFilesCount = 0;
+  // Set by checkEnvironment and read by `# Metrics` — the ONE reconcile() of the run (D8).
+  let doctorReconcileRows = null;
   // Detail collected for the four subjects whose sole assertion now lives in
   // EXPECTATIONS (lib/metrics.mjs, GOTCHAS G20) — the inline check() calls
   // that used to assert these facts were downgraded to info()/warn(), but the
@@ -1014,193 +1018,22 @@ async function doctor() {
   // stays — informational only, never a `check()` — so a reader lands on
   // "retired on purpose" instead of wondering where the watcher checks went.
   // The section that follows ("v2 replacement health") is what can now fail.
-  console.log(`${BOLD}# launchd watcher — RETIRED 2026-08-14${RESET}`);
-  console.log(`  ${DIM}resolved label: ${LAUNCHD_LABEL}${RESET}`);
-  console.log(`  ${DIM}see docs/DECISIONS.md 2026-08-14 for why; these are informational, never a failure${RESET}`);
-  if (!LAUNCHD_ACTIVE) {
-    info(
-      "scheduler",
-      `${SCHEDULER} — launchd not consulted. ` +
-        (SCHEDULER === "none"
-          ? "Nothing is scheduled; `reconcile` derives drift on demand in ~1.2s, so this is a supported configuration, not a gap."
-          : `${SCHEDULER} is declarable but not implemented — scheduled runs will not happen.`),
-    );
-  } else {
-    try {
-      const out = execSync("launchctl list", { encoding: "utf8" });
-      const loaded = out.split("\n").some((l) => l.includes(LAUNCHD_LABEL));
-      info("plist loaded", loaded ? "yes — unloading is a separate, later step; loaded is not a failure here" : "no — unloaded (expected once retirement is complete)");
-    } catch (err) {
-      info("launchctl unreachable", err.message);
-    }
+  // Extracted to lib/report/doctor/environment.mjs (#31 T2). It owns THREE
+  // consecutive sections, so it emits their headers as entries rather than
+  // having this caller print them — that is what keeps them ordered with the
+  // checks in between. It also owns the single reconcile() call and hands the
+  // rows back for `# Metrics` (D8); nothing else may call reconcile in a doctor
+  // run, because two calls could report two different trees.
+  {
+    const { checkEnvironment } = await import("./lib/report/doctor/environment.mjs");
+    const reporter = new Reporter();
+    const { counts, details } = await checkEnvironment({ reporter });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+    stateTrackedFilesCount = counts.stateTrackedFiles;
+    doctorReconcileRows = details.reconcileRows;
   }
 
-  if (existsSync(HEARTBEAT_PATH)) {
-    const raw = (await readFile(HEARTBEAT_PATH, "utf8")).trim();
-    const ts = parseInt(raw, 10);
-    const ageMs = Date.now() - ts;
-    const ageMin = Math.round(ageMs / 60_000);
-    const ageDays = Math.round(ageMs / (1000 * 60 * 60 * 24));
-    const ageLabel = ageDays > 1 ? `${ageDays} days old` : `${ageMin} min old`;
-    info("heartbeat age", `${ageLabel} — a retired component's heartbeat is expected to go stale; not a health signal`);
-  } else {
-    info("heartbeat file", "does not exist — expected once the watcher has stopped running");
-  }
-
-  // Replacement health: does the v2 event store (lib/events.mjs) actually
-  // hold the verification history `reconcile` derives drift from, and does
-  // `reconcile` itself complete? These are the checks that matter now — see
-  // the retirement note above for why the launchd checks above no longer are.
-  console.log(`\n${BOLD}# v2 replacement (event store + reconcile)${RESET}`);
-  try {
-    const { events, malformed } = await readEvents();
-    check("event store readable", true, `${events.length} event(s), ${malformed} malformed`);
-    check(
-      "event store non-empty",
-      events.length > 0,
-      events.length === 0 ? "no verification events recorded yet — run `bootstrap --apply`" : "",
-    );
-    if (malformed > 0) {
-      check("event store lines all parseable", false, `${malformed} malformed line(s)`);
-    }
-  } catch (err) {
-    check("event store readable", false, err.message);
-  }
-  // The rows are kept, not discarded: the graph metrics below derive from this
-  // same pass. Running reconcile twice in one doctor would double its cost and
-  // could report two different trees if a file moved between the calls.
-  let doctorReconcileRows = null;
-  try {
-    const reconcileStart = Date.now();
-    ({ rows: doctorReconcileRows } = await reconcile(WORKSPACES));
-    check("reconcile completes", true, `${Date.now() - reconcileStart}ms`);
-  } catch (err) {
-    check("reconcile completes", false, err.message);
-  }
-
-  // ── monitor liveness ──────────────────────────────────────────────────────
-  // Three states, not two. "Never ran" and "ran and found nothing" are different
-  // facts and must not share an output (rule:discernment-checks §2) — that
-  // conflation is how a zombie LaunchAgent wrote 37 MB of stderr for six weeks
-  // before anyone noticed it was still loaded.
-  //
-  // Deliberately INFORMATIONAL, never a failure: the monitor is generated but
-  // not armed by default, so "not installed" is the expected state and must not
-  // read as broken. It becomes worth escalating only once someone loads it.
-  try {
-    const { MONITOR_LOG } = await import("./lib/report/monitor.mjs");
-    const { MONITOR_PLIST_PATH } = await import("./lib/core/plist.mjs");
-    if (!existsSync(MONITOR_LOG)) {
-      info("monitor", "never run — no ~/.propagate/monitor.log (expected until `monitor --install` is armed)");
-    } else {
-      const runs = (await readFile(MONITOR_LOG, "utf8")).split("\n").filter(Boolean);
-      const last = runs[runs.length - 1] || "";
-      const notified = runs.filter((l) => /notified=[1-9]/.test(l)).length;
-      const errored = runs.filter((l) => / error=/.test(l)).length;
-      info(
-        "monitor",
-        `${runs.length} run(s), ${notified} that notified, ${errored} that could not look — last: ${last.slice(0, 80)}`,
-      );
-
-      // ── FRESHNESS, which the line above cannot express ──────────────────
-      //
-      // Printing the last run's timestamp is not a liveness probe: three
-      // hours stale and two minutes fresh render identically, and on
-      // 2026-08-22 this section reported "all green" while the agent had
-      // been failing every 1800s for hours (docs/ISSUES.md N43). Both this
-      // file and docs/SYSTEMS.md already described that failure in prose —
-      // "a monitor that has silently died is indistinguishable from a quiet
-      // week without that log" — which is exactly the fluency
-      // rule:enforcement-watches-itself warns makes a hazard feel handled.
-      //
-      // Gated on the PLIST, not on the log, and that gate is what makes a
-      // check() safe here: the monitor is generated but not armed by
-      // default, so an unarmed one must stay informational forever. Only an
-      // ARMED monitor that ran and then went quiet is a failure.
-      const armed = existsSync(MONITOR_PLIST_PATH);
-      if (armed) {
-        // 3x the 1800s StartInterval. Generous on purpose: a laptop asleep
-        // through one or two intervals is normal, six hours of silence is
-        // not.
-        const STALE_AFTER_MS = 3 * 1800 * 1000;
-        const stamp = Date.parse((last.match(/^\S+/) || [""])[0]);
-        const ageMs = Number.isNaN(stamp) ? null : Date.now() - stamp;
-
-        // monitor.log records only SUCCESSFUL runs. A crash goes to
-        // monitor.stderr.log, which nothing read — so a newer stderr is the
-        // ONLY on-disk tell that the agent is loaded and failing rather
-        // than merely idle. One mtime comparison; it would have surfaced
-        // N43 in seconds.
-        const stderrPath = MONITOR_LOG.replace(/monitor\.log$/, "monitor.stderr.log");
-        let crashing = false;
-        try {
-          crashing =
-            existsSync(stderrPath) &&
-            statSync(stderrPath).mtimeMs > statSync(MONITOR_LOG).mtimeMs;
-        } catch {
-          /* an unreadable stderr is not itself a monitor failure */
-        }
-
-        if (ageMs === null) {
-          check("monitor is running on schedule", false, `last log line carries no parseable timestamp: ${last.slice(0, 60)}`);
-        } else if (ageMs > STALE_AFTER_MS || crashing) {
-          const mins = Math.round(ageMs / 60000);
-          check(
-            "monitor is running on schedule",
-            false,
-            `armed but last successful run was ${mins} min ago (expected every 30 min)` +
-              (crashing ? `; monitor.stderr.log is NEWER than monitor.log — it is loaded and CRASHING` : "") +
-              `. Disarm with \`launchctl bootout gui/$(id -u)/${"com.tathya.propagate.monitor"}\` if this is deliberate.`,
-          );
-        } else {
-          check("monitor is running on schedule", true, `last run ${Math.round(ageMs / 60000)} min ago`);
-        }
-      }
-    }
-  } catch (err) {
-    // info, not check: adding a check() label means adding a failing-case test
-    // for it (tests/doctor-check-coverage.test.mjs), and a log that cannot be
-    // read is not a doctor failure — the monitor is generated, not armed, so
-    // "no log" is the expected state. Still named, never swallowed.
-    info("monitor", `liveness log unreadable: ${err.message}`);
-  }
-
-  console.log(`\n${BOLD}# State${RESET}`);
-  // INFO, NOT A CHECK — the v1 watcher was retired 2026-08-14 and watcher.mjs is the
-  // ONLY thing that ever wrote state.json. So on any machine installed after that date
-  // the file will never exist, and a `check()` here fails every fresh install forever
-  // for the absence of a dead component's artifact.
-  //
-  // It reads green on the author's machine only because a FOSSIL is still on disk,
-  // dated the day of the retirement. Green-by-leftover and red everywhere else is a
-  // check measuring the wrong thing, and it contradicted this command's own
-  // documented posture: doctor reports the REPLACEMENT's health (event store +
-  // reconcile), not the retired watcher's.
-  //
-  // Reported, never swallowed — absence must stay attributable
-  // (rule:discernment-checks §2). Same treatment the monitor log already gets above.
-  // Found by the Phase 6 baseline; tests/doctor-check-coverage.test.mjs had recorded
-  // the suspicion on 2026-08-14 and asked for exactly this verification first.
-  if (existsSync(STATE_PATH)) {
-    info("state.json", `present (${STATE_PATH.replace(HOME_DIR, "~")}) — v1 watcher fossil, read by nothing live`);
-  } else {
-    info("state.json", "absent — expected: the v1 watcher that wrote it was retired 2026-08-14");
-  }
-  if (existsSync(STATE_PATH)) {
-    try {
-      const raw = await readFile(STATE_PATH, "utf8");
-      const parsed = JSON.parse(raw);
-      stateTrackedFilesCount = Object.keys(parsed.mtimes || {}).length;
-      check("state.json parseable", true, `${stateTrackedFilesCount} tracked files`);
-    } catch (err) {
-      check("state.json parseable", false, err.message);
-    }
-  }
-  if (existsSync(`${STATE_PATH}.bak`)) {
-    check("state.json.bak exists", true);
-  } else {
-    console.log(`  ${YELLOW}!${RESET} state.json.bak exists  ${DIM}no .bak yet (normal until watcher writes for the 2nd time)${RESET}`);
-  }
 
   // Sidecars: gather once per workspace root, then collapse duplicates.
   // findSidecars(ws.root) walks that workspace's ENTIRE subtree with no

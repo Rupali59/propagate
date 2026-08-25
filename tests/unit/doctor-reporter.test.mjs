@@ -145,6 +145,28 @@ test("note() is a marker-less line, distinct from info, and never votes", () => 
   assert.ok(ENTRY_KINDS.includes("note"));
 });
 
+test("header() carries leadingBlank, because the first section has no blank line above it", () => {
+  // Added for the environment module, which owns THREE consecutive sections and
+  // so emits their headers rather than letting the caller print them. doctor's
+  // very first header has no blank line above it and every later one does —
+  // preserving that is the difference between a byte-identical extraction and a
+  // diff, so it is a field on the entry, not a rendering guess.
+  const r = new Reporter();
+  r.header("# launchd watcher — RETIRED 2026-08-14", false);
+  r.check("something", true);
+  r.header("# State");
+
+  assert.equal(r.problems, 0, "a header is not a verdict");
+  assert.equal(r.entries[0].kind, "header");
+  assert.equal(r.entries[0].leadingBlank, false, "the first section must not gain a blank line");
+  assert.equal(r.entries[2].leadingBlank, true, "later sections default to a leading blank");
+  assert.ok(ENTRY_KINDS.includes("header"));
+
+  // Order matters most here: a header emitted out of sequence would move a
+  // whole section's worth of checks under the wrong heading.
+  assert.deepEqual(r.entries.map((e) => e.kind), ["header", "pass", "header"]);
+});
+
 test("entriesOfKind filters without mutating", () => {
   const r = new Reporter();
   r.check("p", true);
