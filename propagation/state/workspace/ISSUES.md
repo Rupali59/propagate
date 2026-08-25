@@ -2371,6 +2371,16 @@ both sides had been read, by explicit decision, and every such event says so in 
 time. A third test joins the set intermittently: `a recently-committed repo with a remote
 classifies active` (27.4s under load).
 
+**A THIRD test joined the set 2026-08-25**, and it is not a git timeout:
+`tests/portability/update-notice.test.mjs — a newer remote version reaches the human running
+status`. It expects the update notice (`9.9.9`) in `status` output and instead gets
+`✗ no workspaces — hub root is not configured`. **Bisected to three commits — HEAD, HEAD~1,
+and 963d416 (before any of the doctor-split work) — it fails at all three**, while having
+passed in a clean 1099/1099 full run the same day. So it is pre-existing and
+environment-dependent, not a regression, but its dependence is on config/hub resolution
+rather than on a subprocess timeout. Worth separating when this is picked up: the fix
+direction below addresses the git-timeout pair only.
+
 **Root cause, measured rather than guessed.** `node --test` spawns one worker PER TEST FILE.
 There are **123 test files on a 10-core machine**, ~9 workers resident at once, and several of
 them shell out to real `git` against real temp repos. Observed `load average: 33.6` mid-run —
