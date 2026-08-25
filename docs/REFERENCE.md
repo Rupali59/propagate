@@ -213,9 +213,26 @@ If it isn't, you wrote to the wrong ledger file.
 
 ## Complete CLI surface
 
-Source of truth: the `mode === "..."` dispatch chain in `cli.mjs` (~line
-1131), not the usage string — the usage string's nested `[--a|--b]` groups
-contain pipes that look like more commands than actually exist.
+Source of truth: the `mode === "..."` dispatch chain in `cli.mjs`, not the usage
+string — the usage string's nested `[--a|--b]` groups contain pipes that look
+like more commands than actually exist.
+
+**Derive the location, do not cite a line number.** This paragraph read
+"~line 1131" from before 2026-08-13 until 2026-08-25, by which point the chain
+had moved to ~3900 — the pointer was ~2800 lines wrong and nothing could notice,
+because a stale line number is indistinguishable from a fresh one. `cli.mjs`
+changed in 46 of the last 30 days, which is also exactly why the
+`cli.mjs` -> `REFERENCE.md` edge is deliberately NOT declared in
+`.propagates.yml` (the reason is recorded there). An undeclared edge means this
+check is the reader's, so make it one command:
+
+```sh
+grep -n 'mode === ' cli.mjs          # the dispatch chain
+ls commands/*.mjs                    # command bodies extracted out of it
+```
+
+Command *implementations* now live in `commands/`; the dispatch that routes to
+them stays in `cli.mjs`.
 
 | Command | What it does |
 |---|---|
