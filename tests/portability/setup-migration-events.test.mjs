@@ -46,7 +46,7 @@ function sandbox() {
   const from = path.join(root, "skill");
   const to = path.join(root, "state");
   mkdirSync(from, { recursive: true });
-  return { root, from, to, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, from, to, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) };
 }
 
 /** Every file under `dir`, as `{relPath: contents}`. Used for before/after snapshots. */

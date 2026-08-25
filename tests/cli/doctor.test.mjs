@@ -79,7 +79,7 @@ test("doctor fails when a ledger contains an unknown row type, and names the typ
     assert.match(out, /"not-a-real-type"/, "output names the offending type string");
     assert.match(out, new RegExp(jsonlPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "output names the ledger");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -94,7 +94,7 @@ test("doctor fails on malformed JSONL lines and names the ledger's workspace", a
     // workspace name (ws.name), derived from the temp dir's basename.
     assert.match(out, new RegExp(path.basename(root)));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -112,7 +112,7 @@ test("doctor fails when zero workspaces are discovered, not silently pass (N7)",
     assert.match(out, /contains no workspace|search root/i, "must name the condition");
     assert.match(out, /\.propagates\.yml|run `init`/, "must name the action");
   } finally {
-    await rm(empty, { recursive: true, force: true });
+    await rm(empty, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -134,7 +134,7 @@ test("doctor's new checks pass cleanly on a healthy ledger (no spurious failure)
     assert.match(out, /✓.*no malformed ledger lines/);
     assert.match(out, /✓.*all calibrated expectations hold/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -183,7 +183,7 @@ test("doctor reports the retired watcher as informational only, never a failure,
     assert.match(out, /event store non-empty/);
     assert.match(out, /reconcile completes/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -248,7 +248,7 @@ test("G20: an unknown ledger row type produces exactly ONE ✗ line, not two", a
     assert.match(out, new RegExp(jsonlPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "names the ledger path");
     assert.match(out, /"not-a-real-type"×1/, "names the offending type and its count");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -277,7 +277,7 @@ test("G20: zero discovered workspaces produces exactly ONE ✗ line, not two", a
       "detail from the old inline check is preserved (same wording, both sites)",
     );
   } finally {
-    await rm(empty, { recursive: true, force: true });
+    await rm(empty, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -295,7 +295,7 @@ test("G20: a healthy fixture produces zero ✗ lines for any of the four sole-so
       assert.equal(countMatches(out, re), 0, `${re} must not fire on a clean fixture`);
     }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -316,7 +316,7 @@ test("a missing plist is informational, not a failure (the watcher was retired o
     assert.match(out, /plist WatchPaths — n\/a/, "absence must still be reported, with a reason");
     assert.match(out, /retired 2026-08-14/, "the reason must name the retirement");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -350,7 +350,7 @@ test("G20: plist.watchpaths stays a single inline assertion — not duplicated i
     );
     assert.equal(countMatches(out, /✗[^\n]*plist/gi), 1, "exactly one ✗ line total references plist");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -465,7 +465,7 @@ test("doctor FAILS when an ARMED monitor has gone quiet, and names how long", as
       "the failure must quantify the staleness on its own line, not just assert it",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -482,7 +482,7 @@ test("doctor PASSES the monitor check when an armed monitor ran recently", async
       `a fresh monitor must not be reported stale:\n${out}`,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -504,7 +504,7 @@ test("doctor names a CRASHING monitor — stderr newer than the log is the only 
       "a crashing monitor must be distinguishable from a merely quiet one, on the check line",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -520,7 +520,7 @@ test("doctor does NOT fail a stale log when the monitor is not armed — disarme
       `an unarmed monitor must never be reported as a failure:\n${out}`,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -532,7 +532,7 @@ test("doctor treats a never-run monitor as informational, so a fresh install sta
     assert.doesNotMatch(out, /✗ monitor is running on schedule/, `a fresh install must not fail here:\n${out}`);
     assert.match(out, /never run/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -564,7 +564,7 @@ test("doctor FAILS on a HALF-migrated workspace, and names what is missing", asy
     assert.match(out, /lacks[^\n]*refs\/snapshot\.json/);
     assert.match(out, /half-migrated/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -583,7 +583,7 @@ test("doctor does NOT fail a workspace nobody has begun migrating — it reports
     );
     assert.match(out, /v3 migration[^\n]*not begun/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -606,7 +606,7 @@ test("doctor PASSES the v3 check on a fully conforming workspace", async () => {
       `a conforming workspace must not be reported:\n${out}`,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -654,8 +654,8 @@ test("doctor FAILS when a CLAUDE.md restates a canonical rule, and names the fil
     assert.match(out, /fixture-doctor-rule/, "must name WHICH rule");
     assert.match(out, /file\(s\)/, "must say how many files were scanned, not just how many findings");
   } finally {
-    await rm(home, { recursive: true, force: true });
-    await rm(root, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -670,7 +670,7 @@ test("doctor does NOT fail the rules check on a machine with no rules layer", as
     assert.doesNotMatch(out, /✗ canonical rules are not restated/, `no rules layer must not fail:\n${out}`);
     assert.match(out, /canonical rules[^\n]*not installed/, "absence must be named, not silent");
   } finally {
-    await rm(home, { recursive: true, force: true });
-    await rm(root, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

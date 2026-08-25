@@ -201,8 +201,8 @@ test("reconcile — each of the six derived states on a controlled fixture", asy
     assert.equal(rowFor(result, abs("i.txt")).state, "REVERSED");
     assert.equal(rowFor(result, abs("k.txt")).state, "DIVERGED");
   } finally {
-    await rm(repo, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -248,8 +248,8 @@ test("reconcile — wontfix pins the pair, then a later source change re-drifts 
       "a wontfix'd edge re-arms once the source changes again — v1 closed this forever, v2 must not",
     );
   } finally {
-    await rm(repo, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -297,8 +297,8 @@ test("reconcile — a deferred event after the last pin is surfaced but does not
     assert.ok(row.deferred, "the later deferred must be surfaced on the row");
     assert.equal(row.deferred.reason, "will handle after the launch");
   } finally {
-    await rm(repo, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -350,8 +350,8 @@ test("reconcile — a cross-repo edge resolves per-side and reports a real state
     row = rowFor(result, sourceAbs);
     assert.equal(row.state, "DRIFTED", "cross-repo edge must derive a real state, not error out");
   } finally {
-    await rm(parent, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -395,8 +395,8 @@ test("reconcile — a glob downstream expands to one edge per match, and a zero-
     assert.equal(unmatchedRow.state, "UNMATCHED");
     assert.equal(unmatchedRow.unresolvable, "unmatched-glob");
   } finally {
-    await rm(repo, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -441,8 +441,8 @@ test("reconcile — a newly matching glob file creates one NEVER_VERIFIED edge w
     assert.equal(byName.get("two.md"), "CLEAN", "verified sibling must stay CLEAN");
     assert.equal(byName.get("three.md"), "NEVER_VERIFIED");
   } finally {
-    await rm(repo, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -475,8 +475,8 @@ test("reconcile — a downstream that is a directory reports UNRESOLVABLE with r
     assert.equal(row.downstream.unresolvable, "is-directory");
     assert.equal(result.stats.unresolvable, 1);
   } finally {
-    await rm(repo, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -525,8 +525,8 @@ sources:
     assert.ok(row, "the declared edge must appear in the reconciled rows");
     assert.equal(row.state, "NEVER_VERIFIED", "an empty store reconciles to NEVER_VERIFIED — the honest starting position");
   } finally {
-    await rm(searchRoot, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -616,7 +616,7 @@ test("reconcile — each side is resolved at its OWN ref, not the source's appli
       "the downstream ref must not change how the source side is read",
     );
   } finally {
-    await rm(parent, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

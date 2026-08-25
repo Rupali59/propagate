@@ -61,7 +61,7 @@ function loadConfig({ configYml, env = {}, mkTree } = {}) {
     if (r.status !== 0) return { ok: false, stderr, stdout: r.stdout ?? "", home };
     return { ok: true, ...JSON.parse(r.stdout), stderr, home };
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 
@@ -129,7 +129,7 @@ test("env beats file — existing invocations keep their behaviour", () => {
     });
     assert.deepEqual(JSON.parse(out), ["right"], "PROPAGATE_SEARCH_ROOTS must win over config.yml");
   } finally {
-    rmSync(home2, { recursive: true, force: true });
+    rmSync(home2, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

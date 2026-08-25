@@ -43,7 +43,7 @@ import {
 /** A repo with `main`, plus an optional merged and unmerged branch. */
 async function repo(t, { branches = [] } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "snap-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const git = (...a) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", stdio: "pipe" });
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   git("config", "user.email", "t@e.st");
@@ -109,7 +109,7 @@ test("is_active_line is null when nobody declared one, and boolean when they did
 
 test("a repo git cannot read is an attributable error, not an empty registry", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "snap-nonrepo-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const snap = await buildSnapshot(path.join(dir, "does-not-exist"), { now: "t" });
   assert.ok(snap.error, "a missing path must report WHY, not return 0 refs silently");
   assert.deepEqual(snap.refs, []);
@@ -141,7 +141,7 @@ test("dry run writes NOTHING — asserted on the directory, not the return value
   // and wrote anyway; each was believed because the function SAID so. This
   // checks the filesystem.
   const ws = await mkdtemp(path.join(tmpdir(), "snap-ws-"));
-  t.after(() => rm(ws, { recursive: true, force: true }));
+  t.after(() => rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const before = readdirSync(ws).sort();
 
   const plan = writeRegistry(ws, snapOf([{ ref: "main", kind: "branch", head: "aaa" }]), [{ type: "created" }]);
@@ -156,7 +156,7 @@ test("--apply writes both files, and lifecycle.jsonl exists even with nothing to
   // yet". A MISSING one means "never registered". Conformance requires the file,
   // so the empty case must still create it.
   const ws = await mkdtemp(path.join(tmpdir(), "snap-ws2-"));
-  t.after(() => rm(ws, { recursive: true, force: true }));
+  t.after(() => rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   const plan = writeRegistry(ws, snapOf([{ ref: "main", kind: "branch", head: "aaa" }]), [], { apply: true });
   assert.equal(plan.applied, true);
@@ -168,7 +168,7 @@ test("--apply writes both files, and lifecycle.jsonl exists even with nothing to
 
 test("appending twice does not rewrite the lifecycle log", async (t) => {
   const ws = await mkdtemp(path.join(tmpdir(), "snap-ws3-"));
-  t.after(() => rm(ws, { recursive: true, force: true }));
+  t.after(() => rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const s = snapOf([{ ref: "main", kind: "branch", head: "aaa" }]);
   writeRegistry(ws, s, [{ type: "created", ref: "a" }], { apply: true });
   writeRegistry(ws, s, [{ type: "created", ref: "b" }], { apply: true });
@@ -188,7 +188,7 @@ test("worktree rows say null for branch-only atoms — never \"\", which claims 
   // upstream_track / last_commit_iso are branch-only. Coercing worktree rows to
   // `""` made every one of them assert a question that was never put to git.
   const dir = await mkdtemp(path.join(tmpdir(), "snap-null-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   execFileSync("git", ["init", "-q", dir]);
   execFileSync("git", ["-C", dir, "config", "user.email", "t@e.st"]);
   execFileSync("git", ["-C", dir, "config", "user.name", "t"]);
@@ -312,7 +312,7 @@ test("every event this module writes declares `schema: 2`", async (t) => {
   // the log — so an event built anywhere cannot arrive undeclared and be read as
   // v1 history by the reader below.
   const dir = await mkdtemp(path.join(tmpdir(), "life-schema-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   const snapshot = v2({
     p: { repo_root: "/ws/p", base_ref: "origin/main", error: null, refs: { main: { head: "aaa", worktrees: [] } }, detached_worktrees: [] },
@@ -337,7 +337,7 @@ test("readLifecycle separates CURRENT from frozen v1 history, and refuses the un
   // about two live PRODUCERS. Here there is one producer going forward and one
   // frozen history, which is the freeze-v1 pattern already chosen for the ledger.
   const dir = await mkdtemp(path.join(tmpdir(), "life-read-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const refs = path.join(dir, "propagation", "refs");
   await mkdir(refs, { recursive: true });
   await writeFile(

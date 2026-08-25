@@ -65,8 +65,8 @@ test("init --workspace writes `workspace: true` and is discoverable (N15)", asyn
     const marker = await readFile(path.join(target, ".propagates.yml"), "utf8");
     assert.match(marker, /^workspace:\s*true\s*$/m);
   } finally {
-    await rm(roots.searchRoot, { recursive: true, force: true });
-    await rm(roots.stateDir, { recursive: true, force: true });
+    await rm(roots.searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(roots.stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -84,8 +84,8 @@ test("init --edges-only writes today's template and does NOT claim to be a works
     const marker = await readFile(path.join(target, ".propagates.yml"), "utf8");
     assert.doesNotMatch(marker, /^workspace:\s*true\s*$/m);
   } finally {
-    await rm(roots.searchRoot, { recursive: true, force: true });
-    await rm(roots.stateDir, { recursive: true, force: true });
+    await rm(roots.searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(roots.stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -99,8 +99,8 @@ test("init defaults to --workspace when no flag is given", async () => {
     const marker = await readFile(path.join(target, ".propagates.yml"), "utf8");
     assert.match(marker, /^workspace:\s*true\s*$/m);
   } finally {
-    await rm(roots.searchRoot, { recursive: true, force: true });
-    await rm(roots.stateDir, { recursive: true, force: true });
+    await rm(roots.searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(roots.stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -120,9 +120,9 @@ test("init --workspace exits non-zero when discovery still cannot see the new di
     // contract, not about refusing to write the file at all.
     assert.equal(existsSync(path.join(outsideDir, ".propagates.yml")), true);
   } finally {
-    await rm(roots.searchRoot, { recursive: true, force: true });
-    await rm(roots.stateDir, { recursive: true, force: true });
-    await rm(outsideDir, { recursive: true, force: true });
+    await rm(roots.searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(roots.stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(outsideDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -138,8 +138,8 @@ test("init never touches the plist (N14) — no plist file appears under the sco
     const plistFiles = filesInStateDir.filter((f) => f.endsWith(".plist"));
     assert.deepEqual(plistFiles, [], "init must not write any .plist file");
   } finally {
-    await rm(roots.searchRoot, { recursive: true, force: true });
-    await rm(roots.stateDir, { recursive: true, force: true });
+    await rm(roots.searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(roots.stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -195,8 +195,8 @@ test("init --workspace creates the CANONICAL propagation/ pair and says so", asy
     assert.ok(!existsSync(path.join(target, ".propagation", "ledger.jsonl")));
     assert.ok(!existsSync(path.join(target, "docs", "PROPAGATION_LEDGER.jsonl")));
   } finally {
-    await rm(roots.searchRoot, { recursive: true, force: true });
-    await rm(roots.stateDir, { recursive: true, force: true });
+    await rm(roots.searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(roots.stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -223,7 +223,7 @@ test("init --workspace REFUSES to print `init complete.` when the ledger pair ca
     );
   } finally {
     await chmod(target, 0o755);
-    await rm(roots.searchRoot, { recursive: true, force: true });
-    await rm(roots.stateDir, { recursive: true, force: true });
+    await rm(roots.searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(roots.stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

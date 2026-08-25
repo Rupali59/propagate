@@ -51,7 +51,7 @@ async function fixture() {
   return { searchRoot, stateDir, ws };
 }
 
-const cleanup = async (...d) => { for (const x of d) await rm(x, { recursive: true, force: true }); };
+const cleanup = async (...d) => { for (const x of d) await rm(x, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); };
 
 // ---------------------------------------------------------------------------
 // G43 — a silent zero becomes attributable

@@ -64,7 +64,7 @@ function runDoctor(root, stateDir = root) {
 
 test("doctor FAILS when a workspace has live ledger files at more than one candidate path, naming both", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "doctor-multi-ledger-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   const ws = path.join(root, "ws");
   await writeFile(await mkdir(ws, { recursive: true }).then(() => path.join(ws, ".propagates.yml")), "workspace: true\nsources: {}\n", "utf8");
@@ -105,7 +105,7 @@ test("doctor FAILS when a workspace has live ledger files at more than one candi
 
 test("doctor PASSES the multi-ledger check when only one live ledger file exists", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "doctor-multi-ledger-clean-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   const ws = path.join(root, "ws");
   await mkdir(ws, { recursive: true });

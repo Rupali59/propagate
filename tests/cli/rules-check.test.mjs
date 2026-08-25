@@ -49,7 +49,7 @@ function fixture() {
       writeFileSync(p, body);
       return p;
     },
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   };
 }
 

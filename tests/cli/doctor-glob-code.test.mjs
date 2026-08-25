@@ -32,7 +32,7 @@ function ws({ downstreamPath, kind }) {
     path.join(w, ".propagates.yml"),
     `workspace: true\nsources:\n  spec.md:\n    propagates_to:\n      - path: ${downstreamPath}\n        why: probe fixture for N6\n        kind: ${kind}\n`,
   );
-  return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) };
 }
 
 function doctor(root) {

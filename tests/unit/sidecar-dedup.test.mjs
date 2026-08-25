@@ -115,7 +115,7 @@ test("assignSidecarsToWorkspaces: a sidecar reachable via a symlink and its real
     assert.equal(uniqueCount, 1, "same file via two paths must count once");
     assert.equal(assignedByWsRoot.get(ws.root).length, 1);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -217,7 +217,7 @@ test("doctor reports a nested sidecar's defect exactly once, not once per contai
       `sidecar load line must not repeat per ancestor workspace, got ${loadLineOccurrences}:\n${out}`,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -255,6 +255,6 @@ test("doctor still reports a defect normally in a workspace with no nesting invo
     const occurrences = (out.match(/prose downstream missing/g) || []).length;
     assert.equal(occurrences, 1);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

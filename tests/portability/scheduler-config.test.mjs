@@ -36,7 +36,7 @@ function loadWith(configYml, env = {}) {
     if (r.status !== 0) return { ok: false, stderr: r.stderr ?? "" };
     return { ok: true, ...JSON.parse(r.stdout) };
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

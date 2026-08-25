@@ -75,7 +75,7 @@ test("gate 1: all four manifests agreeing passes", () => {
     assert.equal(g.status, "passed", g.detail);
     assert.equal(g.versions.VERSION, "1.2.3");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -86,7 +86,7 @@ test("NEGATIVE CONTROL: a manifest that lags VERSION must fail, not pass", () =>
     assert.equal(g.status, "failed", "a version mismatch must not read as passed");
     assert.match(g.detail, /1\.2\.2/);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -98,7 +98,7 @@ test("gate 1: a missing manifest is could-not-run, never a silent pass", () => {
     assert.equal(g.status, "could-not-run");
     assert.match(g.reason, /marketplace\.json/);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -122,7 +122,7 @@ test("gate 2: a clean node:test summary passes", () => {
     assert.equal(g.passed, 3);
     assert.equal(g.failed, 0);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -140,7 +140,7 @@ test("gate 2: the real node:test 'spec' reporter's summary (ℹ glyph, not #) mu
     assert.equal(g.status, "passed", g.detail);
     assert.equal(g.passed, 3);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -153,7 +153,7 @@ test("NEGATIVE CONTROL: a non-zero fail count must fail, not pass", () => {
     assert.equal(g.status, "failed", g.detail);
     assert.equal(g.failed, 1);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -163,7 +163,7 @@ test("gate 2: output with no parseable node:test summary is could-not-run, not a
     const g = gateSuite({ skillDir: dir });
     assert.equal(g.status, "could-not-run", g.detail);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -181,7 +181,7 @@ test("gate 3: no identity map is a legitimate could-not-run, not a failure and n
     assert.equal(g.status, "could-not-run", g.detail || g.reason);
     assert.match(g.reason, /identity map/i);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -204,7 +204,7 @@ test("gate 3: an empty identity map is its own distinct could-not-run reason", (
     assert.equal(g.status, "could-not-run", g.detail || g.reason);
     assert.match(g.reason, /empty/i);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -234,7 +234,7 @@ test("NEGATIVE CONTROL: a skillDir whose cli.mjs cannot even run must be could-n
     const g = gateStrangerInstall({ skillDir: dir });
     assert.notEqual(g.status, "passed", "a broken install must never read as a pass");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -261,9 +261,9 @@ test("runReleaseCheck: a could-not-run gate makes the run 'incomplete', never 'r
     assert.equal(result.overall, result.gates.some((g) => g.status === "failed") ? "blocked" : "incomplete");
     assert.notEqual(result.exitCode, 0, "an incomplete or blocked run must not exit 0");
   } finally {
-    rmSync(manifests, { recursive: true, force: true });
-    rmSync(suite, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
+    rmSync(manifests, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    rmSync(suite, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

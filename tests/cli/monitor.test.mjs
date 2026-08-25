@@ -160,7 +160,7 @@ test("a long list is truncated with the remainder stated", () => {
 
 test("readNotified survives a corrupt line and fails OPEN", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "mon-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const f = path.join(dir, "notified.jsonl");
   await writeFile(f, '{"key":"a|1|2"}\nnot json at all\n{"key":"b|3|4"}\n');
 
@@ -174,7 +174,7 @@ test("readNotified survives a corrupt line and fails OPEN", async (t) => {
 
 test("every run logs, including one that notifies nothing", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "mon-log-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const f = path.join(dir, "monitor.log");
   const { logRun } = await import("../../lib/report/monitor.mjs");
 
@@ -193,7 +193,7 @@ test("every run logs, including one that notifies nothing", async (t) => {
 
 test("a run that could not look is logged differently from one that found nothing", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "mon-err-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const f = path.join(dir, "monitor.log");
   const { logRun } = await import("../../lib/report/monitor.mjs");
 

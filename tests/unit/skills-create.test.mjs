@@ -58,7 +58,7 @@ test("creation refuses on name collision", async () => {
     });
     assert.equal(r.ok, false);
     assert.match(r.reason, /name collision/);
-  } finally { rmSync(f.root, { recursive: true, force: true }); }
+  } finally { rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
 
 test("creation refuses malformed names", async () => {
@@ -70,7 +70,7 @@ test("creation refuses malformed names", async () => {
     }
     const good = await creationAllowed({ name: "changelog-entry", ...f, usage: {}, skills: noSkills });
     assert.equal(good.ok, true);
-  } finally { rmSync(f.root, { recursive: true, force: true }); }
+  } finally { rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
 
 test("the kill switch blocks creation before anything else is evaluated", async () => {
@@ -80,7 +80,7 @@ test("the kill switch blocks creation before anything else is evaluated", async 
     // Deliberately also malformed: disarm must win, proving it is checked first.
     const r = await creationAllowed({ name: "!!!", ...f, usage: {}, skills: noSkills });
     assert.equal(r.reason, "disarmed");
-  } finally { rmSync(f.root, { recursive: true, force: true }); }
+  } finally { rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
 
 test("quarantine has a hard ceiling", async () => {
@@ -90,7 +90,7 @@ test("quarantine has a hard ceiling", async () => {
     const r = await creationAllowed({ name: "one-more", ...f, usage: {}, skills: noSkills });
     assert.equal(r.ok, false);
     assert.match(r.reason, /quarantine full/);
-  } finally { rmSync(f.root, { recursive: true, force: true }); }
+  } finally { rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
 
 test("the daily rate limit counts only today's `created` events", async () => {
@@ -106,7 +106,7 @@ test("the daily rate limit counts only today's `created` events", async () => {
     const r = await creationAllowed({ name: "another", ...f, usage: {}, skills: noSkills });
     assert.equal(r.ok, MAX_CREATES_PER_DAY > 1);
     if (MAX_CREATES_PER_DAY === 1) assert.match(r.reason, /rate limit/);
-  } finally { rmSync(f.root, { recursive: true, force: true }); }
+  } finally { rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
 
 test("createdToday survives a corrupt log rather than under-counting", async () => {
@@ -119,7 +119,7 @@ test("createdToday survives a corrupt log rather than under-counting", async () 
       `{"id":"001","type":"created","skill":"a","timestamp":"${today}T01:00:00.000Z"}\n` +
       `{ this line is not json\n`);
     assert.equal(await createdToday(f.logPath, today), 1);
-  } finally { rmSync(f.root, { recursive: true, force: true }); }
+  } finally { rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
 
 test("landInQuarantine writes the skill and logs a created event with evidence", async () => {
@@ -143,5 +143,5 @@ test("landInQuarantine writes the skill and logs a created event with evidence",
     // A missing auditor must be recorded as "did not run", never as "passed".
     assert.ok(ev.audit.passed === true || ev.audit.passed === false || ev.audit.passed === null);
     if (!ev.audit.ran) assert.equal(ev.audit.passed, null);
-  } finally { rmSync(f.root, { recursive: true, force: true }); }
+  } finally { rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });

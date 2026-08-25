@@ -97,8 +97,8 @@ async function withFixture(fn) {
   try {
     await fn({ searchRoot, stateDir });
   } finally {
-    await rm(searchRoot, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 
@@ -334,7 +334,7 @@ test("gitStage — a non-git directory offers `git init`, never throws, and is n
     assert.equal(entry.branches, 0);
     assert.equal(entry.worktrees, 0);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -349,7 +349,7 @@ test("gitStage — apply:true on a non-git directory runs `git init` and it beco
     assert.equal(entry.offeredInitCommand, null, "already a repo now — nothing left to offer");
     assert.equal(entry.initError, null);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

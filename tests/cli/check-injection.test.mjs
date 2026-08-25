@@ -78,7 +78,7 @@ test("gitDiffNames: hostile --range with ';' does not execute a second command",
     // and exits 2 rather than silently swallowing it.
     assert.equal(result.status, 2);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     await rm(marker, { force: true });
   }
 });
@@ -97,7 +97,7 @@ test("gitDiffNames: hostile --range with $(...) command substitution does not ex
     );
     assert.equal(result.status, 2);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     await rm(marker, { force: true });
   }
 });
@@ -112,7 +112,7 @@ test("gitDiffNames: hostile --staged-adjacent backtick payload does not execute"
     assert.equal(existsSync(marker), false, "backtick command substitution must never execute");
     assert.equal(result.status, 2);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     await rm(marker, { force: true });
   }
 });
@@ -126,7 +126,7 @@ test("check --range: legitimate range still returns the right changed files (beh
     assert.deepEqual(parsed.changedFiles.sort(), ["a.txt", "b.txt"]);
     assert.equal(parsed.exitCode, 0);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -136,6 +136,6 @@ test("gitDiffNames (direct): legitimate array-form git diff resolves the right f
     const files = gitDiffNames(["diff", "--name-only", `${sha1}..${sha2}`], root);
     assert.deepEqual(files.sort(), ["a.txt", "b.txt"]);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

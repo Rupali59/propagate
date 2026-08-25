@@ -88,8 +88,8 @@ async function makeFixture() {
 
 test("drain --cross lists the cross-repo rows", async (t) => {
   const { searchRoot, stateDir, env } = await makeFixture();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   const r = runCli(["drain", "--cross"], env);
   assert.equal(r.status, 0, `exited ${r.status}: ${r.stderr}`);
@@ -100,8 +100,8 @@ test("drain --cross lists the cross-repo rows", async (t) => {
 
 test("a cross row listed by --cross is closable through --cross", async (t) => {
   const { searchRoot, stateDir, env } = await makeFixture();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   assert.deepEqual(await openCrossIds(searchRoot), ["006", "007", "008"], "precondition");
 
@@ -118,8 +118,8 @@ test("a cross row listed by --cross is closable through --cross", async (t) => {
 
 test("closing several cross rows at once works, which is the real workload", async (t) => {
   const { searchRoot, stateDir, env } = await makeFixture();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   const r = runCli(
     ["drain", "--cross", "--close", "006,007,008", "--status", "wontfix",
@@ -132,8 +132,8 @@ test("closing several cross rows at once works, which is the real workload", asy
 
 test("without --cross the cross ledger stays out of scope", async (t) => {
   const { searchRoot, stateDir, env } = await makeFixture();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   const r = runCli(["drain"], env);
   assert.equal(r.status, 0, `exited ${r.status}: ${r.stderr}`);

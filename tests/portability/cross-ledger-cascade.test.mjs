@@ -46,8 +46,8 @@ test("CROSS_LEDGER_JSONL resolves to the ROOT path when no propagation/ file exi
   const searchRoot = await mkdtemp(path.join(tmpdir(), "cross-cascade-root-"));
   const stateDir = await mkdtemp(path.join(tmpdir(), "cross-cascade-state-"));
   t.after(() => Promise.all([
-    rm(searchRoot, { recursive: true, force: true }),
-    rm(stateDir, { recursive: true, force: true }),
+    rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   ]));
 
   const paths = runHelper({ PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: stateDir });
@@ -60,8 +60,8 @@ test("CROSS_LEDGER_JSONL resolves to propagation/ when a real ledger file alread
   const searchRoot = await mkdtemp(path.join(tmpdir(), "cross-cascade-moved-"));
   const stateDir = await mkdtemp(path.join(tmpdir(), "cross-cascade-state-"));
   t.after(() => Promise.all([
-    rm(searchRoot, { recursive: true, force: true }),
-    rm(stateDir, { recursive: true, force: true }),
+    rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   ]));
 
   const propagationDir = path.join(searchRoot, "propagation");
@@ -78,8 +78,8 @@ test("a bare empty propagation/ directory (no ledger file inside) does NOT redir
   const searchRoot = await mkdtemp(path.join(tmpdir(), "cross-cascade-bare-"));
   const stateDir = await mkdtemp(path.join(tmpdir(), "cross-cascade-state-"));
   t.after(() => Promise.all([
-    rm(searchRoot, { recursive: true, force: true }),
-    rm(stateDir, { recursive: true, force: true }),
+    rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   ]));
 
   await mkdir(path.join(searchRoot, "propagation"), { recursive: true });
@@ -97,8 +97,8 @@ test("END TO END: status --cross reports real rows at the root path, not '0 open
   const searchRoot = await mkdtemp(path.join(tmpdir(), "cross-cascade-e2e-"));
   const stateDir = await mkdtemp(path.join(tmpdir(), "cross-cascade-e2e-state-"));
   t.after(() => Promise.all([
-    rm(searchRoot, { recursive: true, force: true }),
-    rm(stateDir, { recursive: true, force: true }),
+    rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   ]));
 
   const ws = path.join(searchRoot, "ws");

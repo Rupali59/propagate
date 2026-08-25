@@ -145,7 +145,7 @@ import path from "node:path";
 
 test("every snapshot declares the blind spot it inherited from the shell", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "blind-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const snap = await buildWorkspaceSnapshot(root, { now: "2026-08-24T00:00:00Z" });
   assert.match(
     snap.blind_spot ?? "",

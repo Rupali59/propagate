@@ -85,7 +85,7 @@ test("stranger install (empty PROPAGATE_STATE_DIR, no user copy): CROSS_ALLOW_PA
         `every cross-repo read (lib/edges/cross-repo.mjs, cli.mjs) has no existence guard and ENOENTs otherwise`,
     );
   } finally {
-    rmSync(searchRoot, { recursive: true, force: true });
-    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    rmSync(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

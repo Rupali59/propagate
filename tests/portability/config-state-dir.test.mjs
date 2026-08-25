@@ -86,7 +86,7 @@ test("defaults unchanged: resolved paths equal today's literals when PROPAGATE_S
       "PLIST_PATH must still resolve under ~/Library/LaunchAgents when STATE_DIR is unset",
     );
   } finally {
-    await rm(searchRoot, { recursive: true, force: true });
+    await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -115,8 +115,8 @@ test("PROPAGATE_STATE_DIR relocates state, lock, heartbeat, watcher log AND the 
       path.join(os.homedir(), "Library", "LaunchAgents", `${paths.LABEL}.plist`),
     );
   } finally {
-    await rm(searchRoot, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -134,8 +134,8 @@ test("PROPAGATE_STATE_DIR relocates into a directory that doesn't exist yet (cre
     assert.equal(paths.STATE_DIR, path.resolve(stateDir));
     assert.equal(paths.STATE_PATH, path.join(stateDir, "state.json"));
   } finally {
-    await rm(searchRoot, { recursive: true, force: true });
-    await rm(parent, { recursive: true, force: true });
+    await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -165,8 +165,8 @@ test("a bad PROPAGATE_STATE_DIR (a file, not a directory) warns and falls back t
       path.join(os.homedir(), "Library", "LaunchAgents", `${paths.LABEL}.plist`),
     );
   } finally {
-    await rm(searchRoot, { recursive: true, force: true });
-    await rm(parent, { recursive: true, force: true });
+    await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -189,6 +189,6 @@ test("an unwritable PROPAGATE_STATE_DIR parent (nonexistent, uncreatable) warns 
     assert.equal(paths.STATE_DIR, DEFAULT_STATE_DIR);
     assert.equal(paths.STATE_PATH, path.join(DEFAULT_STATE_DIR, "state.json"));
   } finally {
-    await rm(searchRoot, { recursive: true, force: true });
+    await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

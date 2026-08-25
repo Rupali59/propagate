@@ -63,7 +63,7 @@ test("a bare propagation/ reports EVERY missing item by name, never a bare false
     assert.equal(r.conforms, false);
     assert.deepEqual([...r.missing].sort(), [...V3_REQUIRED].sort());
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -74,7 +74,7 @@ test("a fully-populated propagation/ conforms and reports nothing missing", asyn
     assert.equal(r.conforms, true, `should conform, missing: ${r.missing.join(", ")}`);
     assert.deepEqual(r.missing, []);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -88,7 +88,7 @@ test("a PARTIAL workspace names only what it lacks — the common case during mi
     assert.deepEqual([...r.missing].sort(), ["INDEX.md", "refs/lifecycle.jsonl", "refs/snapshot.json"]);
     assert.ok(!r.missing.includes("state/"), "must not report what is present");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -100,7 +100,7 @@ test("state/ requires an actual project directory, not just the folder", async (
     assert.equal(r.conforms, false, "an EMPTY state/ is scaffolding, not state");
     assert.ok(r.missing.includes("state/"));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -112,6 +112,6 @@ test("a workspace with no propagation/ at all is attributable, not a crash", asy
     assert.equal(r.conforms, false);
     assert.deepEqual([...r.missing].sort(), [...V3_REQUIRED].sort());
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

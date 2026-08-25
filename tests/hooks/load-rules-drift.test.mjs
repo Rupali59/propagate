@@ -50,8 +50,8 @@ async function withFixture(fn) {
   try {
     return await fn({ home, roots });
   } finally {
-    await rm(home, { recursive: true, force: true });
-    await rm(roots, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(roots, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

@@ -123,7 +123,7 @@ async function makeChain() {
 }
 
 const cleanup = async (...dirs) => {
-  for (const d of dirs) await rm(d, { recursive: true, force: true });
+  for (const d of dirs) await rm(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 };
 
 // ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ async function withScopedStore(fn) {
   try {
     await fn(stateDir);
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

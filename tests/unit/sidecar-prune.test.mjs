@@ -29,7 +29,7 @@ async function withTempSidecar(yamlText, fn) {
   try {
     return await fn(sidecarPath, root);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 
@@ -220,6 +220,6 @@ test("doctor FAILS and names the sidecar, source key, and offending path for a p
     // itself reported as a failure by the sidecar-load check.
     assert.match(out, new RegExp(`✓.*${relSidecar.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

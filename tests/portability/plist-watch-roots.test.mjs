@@ -53,7 +53,7 @@ test("regeneratePlist refuses to write when discovered workspaces is empty (0 wa
     assert.equal(out.path, out.resolvedPlistPath);
     assert.equal(existsSync(out.resolvedPlistPath), false, "must not write anything to disk");
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -70,7 +70,7 @@ test("regeneratePlist writes as before when N>0 workspaces are given", async () 
     assert.match(content, /<key>WatchPaths<\/key>/);
     assert.match(content, new RegExp(fakeWsRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
-    await rm(fakeWsRoot, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(fakeWsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

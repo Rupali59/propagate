@@ -78,8 +78,8 @@ async function buildFixtureIndex(overrides = {}) {
 }
 
 async function cleanup({ stateDir, workDir }) {
-  await rm(stateDir, { recursive: true, force: true });
-  await rm(workDir, { recursive: true, force: true });
+  await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  await rm(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 
 test("graph-index: event_id round-trips (RED against e.id ?? null)", async () => {
@@ -234,7 +234,7 @@ test("graph-index: byte-identical rebuild is preserved after the schema change",
     const [buf1, buf2] = await Promise.all([readFile(dbPath1), readFile(dbPath2)]);
     assert.equal(hash(buf1), hash(buf2), "two rebuilds of the same corpus must be byte-identical");
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
-    await rm(workDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

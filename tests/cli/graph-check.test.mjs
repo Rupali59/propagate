@@ -60,7 +60,7 @@ test("checkGraphMcpStatus: a timeout is reported as status 'timeout', never as a
     assert.notEqual(result.status, "registered", "a timeout must never read as a pass");
     assert.equal(calls, 1);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -77,7 +77,7 @@ test("checkGraphMcpStatus: a non-timeout error is distinguished from a timeout",
     assert.equal(result.status, "error");
     assert.notEqual(result.status, "timeout", "a plain failure must not be reported as a timeout");
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -96,7 +96,7 @@ test("checkGraphMcpStatus: registered / not-registered still distinguished by ou
     });
     assert.equal(notRegistered.status, "not-registered");
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -119,7 +119,7 @@ test("checkGraphMcpStatus: a second call within TTL uses the cache — the expen
     assert.equal(calls, 1, "runMcpList must not be invoked again while the cache is warm");
     assert.equal(second.status, "registered", "the cached status must be returned, unchanged");
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -146,7 +146,7 @@ test("checkGraphMcpStatus: cache expires after the TTL and recomputes", async ()
     await checkGraphMcpStatus({ cachePath, ttlMs: 1000, runMcpList, now });
     assert.equal(calls, 2, "TTL expired — must recompute");
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -162,7 +162,7 @@ test("checkGraphMcpStatus: a corrupt cache file is ignored, not thrown", async (
     assert.equal(result.status, "registered");
     assert.equal(result.fromCache, false);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -250,9 +250,9 @@ test("doctor: a hung `claude mcp list` is bounded to ~2s and reported as an expl
     const cached = JSON.parse(await readFile(cachePath, "utf8"));
     assert.equal(cached.status, "timeout");
   } finally {
-    await rm(root, { recursive: true, force: true });
-    await rm(binDir, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -286,8 +286,8 @@ test("doctor: a warm cache (within TTL) skips the subprocess entirely — second
     assert.match(out, /graph integration check timed out after 2s — status unknown/);
     assert.match(out, /cached \d+m ago/, "warm-cache run must say it's reporting a cached result");
   } finally {
-    await rm(root, { recursive: true, force: true });
-    await rm(binDir, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

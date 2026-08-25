@@ -32,7 +32,7 @@ const g = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { stdio: ["ignor
 /** A repo whose `feature` branch was SQUASH-merged into main — the real shape here. */
 async function squashMergedRepo(t) {
   const root = await mkdtemp(path.join(tmpdir(), "squash-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   execFileSync("git", ["init", "-q", "-b", "main", root]);
   g(root, "config", "user.email", "t@e.st");
   g(root, "config", "user.name", "t");

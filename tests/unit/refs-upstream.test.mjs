@@ -25,7 +25,7 @@ import { enumerateRefs } from "../../lib/edges/refs.mjs";
 test("a branch WITH an upstream reports it; one without reports null", async (t) => {
   const remote = await mkdtemp(path.join(tmpdir(), "rem-"));
   const root = await mkdtemp(path.join(tmpdir(), "loc-"));
-  t.after(() => Promise.all([rm(remote, { recursive: true, force: true }), rm(root, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(remote, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }), rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
   execFileSync("git", ["init", "-q", "--bare", "-b", "main", remote]);
   execFileSync("git", ["init", "-q", "-b", "main", root]);
   const g = (...a) => execFileSync("git", ["-C", root, ...a], { stdio: ["ignore", "pipe", "pipe"] });

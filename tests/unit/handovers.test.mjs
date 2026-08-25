@@ -55,7 +55,7 @@ async function withDoc(text, fn) {
   try {
     return await fn(p);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 
@@ -129,7 +129,7 @@ test("NUMBERED sections parse too, and inherit the file's date", async () => {
     assert.equal(r.sections[0].status, "open");
     assert.equal(r.sections[1].status, "unknown");
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

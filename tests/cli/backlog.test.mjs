@@ -180,7 +180,7 @@ test("discoverBacklogFiles finds STATE.md, TODOS.md, docs/ISSUES.md across a tre
     assert.equal(found.todosMd.length, 1);
     assert.equal(found.issuesMd.length, 1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -221,7 +221,7 @@ test("backlog(): end-to-end over a synthetic tree with mixed formats reports par
     assert.ok(shipItem);
     assert.equal(shipItem.sources.length, 2);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -235,7 +235,7 @@ test("backlog(): never touches disk for writes — the input tree is byte-identi
     backlog({ searchRoots: [root] });
     assert.equal(readFileSync(path.join(p, "TODOS.md"), "utf8"), original);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

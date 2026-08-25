@@ -89,7 +89,7 @@ test("one directory-as-downstream defect produces exactly one counted (✗) prob
     const relSidecar = path.relative(root, sidecarPath);
     assert.match(out, new RegExp(relSidecar.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -113,6 +113,6 @@ test("warnings-only case (no directory-as-downstream defects) keeps today's aggr
       `expected the aggregate to still pass with a warn count:\n${out}`,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

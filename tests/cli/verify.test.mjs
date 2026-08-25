@@ -84,8 +84,8 @@ async function withFixture(fn) {
   try {
     await fn({ searchRoot, stateDir });
   } finally {
-    await rm(searchRoot, { recursive: true, force: true });
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

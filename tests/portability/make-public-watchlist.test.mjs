@@ -60,7 +60,7 @@ function runCheck({ stateDir, searchRoots }) {
 
 function cleanup(h) {
   for (const dir of [h.root, h.stateDir, h.outDir]) {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

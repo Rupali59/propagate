@@ -24,7 +24,7 @@ import { readActiveLines } from "../../lib/refs/active-lines.mjs";
 
 async function workspaceWith(t, budgetBody) {
   const root = await mkdtemp(path.join(tmpdir(), "active-lines-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   if (budgetBody !== null) {
     await mkdir(path.join(root, "docs", "conventions"), { recursive: true });
     await writeFile(path.join(root, "docs", "conventions", "CONTEXT-BUDGET.md"), budgetBody);

@@ -116,7 +116,7 @@ test("inboundRows — a repo reached through a symlinked path still matches its 
     const viaReal = inboundRows(rows, realRepo);
     assert.equal(viaReal.length, 1, "repoRoot given as the real path matches directly");
   } finally {
-    await rm(parent, { recursive: true, force: true });
+    await rm(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

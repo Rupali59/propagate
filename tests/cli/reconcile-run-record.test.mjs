@@ -79,8 +79,8 @@ async function readRunRecords(stateDir) {
 }
 
 async function cleanup({ searchRoot, stateDir }) {
-  await rm(searchRoot, { recursive: true, force: true });
-  await rm(stateDir, { recursive: true, force: true });
+  await rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 
 test("cli reconcile: one invocation appends exactly one run record", async () => {

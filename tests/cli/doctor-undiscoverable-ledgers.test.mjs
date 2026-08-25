@@ -143,7 +143,7 @@ test("doctor names a ledger hidden in a dot-directory, with its folded open-row 
     // proves this fixture isolates the two mechanisms as the header above claims.
     assert.doesNotMatch(out, /✗[^\n]*no unowned ledger files/, ".gstack must be skipped by the other check");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -156,7 +156,7 @@ test("doctor reports none-found (not a silent empty section) when nothing is hid
     assert.match(out, /Undiscoverable ledgers/i);
     assert.match(out, /none-found/, "absence must be attributable (rule:discernment-checks §2), not a blank section");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -177,7 +177,7 @@ test("undiscoverableLedgersReport: a real root with nothing hidden reports none-
     const report = await undiscoverableLedgersReport([root]);
     assert.equal(report.status, "none-found");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -191,6 +191,6 @@ test("undiscoverableLedgersReport: finds a dot-directory ledger and reports its 
     assert.equal(report.findings[0].reason, "dot-directory");
     assert.equal(report.findings[0].open, 2);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

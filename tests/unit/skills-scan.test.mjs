@@ -72,7 +72,7 @@ test("classifies the three installers by symlink shape", () => {
     assert.equal(classifyInstaller(path.join(f.skills, "gstack-health")), INSTALLER.GSTACK);
     assert.equal(classifyInstaller(path.join(f.skills, "propagate")), INSTALLER.HANDMADE);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -84,7 +84,7 @@ test("a directory with no SKILL.md is not a skill", () => {
     const { skills } = scanSkills({ skillsDir: f.skills, lock: {}, usage: {} });
     assert.deepEqual(skills.map((s) => s.id), []);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -99,7 +99,7 @@ test("id is the directory name; a frontmatter mismatch is reported, not correcte
     assert.equal(skills[0].declaredName, "health");
     assert.equal(skills[0].nameMismatch, true);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -116,7 +116,7 @@ test("a dangling SKILL.md symlink is flagged rather than dropped", () => {
     assert.equal(skills[0].dangling, true);
     assert.equal(skills[0].declaredName, null);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -136,7 +136,7 @@ test("usage joins by directory name; absent key means never invoked", () => {
     assert.equal(byId.unused.usageCount, 0);
     assert.equal(byId.unused.neverInvoked, true);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -157,7 +157,7 @@ test("usage keys with no directory are reported as orphans, not silently dropped
     });
     assert.deepEqual(orphanUsageKeys, ["deleted"]);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -177,7 +177,7 @@ test("provenance attaches from the lock; handmade skills stay null, never guesse
     assert.equal(byId["azure-thing"].provenance.source, "microsoft/x");
     assert.equal(byId.propagate.provenance, null);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -192,7 +192,7 @@ test("malformed inputs degrade to empty rather than throwing", () => {
     assert.deepEqual(readSkillUsage(path.join(f.root, "missing.json")), {});
     assert.deepEqual(readSkillLock(path.join(f.root, "missing.json")), {});
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -209,7 +209,7 @@ test("readFrontmatterName tolerates quotes and missing frontmatter", () => {
 
     assert.equal(readFrontmatterName(null), null);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -244,7 +244,7 @@ test("neverInvoked is the AND of both probes, not either alone", () => {
     // absent from skillUsage would undermine skillUsage as the primary probe.
     assert.equal(summarize({ skills, orphanUsageKeys: [] }).transcriptOnly, 1);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -274,7 +274,7 @@ test("probeTranscripts attributes matches to skills and sessions", () => {
     assert.equal(byName["gstack-ship"].count, 1);
     assert.equal(byName["should-not-count"], undefined);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -291,7 +291,7 @@ test("probeTranscripts returns empty-but-scanned when there are no matches", () 
     assert.equal(r.scanned, true);
     assert.deepEqual(r.byName, {});
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -317,7 +317,7 @@ test("summarize counts installers, never-invoked and orphans", () => {
     assert.equal(s.neverInvoked, 1);
     assert.equal(s.orphanUsageKeys, 1);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -407,7 +407,7 @@ test("completeness: a fully-shipped, fully-enabled, reachable skill is all-true"
       testsGreen: "n/a",
     });
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -427,7 +427,7 @@ test("completeness: no frontmatter at all fails structural predicates, never thr
     assert.equal(c.sidecarReachable, "n/a", "no .propagates.yml at all -- not a false failure");
     assert.equal(c.testsGreen, "n/a");
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -443,7 +443,7 @@ test("completeness: description stating WHAT, not WHEN, fails descriptionStatesW
     assert.equal(c.frontmatter, true, "well-formed frontmatter -- the defect is only in the wording");
     assert.equal(c.descriptionStatesWhen, false);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -476,7 +476,7 @@ test("completeness: a YAML block-scalar description is still read, not literal '
     assert.equal(c.frontmatter, true);
     assert.equal(c.descriptionStatesWhen, true);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -488,7 +488,7 @@ test("completeness: a frontmatter name that disagrees with the directory is repo
     const c = scanCompleteness(f)["gstack-mismatch"];
     assert.equal(c.nameMatchesDir, false);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -500,7 +500,7 @@ test("completeness: shipped via marketplace.json plugins[] (Tier A), not just a 
     assert.equal(c.shipped, true, "matched via marketplace.json's plugins[].name, not a skills/ dir listing");
     assert.equal(c.enabled, true, "url-plugin@tathya is true in the fixture settings.json");
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -517,7 +517,7 @@ test("completeness: shipped but disabled reads false, never n/a", () => {
     assert.equal(c.shipped, true);
     assert.equal(c.enabled, false, "quarantine@tathya is false in the fixture settings.json");
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -535,7 +535,7 @@ test("completeness: a .propagates.yml outside every search root is reported unre
     const c = scanCompleteness(f)["orphan-sidecar"];
     assert.equal(c.sidecarReachable, false);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -561,7 +561,7 @@ test("completeness: MUTATION -- moving the sidecar out of reach flips sidecarRea
     symlinkSync(path.join(f.skills, "mutant"), linkPath); // restore
     assert.equal(scanCompleteness(f).mutant.sidecarReachable, true, "must flip back once restored");
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -586,7 +586,7 @@ test("completeness: testsGreen is n/a without a tests/ dir, not-run with one but
     const withFlag = scanCompleteness(f, { withTests: true });
     assert.equal(withFlag["has-tests"].testsGreen, true);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -599,7 +599,7 @@ test("completeness: testsGreen reports no-test-script rather than crashing when 
     const c = scanCompleteness(f, { withTests: true })["no-script"];
     assert.equal(c.testsGreen, "no-test-script");
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -622,6 +622,6 @@ test("existing fields are untouched by adding completeness -- id/dangling/nameMi
     assert.equal(s.neverInvoked, true);
     assert.ok("completeness" in s);
   } finally {
-    rmSync(f.root, { recursive: true, force: true });
+    rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

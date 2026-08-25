@@ -68,7 +68,7 @@ function sandbox() {
       return { code: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
     },
     cleanup() {
-      rmSync(home, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     },
   };
 }

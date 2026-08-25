@@ -40,7 +40,7 @@ function run(mode, { remoteVersion, extraEnv = {} } = {}) {
     const r = spawnSync(process.execPath, [CLI, mode], { encoding: "utf8", env });
     return strip(`${r.stdout ?? ""}${r.stderr ?? ""}`);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 }
 

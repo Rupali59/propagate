@@ -58,7 +58,7 @@ function readConfig(env = {}) {
 
 async function emptyState(t) {
   const dir = await mkdtemp(path.join(tmpdir(), "hub-state-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return dir;
 }
 
@@ -95,7 +95,7 @@ test("declaring the hub derives marketplace, ports and search roots from it", as
   // finding three other restatements of itself.
   const state = await emptyState(t);
   const hub = await mkdtemp(path.join(tmpdir(), "hub-"));
-  t.after(() => rm(hub, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   // The fixture has to LOOK like a hub. `pick()` returns null for a path that
   // does not exist — deliberate, and documented on PORTS_YML_PATH as "null =>
@@ -115,7 +115,7 @@ test("declaring the hub derives marketplace, ports and search roots from it", as
 test("the hub can be declared in config.yml, not only in the environment", async (t) => {
   const state = await emptyState(t);
   const hub = await mkdtemp(path.join(tmpdir(), "hub-file-"));
-  t.after(() => rm(hub, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await writeFile(path.join(state, "config.yml"), `hubRoot: ${hub}\n`);
 
   const c = readConfig({ PROPAGATE_STATE_DIR: state });
@@ -127,8 +127,8 @@ test("env beats config.yml — the documented precedence must not invert", async
   const state = await emptyState(t);
   const fromFile = await mkdtemp(path.join(tmpdir(), "hub-file-"));
   const fromEnv = await mkdtemp(path.join(tmpdir(), "hub-env-"));
-  t.after(() => rm(fromFile, { recursive: true, force: true }));
-  t.after(() => rm(fromEnv, { recursive: true, force: true }));
+  t.after(() => rm(fromFile, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  t.after(() => rm(fromEnv, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await writeFile(path.join(state, "config.yml"), `hubRoot: ${fromFile}\n`);
 
   const c = readConfig({ PROPAGATE_STATE_DIR: state, PROPAGATE_HUB_ROOT: fromEnv });
@@ -147,8 +147,8 @@ test("an existing searchRoots config still wins over the derived default", async
   const state = await emptyState(t);
   const hub = await mkdtemp(path.join(tmpdir(), "hub-"));
   const explicit = await mkdtemp(path.join(tmpdir(), "explicit-roots-"));
-  t.after(() => rm(hub, { recursive: true, force: true }));
-  t.after(() => rm(explicit, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  t.after(() => rm(explicit, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await writeFile(path.join(state, "config.yml"), `hubRoot: ${hub}\nsearchRoots:\n  - ${explicit}\n`);
 
   const c = readConfig({ PROPAGATE_STATE_DIR: state });
@@ -159,7 +159,7 @@ test("a per-integration override still beats the hub-derived path", async (t) =>
   const state = await emptyState(t);
   const hub = await mkdtemp(path.join(tmpdir(), "hub-"));
   const ports = path.join(hub, "elsewhere.yml");
-  t.after(() => rm(hub, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await writeFile(ports, "ports: {}\n");
 
   const c = readConfig({ PROPAGATE_STATE_DIR: state, PROPAGATE_HUB_ROOT: hub, PROPAGATE_PORTS_FILE: ports });
@@ -178,7 +178,7 @@ test("`setup --hub` persists hubRoot, and the reader resolves it back", async (t
   // rather than on either half alone.
   const state = await emptyState(t);
   const hub = await mkdtemp(path.join(tmpdir(), "hub-setup-"));
-  t.after(() => rm(hub, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await mkdir(path.join(hub, "ws"), { recursive: true });
   await writeFile(path.join(hub, "ws", ".propagates.yml"), "workspace: true\n");
 
@@ -194,7 +194,7 @@ test("`setup --hub` persists hubRoot, and the reader resolves it back", async (t
 test("setup refuses a hub that does not exist, rather than writing a config that cannot work", async (t) => {
   const state = await emptyState(t);
   const hub = await mkdtemp(path.join(tmpdir(), "hub-real-"));
-  t.after(() => rm(hub, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const missing = path.join(hub, "definitely", "not", "here");
 
   assert.throws(
@@ -222,7 +222,7 @@ test("a pre-hubRoot install infers the hub from its single declared searchRoot",
   // "not configured" when the truth was "configured, just not under this key".
   const state = await emptyState(t);
   const hub = await mkdtemp(path.join(tmpdir(), "hub-legacy-"));
-  t.after(() => rm(hub, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await mkdir(path.join(hub, "skills-marketplace"), { recursive: true });
   await writeFile(path.join(state, "config.yml"), `searchRoots:\n  - ${hub}\n`);
 
@@ -236,8 +236,8 @@ test("two declared roots stay null — 'which is the hub' has no non-guessed ans
   const state = await emptyState(t);
   const a = await mkdtemp(path.join(tmpdir(), "hub-a-"));
   const b = await mkdtemp(path.join(tmpdir(), "hub-b-"));
-  t.after(() => rm(a, { recursive: true, force: true }));
-  t.after(() => rm(b, { recursive: true, force: true }));
+  t.after(() => rm(a, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  t.after(() => rm(b, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await writeFile(path.join(state, "config.yml"), `searchRoots:\n  - ${a}\n  - ${b}\n`);
 
   const c = readConfig({ PROPAGATE_STATE_DIR: state });
@@ -249,8 +249,8 @@ test("an explicit hubRoot beats the inference — the inference is a fallback, n
   const state = await emptyState(t);
   const explicit = await mkdtemp(path.join(tmpdir(), "hub-explicit-"));
   const root = await mkdtemp(path.join(tmpdir(), "root-"));
-  t.after(() => rm(explicit, { recursive: true, force: true }));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(explicit, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await writeFile(path.join(state, "config.yml"), `hubRoot: ${explicit}\nsearchRoots:\n  - ${root}\n`);
 
   const c = readConfig({ PROPAGATE_STATE_DIR: state });

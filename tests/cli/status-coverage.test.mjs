@@ -108,8 +108,8 @@ function baselineEveryEdge(env) {
 
 test("coverage counts are reported even when nothing has ever been verified", async (t) => {
   const { searchRoot, stateDir, env } = await makeWorkspace();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   const cov = coverage(env);
   assert.equal(cov.edges, 2, "both declared edges are counted");
@@ -120,8 +120,8 @@ test("coverage counts are reported even when nothing has ever been verified", as
 
 test("the tick is NOT earned by a tree nobody has verified", async (t) => {
   const { searchRoot, stateDir, env } = await makeWorkspace();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   const cov = coverage(env);
   assert.equal(cov.actionable, 0, "precondition: nothing actionable");
@@ -134,8 +134,8 @@ test("the tick is NOT earned by a tree nobody has verified", async (t) => {
 
 test("the tick IS earned once every edge is verified and clean", async (t) => {
   const { searchRoot, stateDir, env } = await makeWorkspace();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   const n = baselineEveryEdge(env);
   assert.equal(n, 2, "precondition: both edges were baselined");
@@ -149,8 +149,8 @@ test("the tick IS earned once every edge is verified and clean", async (t) => {
 
 test("a drifted edge is actionable and withdraws the tick", async (t) => {
   const { searchRoot, stateDir, ws, env } = await makeWorkspace();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   baselineEveryEdge(env);
   assert.equal(coverage(env).ok, true, "precondition: clean before the edit");
@@ -168,8 +168,8 @@ test("a drifted edge is actionable and withdraws the tick", async (t) => {
 
 test("an unevaluable edge is never counted as clean", async (t) => {
   const { searchRoot, stateDir, ws, env } = await makeWorkspace();
-  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true }),
-                             rm(stateDir, { recursive: true, force: true })]));
+  t.after(() => Promise.all([rm(searchRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+                             rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })]));
 
   baselineEveryEdge(env);
 

@@ -62,7 +62,7 @@ const { parseEntries, selftestProblems, sourcesFor } = await import("../../lib/g
 
 process.on("exit", () => {
   try {
-    rm(ROOT, { recursive: true, force: true });
+    rm(ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   } catch {
     /* best effort */
   }

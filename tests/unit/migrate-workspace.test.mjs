@@ -53,7 +53,7 @@ function treeSnapshot(root) {
 
 async function workspace(t, { projects = {}, own = {} } = {}) {
   const ws = await mkdtemp(path.join(tmpdir(), "mig-ws-"));
-  t.after(() => rm(ws, { recursive: true, force: true }));
+  t.after(() => rm(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [name, content] of Object.entries(own)) {
     await mkdir(path.dirname(path.join(ws, name)), { recursive: true });
     await writeFile(path.join(ws, name), content);
@@ -380,7 +380,7 @@ test("sidecarsNamingMoves matches the RELATIVE path, not the bare basename", asy
 /** A hub containing: a declared workspace, an UNdeclared one, and a plain project. */
 async function hubFixture(t, { undeclaredHasArtifact = true } = {}) {
   const hub = await mkdtemp(path.join(tmpdir(), "hub-"));
-  t.after(() => rm(hub, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   execFileSync("git", ["init", "-q", hub]);
   const g = (...a) => execFileSync("git", ["-C", hub, ...a], { stdio: ["ignore", "pipe", "pipe"] });
   g("config", "user.email", "t@e.st");
@@ -548,7 +548,7 @@ test("the scaffolded refs registry records a baseline, not an empty log", async 
  */
 test("a self-declared pointer stub is detected even when its heading does not say `moved`", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "stub-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   const motherboardStyle = path.join(dir, "STATE.md");
   await writeFile(
@@ -638,7 +638,7 @@ test("every moved artifact leaves a pointer stub naming its new home", async (t)
  */
 test("N49: an untracked artifact is refused BEFORE anything moves, naming every one", async (t) => {
   const hub = await mkdtemp(path.join(tmpdir(), "untracked-"));
-  t.after(() => rm(hub, { recursive: true, force: true }));
+  t.after(() => rm(hub, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   execFileSync("git", ["init", "-q", hub]);
   const g = (...a) => execFileSync("git", ["-C", hub, ...a], { stdio: ["ignore", "pipe", "pipe"] });
   g("config", "user.email", "t@e.st");

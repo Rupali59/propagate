@@ -55,7 +55,7 @@ test("scanTier namespaces ids by plugin and joins both probes", () => {
     assert.equal(rows[0].transcriptCount, 1);
     assert.equal(rows[0].neverInvoked, false);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -65,7 +65,7 @@ test("a directory without SKILL.md is not a skill", () => {
     mkdirSync(path.join(root, "quarantine", "skills", "junk"), { recursive: true });
     assert.deepEqual(scanTier(path.join(root, "quarantine", "skills"), "quarantine", { usage: {} }), []);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -101,7 +101,7 @@ test("reap defaults to dry-run and touches nothing", async () => {
     assert.deepEqual(res.planned.map((p) => p.id), ["quarantine:doomed"]);
     assert.ok(existsSync(dir), "dry-run must not delete");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -124,7 +124,7 @@ test("reap --apply archives before deleting, and logs the archive path", async (
     assert.equal(ev.skill, "doomed");
     assert.ok(ev.archive);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -150,7 +150,7 @@ test("the kill switch stops promote, demote and reap --apply", async () => {
     // It still reports what it WOULD have done, so the switch is diagnosable.
     assert.deepEqual(r.planned.map((p) => p.id), ["quarantine:alpha"]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -173,7 +173,7 @@ test("promote moves the directory between plugins and logs the rename", async ()
     assert.equal(ev.from, "quarantine:alpha");
     assert.equal(ev.to, "tathya:alpha");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -190,7 +190,7 @@ test("promote refuses to overwrite an already-promoted skill of the same name", 
     const kept = readFileSync(path.join(root, "tathya", "skills", "alpha", "SKILL.md"), "utf8");
     assert.match(kept, /the established one/, "the promoted skill must survive untouched");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -205,7 +205,7 @@ test("demote is the inverse of promote", async () => {
     assert.ok(existsSync(path.join(root, "quarantine", "skills", "alpha", "SKILL.md")));
     assert.ok(!existsSync(path.join(root, "tathya", "skills", "alpha")));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -216,7 +216,7 @@ test("promote on a missing skill fails cleanly rather than throwing", async () =
     assert.equal(res.ok, false);
     assert.match(res.reason, /not in quarantine/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -236,6 +236,6 @@ test("scanLifecycle reads both tiers and ages them from the same clock", () => {
     // the assertion that matters is that it is a number and never negative.
     assert.ok(quarantined[0].ageDays >= 0);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

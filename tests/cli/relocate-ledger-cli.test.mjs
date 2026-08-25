@@ -57,7 +57,7 @@ test("relocate-ledger: no --workspace prints usage and exits non-zero", (t) => {
 
 test("relocate-ledger: dry-run (default) reports the move and writes nothing", async (t) => {
   const root = await makeWorkspace();
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   const r = runCli(["relocate-ledger", "--workspace", root], root);
   assert.equal(r.status, 0, r.stderr);
@@ -69,7 +69,7 @@ test("relocate-ledger: dry-run (default) reports the move and writes nothing", a
 
 test("relocate-ledger --apply --json performs the move and reports JSON", async (t) => {
   const root = await makeWorkspace();
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   const r = runCli(["relocate-ledger", "--workspace", root, "--apply", "--json"], root);
   assert.equal(r.status, 0, r.stderr);
@@ -82,7 +82,7 @@ test("relocate-ledger --apply --json performs the move and reports JSON", async 
 
 test("relocate-ledger --apply a second time refuses via JSON error, not a crash", async (t) => {
   const root = await makeWorkspace();
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   runCli(["relocate-ledger", "--workspace", root, "--apply"], root);
   const r2 = runCli(["relocate-ledger", "--workspace", root, "--apply", "--json"], root);

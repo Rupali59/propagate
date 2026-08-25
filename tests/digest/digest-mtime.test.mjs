@@ -69,7 +69,7 @@ test("finds the newest mtime, and ignores node_modules", () => {
       `expected the ~60s-old file under a/b, not the 1s-old one in node_modules (age ${ageSec}s)`,
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -84,7 +84,7 @@ test("works with no `find` or `stat` on PATH — the Linux condition, reproduced
         `BSD \`stat -f\` fails the same way, reporting "no files" instead of "could not measure"`,
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

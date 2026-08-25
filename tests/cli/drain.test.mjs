@@ -80,7 +80,7 @@ test("list mode: groups rows by correlation_id, lists ungrouped rows individuall
     assert.equal(ws.ungrouped.length, 1, "ungrouped row listed individually");
     assert.equal(ws.ungrouped[0].id, "003");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -91,7 +91,7 @@ test("list mode (non-json) renders without crashing and mentions open row ids", 
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /#001/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -111,7 +111,7 @@ test("--close with a single id closes it; re-reading shows not-open, closed_by d
     assert.equal(row.status, "done");
     assert.equal(row.closed_by, "drain");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -139,7 +139,7 @@ test("batch --close a,b,c closes all three with a shared reason", async () => {
       assert.equal(row.closed_by, "drain");
     }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -161,7 +161,7 @@ test("--group closes every row sharing a correlation_id, leaves other groups ope
     assert.equal(rows.find((r) => r.id === "031").status, "done");
     assert.equal(rows.find((r) => r.id === "032").status, "open", "other group untouched");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -176,7 +176,7 @@ test("--status wontfix without --reason exits non-zero with a clear message, not
     const rows = await readLedger(jsonlPath);
     assert.equal(rows.find((r) => r.id === "040").status, "open", "row stays open — no partial close");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -188,7 +188,7 @@ test("--close <nonexistent-id> exits non-zero and says so, not a silent no-op", 
     assert.match(result.stdout + result.stderr, /999/);
     assert.match(result.stdout + result.stderr, /not found/i);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -208,7 +208,7 @@ test("--json on close mode parses and reports what was closed", async () => {
     assert.equal(parsed.closed[0].id, "060");
     assert.equal(parsed.closed[0].status, "partial");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -225,7 +225,7 @@ test("--closed-by override is accepted when valid, rejected when not", async () 
     assert.notEqual(bad.status, 0);
     assert.match(bad.stdout + bad.stderr, /closed_by/i);
   } finally {
-    await rm(root1, { recursive: true, force: true });
-    await rm(root2, { recursive: true, force: true });
+    await rm(root1, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(root2, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

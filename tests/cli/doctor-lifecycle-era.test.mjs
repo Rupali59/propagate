@@ -35,7 +35,7 @@ function runDoctor(root) {
 /** A workspace with a lifecycle log containing exactly `lines`. */
 async function workspaceWithLifecycle(t, lines) {
   const root = await mkdtemp(path.join(tmpdir(), "doctor-life-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const ws = path.join(root, "ws");
   await mkdir(path.join(ws, "propagation", "refs"), { recursive: true });
   await writeFile(path.join(ws, ".propagates.yml"), "workspace: true\nsources: {}\n", "utf8");
@@ -83,7 +83,7 @@ test("a workspace with no lifecycle log reads as NOT SCANNED, never as clean", a
   // Three states, not two. "No workspace has one yet" and "all lines are fine"
   // are different facts (rule:discernment-checks §2).
   const root = await mkdtemp(path.join(tmpdir(), "doctor-life-none-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const ws = path.join(root, "ws");
   await mkdir(ws, { recursive: true });
   await writeFile(path.join(ws, ".propagates.yml"), "workspace: true\nsources: {}\n", "utf8");

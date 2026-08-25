@@ -48,7 +48,7 @@ test("readFrontmatterDescription reads the description scalar", () => {
     const dir = skillDir(root, "has-desc", { description: "triggers on X" });
     assert.equal(readFrontmatterDescription(path.join(dir, "SKILL.md")), "triggers on X");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -60,7 +60,7 @@ test("readFrontmatterDescription returns null when there is no description line"
     assert.equal(readFrontmatterDescription(null), null);
     assert.equal(readFrontmatterDescription(path.join(root, "missing", "SKILL.md")), null);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -79,7 +79,7 @@ test("an invoked skill classifies active with usage/transcript evidence", () => 
     assert.match(items[0].evidence, /usageCount=5/);
     assert.match(items[0].evidence, /transcriptCount=2/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -99,7 +99,7 @@ test("a never-invoked skill WITH a description classifies installed-never-invoke
     assert.equal(items[0].hasDescription, true);
     assert.doesNotMatch(items[0].evidence, /cannot autotrigger/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -117,7 +117,7 @@ test("a never-invoked skill with NO description frontmatter is flagged as unable
     assert.equal(items[0].hasDescription, false);
     assert.match(items[0].evidence, /cannot autotrigger/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -136,7 +136,7 @@ test("a dangling SKILL.md symlink classifies unknown, never a default status", (
     assert.equal(items.length, 1);
     assert.equal(items[0].status, STATUS.UNKNOWN);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -160,7 +160,7 @@ test("transcriptWindow recurses into nested session/subagent directories", () =>
     assert.equal(w.start, oldTime.toISOString());
     assert.equal(w.end, newTime.toISOString());
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -186,7 +186,7 @@ test("inventoryPlugins classifies true as active-unadopted and false as dormant,
     assert.match(a.evidence, /no per-plugin invocation counter/);
     assert.equal(b.status, STATUS.DORMANT);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -224,7 +224,7 @@ test("a recently-committed repo with a remote classifies active", () => {
     assert.equal(repo.hasRemote, true);
     assert.match(repo.evidence, /remote present/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -238,7 +238,7 @@ test("a recent repo with NO remote classifies active-unadopted, never silently d
     assert.equal(repo.hasRemote, false);
     assert.match(repo.evidence, /NO REMOTE/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -253,7 +253,7 @@ test("a directory with real files and no .git anywhere below it is reported, not
     assert.ok(found, "expected the no-.git directory to be reported");
     assert.equal(found.status, STATUS.ACTIVE_UNADOPTED);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -264,7 +264,7 @@ test("an empty directory with no real files is not reported as a no-git artifact
     const { items } = inventoryRepos({ searchRoots: [root], maxDepth: 3 });
     assert.equal(items.filter((i) => i.kind === "directory (no .git)").length, 0);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -278,7 +278,7 @@ test("a repo walk past its depth budget records a drop, never a silent truncatio
     assert.equal(items.filter((i) => i.kind === "directory (no .git)").length, 0);
     assert.ok(dropped.length > 0, "expected the walk to log what it did not reach");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -292,7 +292,7 @@ test("a zero-budget walk reports every root-level child as dropped, not silently
     assert.ok(dropped.length > 0);
     assert.equal(budgetExceeded, true);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -309,7 +309,7 @@ test("countReferrers excludes the file's own path and counts distinct referring 
     assert.equal(count, 1);
     assert.deepEqual(files.map((f) => path.basename(f)), ["OTHER.md"]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -323,7 +323,7 @@ test("a standalone artifact with zero referrers and stale mtime classifies dorma
     const { items } = inventoryStandalone({ seeds: [target], roots: [root] });
     assert.equal(items[0].status, STATUS.DORMANT);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -335,7 +335,7 @@ test("a standalone artifact with zero referrers but a recent mtime classifies ac
     const { items } = inventoryStandalone({ seeds: [target], roots: [root] });
     assert.equal(items[0].status, STATUS.ACTIVE_UNADOPTED);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -373,7 +373,7 @@ test("inventory() never writes anything -- read-only smoke test over synthetic d
     assert.equal(inv.counts.total, inv.categories.skills.length + inv.categories.plugins.length + inv.categories.repos.length + inv.categories.standalone.length);
     assert.ok(inv.probeLimits.note.includes("seeded"));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

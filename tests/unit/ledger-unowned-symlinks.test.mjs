@@ -73,7 +73,7 @@ test("a ledger reachable both directly and through a symlinked parent directory 
       "the same physical ledger reached by two names must not be reported as an orphan",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -98,7 +98,7 @@ test("negative control: a genuinely unowned ledger IS still reported", async () 
       "a real orphan — no symlink involved, no relation to the owned ledger — must still be detected",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -130,7 +130,7 @@ test("a broken symlink among owned paths does not throw — the function still r
       "the real orphan is still found even though one owned path was a broken symlink",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

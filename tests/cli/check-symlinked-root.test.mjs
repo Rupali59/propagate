@@ -36,7 +36,7 @@ import { resolveChangedFile } from "../../cli.mjs";
 
 function sandbox() {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), "propagate-symroot-")));
-  return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) };
 }
 
 test("a changed file given by REALPATH resolves against a workspace held by its symlinked path", () => {

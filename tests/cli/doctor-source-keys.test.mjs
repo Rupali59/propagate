@@ -38,7 +38,7 @@ function workspace({ sourceKey, createSource }) {
   );
   writeFileSync(path.join(ws, "README.md"), "# readme\n");
   if (createSource) writeFileSync(path.join(ws, sourceKey), "# source\n");
-  return { root, ws, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, ws, cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) };
 }
 
 function doctor(root) {

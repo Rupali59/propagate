@@ -86,7 +86,7 @@ test("classifyDownstreamPath reports 'is-directory' for a real directory downstr
     const result = await classifyDownstreamPath(root, "admin/app");
     assert.equal(result, "is-directory");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -96,7 +96,7 @@ test("classifyDownstreamPath reports 'missing' (not 'is-directory') for an absen
     const result = await classifyDownstreamPath(root, "does/not/exist.tsx");
     assert.equal(result, "missing");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -107,7 +107,7 @@ test("classifyDownstreamPath reports 'ok' for a real file", async () => {
     const result = await classifyDownstreamPath(root, "real.tsx");
     assert.equal(result, "ok");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -161,7 +161,7 @@ test("doctor FAILS on a directory downstream and names the sidecar", async () =>
       "output names the offending sidecar",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -178,7 +178,7 @@ test("doctor still only WARNS for a declare-ahead missing kind: code downstream 
     assert.match(out, /declare-ahead code, not on disk/);
     assert.doesNotMatch(out, /✗.*not_yet_written\.py/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -204,6 +204,6 @@ test("doctor passes clean (no directory/missing findings) on a healthy fixture",
     assert.match(out, /✓.*sidecar downstream paths resolve/, "clean fixture must not trip the new checks");
     assert.doesNotMatch(out, /downstream is a directory/i);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

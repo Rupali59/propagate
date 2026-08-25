@@ -242,7 +242,7 @@ test("discovery: a brand-new workspace with NO docs/ pins the canonical propagat
     assert.equal(ws.ledgerJsonl, path.join(root, "propagation", "ledger.jsonl"));
     assert.equal(ws.ledgerMd, path.join(root, "propagation", "ledger.md"));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -261,7 +261,7 @@ test("discovery: a brand-new workspace WITH docs/ still pins propagation/, not d
       "a superseded ledger must not be created alongside the canonical one",
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -276,6 +276,6 @@ test("discovery: an EXISTING superseded ledger is still pinned — the move neve
     const ws = workspaces.find((w) => w.root === root);
     assert.equal(ws.ledgerJsonl, live, "a live ledger must stay pinned where it is");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

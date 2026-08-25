@@ -249,7 +249,7 @@ test("branch entries carry upstreamTrack and lastCommitIso", async (t) => {
   // Additive on purpose: bootstrap.mjs consumes enumerateRefs and must not pay
   // for a second spawn it has no use for.
   const dir = await mkdtemp(path.join(tmpdir(), "refs-atoms-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const git = (...a) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8" });
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   git("config", "user.email", "t@e.st");
@@ -301,12 +301,12 @@ test("includeRemoteOnly adds branches that exist only on origin", async (t) => {
 
   const origin = await mkdtemp(path.join(tmpdir(), "origin-"));
   const clone = await mkdtemp(path.join(tmpdir(), "clone-"));
-  t.after(() => rm(origin, { recursive: true, force: true }));
-  t.after(() => rm(clone, { recursive: true, force: true }));
+  t.after(() => rm(origin, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  t.after(() => rm(clone, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
 
   execFileSync("git", ["init", "-q", "--bare", origin]);
   const seed = await mkdtemp(path.join(tmpdir(), "seed-"));
-  t.after(() => rm(seed, { recursive: true, force: true }));
+  t.after(() => rm(seed, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const g = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { stdio: ["ignore", "pipe", "pipe"] });
   execFileSync("git", ["init", "-q", seed]);
   g(seed, "config", "user.email", "t@e.st");
@@ -343,7 +343,7 @@ test("a remote-only branch names its upstream, and does not fake a tracking stat
   const origin = await mkdtemp(path.join(tmpdir(), "origin2-"));
   const seed = await mkdtemp(path.join(tmpdir(), "seed2-"));
   const clone = await mkdtemp(path.join(tmpdir(), "clone2-"));
-  for (const d of [origin, seed, clone]) t.after(() => rm(d, { recursive: true, force: true }));
+  for (const d of [origin, seed, clone]) t.after(() => rm(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   execFileSync("git", ["init", "-q", "--bare", origin]);
   const g = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { stdio: ["ignore", "pipe", "pipe"] });
   execFileSync("git", ["init", "-q", seed]);

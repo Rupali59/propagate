@@ -88,7 +88,7 @@ function strangerMachine() {
     codeRoot,
     wsRoot,
     env,
-    cleanup: () => rmSync(home, { recursive: true, force: true }),
+    cleanup: () => rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   };
 }
 

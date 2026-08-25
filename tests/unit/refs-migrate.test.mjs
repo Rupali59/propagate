@@ -40,7 +40,7 @@ function treeSnapshot(root) {
 /** A workspace repo with a v1 snapshot naming `branches`, some of which are gone. */
 async function fixture(t, { v1Branches = ["main", "gone-feat"], realBranches = ["main"] } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "mrefs-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   execFileSync("git", ["init", "-q", root]);
   const git = (...a) => execFileSync("git", ["-C", root, ...a], { stdio: ["ignore", "pipe", "pipe"] });
   git("config", "user.email", "t@e.st");
@@ -128,7 +128,7 @@ test("is_active_line SURVIVES the conversion", async (t) => {
 test("a workspace with NO snapshot is a first run, not an error", async (t) => {
   // E4: the other six workspaces have no file at all.
   const root = await mkdtemp(path.join(tmpdir(), "mrefs-none-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   execFileSync("git", ["init", "-q", root]);
   execFileSync("git", ["-C", root, "config", "user.email", "t@e.st"]);
   execFileSync("git", ["-C", root, "config", "user.name", "t"]);

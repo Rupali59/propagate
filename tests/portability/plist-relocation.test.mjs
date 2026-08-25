@@ -57,8 +57,8 @@ test("generated plists never contain a version-pinned Homebrew Cellar node path"
       assert.match(content, /<key>ProgramArguments<\/key>/);
     }
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
-    await rm(wsRoot, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(wsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -109,8 +109,8 @@ test("regenerating from a relocated copy of the skill produces the relocated pat
       );
     }
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
-    await rm(wsRoot, { recursive: true, force: true });
-    await rm(skillCopy, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(wsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(skillCopy, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

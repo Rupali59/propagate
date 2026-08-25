@@ -34,7 +34,7 @@ function git(cwd, ...args) {
 /** A workspace repo plus `projects` sibling repos inside it. */
 async function workspace(t, { projects = [], detachedIn = null } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "wss-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const init = async (dir) => {
     await mkdir(dir, { recursive: true });
     execFileSync("git", ["init", "-q", dir]);

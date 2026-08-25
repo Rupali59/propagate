@@ -59,7 +59,7 @@ test("skills-scan resolves its search tool through PATH", () => {
     );
     assert.equal(JSON.parse(out)?.bin, decoy, `must resolve via PATH, got ${out}`);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -157,7 +157,7 @@ test("a user cross-allow.yml takes precedence over the shipped one", () => {
     );
     assert.equal(out, path.join(dir, "cross-allow.yml"), "user copy must win");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
