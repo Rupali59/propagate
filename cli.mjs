@@ -141,6 +141,8 @@ import {
   findUnownedLedgers,
   openCount,
   classifyUnownedLedger,
+  readLedgerByEra,
+  LEDGER_SCHEMA,
 } from "./lib/edges/ledger.mjs";
 import { findLedgersUnder } from "./lib/edges/refs.mjs";
 import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatter.mjs";
@@ -193,6 +195,7 @@ import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } fr
 import { runReleaseCheck } from "./lib/core/release.mjs";
 import { migrateLedger } from "./lib/edges/migrate-ledger.mjs";
 import { relocateLedger } from "./lib/edges/relocate-ledger.mjs";
+import { freezeLedgerV1 } from "./lib/edges/freeze-ledger.mjs";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -800,13 +803,29 @@ async function status() {
     }
 
     // ── v1, as history ─────────────────────────────────────────────────────
+    // CLASSIFIED BY THE DECLARED ERA, not by `open.length === 0`. That
+    // inference made "frozen history" and "nothing happens to be open right
+    // now" render IDENTICALLY — one open event turned settled history back into
+    // a worklist. See lib/edges/freeze-ledger.mjs for why the freeze relocates.
     const rows = await readLedger(ws.ledgerJsonl);
     const open = rows.filter((r) => r.status === "open");
+    const era = await readLedgerByEra(ws.ledgerJsonl);
     if (open.length === 0) {
-      if (rows.length) {
+      if (era.v1.length) {
         console.log(
-          `\n  ${DIM}frozen: ${rows.length} v1 events, all closed — history, not a worklist${RESET}`,
+          `\n  ${DIM}frozen: ${era.v1.length} v1 event(s) in archive/ — history, not a worklist${RESET}`,
         );
+      }
+      // An UNFROZEN ledger is a different fact from a frozen one, and from an
+      // empty one. Saying "frozen" here would be the original defect restated.
+      if (era.refused.length) {
+        console.log(
+          `\n  ${YELLOW}${era.refused.length} line(s) declare no schema ${LEDGER_SCHEMA}${RESET}` +
+            `${DIM} — not yet frozen. \`freeze-ledger --workspace <ws> --apply\`.${RESET}`,
+        );
+      }
+      if (era.current.length) {
+        console.log(`\n  ${DIM}${era.current.length} schema-${LEDGER_SCHEMA} event(s), none open${RESET}`);
       }
       console.log("");
       continue;
@@ -1589,10 +1608,26 @@ async function doctor() {
       check("cross-repo edges resolve", x.missing === 0 && x.outsideAllowlist === 0, crossDetail);
     }
     // G7: every fired row must carry a normalized `partner` join key.
+    //
+    // READS BOTH ERAS. This used to read the live ledger only. Once Phase D
+    // froze v1 into archive/, that made `noPartner === 0` trivially true — a
+    // check that cannot fail (rule:discernment-checks §1), and it would have
+    // read as a fix rather than as a relocation. The property is about the v1
+    // history, which is exactly what the archive now holds.
     const { CROSS_LEDGER_JSONL } = await import("./lib/core/config.mjs");
-    const rows = await readLedger(CROSS_LEDGER_JSONL);
-    const noPartner = rows.filter((r) => r.type === "drift" && !r.partner).length;
-    check("cross rows carry partner", noPartner === 0, `${noPartner} rows missing partner`);
+    const crossEra = await readLedgerByEra(CROSS_LEDGER_JSONL);
+    // EVERY parsed row, not the era buckets. Filtering by era here made the
+    // check scan 0 rows on an unfrozen cross ledger and report green — the
+    // vacuous pass this very check was repointed to avoid.
+    const crossAll = crossEra.all;
+    const noPartner = crossAll.filter((r) => r.type === "drift" && !r.partner).length;
+    // Scanning nothing and finding nothing are different facts; say which.
+    check(
+      "cross rows carry partner",
+      noPartner === 0,
+      `${noPartner} rows missing partner`,
+      `${crossAll.length} row(s) scanned across live + archive`,
+    );
   } catch (err) {
     check("cross-repo check ran", false, err.message);
   }
@@ -1992,6 +2027,55 @@ async function doctor() {
     } catch (err) {
       // Absence must be attributable: a failed census is UNKNOWN, not clean.
       info("lifecycle events", `not scanned — ${err.message}`);
+    }
+
+    // LEDGER ERA CENSUS — the same shape, for the other append-only store.
+    // The FAILING condition is `refused`, not the presence of v1: v1 is frozen
+    // history and legitimately sits in archive/ forever. A line in the LIVE
+    // ledger declaring no schema is a writer that bypassed appendRow, or a
+    // workspace whose freeze has not run — either way a shape nobody can
+    // account for, and calling it "history" would hide it.
+    try {
+      let cur = 0, v1 = 0, bypassed = 0, pending = 0, scanned = 0;
+      const offenders = [];
+      for (const ws of WORKSPACES) {
+        const r = await readLedgerByEra(ws.ledgerJsonl);
+        if (r.reason === "absent" || r.reason === "unconfigured") continue;
+        scanned++;
+        cur += r.current.length;
+        v1 += r.v1.length;
+        if (!r.refused.length) continue;
+        // WHICH FAILURE THIS IS depends on whether the freeze has run here, and
+        // conflating the two would assert something unknowable. A ledger with no
+        // archive/ has not been frozen yet, so its unstamped lines are v1
+        // history awaiting Phase D — a named pending state, not a defect. Once
+        // an archive EXISTS, every v1 line is in it, so an unstamped line in the
+        // live ledger has exactly one meaning: a writer that bypassed appendRow.
+        if (r.archives.length > 0) {
+          bypassed += r.refused.length;
+          offenders.push(`${shortPath(ws.ledgerJsonl)}: ${r.refused.length}`);
+        } else {
+          pending += r.refused.length;
+        }
+      }
+      if (scanned === 0) {
+        info("ledger events", "no workspace has a ledger.jsonl yet — not scanned, not zero");
+      } else {
+        check(
+          "no ledger line bypassed appendRow",
+          bypassed === 0,
+          bypassed
+            ? `${bypassed} unstamped line(s) in a FROZEN ledger (${offenders.slice(0, 3).join("; ")}) — written by something that skipped appendRow`
+            : "",
+          `${scanned} ledger(s) scanned`,
+        );
+        info("ledger events", `${cur} current (schema ${LEDGER_SCHEMA}) · ${v1} frozen v1 · across ${scanned} workspace(s)`);
+        if (pending > 0) {
+          info("ledger freeze", `${pending} line(s) not yet frozen — run \`freeze-ledger --workspace <ws> --apply\``);
+        }
+      }
+    } catch (err) {
+      info("ledger events", `not scanned — ${err.message}`);
     }
 
     check(
@@ -3165,6 +3249,56 @@ async function relocateLedgerCmd(argv = []) {
   if (!apply) {
     console.log(`\n${DIM}Re-run with --apply to write.${RESET}`);
   }
+}
+
+/**
+ * `freeze-ledger` — thin dispatch arm: argv parsing and printing only. All
+ * logic and every refusal live in lib/edges/freeze-ledger.mjs.
+ *
+ * Dry-run by default, matching `relocate-ledger` and `migrate`. The preview and
+ * the write take the SAME path through freezeLedgerV1, so a dry run cannot
+ * promise something apply would not do.
+ */
+async function freezeLedgerCmd(argv = []) {
+  const asJson = argv.includes("--json");
+  const apply = argv.includes("--apply");
+  const wsIdx = argv.indexOf("--workspace");
+  const workspace = wsIdx >= 0 ? argv[wsIdx + 1] : undefined;
+  const stampIdx = argv.indexOf("--stamp");
+  const stamp = stampIdx >= 0 ? argv[stampIdx + 1] : undefined;
+
+  if (!workspace) {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs freeze-ledger --workspace <root> [--apply] [--stamp <date>] [--json]`);
+    console.error(`${DIM}Dry-run by default. --apply moves the v1 rows and the .md into propagation/archive/.${RESET}`);
+    process.exit(2);
+  }
+
+  let result;
+  try {
+    result = await freezeLedgerV1({ workspace, apply, ...(stamp ? { stamp } : {}) });
+  } catch (err) {
+    if (asJson) console.log(JSON.stringify({ error: err.message }, null, 2));
+    else console.error(`${RED}error:${RESET} ${err.message}`);
+    process.exit(2);
+  }
+
+  if (asJson) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`${BOLD}# freeze-ledger${RESET}  ${DIM}(${apply ? "APPLY" : "dry-run — nothing written"})${RESET}\n`);
+  console.log(`  workspace: ${result.workspace}`);
+  if (result.skipped) {
+    // A named skip, never silence: eight of fourteen ledgers are legitimately empty.
+    console.log(`  ${DIM}${result.skipped}${RESET}`);
+    return;
+  }
+  console.log(`  ${apply ? "froze" : "would freeze"}:`);
+  console.log(`    ${result.from.jsonl} -> ${result.into.jsonl}`);
+  if (result.from.md) console.log(`    ${result.from.md} -> ${result.into.md}`);
+  console.log(`  lines: ${result.lines}`);
+  if (!apply) console.log(`\n${DIM}Re-run with --apply to write.${RESET}`);
 }
 
 /**
@@ -5977,6 +6111,8 @@ if (_invokedDirectly) {
     await migrateLedgerCmd(process.argv.slice(3));
   } else if (mode === "relocate-ledger") {
     await relocateLedgerCmd(process.argv.slice(3));
+  } else if (mode === "freeze-ledger") {
+    await freezeLedgerCmd(process.argv.slice(3));
   } else if (mode === "migrate") {
     await migrateCmd(process.argv.slice(3));
   } else if (mode === "migrate-refs") {
