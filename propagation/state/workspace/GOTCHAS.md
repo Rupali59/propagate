@@ -1013,7 +1013,21 @@ feature lands.
 
 **Fix, in order.** First: **run `npm test`, not `node --test`.** If you must iterate on one
 file, pass the variable yourself —
-`PROPAGATE_STATE_DIR=$(mktemp -d) node --test tests/watcher/events.test.mjs`.
+`PROPAGATE_STATE_DIR="${TMPDIR:-/tmp}/propagate-test-state" node --test tests/watcher/events.test.mjs`.
+
+**Use that STABLE path, not `$(mktemp -d)` — corrected 2026-08-25, and this entry
+prescribed the wrong one until then.** `CONFIG_PATH` derives from `STATE_DIR`
+(`lib/core/config.mjs`), so a FRESH temp dir has no `config.yml`: `searchRoots` is empty,
+discovery finds **zero workspaces**, and anything that resolves config fails with
+`no workspaces — hub root is not configured`. That is not a flake and not a regression — it
+is the harness reporting that it has no install to look at.
+
+**Cost of the bad advice, all on 2026-08-25:** a bisect across three commits chasing a
+"pre-existing" failure that was not one, a wrongly-filed issue (N50's third entry, since
+withdrawn), and a freshly-extracted `docs` module reported as broken when the command was
+fine — that run had a stale `PROPAGATE_STATE_DIR` exported earlier in the same shell block.
+`rule:enforcement-watches-itself` names this shape exactly: *"a gotcha entry's own advice was
+wrong."* Second recorded instance.
 
 Second, belt-and-braces for the tests that write: scope the store inside the test and assert
 on the message, never on the throw alone:

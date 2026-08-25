@@ -36,18 +36,34 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
-const DOCTOR_DIR = path.join(DIR, "..", "..", "lib", "report", "doctor");
+const REPO = path.join(DIR, "..", "..");
+
+// BOTH extracted layers, because the correct prefix DIFFERS between them and
+// that is exactly the mistake this file exists to catch:
+//   from lib/report/doctor/  ->  ../../core/x.mjs
+//   from commands/           ->  ../lib/core/x.mjs
+// A specifier copied out of cli.mjs (`./lib/core/x.mjs`) is wrong in both, and
+// wrong in a DIFFERENT way in each. Scanning only one layer would have left the
+// other unguarded while this suite reported green.
+const SCAN_DIRS = [
+  path.join(REPO, "lib", "report", "doctor"),
+  path.join(REPO, "commands"),
+];
 
 /** Every `await import("<specifier>")` / `import("<specifier>")` literal in a file. */
 function dynamicImportSpecifiers(source) {
   return [...source.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
 }
 
-const MODULES = existsSync(DOCTOR_DIR)
-  ? readdirSync(DOCTOR_DIR, { recursive: true })
-      .map(String)
-      .filter((f) => f.endsWith(".mjs"))
-  : [];
+/** [absolute dir, relative file] for every .mjs in either scanned layer. */
+const MODULES = SCAN_DIRS.flatMap((dir) =>
+  existsSync(dir)
+    ? readdirSync(dir, { recursive: true })
+        .map(String)
+        .filter((f) => f.endsWith(".mjs"))
+        .map((f) => [dir, f])
+    : [],
+);
 
 test("there are doctor modules to check — an empty scan must not read as a pass", () => {
   // rule:discernment-checks §1. If lib/report/doctor/ is renamed or emptied,
@@ -55,7 +71,7 @@ test("there are doctor modules to check — an empty scan must not read as a pas
   // directory it never looked at.
   assert.ok(
     MODULES.length > 0,
-    `no .mjs files found under ${DOCTOR_DIR} — this suite would then verify nothing while passing`,
+    `no .mjs files found under ${SCAN_DIRS.join(" or ")} — this suite would then verify nothing while passing`,
   );
 });
 
@@ -63,8 +79,8 @@ test("every dynamic import in a doctor module resolves from that module", async 
   const failures = [];
   let checked = 0;
 
-  for (const rel of MODULES) {
-    const abs = path.join(DOCTOR_DIR, rel);
+  for (const [dir, rel] of MODULES) {
+    const abs = path.join(dir, rel);
     const specifiers = dynamicImportSpecifiers(readFileSync(abs, "utf8"));
     for (const spec of specifiers) {
       checked++;
@@ -74,7 +90,7 @@ test("every dynamic import in a doctor module resolves from that module", async 
       const target = path.resolve(path.dirname(abs), spec);
       if (!existsSync(target)) {
         failures.push(
-          `${rel}: import("${spec}") -> ${target} does not exist. ` +
+          `${path.relative(REPO, abs)}: import("${spec}") -> ${target} does not exist. ` +
             `A specifier copied out of cli.mjs is relative to the REPO ROOT, not to this module.`,
         );
         continue;
@@ -83,7 +99,7 @@ test("every dynamic import in a doctor module resolves from that module", async 
       try {
         await import(pathToFileURL(target).href);
       } catch (err) {
-        failures.push(`${rel}: import("${spec}") exists but failed to load — ${err.message}`);
+        failures.push(`${path.relative(REPO, abs)}: import("${spec}") exists but failed to load — ${err.message}`);
       }
     }
   }
