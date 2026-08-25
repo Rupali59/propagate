@@ -3596,7 +3596,7 @@ async function backlogCmd() {
 
   console.log(`${BOLD}backlog${RESET} ${DIM}${result.generatedAt}${RESET}`);
   console.log(
-    `  ${result.totals.stateFilesRead} STATE.md, ${result.totals.todoFilesRead} TODOS.md, ${result.totals.issueFilesRead} docs/ISSUES.md discovered`,
+    `  ${result.totals.stateFilesRead} STATE.md, ${result.totals.todoFilesRead} TODOS.md, ${result.totals.issueFilesRead} ISSUES.md discovered`,
   );
   console.log();
 

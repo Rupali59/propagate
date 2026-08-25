@@ -112,6 +112,56 @@ test("parseTodoLikeFile classifies an explicit 'none open' file as a stub, not u
   assert.equal(r.unparsed, null);
 });
 
+test("a LONG register that merely mentions 'no open' in prose is NOT a stub", () => {
+  // Measured 2026-08-25 on propagate's own ISSUES.md: 63 id-keyed entries, and
+  // the words "no open" appear twice in prose at :906 and :933. The stub branch
+  // was `STUB_EXPLICIT_RE.test(text) || length < 220` — an OR — so the phrase
+  // anywhere at any size declared the whole file a stub with open:0.
+  //
+  // Reporting a full register as "0 open" is worse than failing to find it: a
+  // parser gap becomes a confident false negative.
+  const body = ["# Issues", "", "### N1 · a real thing", "x".repeat(600), "", "there is no open question here", ""].join("\n");
+  const r = parseTodoLikeFile(body, "/tmp/ISSUES.md");
+  assert.notEqual(r.format, "stub", "a 600+ char register must not be a stub because of a prose mention");
+  assert.ok(r.open >= 1, "its real entry must survive");
+});
+
+test("a SHORT file declaring 'none open' is still a stub — the marker keeps working", () => {
+  const r = parseTodoLikeFile("# TODOS\n\nnone open\n", "/tmp/TODOS.md");
+  assert.equal(r.format, "stub");
+  assert.equal(r.open, 0);
+});
+
+test("parseTodoLikeFile recognises DASHLESS leading ids (### N1 ·), not only TM-010 style", () => {
+  // ID_HEADING_RE requires 2-6 letters, a dash, 2-4 digits. propagate numbers
+  // its register N1..N50 plus A/B/C/E/G prefixes — 63 entries, every one
+  // invisible until ID_HEADING_LEADING_RE was added.
+  const body = [
+    "# Issues",
+    "",
+    "### N1 · first thing — **S1**",
+    "### A2 · second thing — **S2**",
+    "### B3 · done thing — **RESOLVED 2026-08-13**",
+  ].join("\n");
+  const r = parseTodoLikeFile(body, "/tmp/ISSUES.md");
+  assert.equal(r.format, "id-keyed");
+  assert.equal(r.parsed, 3, "all three headings are entries");
+  assert.equal(r.open, 2, "the RESOLVED one is closed, not open");
+});
+
+test("the dashless id must be ANCHORED — an id inside heading prose is not an item", () => {
+  // The safety margin on a weak fingerprint. `N1` is far less distinctive than
+  // `TM-010`, so an unanchored version would promote ordinary headings into
+  // backlog items. These three must NOT parse as id-keyed.
+  for (const heading of ["## V2 roadmap and beyond", "### Fix S1 before shipping", "## Notes on N1 and friends"]) {
+    const r = parseTodoLikeFile(`# Doc\n\n${heading}\n${"y".repeat(400)}\n`, "/tmp/TODOS.md");
+    assert.notEqual(r.format, "id-keyed", `"${heading}" must not be read as an ID-keyed item`);
+  }
+  // ...but a genuine leading id at the same depth must.
+  const ok = parseTodoLikeFile(`# Doc\n\n## V2 · a real entry\n${"y".repeat(400)}\n`, "/tmp/TODOS.md");
+  assert.equal(ok.format, "id-keyed", "a leading id IS an item, even when short");
+});
+
 test("parseTodoLikeFile never reports parsed:0 for a file with real content it cannot classify", () => {
   const paragraph = "This file discusses ongoing architecture concerns in long-form prose without any checkbox or ID markers. ".repeat(5);
   const r = parseTodoLikeFile(paragraph, "/fake/TODOS.md");
@@ -179,6 +229,68 @@ test("discoverBacklogFiles finds STATE.md, TODOS.md, docs/ISSUES.md across a tre
     assert.equal(found.stateMd.length, 1);
     assert.equal(found.todosMd.length, 1);
     assert.equal(found.issuesMd.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("discoverBacklogFiles finds ISSUES.md as a SIBLING of STATE.md — the v3 layout, not just docs/", () => {
+  // THE REGRESSION THIS PINS. The v3 move (2026-08-22/23) relocated ISSUES.md
+  // to propagation/state/<project>/ISSUES.md, beside STATE.md. This reader
+  // still checked only `<dir>/docs/ISSUES.md`, so on 2026-08-25 `backlog`
+  // printed "0 docs/ISSUES.md discovered" while the tree's ONLY ISSUES.md --
+  // propagate's own, 43 open entries -- sat in a directory the walk was
+  // already visiting (it collected STATE.md from beside it).
+  //
+  // Zero is the dangerous output here: it reads as "no issues exist" rather
+  // than "I looked where they are not" (rule:discernment-checks §6).
+  const root = tmp("backlog-v3-issues-");
+  try {
+    const ws = path.join(root, "Workspace", "propagation", "state", "workspace");
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(path.join(ws, "STATE.md"), "# STATE\n");
+    writeFileSync(path.join(ws, "ISSUES.md"), "# ISSUES\n\n### N1 · a thing\n");
+
+    const found = discoverBacklogFiles({ searchRoots: [root] });
+    assert.equal(
+      found.issuesMd.length,
+      1,
+      "ISSUES.md beside STATE.md must be discovered — checking only docs/ISSUES.md is the pre-v3 pattern",
+    );
+    assert.ok(found.issuesMd[0].endsWith(path.join("workspace", "ISSUES.md")));
+    // The walk reaching the directory is the premise of the bug report, so
+    // assert it rather than assume it: if this fails the cause is traversal,
+    // not the path pattern, and the fix above is aimed at the wrong thing.
+    assert.equal(found.stateMd.length, 1, "the walk must reach that directory at all");
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("discoverBacklogFiles still finds the LEGACY docs/ISSUES.md — unmigrated workspaces must not lose their issues", () => {
+  // Both paths are kept deliberately. Swapping rather than adding would move
+  // the blind spot instead of removing it.
+  const root = tmp("backlog-legacy-issues-");
+  try {
+    const proj = path.join(root, "Old");
+    mkdirSync(path.join(proj, "docs"), { recursive: true });
+    writeFileSync(path.join(proj, "docs", "ISSUES.md"), "# ISSUES\n");
+    const found = discoverBacklogFiles({ searchRoots: [root] });
+    assert.equal(found.issuesMd.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("a project carrying BOTH layouts reports two files, never one silently dropped", () => {
+  const root = tmp("backlog-both-issues-");
+  try {
+    const proj = path.join(root, "Both");
+    mkdirSync(path.join(proj, "docs"), { recursive: true });
+    writeFileSync(path.join(proj, "docs", "ISSUES.md"), "# legacy\n");
+    writeFileSync(path.join(proj, "ISSUES.md"), "# current\n");
+    const found = discoverBacklogFiles({ searchRoots: [root] });
+    assert.equal(found.issuesMd.length, 2, "mid-migration both exist; collapsing them hides one");
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
