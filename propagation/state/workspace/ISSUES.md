@@ -2362,3 +2362,42 @@ settlements record findings rather than clean reconciles (`e377000b`, `eddcd444`
 guard is conservative, since NEVER_VERIFIED means unchecked, not known-wrong. Settling them
 in fix order would have required draining most of the 399. `--out-of-order` was used where
 both sides had been read, by explicit decision, and every such event says so in its reason.
+
+---
+
+### N50 · `inventory.test.mjs` classifies by a 5s git timeout, so its verdict depends on machine load
+
+**Status:** open. Reproduced twice under full-suite concurrency 2026-08-25; passes in
+isolation every time.
+
+`lib/report/inventory.mjs:329` runs `git` with `timeout: GIT_TIMEOUT_MS` (5000ms), and
+`runGit` correctly degrades to `{ ok: false, error: "git timed out" }` when it expires. That
+degradation is right for production — a hung git must not hang `inventory`. It is wrong as a
+*test* input, because `node --test` runs files concurrently and the classification then
+changes underneath the assertion:
+
+```
+a recent repo with NO remote classifies active-unadopted, never silently dropped
+  isolated       8.4s   PASS
+  in full suite 15.5s   FAIL
+```
+
+`gitStage — apply:true on a non-git directory runs git init` (`tests/cli/bootstrap.test.mjs`)
+is the same shape, via `bootstrap.mjs`'s own `GIT_TIMEOUT_MS`.
+
+**Why it matters beyond the annoyance.** A test whose verdict depends on machine load is a
+check that can fail for the wrong reason, which `rule:discernment-checks` §4 rates as bad as
+one that cannot fail — and the more common harm is the opposite reading: the next person sees
+red, shrugs, re-runs, and gets green. That teaches the suite is unreliable, which is how a
+real regression gets waved through.
+
+**Not caused by the doctor split** (#31 T2), though it surfaced during it. `inventory.mjs` is
+untouched by that work and nothing in the extracted modules reaches it. The two new test
+files add marginal concurrency pressure, which is enough to change how often an existing
+race lands, not enough to be its cause.
+
+**Fix direction, when it is picked up:** make the timeout injectable and have these tests
+pass a generous value, or have `runGit` distinguish "timed out" from "failed" at the call
+site so a timeout produces an attributable `status`, not a silently different
+classification. Do NOT simply raise the constant — that moves the threshold without removing
+the dependence on load.
