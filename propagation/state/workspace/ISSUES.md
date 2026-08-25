@@ -2367,8 +2367,15 @@ both sides had been read, by explicit decision, and every such event says so in 
 
 ### N50 · `inventory.test.mjs` classifies by a 5s git timeout, so its verdict depends on machine load
 
-**Status:** open. Reproduced twice under full-suite concurrency 2026-08-25; passes in
-isolation every time.
+**Status:** open. Reproduced in 3 of 4 full-suite runs 2026-08-25; passes in isolation every
+time. A third test joins the set intermittently: `a recently-committed repo with a remote
+classifies active` (27.4s under load).
+
+**Root cause, measured rather than guessed.** `node --test` spawns one worker PER TEST FILE.
+There are **123 test files on a 10-core machine**, ~9 workers resident at once, and several of
+them shell out to real `git` against real temp repos. Observed `load average: 33.6` mid-run —
+mostly I/O wait, not CPU. A 5-second `git` timeout is simply not a safe assumption in that
+environment, and the tests that depend on one are the ones that fail.
 
 `lib/report/inventory.mjs:329` runs `git` with `timeout: GIT_TIMEOUT_MS` (5000ms), and
 `runGit` correctly degrades to `{ ok: false, error: "git timed out" }` when it expires. That
