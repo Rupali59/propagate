@@ -1269,3 +1269,47 @@ once and planning the whole batch.
 
 **Cost:** ~30 minutes, no wrong data. Everything written was true when written; the waste was
 ordering, not correctness.
+
+---
+
+### G60 · A relative dynamic import moved out of `cli.mjs` fails SILENTLY, and doctor stays green
+
+**Trigger:** `await import\("\./lib/`
+**Fires on:** `await import("./lib/refs/findings.mjs")`
+
+Extracting doctor's per-workspace section (#31 T2) carried
+`await import("./lib/refs/findings.mjs")` along with it. That specifier is correct relative
+to `cli.mjs` at the repo root and **wrong** relative to `lib/report/doctor/`, where it
+resolves to `lib/report/doctor/lib/refs/findings.mjs`.
+
+**Four independent things that should have caught it, and did not:**
+
+| | why not |
+|---|---|
+| `node --check` | a dynamic import is not resolved at parse time |
+| the unit tests | they exercise the module's other paths |
+| the full suite | 1097 + 91 green |
+| **`doctor` itself** | **exit 0** |
+
+The last one is the point. That region is wrapped in a `try/catch` that reports a failed
+probe as `info` — **deliberately**, because "the probe could not run" is a third state
+distinct from pass and fail (`rule:discernment-checks` §2). So a missing module rendered as
+one dim informational line.
+
+**Signal:** `· ref registry  probe could not run: Cannot find module '…/lib/report/doctor/lib/refs/findings.mjs'`
+— one line, dim, in a command that exits 0.
+
+**Measured cost:** doctor's output fell from **465 lines to 241** — the entire branch-registry
+section for every one of 13 workspaces, gone — while the command reported success. Caught
+only by diffing against a baseline captured before the change.
+
+**The guard:** `tests/unit/doctor-module-imports.test.mjs` resolves EVERY relative dynamic
+import in `lib/report/doctor/**` from that module's own location. Deliberately not a grep for
+`"./lib/"` — that is a fingerprint for one spelling of the mistake, and resolving catches
+spellings nobody has made yet. It also asserts the module list and the specifier count are
+non-zero, so an emptied directory cannot pass vacuously.
+
+**The general form, worth more than the instance:** a `try/catch` that correctly distinguishes
+"could not run" from "failed" will, just as correctly, absorb a refactor's mistakes. Every
+extraction that moves code *into* such a region needs its own resolution check, because the
+error handling is working exactly as designed while hiding you.
