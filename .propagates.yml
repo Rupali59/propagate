@@ -181,6 +181,40 @@ sources:
           this edge is what should fire when that gap is closed.
         kind: code
 
+  # Added 2026-08-25 alongside DATA_MODEL.md §11, per
+  # rule:refactor-updates-sidecar-same-commit and
+  # rule:adversarial-review-reads-the-ledger ("declare the edges the review's
+  # findings imply"). content-id.mjs was declared as a downstream NOWHERE while
+  # being the primitive the whole derivation rests on — so its public signature
+  # could change, and did, with nothing able to notice a doc drifting from it.
+  # This is the edge that would have caught it.
+  docs/DATA_MODEL.md:
+    propagates_to:
+      - path: lib/edges/content-id.mjs
+        why: >-
+          §11 states contentId's return contract and its cost model: that
+          wantGitBlob defaults to FALSE, that the default path makes zero git
+          subprocesses, that gitBlob:null conflates "not requested" with
+          "untracked or dirty" on purpose, and that the ref path ignores the
+          flag. Every one of those is a fact about this file. Flipping the
+          default, or reintroducing an unconditional dirtySet/batchTrackedBlobs
+          call, makes the section wrong while every test still passes.
+        kind: code
+      - path: lib/edges/reconcile.mjs
+        why: >-
+          §11's measurement is of reconcile() — 377 edges to 868 rows over 725
+          files in 24 repos. Changing what reconcile hashes, or making it resolve
+          content some other way, invalidates the numbers and the argument built
+          on them.
+        kind: code
+      - path: tests/watcher/content-id.test.mjs
+        why: >-
+          §11 asserts the contract is guarded by SPAWN COUNT rather than timing,
+          and names the mutation result (expected 0, actual 2). That guard lives
+          in this file; deleting or weakening it turns the section into a claim
+          nothing checks.
+        kind: code
+
   # Added 2026-08-17 with the docs themselves, per
   # rule:refactor-updates-sidecar-same-commit. LIFECYCLE.md's whole subject is
   # the state machines these three files implement; a state added or renamed in

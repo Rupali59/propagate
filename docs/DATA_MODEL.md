@@ -594,6 +594,81 @@ record.
 
 ---
 
+## 11. Content identity: what it costs, and the field nothing reads
+
+`contentId()` returns four fields. Three are load-bearing; one is not, and the
+difference was worth **69% of every `reconcile()` run** until 2026-08-25.
+
+| field | who reads it |
+|---|---|
+| `id` | `reconcile.mjs` compares it against `source_content` / `downstream_content` — this IS the drift derivation |
+| `alg` | recorded so a future hash change is detectable |
+| `unresolvable` | the reason an id is absent; §"Absent, null, and `working-tree`" applies |
+| **`gitBlob`** | **nothing in production.** Not the derivation, not the event schema, not any reporter |
+
+`gitBlob` is a *retrieval hint*: git's sha1 of the git object, captured only when
+the bytes are genuinely in the object store (tracked AND clean). It is a real
+design primitive and is kept. But producing it needs `git ls-files -s` +
+`git status --porcelain` for the repo, and that is the entire cost of the
+working-tree path.
+
+### Measured on the real tree, 2026-08-25
+
+```
+reconcile() over 377 declared edges -> 868 rows over 725 files in 24 repos
+
+                             BEFORE            AFTER
+  git spawns                     48                0     <- deterministic
+  summed git cost          2,905ms                 0     <- measured per repo
+  cold wall-clock    3,148-4,232ms      899-1,592ms       <- 3 samples each
+  hashing all 725 files       ~22ms         unchanged
+```
+
+**Quote the spawn count, not the speedup.** Wall-clock on a shared laptop varies
+by ~1.8x run to run in BOTH directions: the before-samples spanned 3,148-4,232ms
+and the after-samples 899-1,592ms. Pairing the best after against the worst
+before yields "6.7x", which is cherry-picking — this document said exactly that
+for one revision before three clean runs corrected it. The defensible claims are
+the two that do not move: **48 spawns to 0**, and **2,905ms of summed `git`
+removed**, both counted rather than timed.
+
+Comparing medians, cold reconcile went from roughly 3.5s to roughly 1.5s.
+
+**The batching was never the problem.** 24 repos produced exactly 48 spawns —
+two per repo, never per file — which is the documented optimum. The cost is that
+`git status` on a large working tree is slow, and it is charged **per repo
+touched, not per file read**:
+
+| repo | files it contributes | git cost |
+|---|---:|---:|
+| `Astroclarity` | 2 | 1,036ms |
+| `Manav-portfolio` | 46 | 681ms |
+| `PanditPawanKaushik` | 938 | 51ms |
+
+A cost uncorrelated with the work is the tell. Three repos were 67% of it.
+
+### The contract
+
+`contentId(abs, {ref, wantGitBlob})` and `hashMany(paths, {wantGitBlob})` —
+**`wantGitBlob` defaults to false.** With it off, the working-tree path makes
+**zero** git subprocesses.
+
+- **`gitBlob: null` means "not requested" as well as "untracked or dirty".** Those
+  are deliberately not distinguished, because the hint is defined as best-effort
+  and every consumer already null-checks it. A caller needing the distinction asks
+  for the hint.
+- **The `ref` path is unaffected.** Its blob sha comes free from the `ls-tree` it
+  already runs, so `wantGitBlob` is ignored there and costs nothing either way.
+- **The flag changes cost, never identity.** `id` is byte-identical with the flag
+  on or off; `tests/watcher/content-id.test.mjs` asserts that alongside the
+  spawn counts.
+
+**Guarded by spawn count, not by timing.** The test asserts 0 spawns by default
+and exactly 2 per repo when asked — a duration assertion is flaky on a shared
+machine and gets deleted the first time CI hiccups, which is how a performance
+property silently stops being one. Mutation-checked: forcing the gate open makes
+it report `expected 0, actual 2`.
+
 ## What this document does not do
 
 No recommendations, no fixes, no roadmap — that's a later pass (see the plan

@@ -103,8 +103,9 @@ test("gitBlob is populated for a tracked clean file and null for a dirty one", a
   await writeFile(dirtyPath, "dirtied now\n");
   clearRepoCaches();
 
-  const clean = contentId(cleanPath);
-  const dirty = contentId(dirtyPath);
+  // R2/D11: the git hint is opt-in now — these tests are its only consumers.
+  const clean = contentId(cleanPath, { wantGitBlob: true });
+  const dirty = contentId(dirtyPath, { wantGitBlob: true });
 
   assert.equal(clean.unresolvable, null);
   assert.ok(clean.gitBlob, "expected a gitBlob hint for a tracked clean file");
@@ -125,7 +126,7 @@ test("our sha256 content id differs from git's own blob sha (different address s
   git(["commit", "-q", "-m", "initial"], repo);
   clearRepoCaches();
 
-  const result = contentId(filePath);
+  const result = contentId(filePath, { wantGitBlob: true });
   const blobSha = gitBlobSha(repo, "file.txt");
 
   assert.equal(result.gitBlob, blobSha, "the hint should match git's real blob sha");
@@ -144,6 +145,67 @@ test("our sha256 content id differs from git's own blob sha (different address s
 // -----------------------------------------------------------------------
 // 5. file outside any repo -> unresolvable: "no-repo", no throw
 // -----------------------------------------------------------------------
+test("hashMany makes ZERO git spawns by default, and exactly two per repo when the hint is asked for", async () => {
+  // R2/D11 — the durable guard for the change that removed 48 git subprocesses
+  // (2,905ms of summed `git` time) from `reconcile()` on the real tree. It
+  // asserts the SPAWN COUNT, not a duration, for two reasons: a timing
+  // assertion is flaky on a shared machine and gets deleted the first time CI
+  // hiccups, and wall-clock here varies ~1.8x run to run in both directions,
+  // so a duration would be the wrong thing to pin even if it were stable.
+  // The spawn count does not move. See docs/DATA_MODEL.md §11.
+  //
+  // The two calls being gated (`git ls-files -s`, `git status --porcelain`)
+  // were 69% of reconcile and served only `gitBlob`, which no production
+  // caller reads. If a future change makes them unconditional again, this
+  // goes red immediately and names why.
+  const repo = await makeTempRepo();
+  const paths = [];
+  for (const name of ["a.txt", "b.txt", "c.txt"]) {
+    const p = path.join(repo, name);
+    await writeFile(p, `${name}\n`);
+    paths.push(p);
+  }
+  git(["add", "."], repo);
+  git(["commit", "-q", "-m", "three files"], repo);
+
+  clearHashCache();
+  clearRepoCaches();
+  __resetSpawnCountForTests();
+
+  const plain = hashMany(paths);
+  assert.equal(
+    __getSpawnCountForTests(),
+    0,
+    "the default path must not spawn git at all — that is the whole point of the flag",
+  );
+  // Content identity is unaffected: every file still resolves, with a real id.
+  for (const p of paths) {
+    assert.equal(plain.get(p).unresolvable, null);
+    assert.ok(plain.get(p).id, "an id is still produced without any git call");
+    assert.equal(plain.get(p).gitBlob, null, "no hint was asked for, so none is offered");
+  }
+
+  clearHashCache();
+  clearRepoCaches();
+  __resetSpawnCountForTests();
+
+  const hinted = hashMany(paths, { wantGitBlob: true });
+  assert.equal(
+    __getSpawnCountForTests(),
+    2,
+    "asking for the hint costs exactly one ls-files + one status for the repo, never per file",
+  );
+  for (const p of paths) {
+    assert.ok(hinted.get(p).gitBlob, "the hint still works when asked for — it was gated, not deleted");
+  }
+  // Same content id either way: the flag must change cost, never identity.
+  for (const p of paths) {
+    assert.equal(plain.get(p).id, hinted.get(p).id);
+  }
+
+  await rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+});
+
 test("a file outside any git repo resolves to unresolvable: no-repo, never throws", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "content-id-orphan-"));
   const filePath = path.join(dir, "not-in-a-repo.txt");
@@ -269,7 +331,9 @@ test("hashMany over N files in one repo spawns git a bounded number of times, no
   clearRepoCaches();
   __resetSpawnCountForTests();
 
-  const results = hashMany(paths);
+  // wantGitBlob:true so the O(1)-per-repo spawn assertion below still has
+  // spawns to count — it is the batching property being tested, not the hint.
+  const results = hashMany(paths, { wantGitBlob: true });
 
   assert.equal(results.size, N);
   for (const p of paths) {
