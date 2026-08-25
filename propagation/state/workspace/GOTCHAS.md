@@ -1241,3 +1241,31 @@ would have restored 36 `null`s over the values.
 instance of `rule:safety-flag-needs-a-test`'s corollary, *never run a command to find out what
 it would do*. Reasoning by analogy from the neighbouring caller's posture is exactly what the
 other three did too.
+
+### G59 · Settling inbound edges before the hub node stops changing costs you the whole set, once per edit
+
+`verify` pins an edge to the CURRENT content pair. So editing a downstream re-REVERSES every
+edge that points **into** it — all of them, at once.
+
+Measured 2026-08-25 in `Vipin Kaushik`: `CLAUDE.md` has **nine inbound edges**. It was edited
+three times in one session (a content-ownership line; a branch-strategy correction; two
+astroacharya path corrections). Each edit re-opened all nine, so nine edges were read,
+reasoned about and settled **three times** — 27 verifications for 9 edges, every one of them
+honest and 18 of them wasted.
+
+**Signal:** you run `status`, see `0 need attention`, make one more edit to the hub file, and
+the same list comes straight back.
+
+**Instead:** on a node with many inbound edges, do all the editing first and settle the
+inbound set **last**. `propagate graph` prints the fix order root-to-leaf, which handles the
+*dependency* direction; it does not warn you that your own next edit will undo the row you
+just closed.
+
+**Corollary — the blocker list is not the whole blocker list.** `graph` excludes
+NEVER_VERIFIED edges from the printed worklist while still counting them as blockers, so a
+`DIVERGED` row can report `BLOCKED by 3`, and then reveal a fourth (`rules/tool-priority.md`)
+only once those three clear. Expect to re-run it after each settlement rather than reading it
+once and planning the whole batch.
+
+**Cost:** ~30 minutes, no wrong data. Everything written was true when written; the waste was
+ordering, not correctness.
