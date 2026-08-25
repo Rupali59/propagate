@@ -183,6 +183,41 @@ summary is below. Each phase is independently shippable.
 | **F** | The four orphans | `curate-docs-skill` is moved or excluded, **never deleted** — the repaired N43 rollback cites it |
 
 
+**Phase F, as executed (2026-08-25).** Two of the four were already resolved; the other
+two were smaller than described, and one was measured wrong.
+
+**Orphan 1 — the rendered ledgers. The census was working-tree-only, and 3 of 4 were
+not orphans.** Re-measured across every branch:
+
+| Project | `.jsonl` on | verdict |
+|---|---|---|
+| `Keerti-portfolio` | **0 of 1** branches | genuinely orphaned — this render is the only surviving record |
+| `SSJK-mb` | **5 of 6** | NOT an orphan: checked out on `r1-dashboard-rebuild`, the one branch of six lacking it |
+| `keerti-job-radar` | 1 of 2 | data exists, and holds no rows either |
+| `Manav-portfolio` | 2 of 3 | already re-headed 2026-08-17 |
+
+Workspace `GOTCHAS.md` G10 exactly — *"say 'absent on `<branch>`', never bare 'absent'"*.
+All three unhandled files were re-headed as frozen historical renders, each stating its own
+per-branch reality rather than a generic claim. Tables kept (19 / 44 / 2 rows): real history.
+Phase D made one claim NEWLY false for them — `renderMarkdown` was removed, so "This file is
+rendered" no longer merely rotted, it became false by construction.
+
+**RESIDUE, not done: the fix reaches only the checked-out branch.** `SSJK-mb` carries this
+`.md` on all 6 branches and 4 of them still assert "Watcher healthy"; `keerti-job-radar` has
+a second branch. Correcting those means checking out branches carrying unrelated in-flight
+work, which is not something to do unasked.
+
+**Orphan 2 — `curate-docs-skill`: retained, working, and mis-described.** The divergence is
+not a sidecar drifting from its own repo — its sidecar declares `skills/eng/SKILL.md`, which
+is correct for ITS layout. The two REPOS diverged when the vendored twin was converted to
+`sections/*.md`. It is not discovered as a workspace (it nests under the hub), its edges
+resolve, and doctor is green. Nothing to move or exclude; the action is to leave it and say so.
+
+**Orphan 3 — phantom `WatchPaths` (N46): RESOLVED 2026-08-24.** `watchPathsFor()` returns `[]`.
+
+**Orphan 4 — the prototype:** promoted in Phase E.
+
+
 **Phase C, as executed (2026-08-24).** The "9 absorb / 6 leave" split counted libs across
 ALL workspaces; `worker-routing` is PanditPawanKaushik-only and absent from
 `Vipin Kaushik/scripts/hygiene/lib/`, where C was actually done. Measured there:
