@@ -3266,16 +3266,29 @@ async function freezeLedgerCmd(argv = []) {
   const workspace = wsIdx >= 0 ? argv[wsIdx + 1] : undefined;
   const stampIdx = argv.indexOf("--stamp");
   const stamp = stampIdx >= 0 ? argv[stampIdx + 1] : undefined;
+  const cross = argv.includes("--cross");
 
   if (!workspace) {
-    console.error(`${RED}error:${RESET} usage: node cli.mjs freeze-ledger --workspace <root> [--apply] [--stamp <date>] [--json]`);
+    console.error(`${RED}error:${RESET} usage: node cli.mjs freeze-ledger --workspace <root> [--cross] [--apply] [--stamp <date>] [--json]`);
     console.error(`${DIM}Dry-run by default. --apply moves the v1 rows and the .md into propagation/archive/.${RESET}`);
     process.exit(2);
   }
 
   let result;
   try {
-    result = await freezeLedgerV1({ workspace, apply, ...(stamp ? { stamp } : {}) });
+    let ledgerOverride = null;
+    if (cross) {
+      // Discovery resolves a workspace's OWN ledger; the cross-repo one shares
+      // the hub's propagation/ dir and is invisible to it.
+      const { CROSS_LEDGER_JSONL, CROSS_LEDGER_MD } = await import("./lib/core/config.mjs");
+      ledgerOverride = { jsonl: CROSS_LEDGER_JSONL, md: CROSS_LEDGER_MD };
+    }
+    result = await freezeLedgerV1({
+      workspace,
+      apply,
+      ...(stamp ? { stamp } : {}),
+      ...(ledgerOverride ? { ledger: ledgerOverride } : {}),
+    });
   } catch (err) {
     if (asJson) console.log(JSON.stringify({ error: err.message }, null, 2));
     else console.error(`${RED}error:${RESET} ${err.message}`);
