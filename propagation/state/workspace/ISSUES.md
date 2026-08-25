@@ -2330,3 +2330,35 @@ this is one real file the repo was never told about, and the two need different 
 
 Asserted on the TREE — a refused run leaves it byte-identical — and paired with a test that a
 fully tracked workspace still migrates, so the preflight cannot pass by blocking everything.
+
+## 2026-08-25 · The never-verified backlog is a baseline gap, not a worklist — POLICY
+
+**399 edges are NEVER_VERIFIED and that is the correct steady state.** Do not treat the
+number as debt to be zeroed, and do not close them in bulk.
+
+**Measured, not assumed.** `bootstrap --baseline-from-git` over the 413 that existed before
+this pass could baseline **12** — 2.9%. The rest: 276 no-co-commit, 119
+ineligible-cross-repo, 6 bound-reached. The 12 were applied; every one names a real
+co-commit SHA in its `reason`.
+
+**Why the other 401 must stay open.** `appendEvent` refuses a `baselined` event without a
+reason naming its evidence (`lib/edges/events.mjs:147-160`), and the reason it refuses is
+v1's **556 unexplained `wontfix_reason` rows**. Closing them without evidence would recreate
+that failure in a new place, and it would be indistinguishable afterwards from work that was
+genuinely checked.
+
+**How it drains: verify-as-you-touch.** When a session edits either end of a declared edge,
+it settles that edge with a reason saying what it actually read. That is the only mechanism
+that produces evidence rather than a claim. The number falls as work happens; it is not a
+project.
+
+**What "done" means for the edge graph** — and it was reached 2026-08-25: **0 need
+attention** across all 13 workspaces plus cross. Every DRIFTED / REVERSED / DIVERGED edge was
+read on both sides and settled with a disposition matching what was actually found. Three
+settlements record findings rather than clean reconciles (`e377000b`, `eddcd444`, and the
+`22c0e76a` / `6a114165` pair state the LIMIT of what was checked).
+
+**One deliberate override.** Attention edges are gated by never-verified upstreams — the
+guard is conservative, since NEVER_VERIFIED means unchecked, not known-wrong. Settling them
+in fix order would have required draining most of the 399. `--out-of-order` was used where
+both sides had been read, by explicit decision, and every such event says so in its reason.
