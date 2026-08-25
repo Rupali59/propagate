@@ -129,6 +129,22 @@ test("drain() empties the buffer but MUST NOT reset problems", () => {
   assert.equal(r.problems, 1, "still 1 — B passing does not clear A's failure");
 });
 
+test("note() is a marker-less line, distinct from info, and never votes", () => {
+  // `note` was added when the first extracted section needed it: doctor prints
+  // "(no DECISIONS.md — tried ...)" as a bare dim line with no ✓/✗/!/· marker.
+  // It is NOT info: info is a tally about checks that ran, note is context
+  // about a check that could not run. Collapsing them would change output.
+  const r = new Reporter();
+  r.note("(no DECISIONS.md — tried a, b)");
+  r.info("a tally");
+
+  assert.equal(r.problems, 0, "context about an absent input is not a failure");
+  assert.equal(r.entries[0].kind, "note");
+  assert.equal(r.entries[1].kind, "info", "note and info must stay distinct kinds");
+  assert.equal(r.entries[0].detail, "", "a note carries no detail — the whole line is the label");
+  assert.ok(ENTRY_KINDS.includes("note"));
+});
+
 test("entriesOfKind filters without mutating", () => {
   const r = new Reporter();
   r.check("p", true);

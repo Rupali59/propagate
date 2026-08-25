@@ -154,7 +154,6 @@ import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_
 import { resolveProvenance, resolveObservedRef } from "./lib/edges/provenance.mjs";
 import { appendRun } from "./lib/core/runs.mjs";
 import { describeWhy } from "./lib/edges/why.mjs";
-import { parseDecisions, zeroTokenEntries } from "./lib/report/decisions.mjs";
 import {
   METRICS_PATH,
   EXPECTATIONS,
@@ -204,30 +203,44 @@ const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const BOLD = "\x1b[1m";
 
+/**
+ * Render a Reporter's drained entries (lib/report/doctor/reporter.mjs).
+ *
+ * This is the ONLY place doctor's extracted sections turn into stdout, and it
+ * reproduces `doctor()`'s own check/warn/info/note formatting exactly — the
+ * split must be byte-identical, so the format lives in one place rather than
+ * being re-derived per module. Modules under lib/ collect entries and print
+ * nothing; no module there contains an ANSI escape, and this keeps it that way.
+ */
+function renderDoctorEntries(entries) {
+  for (const e of entries) {
+    const d = e.detail;
+    if (e.kind === "pass") {
+      console.log(`  ${GREEN}\u2713${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+    } else if (e.kind === "fail") {
+      console.log(`  ${RED}\u2717${RESET} ${e.label}${d ? "  " + RED + d + RESET : ""}`);
+    } else if (e.kind === "warn") {
+      console.log(`  ${YELLOW}!${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+    } else if (e.kind === "note") {
+      // Marker-less dim line — context about a check that could NOT run.
+      console.log(`  ${DIM}${e.label}${RESET}`);
+    } else {
+      console.log(`  ${DIM}\u00b7${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+    }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers — exported for tests (tests/cli-json.test.mjs).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * N12: classify a DECISIONS.md's `Affects:` attribution health. `lib/decisions.mjs`'s
- * `zeroTokenEntries` already isolates the exact N12 failure mode (regex mismatch,
- * empty field, all-placeholder tokens) — this wraps it into the two shapes
- * `doctor` needs: a hard failure when EVERY entry in a non-empty file parses to
- * zero tokens (the bug returning wholesale), and a named warning when only SOME
- * do (partial attribution loss, still worth flagging by date/title).
- *
- * Exported and pure (text in, verdict out) so it's unit-testable directly
- * against synthetic fixtures, without shelling out to `doctor` as a subprocess
- * or touching the real `docs/DECISIONS.md` — same testability-over-shelling-out
- * reasoning as `computeCouplings`/`runCheck` above.
- * @param {string} text - raw DECISIONS.md content
- * @returns {{entries: Array, zero: Array, allZero: boolean}}
- */
-export function decisionsAttributionReport(text) {
-  const entries = parseDecisions(text);
-  const zero = zeroTokenEntries(entries);
-  return { entries, zero, allZero: entries.length > 0 && zero.length === entries.length };
-}
+// `decisionsAttributionReport` moved to lib/report/decisions.mjs 2026-08-25, beside the two functions it
+// composes. Re-exported here because tests/cli/doctor.test.mjs and
+// tests/cli/doctor-undiscoverable-ledgers.test.mjs import it from this module,
+// and because an extracted doctor section needs it without importing cli.mjs
+// back (a cycle). The jsdoc above describes the re-export; the implementation
+// and its rationale live at the new home.
+export { decisionsAttributionReport } from "./lib/report/decisions.mjs";
 
 /**
  * Report ledgers `findLedgersUnder` (lib/edges/refs.mjs) finds that
@@ -1633,47 +1646,30 @@ async function doctor() {
   }
 
   console.log(`\n${BOLD}# DECISIONS.md attribution${RESET}`);
-  // N12: the mechanism that records *why* a choice was made must be able to
-  // read its own Affects: attribution field. A non-empty file where every
-  // entry parses to zero tokens means the parser is reading nothing from
-  // content that exists — that is always a bug, and it is the exact failure
-  // that shipped silently for weeks (all 8 live entries, 0 tokens) before
-  // being caught by hand. Checks the skill's own docs/DECISIONS.md.
-  try {
-    // Both locations, new first. The plugin's own artifacts moved to
-    // propagation/state/workspace/ on 2026-08-23; the legacy path is retained so
-    // an older checkout still resolves, and so this check reports "not found"
-    // only when it genuinely is not there rather than when it merely moved.
-    const decCandidates = [
-      path.join(SKILL_DIR, "propagation", "state", "workspace", "DECISIONS.md"),
-      path.join(SKILL_DIR, "docs", "DECISIONS.md"),
-    ];
-    const decPath = decCandidates.find((c) => existsSync(c)) ?? decCandidates[0];
-    decisionsPath = decPath;
-    if (!existsSync(decPath)) {
-      console.log(`  ${DIM}(no DECISIONS.md — tried ${decCandidates.join(", ")})${RESET}`);
-    } else {
-      const text = await readFile(decPath, "utf8");
-      const { entries, zero } = decisionsAttributionReport(text);
-      decisionsEntriesCount = entries.length;
-      decisionsWithTokensCount = entries.length - zero.length;
-      decisionsZeroEntries = zero.map((e) => `${e.date} ${e.title || "(untitled)"}`);
-      // The count == count assertion (was: fail only when ALL entries are
-      // zero; a partial-zero file only warned) now lives solely in
-      // EXPECTATIONS ("decisions.with_tokens == decisions.entries",
-      // lib/metrics.mjs, GOTCHAS G20) — equality is the correct bar per that
-      // entry's basis, so collapsing to one mechanism also closes the gap
-      // where a partial-zero file used to only warn. This line stays
-      // informational; the try/catch below is the one thing EXPECTATIONS
-      // cannot see (a parse that throws leaves entries=0/withTokens=0, which
-      // reads as a false "0 == 0" pass) — that failure mode stays here.
-      info(
-        "Affects: tokens parse",
-        `${entries.length} entries, ${entries.length - zero.length} with tokens`,
-      );
-    }
-  } catch (err) {
-    check("Affects: tokens parse", false, err.message);
+  // FIRST EXTRACTED SECTION (#31 T2). The section's own rationale — N12, why
+  // the equality assertion lives in EXPECTATIONS rather than here, and why a
+  // THROWN parse must fail rather than read as "0 == 0" — moved with the code
+  // to lib/report/doctor/decisions.mjs. Do not restate it here.
+  //
+  // The shape every other section will follow: build a Reporter, call the
+  // module, render its drained entries IMMEDIATELY (so run order is unchanged),
+  // add its problems to the run tally, then copy its returned counts/details
+  // into the metrics accumulators. Returned values, never shared mutation —
+  // a dropped key becomes a missing property instead of a silent zero.
+  {
+    // Dynamic, like doctor's other 14 imports (D5): a static top-of-file import
+    // would pull doctor's whole subtree into `propagate status`/`check`/`drain`,
+    // a startup cost on a published binary that no test would catch.
+    const { Reporter } = await import("./lib/report/doctor/reporter.mjs");
+    const { checkDecisions } = await import("./lib/report/doctor/decisions.mjs");
+    const reporter = new Reporter();
+    const { counts, details } = await checkDecisions({ skillDir: SKILL_DIR, reporter });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+    decisionsEntriesCount = counts.decisionsEntries;
+    decisionsWithTokensCount = counts.decisionsWithTokens;
+    decisionsPath = details.decisionsPath;
+    decisionsZeroEntries = details.decisionsZeroEntries;
   }
 
   console.log(`\n${BOLD}# Graph integration${RESET}`);

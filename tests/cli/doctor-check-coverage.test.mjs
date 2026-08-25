@@ -15,12 +15,31 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
-const CLI = readFileSync(path.join(DIR, "..", "..", "cli.mjs"), "utf8");
+const REPO = path.join(DIR, "..", "..");
+
+// cli.mjs PLUS the extracted doctor sections. Widened 2026-08-25 with the first
+// extraction (#31 T2): doctor's checks are moving into lib/report/doctor/, and a
+// scan that still read only cli.mjs would see the corpus shrink check by check
+// while reporting improving coverage — the precise failure this file exists to
+// prevent, committed by this file, for the third time (see the two corrections
+// below it about the tests root).
+//
+// Discovered by directory read, never a hardcoded module list: a list would go
+// stale silently on the next extraction, and "found nothing new" would be
+// indistinguishable from "looked at nothing" (GOTCHAS G17).
+const DOCTOR_DIR = path.join(REPO, "lib", "report", "doctor");
+const DOCTOR_MODULES = existsSync(DOCTOR_DIR)
+  ? readdirSync(DOCTOR_DIR, { recursive: true }).filter((f) => String(f).endsWith(".mjs"))
+  : [];
+const CLI = [
+  readFileSync(path.join(REPO, "cli.mjs"), "utf8"),
+  ...DOCTOR_MODULES.map((f) => readFileSync(path.join(DOCTOR_DIR, f), "utf8")),
+].join("\n");
 // RECURSIVE. tests/ gained subdirectories on 2026-08-20, and a non-recursive read
 // would find almost nothing while still producing a confident coverage verdict — a
 // coverage test that parses nothing reports perfect coverage, which this file warns
@@ -35,7 +54,10 @@ const TESTS = TEST_FILES.map((f) => readFileSync(path.join(TESTS_ROOT, f), "utf8
 
 /** Labels doctor asserts on. Parser mirrors the one in skill-doc.test.mjs. */
 function checkLabels() {
-  return [...new Set([...CLI.matchAll(/check\(\s*\n?\s*"([^"]{4,90})"/g)].map((m) => m[1]))];
+  // Matches both the in-cli `check("...")` closure call and the extracted
+  // `reporter.check("...")` method call. Without the optional prefix every
+  // migrated label vanishes from the corpus.
+  return [...new Set([...CLI.matchAll(/(?:reporter\.)?check\(\s*\n?\s*"([^"]{4,90})"/g)].map((m) => m[1]))];
 }
 
 /** A label is "covered" if some test file mentions its distinctive prefix. */
@@ -53,7 +75,11 @@ const covered = (label) => TESTS.includes(label.split("—")[0].trim().slice(0, 
 // The other two stay: `parseable` only runs when the file exists, so it cannot fail a
 // fresh machine, and `.bak` already degrades to `!` with a reason.
 const KNOWN_UNCOVERED = [
-  "Affects: tokens parse",
+  // "Affects: tokens parse" — PAID 2026-08-25. tests/unit/doctor-decisions.test.mjs
+  // makes DECISIONS.md a directory so existsSync passes and readFile throws EISDIR,
+  // then asserts problems === 1. That was the one failure mode EXPECTATIONS cannot
+  // see (a throw leaves entries=0/withTokens=0, satisfying "withTokens == entries"),
+  // so it needed a fixture rather than a rule. Removed, not deferred.
   "cross rows carry partner",
   "cross-repo check ran",
   "cross-repo edges resolve",
