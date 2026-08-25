@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 
+import { heartbeatState } from "../../lib/core/plist.mjs";
+import { nestedUnderOf } from "../../commands/status.mjs";
 import {
-  heartbeatState,
   findDuplicateOpenAcrossLedgers,
   parsePlistWatchPaths,
   expectedWatchPaths,
-  nestedUnderOf,
 } from "../../cli.mjs";
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -37,10 +37,9 @@ import {
   SKILL_DIR, INTEGRATIONS } from "./lib/core/config.mjs";
 import { readLedgerWithStats, lastActivityAt } from "./lib/edges/ledger.mjs";
 import { reconcile, inboundRows, toNodeId } from "./lib/edges/reconcile.mjs";
-import { PLIST_PATH } from "./lib/core/plist.mjs";
+import { PLIST_PATH, heartbeatState } from "./lib/core/plist.mjs";
 import { notify } from "./lib/report/notify.mjs";
 import {
-  heartbeatState,
   findDuplicateOpenAcrossLedgers,
   parsePlistWatchPaths,
   expectedWatchPaths,
