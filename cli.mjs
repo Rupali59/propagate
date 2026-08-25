@@ -133,6 +133,17 @@ import {
 } from "./lib/core/config.mjs";
 import YAML from "yaml";
 
+// Five helpers moved out of cli.mjs 2026-08-25 (#31 T2) so doctor's extracted
+// sections can use them without importing cli.mjs back. Imported with a REAL
+// binding (not `export … from`, which creates none) because cli.mjs still calls
+// shortPath in 17 places, and re-exported because three of them are imported
+// from this module by tests/cli/cli-json.test.mjs.
+import { parsePlistWatchPaths, expectedWatchPaths } from "./lib/core/plist.mjs";
+import { findDuplicateOpenAcrossLedgers } from "./lib/edges/ledger.mjs";
+import { sweepMarkers } from "./lib/core/discovery.mjs";
+import { shortPath } from "./lib/core/config.mjs";
+export { parsePlistWatchPaths, expectedWatchPaths, findDuplicateOpenAcrossLedgers };
+
 import {
   readLedger,
   readLedgerWithStats,
@@ -340,62 +351,11 @@ export function heartbeatState(ageSeconds) {
   return "dead";
 }
 
-/** Extract the <string> entries inside the plist's <key>WatchPaths</key> array. */
-export function parsePlistWatchPaths(xml) {
-  const m = xml.match(/<key>WatchPaths<\/key>\s*<array>([\s\S]*?)<\/array>/);
-  if (!m) return [];
-  return [...m[1].matchAll(/<string>([^<]*)<\/string>/g)].map((mm) =>
-    mm[1]
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'"),
-  );
-}
 
-/**
- * Expected WatchPaths for a set of discovered workspaces: root, `docs/` when
- * present, and — the fix for the silent unwatched-ledger gap — the resolved
- * ledger directory itself (`ws.ledgerJsonl`'s dirname), read from the
- * workspace record rather than rebuilt from `path.join(ws.root, "docs")`.
- * Rebuilding assumed the docs/ convention and silently dropped both
- * `.propagation/`- and `propagation/`-layout workspaces from the watch set.
- */
-export function expectedWatchPaths(workspaces) {
-  const set = new Set();
-  for (const ws of workspaces) {
-    set.add(ws.root);
-    const docsDir = path.join(ws.root, "docs");
-    if (existsSync(docsDir)) set.add(docsDir);
-    if (ws.ledgerJsonl) set.add(path.dirname(ws.ledgerJsonl));
-  }
-  return set;
-}
 
-/**
- * Given every ledger's open rows, find absolute source paths open in more
- * than one ledger — the expiry signal for the deferred hub-row migration
- * (docs/DECISIONS.md 2026-08-10, "the 69 misfiled hub rows are deferred").
- * @param {Array<{workspaceRoot: string, ledgerPath: string, rows: Array}>} ledgerEntries
- * @returns {{count: number, examples: Array<{path: string, ledgers: string[]}>}}
- */
-export function findDuplicateOpenAcrossLedgers(ledgerEntries) {
-  const bySource = new Map(); // absPath -> Set(ledgerPath)
-  for (const { workspaceRoot, ledgerPath, rows } of ledgerEntries) {
-    for (const row of rows) {
-      if (row.status !== "open" || !row.source) continue;
-      const abs = path.resolve(workspaceRoot, row.source);
-      if (!bySource.has(abs)) bySource.set(abs, new Set());
-      bySource.get(abs).add(ledgerPath);
-    }
-  }
-  const dups = [...bySource.entries()].filter(([, set]) => set.size > 1);
-  return {
-    count: dups.length,
-    examples: dups.slice(0, 5).map(([abs, set]) => ({ path: abs, ledgers: [...set] })),
-  };
-}
+
+
+
 
 /**
  * Assign each unique sidecar (by `fs.realpathSync`) to its nearest — i.e.
@@ -464,37 +424,7 @@ export function nestedUnderOf(ws, workspaces) {
   return nearest.root;
 }
 
-/**
- * Sweep for `.propagates.yml` markers to `maxDepth`, deeper than discovery's
- * default (2), so a workspace marker discovery silently dropped is caught.
- * Skips dot-directories (e.g. `.claude/worktrees/`) at every level.
- */
-async function sweepMarkers(roots, maxDepth) {
-  const found = [];
-  async function walk(dir, depth) {
-    if (depth > maxDepth) return;
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    if (entries.some((e) => e.isFile() && e.name === ".propagates.yml")) {
-      found.push(path.join(dir, ".propagates.yml"));
-    }
-    if (depth === maxDepth) return;
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      if (e.name.startsWith(".")) continue; // skip dot-directories (worktree copies etc.)
-      if (e.name === "node_modules") continue;
-      await walk(path.join(dir, e.name), depth + 1);
-    }
-  }
-  for (const root of roots) {
-    if (existsSync(root)) await walk(root, 0);
-  }
-  return found;
-}
+
 
 // `classifyDownstreamPath` moved to lib/edges/edges.mjs 2026-08-25 — it is edge
 // semantics, and doctor's extracted per-workspace section needs it without
@@ -5579,11 +5509,7 @@ async function loadGraph(workspaces) {
   return { graph: buildGraph(rows, { workspaceRoots: workspaces.map((w) => w.root) }), rows, stats };
 }
 
-function shortPath(p) {
-  if (!p) return "(none)";
-  const root = SEARCH_ROOTS[0];
-  return root && p.startsWith(root + "/") ? p.slice(root.length + 1) : p;
-}
+
 
 async function graphCmd() {
   const args = process.argv.slice(3);
