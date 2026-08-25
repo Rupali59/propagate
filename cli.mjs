@@ -141,7 +141,7 @@ import YAML from "yaml";
 import { parsePlistWatchPaths, expectedWatchPaths } from "./lib/core/plist.mjs";
 import { findDuplicateOpenAcrossLedgers } from "./lib/edges/ledger.mjs";
 import { sweepMarkers } from "./lib/core/discovery.mjs";
-import { shortPath } from "./lib/core/config.mjs";
+import { shortPath, currentWorkspace } from "./lib/core/config.mjs";
 export { parsePlistWatchPaths, expectedWatchPaths, findDuplicateOpenAcrossLedgers };
 
 import {
@@ -458,24 +458,7 @@ async function findSidecars(workspaceRoot) {
   return found;
 }
 
-/**
- * The workspace whose root contains the current working directory, or null if
- * cwd is outside every known workspace. Lets `status` default to "this project"
- * instead of relaying every workspace's queue.
- */
-function currentWorkspace() {
-  const cwd = process.cwd();
-  // Nearest ancestor, not first match. A repo registered as its own workspace
-  // also sits under a broader one (e.g. Keerti-portfolio inside the GitHub hub),
-  // and `.find()` returned whichever was discovered first — so `status` run from
-  // inside the repo relayed the hub's queue instead of the repo's. Longest
-  // matching root wins, matching `findAllSidecarsRecursive`'s scoping.
-  const matches = WORKSPACES.filter(
-    (ws) => cwd === ws.root || cwd.startsWith(ws.root + path.sep),
-  );
-  if (matches.length === 0) return null;
-  return matches.reduce((best, ws) => (ws.root.length > best.root.length ? ws : best));
-}
+
 
 /**
  * Watcher liveness block for `status --json`. Derives `state` ONLY from the
