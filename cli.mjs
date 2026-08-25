@@ -3629,6 +3629,46 @@ async function backlogCmd() {
     console.log(`  ${YELLOW}discovery walk time budget exceeded — results are partial${RESET}`);
   }
 
+  // HANDOVERS. Parsed since 2026-08-22 and rendered nowhere until 2026-08-25 --
+  // available in --json, invisible to anyone reading the command. A source that
+  // is collected and never shown delivers exactly what one that was never built
+  // delivers (rule:enforcement-watches-itself).
+  //
+  // `unknown` is the honest majority and must be printed as such, not hidden or
+  // rounded to open/closed. Measured 2026-08-25: all 4 handover files carry ZERO
+  // `**Done when:**` / `**Resolved:**` markers, so all 37 sections are unknown.
+  // That IS the finding -- nobody has scoped them -- and it is only actionable
+  // if a human can see it.
+  const hoFiles = result.handovers?.files ?? [];
+  if (hoFiles.length) {
+    const secs = hoFiles.flatMap((f) => f.sections ?? []);
+    const tally = { open: 0, closed: 0, unknown: 0 };
+    for (const sec of secs) tally[sec.status] = (tally[sec.status] ?? 0) + 1;
+    console.log();
+    console.log(
+      `  ${BOLD}handovers${RESET} ${DIM}${hoFiles.length} file(s), ${secs.length} section(s) — ` +
+        `${tally.open} open / ${tally.closed} closed / ${tally.unknown} unscoped${RESET}`,
+    );
+    for (const f of hoFiles) {
+      if (f.error) {
+        console.log(`    ${RED}unreadable${RESET} ${f.file} ${DIM}— ${f.error}${RESET}`);
+        continue;
+      }
+      const n = (f.sections ?? []).length;
+      const unscoped = (f.sections ?? []).filter((x) => x.status === "unknown").length;
+      console.log(`    ${f.file} ${DIM}(${n} section(s), ${unscoped} unscoped)${RESET}`);
+    }
+    for (const sec of secs.filter((x) => x.status === "open")) {
+      console.log(`    ${YELLOW}open${RESET}  ${sec.date} · ${sec.title} ${DIM}— done when: ${sec.doneWhen}${RESET}`);
+    }
+    if (tally.unknown === secs.length && secs.length > 0) {
+      console.log(
+        `    ${YELLOW}no handover section carries a **Done when:** or **Resolved:** line${RESET} ` +
+          `${DIM}— none can be closed, or reported as still open${RESET}`,
+      );
+    }
+  }
+
   console.log();
   console.log(`  ${BOLD}ranked (${result.ranked.length})${RESET}`);
   for (const item of result.ranked) {

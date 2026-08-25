@@ -389,3 +389,43 @@ test("checkbox files respect closed sections too", () => {
   const r = parseTodoLikeFile(text, "/fake/TODOS.md");
   assert.equal(r.open, 1, "an unchecked box under a 'Done' heading is not open work");
 });
+
+test("the backlog COMMAND renders handovers — collecting them is not delivering them", () => {
+  // The defect this pins is not a wrong value, it is an unread one. Handovers
+  // were parsed from 2026-08-22 and rendered nowhere until 2026-08-25: present
+  // in `--json`, absent from the command every human actually runs. A source
+  // that is collected and never shown delivers what one that was never built
+  // delivers (rule:enforcement-watches-itself: "grep for the callers of what you
+  // just built").
+  //
+  // Asserting on the RENDERER's source rather than on captured stdout keeps this
+  // free of the real filesystem — `backlog()` walks SEARCH_ROOTS, so a stdout
+  // test would depend on the machine it runs on.
+  const cli = readFileSync(new URL("../../cli.mjs", import.meta.url), "utf8");
+  const body = cli.slice(cli.indexOf("async function backlogCmd"));
+  const cmd = body.slice(0, body.indexOf("\nasync function ", 1));
+  assert.ok(
+    /result\.handovers/.test(cmd),
+    "backlogCmd must read result.handovers — it collected them and printed nothing for three days",
+  );
+  assert.ok(/unscoped|handovers/i.test(cmd), "and must label them for a reader");
+});
+
+test("handovers reach the backlog result with per-file sections", () => {
+  // The data contract the renderer above depends on. If this shape changes the
+  // renderer goes quiet, which is the original failure returning by a new door.
+  const root = tmp("backlog-handover-");
+  try {
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      path.join(root, "HANDOVERS.md"),
+      ["# Handovers", "", "## 2026-08-25 · a thing to hand over", "body text", ""].join("\n"),
+    );
+    const r = backlog({ searchRoots: [root] });
+    assert.ok(r.handovers, "result must carry a handovers block");
+    assert.equal(r.handovers.files.length, 1);
+    assert.ok(r.handovers.files[0].sections.length >= 1, "its dated section must be found");
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
