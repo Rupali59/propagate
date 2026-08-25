@@ -34,6 +34,7 @@
     "index.mjs",
     "hooks/",
     "skills/",
+    "commands/",
     "lib/",
     "bin/",
     "docs/",
