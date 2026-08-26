@@ -3758,16 +3758,45 @@ async function monitorCmd() {
   const { toNotify, suppressed, actionable } = mon.selectToNotify(rows, already);
   const { title, body } = mon.formatNotification(toNotify, { root: SEARCH_ROOTS[0] });
 
+  // Backlog DEFECTS — registers nothing can parse, handovers nothing can close.
+  // Never the open items: there are 500 and they are the normal state of a
+  // working tree, so notifying on them would mute this channel permanently.
+  // The definition is `backlogDefects()` in lib/report/backlog.mjs, the same one
+  // doctor reads, so the two can never disagree about what counts as a problem.
+  //
+  // A reconcile failure above already exited; a backlog failure must not take
+  // the monitor down with it, because edge notification is the older and more
+  // load-bearing half of this command. It degrades to zero defects and SAYS SO
+  // rather than reporting a clean backlog it never managed to read.
+  let defects = [];
+  let backlogErr = null;
+  try {
+    const bl = await import("./lib/report/backlog.mjs");
+    defects = bl.backlogDefects(bl.backlog());
+  } catch (e) {
+    backlogErr = String(e && e.message);
+  }
+  const defectPick = mon.selectDefectsToNotify(defects, already);
+
   if (!dryRun && toNotify.length > 0) {
     await notify(title, body, { group: "propagate-monitor" });
     await mon.recordNotified(toNotify);
   }
+  if (!dryRun && defectPick.toNotify.length > 0) {
+    const d = mon.formatDefectNotification(defectPick.toNotify, { root: SEARCH_ROOTS[0] });
+    await notify(d.title, d.body, { group: "propagate-monitor" });
+    await mon.recordNotified(defectPick.toNotify);
+  }
+  if (backlogErr) console.error(`${YELLOW}monitor: backlog check could not run:${RESET} ${backlogErr}`);
 
   const stats = {
     rows: rows.length,
     actionable: actionable.length,
     notified: dryRun ? 0 : toNotify.length,
     suppressed: suppressed.length,
+    backlogDefects: defects.length,
+    backlogNotified: dryRun ? 0 : defectPick.toNotify.length,
+    backlogError: backlogErr,
     ms: Date.now() - started,
   };
   if (!dryRun) await mon.logRun(stats);

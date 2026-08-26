@@ -24,7 +24,7 @@ import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { notifyKey, selectToNotify, formatNotification } from "../../lib/report/monitor.mjs";
+import { notifyKey, selectToNotify, formatNotification, selectDefectsToNotify, formatDefectNotification } from "../../lib/report/monitor.mjs";
 import { isActionable } from "../../lib/graph/graph.mjs";
 
 let seq = 0;
@@ -202,4 +202,52 @@ test("a run that could not look is logged differently from one that found nothin
 
   assert.doesNotMatch(quiet, /error=/);
   assert.match(broken, /error="git exploded"/, "absence must be attributable");
+});
+
+// ---------------------------------------------------------------------------
+// Backlog defects — added 2026-08-26 when the monitor gained a second subject.
+// ---------------------------------------------------------------------------
+
+test("a backlog defect notifies ONCE, then is suppressed", () => {
+  // The whole value of the notified store. A defect that re-fires every run is
+  // a defect nobody reads.
+  const d = { kind: "unparsed", file: "/x/TODOS.md", detail: "…", key: "backlog:unparsed:/x/TODOS.md" };
+  const first = selectDefectsToNotify([d], new Set());
+  assert.equal(first.toNotify.length, 1);
+  assert.equal(first.suppressed.length, 0);
+
+  const second = selectDefectsToNotify([d], new Set([d.key]));
+  assert.equal(second.toNotify.length, 0, "already sent — stay quiet");
+  assert.equal(second.suppressed.length, 1, "and say it was suppressed, not that there was nothing");
+});
+
+test("open items produce ZERO notifications — only defects reach the channel", () => {
+  // The load-bearing property, asserted at the monitor layer as well as at
+  // backlogDefects(). 500 open items is the normal state of a working tree; if
+  // it notified, the channel would be muted and the one line that matters would
+  // go unread. selectDefectsToNotify is only ever handed defects, and an empty
+  // defect list must therefore produce silence no matter how much work is open.
+  assert.deepEqual(selectDefectsToNotify([], new Set()).toNotify, []);
+  assert.deepEqual(selectDefectsToNotify(undefined, new Set()).toNotify, [], "a missing list is silence, not a throw");
+});
+
+test("notifyKey honours a defect's precomputed key, so both kinds share one store", () => {
+  // A defect's identity is its FILE, not a pair of content hashes: it should
+  // stay quiet until fixed, not re-fire when the file's bytes change.
+  assert.equal(notifyKey({ key: "backlog:unparsed:/x/TODOS.md" }), "backlog:unparsed:/x/TODOS.md");
+  // ...and an edge row, which has no `key`, still derives one as before.
+  const row = { edge_id: "abc123", source: { contentId: "s" }, downstream: { contentId: "d" } };
+  assert.equal(notifyKey(row), "abc123|s|d", "the edge path must be untouched");
+  assert.equal(notifyKey({ key: "", edge_id: "e" }), "e|null|null", "an empty key is not a key");
+});
+
+test("the defect notification NAMES files — a count sends nobody anywhere", () => {
+  const mk = (f) => ({ kind: "handover-unscoped", file: `/root/${f}`, detail: "…", key: `k${f}` });
+  const { title, body } = formatDefectNotification([mk("a.md"), mk("b.md"), mk("c.md"), mk("d.md")], { root: "/root" });
+  assert.match(title, /4 backlog files/);
+  assert.match(body, /handover-unscoped a\.md/, "paths are shown relative to the root");
+  assert.match(body, /\+1 more/, "the body is capped at 3 and says how many it hid");
+
+  const one = formatDefectNotification([mk("a.md")], { root: "/root" });
+  assert.match(one.title, /1 backlog file holds/, "singular reads as singular");
 });
