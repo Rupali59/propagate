@@ -2417,3 +2417,51 @@ pass a generous value, or have `runGit` distinguish "timed out" from "failed" at
 site so a timeout produces an attributable `status`, not a silently different
 classification. Do NOT simply raise the constant — that moves the threshold without removing
 the dependence on load.
+
+### N51 · `parseHandovers` reads fenced examples as real sections — **S2**
+
+Found 2026-08-26 while correcting `HANDOVERS.md`'s header to document its marker protocol.
+Writing the convention **inside the file it governs** minted a 17th section:
+
+```
+sections: 16  totals: {"open":0,"closed":0,"unknown":16}     before
+sections: 17  totals: {"open":0,"closed":1,"unknown":16}     after adding a ```markdown example
+```
+
+The example was a fenced block containing `## 2026-08-26 · A thing handed over` followed by
+`**Resolved:** …`. `SECTION_RE` matched the heading and, because the marker sat within
+`MARKER_WINDOW`, the phantom section reported **closed**.
+
+**Why S2 and not S3.** The direction is the dangerous one. `closed` is the single state that
+makes work disappear, and `MARKER_WINDOW = 3` exists precisely because a looser reading
+produced two false closes on this file before. A code fence re-opens that door from a
+different side — and unlike the earlier case, the phantom carries no real work, so it
+inflates the closed count with something nobody can ever act on.
+
+**Worked around, not fixed.** The example heading is now `## <YYYY-MM-DD> · <title>`, which
+`SECTION_RE` cannot match (it requires a literal date or number), and the file carries a
+note saying why. That protects this file and nothing else: any handover file quoting a
+dated heading in a fence has the same defect.
+
+**Fix direction:** track fenced state while scanning (a ```-toggle) and skip lines inside a
+fence, in both the section scan and the marker window. Test with the exact shape above —
+a fenced dated heading plus a `**Resolved:**` line — and assert the section count does not
+move. Do NOT fix it by narrowing `SECTION_RE`; the heading grammar is correct, the problem
+is that prose about the format is being read as the format.
+
+**Related:** the granularity mismatch recorded in the same session — `HANDOVERS.md` resolves
+per ITEM, `handovers.mjs` scopes per SECTION — is a separate, larger design question and is
+NOT this issue. This one is a parser bug with a bounded fix.
+
+**A second instance, found by writing this entry.** Its first title ended
+`… and a phantom section reports CLOSED — **S2**`, and the register promptly classified
+**this issue** as closed: `CLOSED_MARKERS_RE` matches the word anywhere in a heading, and
+`CLOSED_SECTION_RE` would have marked every entry beneath it closed too — harmless only
+because N51 is currently last. So the classifier cannot tell *"this item is closed"* from
+*"this item is about closing"*, and an issue describing a close-state bug closes itself.
+
+Same root shape as the fence bug: **prose about a mechanism being read as the mechanism.**
+Worked around the same way — the title now avoids the vocabulary. A real fix would require
+the marker to be positional (a status field, a leading token) rather than a keyword anywhere
+in the line, which is a bigger change than this issue's, and is why it is recorded here as
+evidence rather than filed as its own entry.
