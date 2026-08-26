@@ -211,6 +211,62 @@ v1 `markStatus` path still exists; it is no longer the only mechanism.
 Quick sanity check after closing: re-run `status` — the row should be gone.
 If it isn't, you wrote to the wrong ledger file.
 
+## `manifest` — standing a workspace up on another machine
+
+`propagate manifest "<workspace>"` (`--json`) answers: which repos, on which
+branches, where they go, and what is not in git at all.
+
+**Report only.** It never clones, never writes, never touches the network.
+
+**Phased on purpose.** It reads `.sidecar.yml` files INSIDE the workspace repo, so
+on a bare machine it cannot be the first thing you run — the repo it reads is not
+there yet. Phase 0 (clone the hub, install the plugin, `propagate setup --hub`) is
+by hand; from phase 2 the command describes the rest itself.
+
+**Toolchain comes from the LOCKFILE, never `package.json.packageManager`.**
+Measured 2026-08-26 across `Vipin Kaushik`'s seven units, the lockfile resolves 6
+and the field resolves 1 — and the field's absence is *not* npm. `Astroclarity`
+and `marketing-intel` carry a `package.json` with no field, and rendering those as
+npm reproduces the failure that workspace's `CLAUDE.md` records ("`npm install` in
+a pnpm project breaks CI silently"). Unknown stays `none`.
+
+**The unit, not the project, is the row.** `VipinKaushik-mb` has no root
+`package.json`; it is `server` (3152) and `ui` (3153). The three registries
+(`ports.yml`, `deploy.yml`, `mongo.yml`) key on `<Workspace>/<unit-path>`, which
+is the same identity, so they join without new storage.
+
+### Gap kinds — four facts, deliberately not one
+
+| kind | meaning |
+|---|---|
+| `cannot-clone` | no `remote:`, and not a git repo of its own here. Must be copied out of band |
+| `remote-undeclared` | on disk WITH a remote the sidecar does not record. A stale declaration — the output names the exact line to add |
+| `would-be-missed` | a repo on disk no sidecar declares; a new machine silently would not get it |
+| `not-cloned-here` | declared, absent locally. **Informational** — a fresh machine is entirely this |
+
+### `external:` — the one thing that cannot be derived
+
+Nothing on disk distinguishes a required gitignored directory from scratch. It has
+to be declared, in the project's `.sidecar.yml`:
+
+```yaml
+external:
+  - path: sanskrit-texts-sources
+    bytes_approx: 369000000
+    why: source scans feeding the canon; deliberately out of git
+    transfer: out of band — copy from a machine that has it
+```
+
+Without it, a fresh machine gets `sanskrit-texts` with its entire 369 MB corpus
+missing and nothing indicating anything is absent.
+
+### What it does NOT get you
+
+Cloned, on the right branches, toolchains and ports known, every missing piece
+named — **not running**. Env values come from Doppler (`rule:secrets-source-of-truth`
+routes those through Rupali), `external:` payloads move by hand, and the
+`.nvmrc`-says-22 / machine-runs-25.9 conflict is reported, not settled.
+
 ## Complete CLI surface
 
 Source of truth: the `mode === "..."` dispatch chain in `cli.mjs`, not the usage
