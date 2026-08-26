@@ -474,3 +474,122 @@ test("a REAL state file mentioning a move is not swallowed as a pointer stub", (
   assert.equal(r.format, "checkbox", "45 real checkbox items must survive the word 'moved'");
   assert.equal(r.open, 45);
 });
+
+test("a heading WITH bullets is a group — the bullets are the items, the label never is", () => {
+  // THE REGRESSION THIS PINS, measured 2026-08-26. `parseStateLiveSections` took
+  // every subheading as an item and never descended, so the canonical STATE.md
+  // shape `## Pending (by priority)` -> `### P1` -> bullets reported the BUCKET
+  // as work and the tasks under it were unreachable. Across 48 STATE.md files:
+  // 174 items reported, 343 actually present, and 16 priority labels standing in
+  // for work that was invisible. Wrong in both directions at once.
+  const md = [
+    "# S", "",
+    "## Pending (by priority)", "",
+    "### P1 — Rebuild", "",
+    "- **Rebuild the app shell** — no `app/` exists",
+    "- **Homepage build** against the brief",
+    "",
+    "### P2 — Deferred", "",
+    "- **Kundli renderer port** from VipinKaushik",
+  ].join("\n");
+  const { items } = parseStateLiveSections(md, "/tmp/STATE.md");
+  assert.deepEqual(
+    items.map((i) => i.text),
+    ["**Rebuild the app shell** — no `app/` exists", "**Homepage build** against the brief", "**Kundli renderer port** from VipinKaushik"],
+  );
+  assert.ok(!items.some((i) => /^P[0-9]/.test(i.text)), "a bucket label must never be an item");
+  assert.equal(items[0].group, "P1 — Rebuild", "the bucket is carried as context, not discarded");
+  assert.equal(items[2].group, "P2 — Deferred");
+});
+
+test("a heading with NO bullets is itself the item — Now sections must not regress", () => {
+  // The other real shape in the tree: `## Now` uses `### Task` with a prose body
+  // and no bullets. The deepest-node rule must keep treating those as items, or
+  // fixing Pending would silently empty every Now section.
+  const md = [
+    "# S", "",
+    "## Now (in flight)", "",
+    "### Instrument-fronted V1 rebuild", "",
+    "the platform-as-protagonist variant, prose body, no bullets",
+    "",
+    "### Design-process docs seeded", "",
+    "more prose",
+  ].join("\n");
+  const { items } = parseStateLiveSections(md, "/tmp/STATE.md");
+  assert.deepEqual(items.map((i) => i.text), ["Instrument-fronted V1 rebuild", "Design-process docs seeded"]);
+  assert.equal(items[0].format, "state-subheading");
+  assert.ok(items.every((i) => i.group === undefined), "an item that is its own heading has no group");
+});
+
+test("one file carrying BOTH shapes resolves each on its own structure", () => {
+  const md = [
+    "# S", "",
+    "## Now (in flight)", "",
+    "### Ship the login page", "",
+    "prose only",
+    "",
+    "## Pending (by priority)", "",
+    "### P1", "",
+    "- do the thing",
+  ].join("\n");
+  const { items } = parseStateLiveSections(md, "/tmp/STATE.md");
+  assert.deepEqual(items.map((i) => [i.format, i.text]), [
+    ["state-subheading", "Ship the login page"],
+    ["state-bullet", "do the thing"],
+  ]);
+});
+
+test("a deeper sub-group owns its own bullets — they do not leak into the parent", () => {
+  // The nesting bound. Without it a `####` sub-group's bullets would be absorbed
+  // by the `###` above it and counted twice, or attributed to the wrong group.
+  const md = [
+    "# S", "",
+    "## Pending", "",
+    "### P1 — parent", "",
+    "- parent item",
+    "",
+    "#### Sub-group", "",
+    "- child item",
+  ].join("\n");
+  const { items } = parseStateLiveSections(md, "/tmp/STATE.md");
+  assert.deepEqual(items.map((i) => [i.group, i.text]), [
+    ["P1 — parent", "parent item"],
+    ["Sub-group", "child item"],
+  ]);
+  assert.equal(items.length, 2, "no bullet may be counted twice");
+});
+
+test("dedupe keys on id when present — rewording an entry does not mint a new item", () => {
+  // Identity must survive an edit, or nothing can be tracked over time. Until
+  // 2026-08-26 dedupe keyed on normalized TEXT for every format, so the `id` the
+  // parser had just extracted was thrown away.
+  const a = { file: "/x/TODOS.md", line: 3, id: "TM-010", text: "Public read-only API" };
+  const b = { file: "/x/TODOS.md", line: 3, id: "TM-010", text: "Public read-only API at api.astroclarity.org" };
+  const { items, mergedCount } = dedupeItems([a, b]);
+  assert.equal(items.length, 1, "same id, reworded text, is ONE item");
+  assert.equal(mergedCount, 1);
+});
+
+test("dedupe does NOT collide different ids that share prose", () => {
+  // The opposite error from the same line: five unrelated files each carrying a
+  // bare `P2` line merged into a single "item" before this fix.
+  const a = { file: "/x/TODOS.md", line: 3, id: "TM-010", text: "P2" };
+  const b = { file: "/y/TODOS.md", line: 9, id: "YV-004", text: "P2" };
+  const { items } = dedupeItems([a, b]);
+  assert.equal(items.length, 2, "different ids are different work, whatever the prose says");
+});
+
+test("the same id in two DIFFERENT files stays two items — registers number independently", () => {
+  const a = { file: "/x/TODOS.md", line: 3, id: "N1", text: "one thing" };
+  const b = { file: "/y/TODOS.md", line: 4, id: "N1", text: "a different thing" };
+  assert.equal(dedupeItems([a, b]).items.length, 2);
+});
+
+test("id-less items still dedupe on prose — the fallback is unchanged", () => {
+  const a = { file: "/x/STATE.md", line: 3, text: "Ship the login page" };
+  const b = { file: "/y/TODOS.md", line: 8, text: "ship the  login page" };
+  const { items, mergedCount } = dedupeItems([a, b]);
+  assert.equal(items.length, 1, "normalisation still merges byte-equivalent prose");
+  assert.equal(mergedCount, 1);
+  assert.equal(items[0].sources.length, 2, "and both origins are kept");
+});

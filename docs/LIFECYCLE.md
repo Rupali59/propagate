@@ -247,9 +247,19 @@ by a count, because a count in a doc rots faster than anything else in it
 SSJK-mb cycle and the duplicate declaration are named by `propagate doctor`.
 The `NEVER_VERIFIED` baseline gap is a `bootstrap --baseline-from-git` pass.
 
-**Unclassified, still real:** the four `TODOS.md` files `propagate backlog` reports as `unparsed` (SSJK-mb, Tathya, thesis-frontend, VipinKaushik); `DATA_MODEL.md`
-describing v1 only; the skills-probe findings (a dangling `SKILL.md` symlink, 47
-`skillUsage` keys with no directory, the unexplained 169 → 92 → 61 trajectory).
+**Unclassified, still real:** `DATA_MODEL.md` describing v1 only; the skills-probe
+findings (a dangling `SKILL.md` symlink, 47 `skillUsage` keys with no directory, the
+unexplained 169 → 92 → 61 trajectory).
+
+**The `unparsed TODOS.md` entry that stood here is closed (2026-08-26).** It named
+*four* files — SSJK-mb, Tathya, thesis-frontend, VipinKaushik — and was already wrong
+when read: VipinKaushik's had become a migration pointer stub, leaving three. All three
+are now ID-keyed and parse. **Do not restate the count here again** — a count in a doc
+rots faster than anything else in it (`rule:state-and-decisions`). Derive it:
+
+```sh
+propagate backlog        # `N parsed / N unparsed / N stub files`
+```
 
 ---
 
