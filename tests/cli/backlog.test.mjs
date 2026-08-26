@@ -16,7 +16,7 @@ import {
   parseTodoLikeFile,
   extractPriority,
   dedupeItems,
-  backlog, closedSectionLines } from "../../lib/report/backlog.mjs";
+  backlog, closedSectionLines, backlogDefects } from "../../lib/report/backlog.mjs";
 
 function tmp(prefix) {
   return mkdtempSync(path.join(tmpdir(), prefix));
@@ -592,4 +592,64 @@ test("id-less items still dedupe on prose — the fallback is unchanged", () => 
   assert.equal(items.length, 1, "normalisation still merges byte-equivalent prose");
   assert.equal(mergedCount, 1);
   assert.equal(items[0].sources.length, 2, "and both origins are kept");
+});
+
+test("backlogDefects reports NOTHING for a healthy result — open items are not defects", () => {
+  // THE LOAD-BEARING TEST. There were 500 open items on 2026-08-26; that is the
+  // normal state of a working tree, not a fault. If open work counted as a
+  // defect the monitor would notify on every one, the channel would be muted,
+  // and the one line that matters would go unread. A muted channel is worth less
+  // than no channel.
+  const healthy = {
+    totals: { unparsedFileList: [] },
+    handovers: { files: [{ file: "/x/HANDOVERS.md", error: null, sections: [{ status: "open" }, { status: "closed" }] }] },
+    ranked: Array.from({ length: 500 }, (_, i) => ({ text: `item ${i}` })),
+  };
+  assert.deepEqual(backlogDefects(healthy), [], "500 open items and a scoped handover file is a clean result");
+});
+
+test("an unparsed register is a defect — work exists that no count can see", () => {
+  const r = {
+    totals: { unparsedFileList: [{ file: "/x/TODOS.md", reason: "format not recognised (804 chars…)" }] },
+    handovers: { files: [] },
+  };
+  const d = backlogDefects(r);
+  assert.equal(d.length, 1);
+  assert.equal(d[0].kind, "unparsed");
+  assert.equal(d[0].key, "backlog:unparsed:/x/TODOS.md", "the key must be stable so it notifies once, not every run");
+});
+
+test("unreadable is a DIFFERENT kind from unrecognised — they send you to different fixes", () => {
+  const r = {
+    totals: { unparsedFileList: [{ file: "/x/TODOS.md", reason: "unreadable: EACCES permission denied" }] },
+    handovers: { files: [] },
+  };
+  assert.equal(backlogDefects(r)[0].kind, "unreadable", "an IO problem is not a format problem");
+});
+
+test("a fully-unscoped handover file is ONE defect, not one per section", () => {
+  // 16 notifications for one file is the noise this function exists to prevent.
+  const r = {
+    totals: { unparsedFileList: [] },
+    handovers: { files: [{ file: "/x/HANDOVERS.md", error: null, sections: Array.from({ length: 16 }, () => ({ status: "unknown" })) }] },
+  };
+  const d = backlogDefects(r);
+  assert.equal(d.length, 1, "per file, never per section");
+  assert.equal(d[0].kind, "handover-unscoped");
+  assert.match(d[0].detail, /16 section\(s\)/);
+});
+
+test("a handover file with even ONE scoped section is not a defect", () => {
+  // The defect is "nothing here can ever be closed", not "some of this is open".
+  const r = {
+    totals: { unparsedFileList: [] },
+    handovers: { files: [{ file: "/x/H.md", error: null, sections: [{ status: "unknown" }, { status: "open" }] }] },
+  };
+  assert.deepEqual(backlogDefects(r), []);
+});
+
+test("an empty handover file is not a defect, and does not throw", () => {
+  const r = { totals: { unparsedFileList: [] }, handovers: { files: [{ file: "/x/H.md", error: null, sections: [] }] } };
+  assert.deepEqual(backlogDefects(r), [], "no sections is not the same as no scoped sections");
+  assert.deepEqual(backlogDefects({}), [], "a result missing both keys must not throw");
 });

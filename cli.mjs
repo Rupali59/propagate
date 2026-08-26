@@ -714,6 +714,23 @@ async function doctor() {
     decisionsZeroEntries = details.decisionsZeroEntries;
   }
 
+  // # Backlog — todos, issues and handovers. Dynamic import for the same reason
+  // as the block above (D5). Reports counts as context and NAMES only defects:
+  // the open-item list is 500 long and belongs in `propagate backlog`.
+  {
+    const { checkBacklog } = await import("./lib/report/doctor/backlog.mjs");
+    const reporter = new Reporter();
+    const { counts } = await checkBacklog({ reporter });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+    // counts are returned for the same reason every doctor module returns them
+    // (D4 — a dropped key becomes a missing property, not a silent zero), and
+    // deliberately not stored: nothing reads them yet. Wiring them into
+    // `# Metrics` is a separate, deliberate step, and an unread accumulator
+    // here would be exactly the dead state this codebase keeps deleting.
+    void counts;
+  }
+
   console.log(`\n${BOLD}# Graph integration${RESET}`);
   {
     const graphResult = await checkGraphMcpStatus();
