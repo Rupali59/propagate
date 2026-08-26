@@ -1,0 +1,14 @@
+# Which project the files in this directory belong to.
+# Written by hand 2026-08-26, closing the state-dir-undeclared gap that
+# `propagate manifest` could not previously see. See ../../README.md.
+schema_version: 1
+project: curate-docs
+repo_root: curate-docs
+remote: https://github.com/Rupali59/curate-docs-skill.git
+active_line: main
+ready: true
+note: >-
+  Clone deleted from disk 2026-08-25 by design; state kept here. Re-clone from the remote if the skill is revived.
+ledger: ../../ledger.jsonl
+owns:
+  - DECISIONS.md GOTCHAS.md STATE.md 

@@ -1,0 +1,14 @@
+# Which project the files in this directory belong to.
+# Written by hand 2026-08-26, closing the state-dir-undeclared gap that
+# `propagate manifest` could not previously see. See ../../README.md.
+schema_version: 1
+project: workspace
+repo_root: propagate
+remote: https://github.com/Rupali59/propagate.git
+active_line: main
+ready: true
+note: >-
+  propagate's own state. The plugin that installs this convention was exempt from it until 2026-08-26 (rule:enforcement-watches-itself).
+ledger: ../../ledger.jsonl
+owns:
+  - DECISIONS.md GOTCHAS.md ISSUES.md STATE.md 
