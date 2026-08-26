@@ -2418,7 +2418,7 @@ site so a timeout produces an attributable `status`, not a silently different
 classification. Do NOT simply raise the constant — that moves the threshold without removing
 the dependence on load.
 
-### N51 · `parseHandovers` reads fenced examples as real sections — **S2**
+### N51 · `parseHandovers` reads fenced examples as real sections — **S2** — **RESOLVED 2026-08-26**
 
 Found 2026-08-26 while correcting `HANDOVERS.md`'s header to document its marker protocol.
 Writing the convention **inside the file it governs** minted a 17th section:
@@ -2465,3 +2465,24 @@ Worked around the same way — the title now avoids the vocabulary. A real fix w
 the marker to be positional (a status field, a leading token) rather than a keyword anywhere
 in the line, which is a bigger change than this issue's, and is why it is recorded here as
 evidence rather than filed as its own entry.
+
+**RESOLVED 2026-08-26 — the parser tracks fences.** `FENCE_RE` toggles on ``` / ~~~ and
+fenced lines are skipped for both the section scan and the marker window. The workaround is
+gone: `HANDOVERS.md`'s example now carries a real date again and the file still parses to 16
+sections, which is the check that the fix rather than the evasion is what holds.
+
+Fenced lines DO still consume the marker window, deliberately — a section-level marker
+belongs directly under its heading, before any illustration, so a code block between them is
+exactly the distance `MARKER_WINDOW` exists to measure. Not consuming it would widen the
+window by an arbitrary amount and re-open the false-close door from a third side.
+
+Five tests in `tests/unit/handovers-fence.test.mjs`; the mutation (disabling fence tracking)
+turns three of them red and reproduces the original symptom verbatim — a fenced example
+becoming a section, and an illustration discharging real work.
+
+**THE SECOND INSTANCE ABOVE IS NOT FIXED** and this entry is not closing it. The classifier
+still cannot tell *"this item is closed"* from *"this item is about closing"*: any heading
+containing the word closes itself, and `CLOSED_SECTION_RE` sweeps every entry beneath it.
+That needs a positional marker — a status field or a leading token — rather than a keyword
+anywhere in the line, which is a larger change than this issue's. It is recorded here as
+evidence and stays live; **do not read this RESOLVED banner as covering it.**
