@@ -2540,6 +2540,8 @@ edited, per this register's own standard that evidence is not rewritten.
 
 ### N53 · The size-cap check reads `STATE.md` at the pre-move path, so it measures 14-line stubs — **S1** — **OPEN**
 
+> **Same root cause as N54 and N55** (cross-linked 2026-08-27): the 2026-08-21/24 relocations left readers pointed at what is no longer the thing. N54 is the mirror image of this one — there a stub reads as *broken*, here it reads as *passing*.
+
 **Status:** open, filed 2026-08-27. Found while reconciling
 `Vipin Kaushik/propagation/state/marketing-intel/STATE.md`, not by any check.
 
@@ -2624,6 +2626,8 @@ trade twice over.
 
 ### N54 · The gotchas liveness probe counts pointer stubs as inert files, inflating its own headline — **S3** — OPEN
 
+> **Same root cause as N53 and N55** (cross-linked 2026-08-27). N53 was filed independently hours apart by another session, against a different reader of the same stubs — that neither knew of the other is itself the argument for treating this as one relocation-completeness defect.
+
 Found 2026-08-27 while reviewing every `GOTCHAS.md` in the tree. `doctor` reported:
 
 ```
@@ -2660,3 +2664,74 @@ gotchas doc with 0 triggers. That one was correctly flagged, and was moved the s
 `PanditPawanKaushik/propagation/state/gemastrology-shopify/GOTCHAS.md` — where the
 `shopify.app.toml` and `shopify app deploy` triggers now fire in the code repo that
 actually holds those files, rather than in a docs directory where nobody runs them.
+
+---
+
+### N55 · The refs registry changed owners on 2026-08-24 and the new owner is wired to nothing — **S1** — **OPEN**
+
+**Status:** open, filed 2026-08-27 while verifying the `Vipin Kaushik` propagation ledger.
+
+**The hazard.** `scripts/hygiene/collect.sh` retired its `branch-registry` lib on 2026-08-24, for
+a good reason stated at the call site:
+
+```
+# branch-registry RETIRED 2026-08-24 — propagate owns propagation/refs/ now.
+# Two writers for one artifact is the defect; unregistering here is what makes
+# the plugin's ownership real.
+```
+
+The diagnosis is right and the unregistration is right. What is missing is the other half:
+**nothing invokes the new owner on a schedule.** `migrate-refs` — the refresh path for
+`refs/snapshot.json` and `refs/lifecycle.jsonl` — is called by no hook (`hooks/` is
+`doc-authority`, `gotcha-guard`, `load-rules`), by no `collect.sh` entry, and by no other command.
+It occurs in the codebase only inside **error strings** telling a human to run
+`propagate migrate-refs <workspace> --apply`.
+
+**Stated precisely, because the first draft of this entry got it wrong.** The new owner *has*
+run — `snapshot.json` carries `captured_by: propagate/refs` and
+`captured_at: 2026-08-24T10:54:17Z`, which is **later** than `lifecycle.jsonl`'s newest row
+(`03:39:08Z`). So the handover worked once, by hand, on the day it happened. The defect is not
+"it never ran"; it is that **the only thing that can make it run is a human remembering to**, and
+in the three days since, nobody has.
+
+**Measured.** `Vipin Kaushik/propagation/refs/lifecycle.jsonl` holds 21 rows, all
+`branch_lifecycle`, newest `2026-08-24T03:39:08Z` — the retirement day. In the three days since:
+a new remote branch appeared (`origin/topic-selection-review-followups`, 08-26), three branches
+became merged-and-prunable, and a merge landed on `main`. **None recorded.**
+
+**Why S1.** The artifact does not look broken. It is valid JSON, has 21 plausible rows, and
+carries a recent-looking date; `doctor` reads it without complaint. Nothing distinguishes "no
+branch events happened" from "no writer has run since August 24" — and only the second is true.
+`rule:discernment-checks` §2: absence must be attributable.
+
+**Why it belongs with N53 and N54.** All three are the 2026-08-21/24 relocations leaving a reader
+pointed at something that is no longer the thing:
+
+| | Reader | Reads | Symptom |
+|---|---|---|---|
+| N53 | `size-caps.sh` | a 14-line stub at the pre-move path | a 586-line file passes a 200 cap |
+| N54 | gotchas liveness probe | the same stubs | 3× overstated inert count, burying 2 real breaks |
+| N55 | *nothing* | — | a registry frozen since its handover |
+
+N53 and N54 were filed hours apart by different sessions without either knowing of the other.
+That is the argument for treating this as one root cause with three faces rather than three
+tickets: **a move is not complete when the file arrives; it is complete when every reader and
+writer that named the old location has been re-pointed or re-wired.**
+
+**Running `migrate-refs --apply` to close this is actively hazardous, per G26/G27.** The live
+snapshot at `Vipin Kaushik/propagation/refs/snapshot.json` is the **nested** shape —
+7 projects, 36 refs, `schema_version: 2` — and G26 records `diffSnapshots` reading `prev?.refs ??
+[]` against a nested previous, turning 36 existing refs into "there was nothing here" and emitting
+spurious `created` rows. G27 adds that a first run must label `baseline`, not `created`, and that
+enumeration must read `refs/heads` **and** `refs/remotes/origin` or it invents prunes (measured:
+24 vs 36, 12 false prunes). **Those rows land in `lifecycle.jsonl`, which is append-only** — so a
+careless refresh permanently writes fiction into the log this entry is about. Confirm the reader
+and the on-disk shape agree *before* any `--apply`.
+
+**Fix direction, not implemented here.** Either register a refs-refresh in `collect.sh` (accepting
+that the plugin then owns the lib the daemon calls), or wire it into a propagate hook, or — if it
+is genuinely meant to be manual — make `doctor` fail on a `lifecycle.jsonl` whose newest row
+predates the workspace's newest branch change, so "nobody has run it" becomes a reported state
+rather than a silence. **Do not simply run `migrate-refs --apply` and close this**: that refreshes
+the data, risks the G26 rows above, and leaves the wiring gap exactly where it is — which is how
+the three days accumulated.
