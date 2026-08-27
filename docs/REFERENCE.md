@@ -433,7 +433,9 @@ finds at least one workspace, so an install that does not work cannot report tha
 does. That is the whole point of the command: the failure it exists to prevent is
 `status` printing nothing and exiting 0 on a machine where nothing is configured.
 
-Four outcomes, each naming its own fix, because they need different ones:
+Each outcome names its own fix, because they need different ones. The set is split
+across two modules — `lib/core/setup.mjs` returns all but `no-roots`, which
+`commands/setup.mjs` returns when nothing was given to walk:
 
 | `reason` | Means | Fix |
 |---|---|---|
@@ -452,9 +454,11 @@ behaviour that already works on a machine that exports it.
 
 ### `hubRoot` — the one declared fact
 
-`setup --hub <path>` records where your code lives. Three things derive from it and
+`setup --hub <path>` records where your code lives. Five things derive from it and
 are **not** configured separately: `searchRoots` (when not declared), the skills
-marketplace directory, and the ports registry.
+marketplace directory, and the three execution registries — `scripts/execution/`'s
+`ports.yml`, `deploy.yml` and `mongo.yml`. Derive the list rather than trusting this
+sentence: they are exactly the `underHub()` call sites in `lib/core/config.mjs`.
 
 It exists because that path was previously restated four times, each independently
 overridable and each defaulting to one author's layout — so `portsFile` had to be

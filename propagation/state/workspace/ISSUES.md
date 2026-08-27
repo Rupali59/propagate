@@ -2486,3 +2486,52 @@ containing the word closes itself, and `CLOSED_SECTION_RE` sweeps every entry be
 That needs a positional marker — a status field or a leading token — rather than a keyword
 anywhere in the line, which is a larger change than this issue's. It is recorded here as
 evidence and stays live; **do not read this RESOLVED banner as covering it.**
+
+### N52 · `migrate-refs`'s markdown renderer prints `undefined` and misplaces paths into the ref column — **S3** — OPEN
+
+Found 2026-08-27 while refreshing the branch registry after pruning worktrees. The
+**data layer is correct**; only the human-readable rendering is wrong, which is why this is
+S3 and not S2.
+
+`migrate-refs <workspace>` (dry-run) renders every event with a literal `undefined` as its
+leading field, emits `<project>/null` rows, and puts an absolute filesystem path where a ref
+name belongs:
+
+```
+undefined Motherboard/chore/shared-as-versioned-module
+undefined Motherboard//Users/rupali.b/Documents/GitHub/Motherboard/.claude/worktrees/hardcore-villani-778ff0
+undefined Rishabh/null
+undefined curate-docs-skill/null
+```
+
+**The same run under `--json` is entirely well-formed**, which is what localises the defect:
+
+```json
+{"type":"worktree-removed","project":"Motherboard","ref":"feature/asset-registration","path":"/Users/.../\.worktrees/feature/asset-registration"}
+{"type":"baseline","project":"Anushka","ref":null,"path":null,"ref_count":1,"detected_by":"snapshot-diff"}
+```
+
+So: the renderer reads a field name the event objects do not carry (hence `undefined` where
+`type` belongs), prints `ref` without handling the documented `null` case that `baseline`
+and workspace-level events legitimately use, and falls back to `path` for
+`worktree-removed`/`worktree-added` events — where `path` is the worktree directory, not a
+ref, and is correct data displayed in the wrong column.
+
+**Why it matters despite being cosmetic.** `rule:discernment-checks` §6 — a reader that
+cannot report failure invents an answer. Three of the four symptoms here are a *correct*
+value in the wrong slot, which reads as corruption and argues against running `--apply`.
+That is the actual cost: a working refresh command looks broken, so the registry does not
+get refreshed, so `doctor`'s `✓ ref registry` count drifts from disk. Measured this session,
+before the refresh: the snapshot still listed a pruned worktree and a `curate-docs-skill`
+project that no longer exists.
+
+**Corrected root cause.** This entry's first draft claimed `buildWorkspaceSnapshot` had a
+single caller (`lib/migrate/workspace.mjs`) and therefore *no refresh path at all*. That was
+wrong, and the error was in the instrument: the search pattern required
+`from "../refs/snapshot"`, while `lib/refs/migrate-refs.mjs:23` imports
+`from "./snapshot.mjs"` — so the second, and decisive, production caller never matched.
+`migrate-refs` **is** the refresh path and it works. Recorded here rather than silently
+edited, per this register's own standard that evidence is not rewritten.
+
+**Fix.** In `migrate-refs`'s renderer: print `e.type`; render `ref ?? "—"`; give
+`worktree-*` events their own line format with the path labelled as a path.
