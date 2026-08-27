@@ -17,6 +17,7 @@ every command below: `docs/REFERENCE.md`.
 | `graph` | What depends on what, and in what order should I fix it? | See Worklist semantics below. `--all`, `--node <path>`, `--html out.html`. |
 | `drain` | What's open, grouped for closing? | Bare = read-only list grouped by `correlation_id`. Writing closes is the `reconcile` skill's job, not this one's. |
 | `rules <list\|check\|selftest\|promote>` | Does a `CLAUDE.md` restate a canonical rule instead of referencing it? | See Rules check below. |
+| `registers` | Has a register grown past the point anyone opens it? | Read-only. Reports which `ISSUES.md` / `TODOS.md` / handover / `GOTCHAS.md` files are hot, which carry finished work that could rotate out, and which could not be read at all. **Gotchas never rotate** — a hazard does not expire. There is deliberately no writer: rotation is `git mv` into `archive/` plus an index line. `--json`, `--all`. |
 | `setup [--roots …]` | Install-time bootstrap, once per machine. | Writes `~/.propagate/config.yml`; exits non-zero unless discovery then finds ≥1 workspace. Safe to re-run. |
 | `init <dir>` | Scaffold an empty `.propagates.yml`. | Configures one directory, not the machine — `setup` is for that. |
 | `reload` | (No live purpose.) | Regenerates the v1 watcher's plist; the watcher is retired. |

@@ -731,6 +731,23 @@ async function doctor() {
     void counts;
   }
 
+  // # Registers — adjacent to # Backlog and deliberately separate from it.
+  // Backlog answers "can every register be READ and every handover CLOSED";
+  // this answers "has a register grown past the point anyone opens it". A file
+  // can be perfectly readable and still be 2738 lines of which 31 entries are
+  // finished, which is what propagate's own ISSUES.md was on 2026-08-27.
+  {
+    const { checkRegisters } = await import("./lib/report/doctor/registers.mjs");
+    const reporter = new Reporter();
+    const { counts } = await checkRegisters({ reporter });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+    // Same posture as the block above: returned so a dropped key is a missing
+    // property rather than a silent zero (D4), not stored because nothing reads
+    // them yet.
+    void counts;
+  }
+
   console.log(`\n${BOLD}# Graph integration${RESET}`);
   {
     const graphResult = await checkGraphMcpStatus();
@@ -4139,6 +4156,9 @@ if (_invokedDirectly) {
   } else if (mode === "manifest") {
     const { manifestCmd } = await import("./commands/manifest.mjs");
     await manifestCmd();
+  } else if (mode === "registers") {
+    const { registersCmd } = await import("./commands/registers.mjs");
+    process.exitCode = await registersCmd(process.argv.slice(3));
   } else if (mode === "docs") {
     const { docsCmd } = await import("./commands/docs.mjs");
     await docsCmd();
