@@ -38,6 +38,15 @@ export function verdict(row, staleDays, hubless = false) {
   if (row.isHub) return { flag: "ok", why: "entry point / seed" };
   // An entry point is opened directly, not cited. Zero in-degree is correct for it.
   if (row.isEntryPoint) return { flag: "ok", why: "entry point — read directly, not cited" };
+  // A machine-rendered artifact is not authored documentation, so "nothing cites
+  // it" is not a finding about it — it is re-rendered from state on every tick and
+  // the only honest verdict is "regenerate it". Detected from the file's own
+  // opening declaration (link-graph.mjs), never a path list.
+  //
+  // THIS CHECK MUST LIVE HERE. It was first written into link-graph's exempt(),
+  // which is a DIFFERENT reader of the same idea — the flag was set correctly and
+  // the CLI never consulted it, so the fix verified clean and changed nothing.
+  if (row.isGenerated) return { flag: "ok", why: "generated artifact — rendered from state, not cited" };
   // Declared dead: exempt from grading, never from parsing. Grading it would re-report a
   // decision someone already made, and the archive would never look done.
   if (row.status === "archived") return { flag: "archived", why: `declared archived (${row.statusSource})` };

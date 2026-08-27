@@ -156,6 +156,7 @@ async function analyse(opts, root) {
       hubName: graph.hubless ? "hub" : "entry points",
       inDegree: node.inDegree, hubDistance: node.hubDistance,
       unreadable: node.unreadable, isHub: node.isSeed, isEntryPoint: node.isEntryPoint,
+      isGenerated: node.isGenerated,
       isUnlinkedSeed: graph.unlinkedSeeds.includes(abs),
       status: node.status, statusSource: node.statusSource, statusWhy: node.statusWhy,
       lastTouched: lastTouched(root, abs),

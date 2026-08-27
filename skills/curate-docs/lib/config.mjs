@@ -37,7 +37,7 @@ import { parse as parseYaml } from "yaml";
  */
 const SKIP_DIRS = [
   "node_modules", ".git", ".next", "dist", "build", "coverage", "vendor",
-  ".agents", "_archive", "fixtures", "__fixtures__", "testdata", "__snapshots__",
+  ".agent", ".agents", "_archive", "fixtures", "__fixtures__", "testdata", "__snapshots__",
   ".gstack", ".worktrees", ".claude", ".gemini", ".github", ".cursor", ".disabled",
   ".obsidian", ".turbo", ".vercel", ".docusaurus", "_site",
 ];

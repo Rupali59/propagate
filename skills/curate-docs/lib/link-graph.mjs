@@ -31,6 +31,10 @@ const MD_LINK = /\[[^\]\n]*\]\(\s*<?([^)>\s]+)>?(?:\s+"[^"]*")?\s*\)/g;
 /** Backticked `.md` paths, with optional leading ./ or ../ and no slash required. */
 const BACKTICKED = /`((?:\.{1,2}\/)*[A-Za-z0-9_][A-Za-z0-9_./()-]*\.md)`/g;
 
+/** A file that declares itself machine-rendered. Kept narrow and anchored to the
+ *  file HEAD so a doc merely discussing generated output is not swallowed. */
+const GENERATED_RE = /\b(generated|derived on demand|auto-generated|do not hand-edit|do not edit)\b/i;
+
 export function extractCitations(raw) {
   const cited = new Set();
   for (const m of raw.matchAll(MD_LINK)) cited.add(m[1]);
@@ -145,6 +149,14 @@ export function buildLinkGraph(root, opts = {}) {
   for (const doc of docs) {
     let raw;
     try { raw = readFileSync(doc, "utf8"); } catch { nodes.get(doc).unreadable = true; continue; }
+    // GENERATED ARTIFACTS are not authored documentation, so "nothing cites it"
+    // is not a finding about them — they are re-rendered from state on every
+    // tick and the only honest verdict is "regenerate it". Detected from the
+    // file's OWN opening declaration, not a path list: a path rule must know
+    // every generator's output location and goes stale the first time one
+    // moves — which is exactly how a propagation edge ended up watching a
+    // pointer stub. Head only, so prose ABOUT generated files is not caught.
+    if (GENERATED_RE.test(raw.slice(0, 400))) nodes.get(doc).isGenerated = true;
     for (const cite of extractCitations(raw)) {
       const r = resolveCitation(cite, path.dirname(doc), root, index, byBasename, externalBases);
       if (r.status === "resolved") {
@@ -168,10 +180,38 @@ export function buildLinkGraph(root, opts = {}) {
     if (best) allSeeds.push(best);
   }
   for (const s of allSeeds) nodes.get(s).isSeed = true;
-  for (const n of cfg.entryPoints) {
-    const abs = index.get(key(path.join(root, n)));
-    if (abs) nodes.get(abs).isEntryPoint = true;
+  // Entry points are recognised by BASENAME AT ANY DEPTH, not only at the repo
+  // root. `motherboard-api/CLAUDE.md` is found by exactly the same contract as
+  // the root one — an agent walks UP from its working directory — so nothing
+  // cites it and nothing should. Matching only `path.join(root, n)` reported 9
+  // per-directory CLAUDE.md and 8 nested README.md as ORPHAN in Motherboard:
+  // 17 of 30, every one a false positive, and the "fix" they invite is to add
+  // fake citations to satisfy the metric.
+  //
+  // Deliberately basename-only. A path rule would need to know every nesting
+  // convention in the tree; the filename IS the convention.
+  // TWO CLASSES, and conflating them is a real bug the suite caught.
+  //
+  // AGENT-CONTEXT files are OPENED by tooling walking UP from a working
+  // directory. That contract is identical at any depth, so
+  // `motherboard-api/CLAUDE.md` is as much an entry point as the root one —
+  // nothing cites it and nothing should. Matching these at root only reported 9
+  // per-directory CLAUDE.md as ORPHAN in Motherboard, and the "fix" that invites
+  // is to add fake citations to satisfy a metric.
+  //
+  // NAVIGATIONAL files (README.md, STATE.md, TODOS.md) stay ROOT-ONLY. A nested
+  // `docs/README.md` is an INDEX, and "the index nobody links" is a true finding
+  // — exempting it everywhere would swallow it, which is exactly what
+  // tests/link-graph.test.mjs:162 asserts against. An earlier version of this
+  // change did exactly that and went red there.
+  const AGENT_CONTEXT = new Set(["CLAUDE.md", "AGENTS.md", "GEMINI.md"]);
+  const rootEntry = new Set(cfg.entryPoints.map((n) => path.join(root, n)));
+  for (const d of docs) {
+    if (AGENT_CONTEXT.has(path.basename(d)) || rootEntry.has(d)) {
+      nodes.get(d).isEntryPoint = true;
+    }
   }
+
 
   // BFS from every seed at once. hubDistance = minimum hops from any of them.
   const queue = [];
@@ -189,6 +229,11 @@ export function buildLinkGraph(root, opts = {}) {
   // removed its outbound edges and orphaned its children (the F1 cascade).
   const exempt = (d) => {
     const n = nodes.get(d);
+    // NOTE: `isGenerated` is deliberately NOT consulted here. It is classified in
+    // report.mjs:verdict(), which is the reader the CLI actually uses. Checking it
+    // in both places is how the first attempt at this "worked" while changing
+    // nothing — the flag was set, this predicate honoured it, and the classifier
+    // never asked. One reader, or the next person debugs the same ghost.
     return n.isSeed || n.isEntryPoint || n.status === "archived" || n.status === "superseded";
   };
   const orphans = docs.filter((d) => !exempt(d) && nodes.get(d).inDegree === 0);
