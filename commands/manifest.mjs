@@ -22,11 +22,14 @@ import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./ansi.mjs";
 const q = (s) => (/[\s'"]/.test(s) ? JSON.stringify(s) : s);
 
 const GAP_LABEL = {
+  "arrives-with-parent": `${DIM}arrives with parent${RESET}`,
   "cannot-clone": `${RED}cannot clone${RESET}`,
+  "shared-remote": `${RED}shared remote${RESET}`,
   "remote-undeclared": `${YELLOW}remote undeclared${RESET}`,
   "would-be-missed": `${RED}would be missed${RESET}`,
   "not-cloned-here": `${DIM}not cloned here${RESET}`,
   "sidecar-unreadable": `${RED}sidecar unreadable${RESET}`,
+  "state-dir-undeclared": `${RED}state dir undeclared${RESET}`,
 };
 
 export async function manifestCmd() {
@@ -66,7 +69,12 @@ export async function manifestCmd() {
   const clonable = result.projects
     .filter((p) => p.remote)
     .sort((a, b) => Number(b.isWorkspaceItself) - Number(a.isWorkspaceItself));
-  const blocking = result.gaps.filter((g) => g.kind !== "not-cloned-here");
+  // Informational kinds are NOT blockers. `not-cloned-here` is the normal state
+  // of a fresh machine, and `arrives-with-parent` says the thing is already
+  // covered by another clone. Counting either as blocking makes a healthy
+  // workspace report failures, which trains people to ignore the number.
+  const INFORMATIONAL = new Set(["not-cloned-here", "arrives-with-parent"]);
+  const blocking = result.gaps.filter((g) => !INFORMATIONAL.has(g.kind));
 
   console.log(
     `${BOLD}${result.workspace}${RESET} ${DIM}— ${result.projects.length} project(s), ` +

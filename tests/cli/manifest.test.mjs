@@ -31,6 +31,14 @@ function fixture(spec) {
     if (s.external) lines.push("external:", ...s.external.map((e) => `  - path: ${e}`));
     writeFileSync(path.join(dir, ".sidecar.yml"), lines.join("\n") + "\n");
   }
+  // A state directory holding STATE.md/DECISIONS.md but NO .sidecar.yml. This
+  // shape is what the live tree actually had for two workspaces, and it must be
+  // expressible here or the gap below cannot be tested at all.
+  for (const name of spec.bareStateDirs ?? []) {
+    const dir = path.join(root, "propagation", "state", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "STATE.md"), "# STATE\n");
+  }
   for (const [rel, files] of Object.entries(spec.dirs ?? {})) {
     const d = path.join(root, rel);
     mkdirSync(d, { recursive: true });
@@ -126,7 +134,12 @@ test("`git -C` walks UP, so a non-repo subdir must not inherit the parent's remo
   try {
     execFileSync("git", ["remote", "add", "origin", "https://github.com/x/parent.git"], { cwd: root, stdio: "ignore" });
     const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
-    assert.deepEqual(gapKinds(m).filter((k) => k !== "would-be-missed"), ["cannot-clone"]);
+    // Reclassified 2026-08-26: this is `arrives-with-parent`, not `cannot-clone`.
+    // The child sits INSIDE the workspace repo, so it genuinely does arrive with
+    // that clone — calling it unclonable was a false blocker. The property this
+    // test actually guards is unchanged and still asserted below: the parent's
+    // remote must never be attributed to the child.
+    assert.deepEqual(gapKinds(m).filter((k) => k !== "would-be-missed"), ["arrives-with-parent"]);
     assert.ok(!JSON.stringify(m.gaps).includes("parent.git"), "the parent's remote must never be attributed to a child");
   } finally {
     cleanup(root);
@@ -183,6 +196,115 @@ test("external: entries survive into the manifest", () => {
   try {
     const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
     assert.deepEqual(m.projects[0].external.map((e) => e.path), ["sources-dir"]);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("a state dir with NO .sidecar.yml is a GAP, not a silent skip", () => {
+  // Regression. workspaceManifest() used to `continue` past a state directory
+  // whose .sidecar.yml was missing. The effect was not a smaller manifest — it
+  // was a manifest that omitted the WORKSPACE REPO ITSELF, the one you must
+  // clone before any of this is readable, while reporting the workspace clean.
+  // Measured on the live tree: two workspaces (Anushka, Rupali) reported zero
+  // gaps in exactly this state.
+  const root = fixture({ sidecars: { declared: { remote: "https://x/d.git" } }, bareStateDirs: ["workspace"] });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    const gap = m.gaps.find((g) => g.kind === "state-dir-undeclared");
+    assert.ok(gap, `expected a state-dir-undeclared gap, got ${JSON.stringify(gapKinds(m))}`);
+    assert.equal(gap.project, "workspace");
+    // The detail must name the consequence, not just the missing file — an
+    // operator reading "no .sidecar.yml" has no reason to act on it.
+    assert.match(gap.detail, /what repo it belongs to|clone/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("a remote already claimed by another project is a SHARED remote, never advice to declare it", () => {
+  // Regression, and the dangerous kind: the tool told you to add a `remote:`
+  // that a sibling project already declared. `Tushar/Youvan-legacy` shares
+  // `Youvan.git` with `Tushar/Youvan`. Following that advice yields a manifest
+  // that clones one repo into two directories — and Youvan-legacy carries a
+  // 29-file unpushed overhaul that exists nowhere else, so the second clone
+  // silently replaces real work with a copy of its sibling.
+  const root = fixture({
+    sidecars: { orig: { repo_root: "orig", remote: "https://x/shared.git" }, fork: { repo_root: "fork" } },
+    dirs: { orig: [], fork: [] },
+    gitRepos: ["orig", "fork"],
+    remotes: { orig: "https://x/shared.git", fork: "https://x/shared.git" },
+  });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    const kinds = gapKinds(m);
+    assert.ok(kinds.includes("shared-remote"), `expected shared-remote, got ${JSON.stringify(kinds)}`);
+    assert.ok(!kinds.includes("remote-undeclared"), "must NOT also advise declaring the claimed URL");
+    const g = m.gaps.find((x) => x.kind === "shared-remote");
+    assert.match(g.detail, /ALREADY claimed by/i);
+    assert.match(g.detail, /Do NOT add it/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("cannot-clone distinguishes `no remote configured` from `not a git repo`", () => {
+  // The reader used to emit one explanation for two different causes.
+  // `Tushar/texts` IS a git repo with no remote; being told it is "not a git
+  // repo of its own" sends you to fix something that is not broken.
+  const root = fixture({
+    sidecars: { norem: { repo_root: "norem" }, plain: { repo_root: "plain" } },
+    dirs: { norem: [], plain: [] },
+    gitRepos: ["norem"], // no remote added; `plain` is a plain directory
+  });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    const byProject = Object.fromEntries(
+      m.gaps.filter((g) => g.kind === "cannot-clone").map((g) => [g.project, g.detail]),
+    );
+    assert.match(byProject.norem, /NO REMOTE configured/, "a repo with no remote must say so");
+    assert.ok(!/not a git repo/.test(byProject.norem), "must not claim a real git repo is not one");
+    assert.match(byProject.plain, /not a git repo of its own/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("a monorepo subdirectory ARRIVES WITH its parent — never `cannot-clone`", () => {
+  // Regression. Motherboard/motherboard-web is a directory inside the monorepo:
+  // no .git, no remote, nothing to clone separately. The manifest called that
+  // `cannot clone`, which is a FALSE BLOCKER — worse than a missing one, because
+  // it sends someone hunting for a repo that does not exist. Derived from
+  // `git rev-parse --show-toplevel`, so no new sidecar field is needed.
+  const root = fixture({
+    sidecars: { mono: { repo_root: "mono", remote: "https://x/mono.git" }, sub: { repo_root: "mono/sub" } },
+    dirs: { mono: [], "mono/sub": [] },
+    gitRepos: ["mono"],
+    remotes: { mono: "https://x/mono.git" },
+  });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    const kinds = gapKinds(m);
+    assert.ok(kinds.includes("arrives-with-parent"), `expected arrives-with-parent, got ${JSON.stringify(kinds)}`);
+    assert.ok(!kinds.includes("cannot-clone"), "must NOT report a monorepo subdir as unclonable");
+    const g = m.gaps.find((x) => x.kind === "arrives-with-parent");
+    assert.equal(g.project, "sub");
+    assert.match(g.detail, /arrives with that clone/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("a genuinely standalone dir with no remote is STILL cannot-clone", () => {
+  // Negative control for the case above. If containingRepo() matched too
+  // eagerly, every unclonable directory would be excused as "arrives with
+  // parent" and the real blocker would vanish silently.
+  const root = fixture({ sidecars: { lonely: { repo_root: "lonely" } }, dirs: { lonely: [] } });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    const kinds = gapKinds(m);
+    assert.ok(kinds.includes("cannot-clone"), `expected cannot-clone, got ${JSON.stringify(kinds)}`);
+    assert.ok(!kinds.includes("arrives-with-parent"));
   } finally {
     cleanup(root);
   }
