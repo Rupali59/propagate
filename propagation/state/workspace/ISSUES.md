@@ -2589,6 +2589,23 @@ attributable) and §6 (a reader that cannot report failure reports absence, whic
 reporting success, because absence gets acted on). Nothing in the output distinguishes the
 three over-cap files from the two that are genuinely fine.
 
+**Observed live, not only read from the code.** The `Vipin Kaushik` pre-commit hook ran on
+`ab91f23` — the commit that took `marketing-intel/STATE.md` from 200 to **225** lines against a
+200 cap — and printed:
+
+```
+check-doc-sizes: yellow (>= 90% of cap):
+  CLAUDE.md: 219 lines (yellow at 198, cap 220)
+  marketing-intel/CLAUDE.md: 179 lines (yellow at 162, cap 180)
+precommit-check[workspace]: size-caps yellow (warning, not blocking):
+  ~ CLAUDE.md (219 / cap 220)
+```
+
+Two `CLAUDE.md` files at 99% of cap were named. **No `STATE.md` appears at all** — not the
+225-line file in that very commit, not the 248-line workspace file, not sanskrit-texts' 586.
+The gate ran, resolved every `STATE.md` to a stub, and reported nothing. That is the failure in
+one screenful.
+
 **Fix direction, not implemented here.** Resolve `STATE.md` through the same `.sidecar.yml`
 the rest of the layout already uses instead of a hardcoded repo-relative path; and make a stub
 an explicit `skipped: stub-at-legacy-path` result rather than a 14-line pass. **Do not simply
