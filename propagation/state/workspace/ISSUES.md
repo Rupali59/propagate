@@ -2535,3 +2535,70 @@ edited, per this register's own standard that evidence is not rewritten.
 
 **Fix.** In `migrate-refs`'s renderer: print `e.type`; render `ref ?? "—"`; give
 `worktree-*` events their own line format with the path labelled as a path.
+
+---
+
+### N53 · The size-cap check reads `STATE.md` at the pre-move path, so it measures 14-line stubs — **S1** — **OPEN**
+
+**Status:** open, filed 2026-08-27. Found while reconciling
+`Vipin Kaushik/propagation/state/marketing-intel/STATE.md`, not by any check.
+
+**The hazard.** The 2026-08-21/22 relocation moved project state to
+`<workspace>/propagation/state/<project>/STATE.md` and left a 14-line pointer stub at the old
+repo-relative path. `Vipin Kaushik/scripts/hygiene/lib/size-caps.sh` still measures
+`proj_files=("CLAUDE.md" "STATE.md")` at each **project repo path**, read from the committed
+active line (`git -C $REPO show $ACTIVE:$FILE | wc -l`). So it now measures the stub.
+
+Neither side knows the new path — this returns nothing:
+
+```sh
+grep 'propagation/state' docs/conventions/CONTEXT-BUDGET.md scripts/hygiene/lib/size-caps.sh
+```
+
+**Measured 2026-08-27**, each project read at its own `[active_lines]` value, cap 200:
+
+| Project | Active | Checker sees | Stub? | Real file | Verdict |
+|---|---|---:|---|---:|---|
+| workspace | main | 14 | yes | **248** | green, 48 over |
+| marketing-intel | main | 14 | yes | **225** | green, 25 over |
+| sanskrit-texts | main | 14 | yes | **586** | green, **386 over** |
+| Astroclarity | main | 14 | yes | 93 | green, and correct by luck |
+| VipinKaushik-mb | main | 14 | yes | 38 | green, and correct by luck |
+| astroacharya | main | 190 | no | 187 | measures **stale pre-move content** |
+| VipinKaushik | production | 78 | no | *never migrated* | genuinely measured |
+
+**Five of seven are stubs.** Two of those five are genuinely under cap, so the pass is
+accidentally right — which is what makes the other three hard to notice.
+
+Two population wrinkles a fix must not assume away:
+
+- **astroacharya's move landed on `feat/muhurta-typed-endpoints`, not on its active line.** Its
+  `main` still carries 190 lines of pre-move content; the stub and the real 187-line file are
+  elsewhere. The checker measures a third thing nobody reads.
+- **`VipinKaushik` never migrated at all** — 78 real lines in-repo, no
+  `propagation/state/VipinKaushik/`. The population is heterogeneous; "every project moved" is
+  false.
+
+**Why this is propagate's and not the workspace's.** The relocation is propagate's
+(`docs/REFERENCE.md` §"Propagation layout"). `rule:enforcement-watches-itself` §1: installing
+or *moving* something is the moment to ask what read it at the old path. Nothing did.
+
+**Why S1.** The checker cannot distinguish *"this file is 14 lines"* from *"I am looking at a
+stub"*, and renders the second as a pass — `rule:discernment-checks` §2 (absence must be
+attributable) and §6 (a reader that cannot report failure reports absence, which is worse than
+reporting success, because absence gets acted on). Nothing in the output distinguishes the
+three over-cap files from the two that are genuinely fine.
+
+**Fix direction, not implemented here.** Resolve `STATE.md` through the same `.sidecar.yml`
+the rest of the layout already uses instead of a hardcoded repo-relative path; and make a stub
+an explicit `skipped: stub-at-legacy-path` result rather than a 14-line pass. **Do not simply
+repoint the path** — that would fix the five and silently keep measuring astroacharya's stale
+`main` copy and VipinKaushik's unmigrated one. Sub-200 is not evidence when 14 is the number.
+
+**The tension that surfaced it, recorded for propagate to decide.** The overage was created by
+a legitimate edit: `marketing-intel/STATE.md` gained a previously-undocumented branch and a
+corrected instrument rule, going 200 → 225. Caps are static; a state file grows when genuinely
+new information arrives. The template's ">90d archive" release valve did not apply — the oldest
+`Completed` entries are ~58d. It was left over-cap and flagged rather than trimmed early, since
+deleting history to satisfy a checker that is not currently reading the file would be the wrong
+trade twice over.
