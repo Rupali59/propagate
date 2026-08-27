@@ -2619,3 +2619,44 @@ new information arrives. The template's ">90d archive" release valve did not app
 `Completed` entries are ~58d. It was left over-cap and flagged rather than trimmed early, since
 deleting history to satisfy a checker that is not currently reading the file would be the wrong
 trade twice over.
+
+---
+
+### N54 · The gotchas liveness probe counts pointer stubs as inert files, inflating its own headline — **S3** — OPEN
+
+Found 2026-08-27 while reviewing every `GOTCHAS.md` in the tree. `doctor` reported:
+
+```
+· gotchas  16 GOTCHAS.md of 1372 docs scanned
+· gotchas inert  4 unreadable, 2 with an entry that cannot fire (of 16 file(s))
+```
+
+**Three of those four were 14-line pointer stubs** left by the 2026-08-23 relocation —
+`Motherboard/docs/GOTCHAS.md`, `Tushar/docs/GOTCHAS.md`,
+`Keerti/keerti-job-radar/docs/GOTCHAS.md`. Each says *"This is a pointer stub, not the
+state"* and names its target. They contain no entries **by design**, and the real files
+they point at are separately discovered by `sourcesFor()` and are healthy.
+
+`selftestProblems()` reports each as *"1 source file(s) found but 0 carry a **Trigger:**
+line — the guard would run forever and never fire, which reads as 'no hazards'"*. For a
+stub that sentence is false: the guard does not run forever, it walks on to the target in
+the same `sourcesFor()` pass.
+
+**Why it matters despite being cosmetic.** The headline overstated the problem by 3× and
+buried the two entries that were genuinely broken — `curate-docs` G24 and
+`marketing-intel` G9, both fixed the same day. `rule:discernment-checks` §1's point in
+reverse: a check that fires on things that are fine trains you to skim it, which is how
+the two real ones nearly went unread. Noise is a hiding place — this register's own G23.
+
+**Fix.** In the probe, skip a source whose body is a move-pointer (the stubs are uniform:
+`# GOTCHAS.md — moved` as the first line, `pointer stub` in the body). Count it as
+`redirect`, not `inert`. Distinguishing "0 entries because it is a stub" from "0 entries
+because nobody wrote triggers" is the same
+found-nothing-versus-looked-at-nothing distinction the rest of this tool already honours.
+
+**Not a defect, deliberately left:** the fourth file,
+`PanditPawanKaushik/docs/gemstone-storefront/shopify/GOTCHAS.md`, was a REAL 478-line
+gotchas doc with 0 triggers. That one was correctly flagged, and was moved the same day to
+`PanditPawanKaushik/propagation/state/gemastrology-shopify/GOTCHAS.md` — where the
+`shopify.app.toml` and `shopify app deploy` triggers now fire in the code repo that
+actually holds those files, rather than in a docs directory where nobody runs them.

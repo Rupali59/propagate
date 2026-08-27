@@ -1327,3 +1327,49 @@ non-zero, so an emptied directory cannot pass vacuously.
 "could not run" from "failed" will, just as correctly, absorb a refactor's mistakes. Every
 extraction that moves code *into* such a region needs its own resolution check, because the
 error handling is working exactly as designed while hiding you.
+
+### G61 · `bootstrap --baseline-from-git` clears ~2% of a never-verified backlog, not most of it
+**Trigger:** `bootstrap[^|\n]*--baseline`
+**Fires on:** `node cli.mjs bootstrap --baseline-from-git --apply`
+The policy baselines only edges whose source and downstream were **co-committed in
+one commit**, recording that SHA as its evidence (`lib/edges/bootstrap.mjs:339`).
+Everything else is classified and left alone. Measured tree-wide 2026-08-27
+against 396 NEVER_VERIFIED rows:
+
+```
+    9  baselineable            2.3%
+  268  no-co-commit           67.7%
+    6  bound-reached           1.5%
+  113  ineligible-cross-repo  28.5%
+```
+
+**The 113 are permanent, and that is structural, not a backlog.** A hub rule
+propagating into a workspace `CLAUDE.md` lives in two different git repositories,
+so no single commit can ever evidence the pair. No amount of re-running changes it.
+**Signal:** running it expecting `status` to go green, and watching 387 of 396 stay
+put. That is the command working.
+**Cost:** none — but the adjacent `--baseline-all` writes an event for *every* row,
+and its own recorded reason reads `"baseline-all: asserted consistent now, without
+inspection"`. Choosing it to make a number look better replaces an honest unknown
+with an unearned claim, which is the failure this whole tool exists to prevent.
+**Instead:** run `--baseline-from-git`, then report the residue **by class**. "268
+have no co-commit" and "113 cannot ever have one" are different facts and only one
+of them is work.
+
+### G62 · `verify`'s out-of-order refusal is a finding, not an obstacle
+**Trigger:** `cli\.mjs\s+verify\s+--edge`
+**Fires on:** `node cli.mjs verify --edge 8e4313b8 --disposition no-change-needed`
+`verify` refuses (and names every blocking upstream) when the edge's own SOURCE is
+unsettled, because pinning a downstream against an unconfirmed source records a
+verification nobody performed. `--out-of-order` exists to override it deliberately.
+**Signal:** `! OUT OF ORDER`, with the upstream edges listed and `would pin:` naming
+the downstream. Exit 0 — it is a refusal to write, not an error.
+**Cost:** none, and that is the point. On 2026-08-27 it refused
+`rules/secrets-source-of-truth.md → CLAUDE.md` because the rule is itself the
+downstream of `deploy.yml` and `mongo.yml`, both NEVER_VERIFIED. Following the
+refusal instead of overriding it meant actually checking the rule's "four projects
+have two environments pointing at one database" claim — `scripts/mongo-check.sh`
+returned exactly 4 findings, confirming it. Overriding would have pinned the claim
+without ever testing it.
+**Instead:** work `graph`'s fix order, which is already topologically sorted. Reach
+for `--out-of-order` only when you can say why the upstream does not matter here.

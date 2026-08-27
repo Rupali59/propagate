@@ -204,7 +204,7 @@ the fourth. **Use an explicit list or an array, never a list-in-a-string.**
 
 ### G24 · The verdict is computed in `report.mjs`, not in link-graph's `exempt()`
 
-**Trigger:** `isEntryPoint|exempt\(|verdict\(`
+**Trigger:** `isEntryPoint|exempt\s*[=(]|verdict\s*[=(]`
 **Fires on:** `const exempt = (d) => {`
 
 There are two readers of "should this doc be graded":
