@@ -201,3 +201,34 @@ counting grep. Already `~/.claude/gotchas-global.md` G-E; the guard fired and it
 body silently produced one row of zeros for a six-branch table. bash splits; zsh does not.
 `rule:discernment-checks` §4 records this biting three times in one earlier session; this is
 the fourth. **Use an explicit list or an array, never a list-in-a-string.**
+
+### G24 · The verdict is computed in `report.mjs`, not in link-graph's `exempt()`
+
+**Trigger:** `isEntryPoint|exempt\(|verdict\(`
+**Fires on:** `const exempt = (d) => {`
+
+There are two readers of "should this doc be graded":
+
+| Where | What it feeds |
+|---|---|
+| `lib/link-graph.mjs` `exempt()` | the `graph.orphans` / `graph.detached` ARRAYS |
+| `lib/report.mjs` `verdict()` | the `ORPHAN` / `DETACHED` **flag the CLI prints** |
+
+They are not wired together. `verdict()` re-derives from `row.inDegree === 0` and
+consults its own set of exemptions.
+
+**Signal:** you add an exemption, the flag it depends on is provably set, the
+predicate provably honours it — and the output does not change by a single line.
+Measured 2026-08-27: a generated-artifact exemption added to `exempt()` was
+verified three ways (regex matched both files, `isGenerated` set, `exempt()`
+returned true) and moved the orphan count by **zero**, because `orphans` from
+`report.mjs` is what `cli.mjs` prints.
+
+**Cost:** an hour, and very nearly a "fixed" claim about a change that did
+nothing. It survived a direct regex test and a predicate read; only diffing the
+actual CLI output caught it.
+
+**Instead:** classify in `report.mjs:verdict()`. If you must touch `exempt()`,
+change both or neither — and check the CLI output, never the intermediate flag.
+The general form is `rule:discernment-checks` §3: verify the work, not the report.
+Here the "report" was my own instrumentation agreeing with me.
