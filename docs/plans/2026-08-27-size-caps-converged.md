@@ -133,13 +133,20 @@ Implement the hub policy as written, plus the two D6/D7 additions.
 | `MEMORY.md` | 40 | lines |
 | `ISSUES.md` | 800 | lines |
 | handover register | 800 | lines |
-| **`GOTCHAS.md`** | **80** | **entries (`### ` headings)** |
+| **`GOTCHAS.md`** | **pending** | **entries (`### ` headings)** |
 
-**The gotchas cap must sit above the current maximum.** Measured 2026-08-27: 18 files, largest
-is `propagate/propagation/state/workspace/GOTCHAS.md` at **67 entries** / 1376 lines. A cap of
-80 leaves headroom; anything at or below 67 freezes the largest file on day one and
-contradicts D5's "passable day one" principle, which is the property that stops people
-reaching for `--no-verify`.
+**The gotchas cap number is deliberately not set here — it lands when propagation aligns.**
+An earlier draft of this plan wrote `80`, which was a guess dressed as a decision. What is
+actually fixed is the *constraint*, not the value: **it must exceed the current maximum**,
+or the ratchet freezes the largest file the day it lands and reintroduces the bypass problem
+that the old `(none)` exemption was written to avoid — contradicting D5's "passable day one"
+property, which is the whole reason the ratchet was chosen over a hard block.
+
+Derive the maximum at the moment of choosing; do not copy a number out of this paragraph.
+Measured once, 2026-08-27, purely to show the shape: 18 files, largest 67 entries across
+1376 lines. That spread is also why the metric is entries and not lines.
+
+Canonical statement of the same deferral: `rules/conventions/CONTEXT-BUDGET.md` §Caps.
 
 Accepted cost of D7, recorded so it is not rediscovered: once a `GOTCHAS.md` reaches its entry
 cap, admitting the next hazard is blocked until a `RETIRED` entry is collapsed to a tombstone —
@@ -270,8 +277,12 @@ an interim patch to a file T3 also edits — land T6 first or fold it into T3.
 
 ## Open risks
 
-1. **The gotchas entry cap is a guess.** 80 is chosen as "above the current max of 67". Nothing
-   validates that number; revisit after one quarter of real use.
+1. **The gotchas entry cap is unset, on purpose.** It is chosen when propagation aligns, and
+   the only fixed constraint is that it exceed the current maximum (derive it then). The risk
+   is not that the number is wrong — it is that "pending" quietly becomes "never", and the
+   metric ships with no cap behind it. Whoever implements T4 either sets it or says out loud
+   that gotchas ship uncapped for now; silently shipping the entry counter with no threshold
+   is the failure to avoid.
 2. **D7's mid-incident block is accepted, not solved.** If it fires in practice and someone
    skips recording a hazard because of it, that is the signal to revisit — and the cost will be
    invisible, so it must be asked about rather than waited for.
