@@ -278,6 +278,30 @@ an interim patch to a file T3 also edits — land T6 first or fold it into T3.
 3. **The shell→Node port is where behaviour silently changes.** Port `canonical_lines` and the
    index handling verbatim, including PPK's `index-deleted` case; do not re-derive them.
 
+4. **`[active_lines]` is one knob with eleven consumers, and it moves while propagation
+   stabilises.** The canonical-guard's "expected branch" is not a hard rule — it reads
+   `[active_lines].workspace` from `docs/conventions/CONTEXT-BUDGET.md`
+   (`canonical-guard.sh:32,77`, defaulting to `main`), so pointing it at a feature branch is a
+   supported move during the migration. **But the same key drives ten other readers**, including
+   `size-caps.sh:94`:
+
+   ```bash
+   canonical_lines() { local repo="$1" active="$2" relpath="$3"
+     local ref="$active"        # the file is read AT the active line
+   ```
+
+   So repointing `active_lines` to unblock a commit **also repoints the size checker at that
+   branch**, and every cap number moves for a reason unrelated to anyone editing content. Under
+   the ratchet that is worse than cosmetic: the baseline the gate compares against changes
+   underneath it, so a file can read as having grown or shrunk without any edit.
+
+   **What the resolver must do about it.** D4 already requires every record to carry its
+   `source`; extend that to carry the **ref it was read at**, and treat an `active_line` that is
+   not the repo's default as a reportable condition rather than a silent input. The other ten
+   consumers are: `worktree-doctor.sh`, `worktree-inventory.sh`, `decisions-check.sh`,
+   `hygiene/collect.sh`, `lib/{state-index,state-shape,state-staleness,branch-registry,ref-resolver,worktree-resolver}.sh`.
+   Anything that changes this key should say which of them it just moved.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
