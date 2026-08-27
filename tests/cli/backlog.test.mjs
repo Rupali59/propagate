@@ -653,3 +653,109 @@ test("an empty handover file is not a defect, and does not throw", () => {
   assert.deepEqual(backlogDefects(r), [], "no sections is not the same as no scoped sections");
   assert.deepEqual(backlogDefects({}), [], "a result missing both keys must not throw");
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// --affects <scope> — the scoped index
+//
+// The load-bearing case is BODY matching. A title-only reader reported 2
+// cross-filed items for `Vipin Kaushik` where bodies find 24, because an issue
+// titled "N53 · The size-cap check reads STATE.md at the pre-move path" never
+// names the repo it is entirely about. A small plausible wrong number is the
+// failure here, not a crash — rule:discernment-checks §6.
+// ─────────────────────────────────────────────────────────────────────────
+
+import { repoSegments, affectsMatcher, bodiesByItem, filterByAffects } from "../../lib/report/backlog.mjs";
+
+test("affectsMatcher: inPath matches a path SEGMENT, never a substring of one", () => {
+  const m = affectsMatcher("Keerti");
+  assert.equal(m.inPath("/hub/Keerti/propagation/x.md"), true);
+  assert.equal(m.inPath("Keerti/x.md"), true, "leading segment counts");
+  // The bug this guards: `Keerti` must not swallow `Keerti-portfolio`, which is
+  // a DIFFERENT repo. A hyphen is not a path separator.
+  assert.equal(m.inPath("/hub/Keerti-portfolio/x.md"), false);
+});
+
+test("affectsMatcher is case-insensitive on both axes", () => {
+  const m = affectsMatcher("vipin kaushik");
+  assert.equal(m.inPath("/hub/Vipin Kaushik/TODOS.md"), true);
+  assert.equal(m.inText("about VIPIN KAUSHIK's checker"), true);
+});
+
+test("bodiesByItem reconstructs a body from its own line to the next item's", () => {
+  const file = "/tmp/fake/ISSUES.md";
+  const text = [
+    "# Issues",          // 1
+    "",                  // 2
+    "### N1 · first",    // 3
+    "mentions Alpha",    // 4
+    "",                  // 5
+    "### N2 · second",   // 6
+    "mentions Beta",     // 7
+  ].join("\n");
+  const ranked = [
+    { file, line: 3, text: "N1 · first" },
+    { file, line: 6, text: "N2 · second" },
+  ];
+  const bodies = bodiesByItem(ranked, () => text);
+  assert.match(bodies.get(ranked[0]), /mentions Alpha/);
+  assert.doesNotMatch(bodies.get(ranked[0]), /mentions Beta/, "an item's body must stop at the next item");
+  assert.match(bodies.get(ranked[1]), /mentions Beta/);
+});
+
+test("bodiesByItem: an UNREADABLE file yields NO entry, so 'never looked' differs from 'no match'", () => {
+  const ranked = [{ file: "/tmp/gone/ISSUES.md", line: 1, text: "x" }];
+  const bodies = bodiesByItem(ranked, () => { throw new Error("ENOENT"); });
+  assert.equal(bodies.has(ranked[0]), false, "must be absent, NOT an empty string");
+});
+
+test("filterByAffects finds an item whose BODY names the scope but whose TITLE does not", () => {
+  const file = "/hub/propagate/ISSUES.md";
+  const text = [
+    "# Issues",
+    "",
+    "### N53 · The size-cap check reads STATE.md at the pre-move path",
+    "`Vipin Kaushik/scripts/hygiene/lib/size-caps.sh` still measures proj_files",
+    "",
+    "### N60 · Something unrelated",
+    "nothing to see",
+  ].join("\n");
+  const ranked = [
+    { file, line: 3, text: "N53 · The size-cap check reads STATE.md at the pre-move path" },
+    { file, line: 6, text: "N60 · Something unrelated" },
+  ];
+  const result = { ranked, handovers: { files: [] } };
+  const stats = filterByAffects(result, "Vipin Kaushik", () => text);
+
+  assert.equal(stats.filedElsewhere, 1, "N53 must be found via its BODY — its title never names the repo");
+  assert.equal(stats.filedHere, 0);
+  assert.equal(stats.bodylessItems, 0);
+  assert.match(result.ranked[0].text, /N53/, "elsewhere-filed items rank FIRST");
+});
+
+test("filterByAffects splits filed-here from filed-elsewhere, and elsewhere leads", () => {
+  const own = { file: "/hub/Vipin Kaushik/TODOS.md", line: 1, text: "my own item" };
+  const foreign = { file: "/hub/propagate/ISSUES.md", line: 1, text: "about Vipin Kaushik" };
+  const result = { ranked: [own, foreign], handovers: { files: [] } };
+  const stats = filterByAffects(result, "Vipin Kaushik", (f) => f.includes("propagate") ? "about Vipin Kaushik" : "my own item");
+
+  assert.equal(stats.filedHere, 1);
+  assert.equal(stats.filedElsewhere, 1);
+  assert.equal(result.ranked[0], foreign, "the item you cannot otherwise see must come first");
+});
+
+test("filterByAffects on a scope nothing mentions returns 0 elsewhere — and says how much it checked", () => {
+  const ranked = [{ file: "/hub/propagate/ISSUES.md", line: 1, text: "unrelated" }];
+  const result = { ranked, handovers: { files: [] } };
+  const stats = filterByAffects(result, "Nobody", () => "unrelated");
+  assert.equal(stats.filedElsewhere, 0);
+  assert.equal(stats.rankedBefore, 1, "the denominator must survive, so 0 is attributable");
+});
+
+test("repoSegments excludes .md filenames so a scope can never be a file", () => {
+  const segs = repoSegments({
+    stateFiles: [{ file: "/hub/Keerti/propagation/state/x/STATE.md" }],
+    todoFiles: [], issueFiles: [], handovers: { files: [] },
+  });
+  assert.equal(segs.has("Keerti"), true);
+  assert.equal(segs.has("STATE.md"), false);
+});

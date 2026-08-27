@@ -3620,12 +3620,57 @@ async function journalCmd() {
 }
 
 async function backlogCmd() {
-  const { backlog } = await import("./lib/report/backlog.mjs");
+  const { backlog, repoSegments, filterByAffects } = await import("./lib/report/backlog.mjs");
   const result = backlog();
 
+  const affectsIdx = process.argv.indexOf("--affects");
+  const affects = affectsIdx !== -1 ? process.argv[affectsIdx + 1] : null;
+
+  if (affectsIdx !== -1 && (!affects || affects.startsWith("--"))) {
+    console.error(`${RED}--affects needs a repo or workspace name${RESET}`);
+    process.exit(2);
+  }
+
+  let affectsStats = null;
+  if (affects) {
+    // A name nobody recognises must NOT render as "0 items affect it" — that is
+    // absence masquerading as a result (rule:discernment-checks §2 and §6). A
+    // typo would otherwise read as good news.
+    const known = repoSegments(result);
+    const hit = [...known].find((s) => s.toLowerCase() === affects.toLowerCase());
+    if (!hit) {
+      console.error(`${RED}unknown scope:${RESET} ${affects}`);
+      console.error(`${DIM}  No discovered register path contains that segment, so "0 results" would be`);
+      console.error(`  a reader failure, not a finding. Known segments include:${RESET}`);
+      const sample = [...known].filter((s) => !s.startsWith(".")).sort().slice(0, 24);
+      console.error(`  ${sample.join("  ")}`);
+      process.exit(2);
+    }
+
+    affectsStats = filterByAffects(result, hit);
+  }
+
   if (process.argv.includes("--json")) {
+    if (affectsStats) result.affects = affectsStats;
     console.log(JSON.stringify(result, null, 2));
     return;
+  }
+
+  if (affectsStats) {
+    const a = affectsStats;
+    console.log(`${BOLD}scope${RESET} ${a.scope} ${DIM}(of ${a.rankedBefore} ranked items tree-wide)${RESET}`);
+    console.log(
+      `  ${YELLOW}${a.filedElsewhere}${RESET} filed ELSEWHERE about it ${DIM}— you would not see these by opening your own registers${RESET}`,
+    );
+    console.log(`  ${a.filedHere} filed in it ${DIM}— already visible locally${RESET}`);
+    if (a.handoverSectionsElsewhere > 0) {
+      console.log(`  ${a.handoverSectionsElsewhere} handover section(s) elsewhere mention it`);
+    }
+    if (a.filedElsewhere === 0) {
+      console.log(`  ${DIM}nothing filed elsewhere — checked ${a.rankedBefore} items and ${a.handoverSectionsBefore} handover sections${RESET}`);
+    }
+    console.log(`${DIM}  Filtered view, elsewhere-first. Nothing copied or moved; drop --affects for the whole tree.${RESET}`);
+    console.log();
   }
 
   console.log(`${BOLD}backlog${RESET} ${DIM}${result.generatedAt}${RESET}`);
