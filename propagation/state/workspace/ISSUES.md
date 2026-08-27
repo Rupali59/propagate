@@ -2735,3 +2735,46 @@ predates the workspace's newest branch change, so "nobody has run it" becomes a 
 rather than a silence. **Do not simply run `migrate-refs --apply` and close this**: that refreshes
 the data, risks the G26 rows above, and leaves the wiring gap exactly where it is — which is how
 the three days accumulated.
+
+### N56 · `backlog` reads a STATE.md pointer stub as a live file with 0 open items — **S1** — **OPEN**
+
+Found 2026-08-27 while adopting STATE/DECISIONS for `Tathya/WorkTracker`. The new root stub
+was reported as real:
+
+```
+parsed  Tathya/WorkTracker/STATE.md          (state-live-sections, 0 open)   <- a 20-line signpost
+parsed  Tathya/propagation/state/WorkTracker/STATE.md (state-live-sections, 5 open)
+```
+
+**The stub check exists, is correct, and is not called on this path.**
+`isPointerStubText()` (`lib/migrate/workspace.mjs:176`) returns **true** for all seven of
+these files; `lib/report/backlog.mjs:380` consults it before the checkbox/id-keyed parsers,
+but the `state-live-sections` parser does not.
+
+Measured across the tree — every one classified STUB by the predicate, every one reported
+`0 open` by `backlog`:
+
+```
+STUB  STATE.md                          parsed (state-live-sections, 0 open)
+STUB  Keerti/STATE.md                   parsed (state-live-sections, 0 open)
+STUB  ManavDaehi/STATE.md               parsed (state-live-sections, 0 open)
+STUB  Motherboard/STATE.md              parsed (state-live-sections, 0 open)
+STUB  PanditPawanKaushik/STATE.md       parsed (state-live-sections, 0 open)
+STUB  Tushar/STATE.md                   parsed (state-live-sections, 0 open)
+STUB  Tathya/WorkTracker/STATE.md       parsed (state-live-sections, 0 open)
+```
+
+**Why S1.** This module's own header states the contract it is breaking — *"`stub: true`
+recognised, explicitly, as intentionally empty … absence is ambiguous unless it is
+attributable"* (`backlog.mjs:14-22`). A signpost reporting `0 open` is indistinguishable from
+a project that genuinely has no open work, and `0 open` is the reading that makes work
+disappear. Seven of them are doing it now. It is the same shape as
+`rule:discernment-checks` §6: a reader that cannot say "I did not understand this input"
+reports **absence** instead, and absence gets acted on.
+
+**Fix:** call `isPointerStubText()` in the `state-live-sections` path too, before parsing —
+one call, at the same point the other formats already make it.
+
+**Test that would have caught it:** feed each parser a known stub and assert the outcome is
+`stub`, not `parsed: 0`. Today only the checkbox/id-keyed paths have that case, which is why
+the gap survived — the check was written once and the second reader was added later.
