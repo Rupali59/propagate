@@ -3610,7 +3610,7 @@ async function journalCmd() {
     const link = r.viaSymlink ? ` ${DIM}[via symlink]${RESET}` : "";
     // Authors are printed always, not only when there are several: a journal that reads
     // as one person's day is wrong about who did what.
-    console.log(`  ${BOLD}${r.repo.replace(os.homedir(), "~")}${RESET}  ${r.count}${link}  ${DIM}${r.authors.join(", ")}${RESET}`);
+    console.log(`  ${BOLD}${r.repo.replace(_homedir(), "~")}${RESET}  ${r.count}${link}  ${DIM}${r.authors.join(", ")}${RESET}`);
     for (const c of r.commits.slice(0, 4)) console.log(`      ${DIM}${c.hash}${RESET} ${c.subject.slice(0, 76)}`);
     if (r.commits.length > 4) console.log(`      ${DIM}… ${r.commits.length - 4} more${RESET}`);
   }
@@ -3770,6 +3770,68 @@ async function backlogCmd() {
 // thing is a record of what it has already told you, keyed on the content triple
 // — see lib/monitor.mjs for why that key and not mtimes.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// caps — context-budget caps, derived tree-wide (plan T1 + T2).
+//
+// The report path, NOT the gate. The pre-commit ratchet reads
+// `git diff --cached --numstat` and never walks the tree; keeping the two apart
+// is the perf contract, not an optimisation to add later.
+// ─────────────────────────────────────────────────────────────────────────────
+async function capsCmd() {
+  const { capsReport } = await import("./lib/report/caps.mjs");
+  const { HUB_ROOT } = await import("./lib/core/config.mjs");
+  const r = capsReport();
+  // `short` lives in commands/registers.mjs and is not in scope here. Caught at
+  // RUNTIME, not by `node --check` — G60: a parse check does not resolve names
+  // inside a function body it never calls.
+  const shortPath = (f) => String(f).replace(`${HUB_ROOT ?? ""}/`, "").replace(HOME_DIR, "~");
+
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify(r, null, 2));
+    return;
+  }
+
+  const t = r.totals;
+  console.log(`${BOLD}caps${RESET} ${DIM}(read-only derivation)${RESET}`);
+  console.log(
+    `  ${t.measured} measured · ${t.over ? RED : ""}${t.over} over${RESET} · ${t.yellow} yellow · ` +
+      `${t.skippedStubs} stub(s) skipped · ${t.unset} unset · ${t.unreadable} unreadable`,
+  );
+  if (t.over) console.log(`  ${RED}${t.excessLines}${RESET} line(s) over cap in total`);
+
+  if (r.scopeDegraded) {
+    console.log(`\n  ${YELLOW}scope classification degraded${RESET} ${DIM}— ${r.scopeDegraded}${RESET}`);
+  }
+
+  const over = r.records.filter((x) => x.status === "over").sort((a, b) => b.actual / b.cap - a.actual / a.cap);
+  if (over.length) {
+    console.log(`\n  ${BOLD}over cap${RESET}`);
+    for (const x of over) {
+      console.log(
+        `    ${(x.actual / x.cap).toFixed(1)}x  ${String(x.actual).padStart(5)}/${String(x.cap).padEnd(4)} ` +
+          `${DIM}${x.scope} [${x.source}]${RESET}  ${shortPath(x.file)}`,
+      );
+    }
+  }
+
+  // A stub is NOT a pass. N53's whole shape was a checker rendering a 14-line
+  // pointer as green; printing the count makes the distinction visible.
+  if (t.skippedStubs) {
+    console.log(
+      `\n  ${DIM}${t.skippedStubs} legacy-path stub(s) skipped — measured at their propagation/state location, not here${RESET}`,
+    );
+  }
+  if (t.unset) {
+    const g = r.records.filter((x) => x.status === "unset").sort((a, b) => b.actual - a.actual);
+    console.log(`\n  ${BOLD}gotchas${RESET} ${DIM}— measured in entries; cap unset until propagation aligns${RESET}`);
+    console.log(`    max ${g[0].actual} entries ${DIM}${shortPath(g[0].file)}${RESET}`);
+    console.log(`    ${DIM}any cap must EXCEED that, or the ratchet freezes the largest file on day one${RESET}`);
+  }
+  for (const nd of r.notDiscovered) {
+    console.log(`\n  ${YELLOW}not discovered${RESET}  ${nd.kind} ${DIM}— ${nd.reason}${RESET}`);
+  }
+}
 
 async function monitorCmd() {
   const args = process.argv.slice(3);
@@ -4201,6 +4263,8 @@ if (_invokedDirectly) {
   } else if (mode === "manifest") {
     const { manifestCmd } = await import("./commands/manifest.mjs");
     await manifestCmd();
+  } else if (mode === "caps") {
+    await capsCmd();
   } else if (mode === "registers") {
     const { registersCmd } = await import("./commands/registers.mjs");
     process.exitCode = await registersCmd(process.argv.slice(3));
