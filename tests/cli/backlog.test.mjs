@@ -759,3 +759,89 @@ test("repoSegments excludes .md filenames so a scope can never be a file", () =>
   assert.equal(segs.has("Keerti"), true);
   assert.equal(segs.has("STATE.md"), false);
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// --brief — the planning-shaped grouping
+//
+// The property that matters is NOT the size reduction. It is that shortening
+// never LOSES an item: full output is 120 KB and could not be put in front of a
+// planner, but a digest that quietly drops rows is worse than no digest.
+// ─────────────────────────────────────────────────────────────────────────
+
+import { groupForBrief, BRIEF_TRUNC } from "../../lib/report/backlog.mjs";
+
+const mkItems = (n, prefix = "A") =>
+  Array.from({ length: n }, (_, i) => ({ file: `${prefix}/f${i}.md`, line: i + 1, text: `item ${i}`, priority: null }));
+
+test("groupForBrief lists EVERY item — grouping and truncation shorten text, never drop rows", () => {
+  // HALF THE ITEMS MUST BE OVER-LONG. The first version of this test used 250
+  // short items, so nothing was truncated and it could not have caught a
+  // drop-on-truncate at all — it passed under a mutation that silently deleted
+  // every over-long row. A count assertion that never exercises the truncation
+  // path is a check that cannot fail (rule:discernment-checks §1).
+  const short = mkItems(125, "W");
+  const long = Array.from({ length: 125 }, (_, i) => ({
+    file: `W/long${i}.md`, line: i, text: "x".repeat(BRIEF_TRUNC + 40), priority: null,
+  }));
+  const items = [...short, ...long];
+
+  const g = groupForBrief(items);
+  assert.equal(g.listed, 250, "listed must equal the input length, always");
+  assert.equal([...g.groups.values()].reduce((n, a) => n + a.length, 0), 250,
+    "and the groups must contain every one of them");
+  assert.equal(g.truncated, 125, "exactly the over-long half was shortened — not dropped");
+});
+
+test("an over-long item is TRUNCATED and COUNTED, never silently shortened", () => {
+  const g = groupForBrief([{ file: "W/a.md", text: "x".repeat(BRIEF_TRUNC + 50), priority: null }]);
+  const only = [...g.groups.values()][0][0];
+  assert.equal(only.briefText.length, BRIEF_TRUNC, "shortened to the stated width");
+  assert.ok(only.briefText.endsWith("…"), "and marked, so a reader knows text is missing");
+  assert.equal(g.truncated, 1, "the COUNT is what makes the elision honest — rule:discernment-checks §2");
+});
+
+test("an item shorter than the limit is untouched and not counted as truncated", () => {
+  const g = groupForBrief([{ file: "W/a.md", text: "short", priority: null }]);
+  assert.equal([...g.groups.values()][0][0].briefText, "short");
+  assert.equal(g.truncated, 0, "or the truncation count would overstate what was lost");
+});
+
+test("wrapped entries collapse to ONE line — several registers wrap across lines", () => {
+  // Without this a "90 char" line renders as four, and the digest is not brief.
+  const g = groupForBrief([{ file: "W/a.md", text: "one\n  two\n\tthree", priority: null }]);
+  assert.equal([...g.groups.values()][0][0].briefText, "one two three");
+});
+
+test("the priority gap is reported, because a filtered view hides it", () => {
+  // "P0+P1 = 16" reads as "there are 16 important things" when 481 items are
+  // simply unclassified. The denominator is the honest part.
+  const items = [
+    { file: "W/a.md", text: "a", priority: 0 },
+    { file: "W/b.md", text: "b", priority: 1 },
+    ...mkItems(20, "W"),
+  ];
+  const g = groupForBrief(items);
+  assert.equal(g.byPriority.P0, 1);
+  assert.equal(g.byPriority.P1, 1);
+  assert.equal(g.byPriority.none, 20, "the unclassified count must be visible, not inferred");
+  assert.equal(g.listed, 22);
+});
+
+test("groups are ordered biggest-first — a planner reads a digest from the top", () => {
+  const g = groupForBrief([...mkItems(3, "small"), ...mkItems(9, "big")]);
+  assert.deepEqual([...g.groups.keys()], ["big", "small"]);
+});
+
+test("workspaceOf is injectable, so hub-root files do not become a group named after a file", () => {
+  const g = groupForBrief([{ file: "HANDOVERS.md", text: "x", priority: null }], {
+    workspaceOf: (f) => (f.endsWith(".md") && !f.includes("/") ? "(hub root)" : f.split("/")[0]),
+  });
+  assert.deepEqual([...g.groups.keys()], ["(hub root)"]);
+});
+
+test("an empty ranked list yields an empty digest, not a crash", () => {
+  const g = groupForBrief([]);
+  assert.equal(g.listed, 0);
+  assert.equal(g.groups.size, 0);
+  assert.equal(g.truncated, 0);
+});

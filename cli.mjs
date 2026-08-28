@@ -3620,9 +3620,15 @@ async function journalCmd() {
 }
 
 async function backlogCmd() {
-  const { backlog, repoSegments, filterByAffects } = await import("./lib/report/backlog.mjs");
+  const { backlog, repoSegments, filterByAffects, groupForBrief, BRIEF_TRUNC } = await import("./lib/report/backlog.mjs");
+  // HUB_ROOT is used by --brief's path shortener. Imported HERE, not borrowed
+  // from capsCmd's scope — `node --check` does not resolve names inside a
+  // function body it never calls (G60, third instance today).
+  const { HUB_ROOT } = await import("./lib/core/config.mjs");
   const result = backlog();
 
+  const brief = process.argv.includes("--brief");
+  const verbose = process.argv.includes("--verbose");
   const affectsIdx = process.argv.indexOf("--affects");
   const affects = affectsIdx !== -1 ? process.argv[affectsIdx + 1] : null;
 
@@ -3679,7 +3685,10 @@ async function backlogCmd() {
   );
   console.log();
 
-  const genericFiles = [...result.todoFiles, ...result.issueFiles];
+  // The per-file discovery listing is 12.8 KB of the full output and answers
+  // "did the walk find my file" — a debugging question, not a planning one.
+  // `--brief` drops it; `--verbose` brings it back.
+  const genericFiles = brief && !verbose ? [] : [...result.todoFiles, ...result.issueFiles];
   for (const f of genericFiles) {
     if (f.stub) {
       console.log(`  ${DIM}stub${RESET}      ${f.file} ${DIM}(${f.stubReason})${RESET}`);
@@ -3689,7 +3698,7 @@ async function backlogCmd() {
       console.log(`  ${GREEN}parsed${RESET}    ${f.file} ${DIM}(${f.format}, ${f.parsed} total, ${f.open} open)${RESET}`);
     }
   }
-  for (const f of result.stateFiles) {
+  for (const f of (brief && !verbose ? [] : result.stateFiles)) {
     const tag = f.error ? `${RED}unparsed${RESET}  ${f.file} ${DIM}— unreadable: ${f.error}${RESET}` : `${GREEN}parsed${RESET}    ${f.file} ${DIM}(state-live-sections, ${f.items.length} open)${RESET}`;
     console.log(`  ${tag}`);
   }
@@ -3750,11 +3759,53 @@ async function backlogCmd() {
 
   console.log();
   console.log(`  ${BOLD}ranked (${result.ranked.length})${RESET}`);
-  for (const item of result.ranked) {
-    const pri = item.priority !== null && item.priority !== undefined ? `P${item.priority} ` : "";
-    const loc = item.sources.length > 1 ? item.sources.map((s) => `${s.file}:${s.line}`).join(", ") : `${item.file}:${item.line}`;
-    console.log(`    ${pri}${item.text}  ${DIM}${loc}${RESET}`);
+
+  if (!brief) {
+    for (const item of result.ranked) {
+      const pri = item.priority !== null && item.priority !== undefined ? `P${item.priority} ` : "";
+      const loc = item.sources.length > 1 ? item.sources.map((s) => `${s.file}:${s.line}`).join(", ") : `${item.file}:${item.line}`;
+      console.log(`    ${pri}${item.text}  ${DIM}${loc}${RESET}`);
+    }
+    return;
   }
+
+  // ── --brief ────────────────────────────────────────────────────────────────
+  // The planning-shaped view. Full output is 120 KB, of which 107 KB is this
+  // list at a mean 209 chars per item — it exceeded the tool output limit twice
+  // in one session and had to be spilled to a file. That makes the ONE
+  // derivation carrying open work the one you cannot put in front of a planner.
+  //
+  // Truncation is the whole mechanism, so it is stated rather than hidden: the
+  // count of shortened items is printed, and every item is still LISTED. A digest
+  // that drops items without saying so is the failure this tree keeps recording
+  // (rule:discernment-checks §2).
+  const short = (f) => String(f ?? "").replace(`${HUB_ROOT ?? ""}/`, "").replace(HOME_DIR, "~");
+  const { groups, truncated, byPriority, listed } = groupForBrief(result.ranked, {
+    workspaceOf: (f) => { const top = short(f).split("/")[0]; return top.endsWith(".md") ? "(hub root)" : top; },
+  });
+
+  for (const [ws, items] of groups) {
+    console.log(`\n  ${BOLD}${ws}${RESET} ${DIM}(${items.length})${RESET}`);
+    for (const item of items) {
+      const pri = item.priority !== null && item.priority !== undefined ? `P${item.priority} ` : "   ";
+      console.log(`    ${pri}${item.briefText}`);
+    }
+  }
+
+  // The priority gap, printed BECAUSE a filtered view hides it. "P0+P1 = 16"
+  // reads as "there are 16 important things" when 481 items are simply
+  // unclassified; stating the denominator stops the digest lying by omission.
+  const prioritised = listed - byPriority.none;
+  console.log(`\n  ${BOLD}brief${RESET} ${DIM}— ${listed} item(s) listed, none dropped${RESET}`);
+  console.log(`    ${truncated} shortened to ${BRIEF_TRUNC} chars ${DIM}(full text: drop --brief)${RESET}`);
+  console.log(`    priority: ${Object.entries(byPriority).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ")}`);
+  if (byPriority.none) {
+    console.log(
+      `    ${YELLOW}${byPriority.none} of ${listed} carry NO priority${RESET} ` +
+        `${DIM}— so "${prioritised} prioritised" is a floor, not a ranking${RESET}`,
+    );
+  }
+  if (!verbose) console.log(`    ${DIM}file discovery listing omitted — --verbose to include it${RESET}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
