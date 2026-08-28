@@ -3779,8 +3779,56 @@ async function backlogCmd() {
 // is the perf contract, not an optimisation to add later.
 // ─────────────────────────────────────────────────────────────────────────────
 async function capsCmd() {
-  const { capsReport } = await import("./lib/report/caps.mjs");
+  const { capsReport, capsGate } = await import("./lib/report/caps.mjs");
   const { HUB_ROOT } = await import("./lib/core/config.mjs");
+
+  // --gate: the pre-commit ratchet. A DIFFERENT code path from the report --
+  // it never walks the tree, only what is staged. Exit 1 blocks the commit.
+  if (process.argv.includes("--gate")) {
+    const { execFileSync } = await import("node:child_process");
+    let repoRoot;
+    try {
+      repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    } catch {
+      // Not a repo. A gate that cannot tell must not pretend to pass, but it
+      // also must not block work it never inspected -- say which, and exit 0.
+      console.error(`${YELLOW}caps --gate: not a git repository — nothing inspected${RESET}`);
+      return;
+    }
+    const runGit = (args) => execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    const bypass = process.env.GSTACK_HYGIENE_BYPASS === "1";
+    const g = capsGate({ repoRoot, runGit, bypass });
+
+    if (g.bypassed) {
+      console.error(`${YELLOW}caps --gate: GSTACK_HYGIENE_BYPASS=1 — allowing without inspection${RESET}`);
+      return;
+    }
+    // Only NOTABLE skips are printed — a stub, an unset gotchas cap, an
+    // unreadable index. "not a capped file" is the default for almost every
+    // staged path and printing it drowns the two that matter. The full list is
+    // always in --json.
+    for (const s of g.skipped.filter((x) => x.notable)) console.error(`${DIM}  skipped ${s.file} — ${s.reason}${RESET}`);
+    if (!g.blocked.length) {
+      // "Found nothing" and "looked at nothing" MUST be different outputs.
+      // rule:enforcement-watches-itself, corollary 4 — and this printed nothing
+      // at all for an empty index on its first run, which reads as a pass.
+      if (g.staged === 0) console.error(`${DIM}caps --gate: nothing staged — inspected 0 paths${RESET}`);
+      else console.error(`${DIM}caps --gate: ${g.staged} staged path(s) inspected, none over cap and growing${RESET}`);
+      return;
+    }
+    console.error(`${RED}caps --gate: refusing commit — a file that is over cap got longer.${RESET}`);
+    for (const b of g.blocked) {
+      console.error(`  ${b.file}  ${b.before} -> ${b.now} lines (cap ${b.cap}, +${b.added})`);
+    }
+    console.error("");
+    console.error(`  ${DIM}The rule is a RATCHET: an over-cap file may be committed, it may not GROW.`);
+    console.error(`  Trim at least as much as you add — routing a landed dated section to`);
+    console.error(`  DECISIONS.md or archive/ is usually the whole fix. Once under cap this lifts.`);
+    console.error(`  Bypass (logged, and it disables every other hook too): GSTACK_HYGIENE_BYPASS=1${RESET}`);
+    process.exitCode = 1;
+    return;
+  }
+
   const r = capsReport();
   // `short` lives in commands/registers.mjs and is not in scope here. Caught at
   // RUNTIME, not by `node --check` — G60: a parse check does not resolve names
