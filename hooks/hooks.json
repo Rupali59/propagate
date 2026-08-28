@@ -1,10 +1,20 @@
 {
   "_comment": [
-    "FOUR registrations, not three hooks. gotcha-guard.mjs is registered TWICE, against",
+    "FIVE registrations, not four hooks. gotcha-guard.mjs is registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
-    "classes. A verification phrased as 'all three hooks fire' counts it once and would",
+    "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
     "doc-authority defect this plugin exists to have fixed. Count registrations.",
+    "",
+    "THE SERVED PLUGIN IS A COPY, NOT A LINK — found 2026-08-28, and it is the reason",
+    "this file's version matters. Claude Code copies the marketplace into",
+    "~/.claude/plugins/cache/<mkt>/<plugin>/<version>/ at install time and serves THAT.",
+    "Editing propagate/hooks/*.mjs changes nothing until `claude plugin update",
+    "propagate@tathya` runs AND the session restarts. Measured that day: the running",
+    "gotcha-guard.mjs was the 2026-08-22 snapshot while source had moved on 08-24, and",
+    "both manifests said 0.2.0 — so nothing could ever have invalidated the copy. Bump",
+    "the version in .claude-plugin/plugin.json with any hook change, or the change is",
+    "authored and not delivered.",
     "",
     "${CLAUDE_PLUGIN_ROOT} is resolved by Claude Code to this plugin's root, so these",
     "paths survive the plugin being installed anywhere. The previous arrangement",
@@ -42,6 +52,26 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/gotcha-guard.mjs\""
+          }
+        ]
+      },
+      {
+        "_comment": [
+          "rule-guard, added 2026-08-28. The matcher is Agent|Task|ExitPlanMode and NOT",
+          "Bash|Edit|Write, because today exactly one rule declares a trigger and it is",
+          "about subagent dispatch. Widen this the moment a rule declares a trigger for",
+          "another tool — a matcher narrower than the rule set is a rule that loads and",
+          "can never fire.",
+          "",
+          "Verified live 2026-08-28 that PreToolUse DOES fire on Agent and that an omitted",
+          "`model` is visible as an absent key, using a Bash control in the same config so",
+          "'does not fire' was distinguishable from 'config never reloaded'."
+        ],
+        "matcher": "Agent|Task|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/rule-guard.mjs\""
           }
         ]
       }

@@ -11,7 +11,7 @@
       "name": "propagate",
       "source": "./",
       "description": "Use when a change to one file needs to reach files that must move with it \u2014 across branches, worktrees, or repos. Declares those couplings in a sidecar, derives drift from content on demand, and records every verification in an append-only ledger. Never edits a downstream; it tells a human.",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }

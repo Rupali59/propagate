@@ -1373,3 +1373,31 @@ returned exactly 4 findings, confirming it. Overriding would have pinned the cla
 without ever testing it.
 **Instead:** work `graph`'s fix order, which is already topologically sorted. Reach
 for `--out-of-order` only when you can say why the upstream does not matter here.
+
+### G63 · The served plugin is a COPY, so editing a hook here changes nothing
+**Trigger:** `propagate/hooks/.*\.(mjs|json)$`
+**Fires on:** `/Users/rupali.b/Documents/GitHub/propagate/hooks/rule-guard.mjs`
+Claude Code copies the marketplace into
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` at install time and serves
+**that copy**. `skills-marketplace/propagate` being a symlink to this repo is what makes
+it look otherwise — the symlink is only how the marketplace *finds* the source, not how
+the plugin is *run*.
+So an edit to `hooks/*.mjs` is inert until BOTH `claude plugin update propagate@tathya`
+runs AND the session restarts. The update prints `Restart to apply changes`; there is no
+warning at all for the edit-and-forget case.
+**Signal:** none. The hook keeps firing, correctly, from the old code. `--selftest` run
+from the repo passes, because it tests the source you are looking at rather than the copy
+being executed. That is the trap: the check and the edit agree with each other and both
+disagree with production.
+**Cost:** found 2026-08-28 while adding `rule-guard.mjs`. The running `gotcha-guard.mjs`
+was the **2026-08-22 snapshot** while source had moved on 08-24 — four days of a hook
+whose source nobody doubted. Both manifests said `0.2.0`, so no version change could ever
+have invalidated the copy. Nothing was lost only because the 08-24 edit was a comment.
+**Instead:** bump `version` in `.claude-plugin/plugin.json` with every hook change (both
+`marketplace.json` entries too — `claude plugin validate` catches the mismatch), run
+`claude plugin update propagate@tathya`, then verify against the SERVED path:
+```
+diff -q hooks/gotcha-guard.mjs ~/.claude/plugins/cache/tathya/propagate/<ver>/hooks/gotcha-guard.mjs
+node ~/.claude/plugins/cache/tathya/propagate/<ver>/hooks/rule-guard.mjs --selftest
+```
+Never conclude a hook change is live from a selftest run in this repo.
