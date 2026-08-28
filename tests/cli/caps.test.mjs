@@ -107,8 +107,12 @@ test("countEntries strips fenced blocks — propagate's own N51, one file over",
 
 // ── statuses that are not passes ─────────────────────────────────────────────
 
-test("GOTCHAS.md is measured in entries and reported UNSET — which is not a pass", () => {
-  assert.equal(GOTCHAS_CAP, null, "the number is deferred until propagation aligns");
+test("GOTCHAS.md is measured in entries and reported EXEMPT — which is not a pass", () => {
+  // Renamed from "unset" on 2026-08-28 (D11). "unset" implied a number was still
+  // coming; it is not. Gotchas never auto-load — the guard delivers one matching
+  // entry at the moment of risk — so there is no budget to cap. The status must
+  // still not read as OK: measured and deliberately unjudged is a third thing.
+  assert.equal(GOTCHAS_CAP, null, "deliberately uncapped, not pending a number");
   const r = capsReport({
     discover: () => ({ stateMd: [], todosMd: [], issuesMd: [], handoverMd: [], claudeMd: [], gotchasMd: ["/hub/W/propagation/state/x/GOTCHAS.md"], memoryMd: [] }),
     readFile: () => "### A\nb\n### B\nb\n",
@@ -117,7 +121,7 @@ test("GOTCHAS.md is measured in entries and reported UNSET — which is not a pa
   const rec = r.records[0];
   assert.equal(rec.metric, "entries");
   assert.equal(rec.actual, 2);
-  assert.equal(rec.status, "unset");
+  assert.equal(rec.status, "exempt");
   assert.notEqual(rec.status, "ok", "no cap must never render as green");
 });
 

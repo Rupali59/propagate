@@ -3803,8 +3803,8 @@ async function capsCmd() {
       console.error(`${YELLOW}caps --gate: GSTACK_HYGIENE_BYPASS=1 — allowing without inspection${RESET}`);
       return;
     }
-    // Only NOTABLE skips are printed — a stub, an unset gotchas cap, an
-    // unreadable index. "not a capped file" is the default for almost every
+    // Only NOTABLE skips are printed — a stub, a gated kind with no declared
+    // cap, an unreadable index. "not a capped file" is the default for almost every
     // staged path and printing it drowns the two that matter. The full list is
     // always in --json.
     for (const s of g.skipped.filter((x) => x.notable)) console.error(`${DIM}  skipped ${s.file} — ${s.reason}${RESET}`);
@@ -3844,7 +3844,7 @@ async function capsCmd() {
   console.log(`${BOLD}caps${RESET} ${DIM}(read-only derivation)${RESET}`);
   console.log(
     `  ${t.measured} measured · ${t.over ? RED : ""}${t.over} over${RESET} · ${t.yellow} yellow · ` +
-      `${t.skippedStubs} stub(s) skipped · ${t.unset} unset · ${t.unreadable} unreadable`,
+      `${t.skippedStubs} stub(s) skipped · ${t.exempt} exempt · ${t.unreadable} unreadable`,
   );
   if (t.over) console.log(`  ${RED}${t.excessLines}${RESET} line(s) over cap in total`);
 
@@ -3870,11 +3870,11 @@ async function capsCmd() {
       `\n  ${DIM}${t.skippedStubs} legacy-path stub(s) skipped — measured at their propagation/state location, not here${RESET}`,
     );
   }
-  if (t.unset) {
-    const g = r.records.filter((x) => x.status === "unset").sort((a, b) => b.actual - a.actual);
-    console.log(`\n  ${BOLD}gotchas${RESET} ${DIM}— measured in entries; cap unset until propagation aligns${RESET}`);
+  if (t.exempt) {
+    const g = r.records.filter((x) => x.status === "exempt").sort((a, b) => b.actual - a.actual);
+    console.log(`\n  ${BOLD}gotchas${RESET} ${DIM}— measured in entries; deliberately uncapped (D11)${RESET}`);
     console.log(`    max ${g[0].actual} entries ${DIM}${shortPath(g[0].file)}${RESET}`);
-    console.log(`    ${DIM}any cap must EXCEED that, or the ratchet freezes the largest file on day one${RESET}`);
+    console.log(`    ${DIM}never auto-loaded — the guard delivers one entry at the moment of risk, so size costs nothing${RESET}`);
   }
   for (const nd of r.notDiscovered) {
     console.log(`\n  ${YELLOW}not discovered${RESET}  ${nd.kind} ${DIM}— ${nd.reason}${RESET}`);
