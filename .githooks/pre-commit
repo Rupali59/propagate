@@ -13,4 +13,28 @@
 if [ -z "${PROPAGATE_SKIP:-}" ]; then
   node "$(git rev-parse --show-toplevel)/cli.mjs" check --staged || true
 fi
+
+# --- caps ratchet (added 2026-08-28, plan T3) --------------------------------
+# BLOCKING, and deliberately a different posture from the step above. The drift
+# check is warn-only because a declared coupling is INFORMATION and the answer is
+# often "no change needed". The ratchet is blocking because growth in an
+# already-over-cap file is not information, it is the thing we are preventing.
+#
+# The rule: an over-cap file may be committed, it may not GROW. Passable on day
+# one for every file in this repo, so it can never force `--no-verify`.
+#
+# THIS REPO IS SUBJECT TO ITS OWN GATE, which is the point. Measured 2026-08-28,
+# propagation/state/workspace/{STATE.md 655/200, ISSUES.md 2780/800} are both over
+# cap, so editing either from here on costs a trim of equal size. That friction is
+# the feature. rule:enforcement-watches-itself lists nine mechanisms in this tree
+# that were built and never pointed at their own author; this hook's own header
+# records being the fourth of them.
+#
+# No path resolution needed: cli.mjs is at this repo's root, unlike the workspace
+# hooks which must resolve an installed plugin.
+#
+# Bypass (logged by the workspace guards, and it disables every other hook too):
+#   GSTACK_HYGIENE_BYPASS=1 git commit ...
+node "$(git rev-parse --show-toplevel)/cli.mjs" caps --gate || exit 1
+
 exit 0
