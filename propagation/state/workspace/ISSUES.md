@@ -1097,7 +1097,7 @@ rather than a silence. **Do not simply run `migrate-refs --apply` and close this
 the data, risks the G26 rows above, and leaves the wiring gap exactly where it is — which is how
 the three days accumulated.
 
-### N56 · `backlog` reads a STATE.md pointer stub as a live file with 0 open items — **S1** — **OPEN**
+### N56 · `backlog` reads a STATE.md pointer stub as a live file with 0 open items — **S1** — **RESOLVED 2026-08-28**
 
 Found 2026-08-27 while adopting STATE/DECISIONS for `Tathya/WorkTracker`. The new root stub
 was reported as real:
@@ -1139,6 +1139,35 @@ one call, at the same point the other formats already make it.
 **Test that would have caught it:** feed each parser a known stub and assert the outcome is
 `stub`, not `parsed: 0`. Today only the checkbox/id-keyed paths have that case, which is why
 the gap survived — the check was written once and the second reader was added later.
+
+**RESOLVED 2026-08-28, and the filed measurement was low.** (The word is `RESOLVED`, not
+`FIXED`, on purpose — `registers.mjs`'s `ISSUE_FINISHED_RE` reads
+`RESOLVED|MOOT|CLOSED|SUPERSEDED|WONTFIX` and nothing else, so an entry closed in any other
+word stays counted as open forever. This entry was first written `FIXED` and the open count
+did not move.) The fix is the one prescribed
+above: `isPointerStubText()` is now called in `backlog()`'s `stateFiles` mapping, before
+`parseStateLiveSections`, returning `format: "pointer-stub"` with the target named. The
+renderer in `cli.mjs` prints `stub` for it, matching what the checkbox path already printed.
+
+**This entry said 7 files. The real number is 23** — every one a 15–20 line signpost. The
+seven listed were the ones a single reading happened to surface; the entry never claimed to
+be exhaustive and read as though it were, which is the same shape as the defect itself.
+
+**Proven not to be a loss, not merely a relabel that looked safe.** The dangerous direction
+here is suppression: a reader that calls everything a stub hides real backlog and is worse
+than the bug. Each of the 23 was run through `parseStateLiveSections` directly and yielded
+**0 items before the fix**, so nothing that was being counted stopped being counted — only
+the label changed, from a number that reads as a fact to a pointer that reads as a
+redirection.
+
+**Regression test:** `tests/cli/backlog.test.mjs`, "N56: backlog() classifies a STATE.md
+pointer stub as pointer-stub, never `0 open`". It asserts BOTH directions in one temp tree —
+the stub is reported and classified `pointer-stub` with its target named, and a real
+`STATE.md` sitting beside it still yields its items. Mutating the guard to
+`if (false && isPointerStubText(text))` turns it red with `must not read as
+state-live-sections`, and the mutation was confirmed present in the file before the run
+(`rule:discernment-checks` §4 — a `sed` that matches nothing silently no-ops this check).
+Suite: 61 pass, 0 fail.
 
 ## Rotated to archive
 

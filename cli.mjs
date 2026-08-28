@@ -3699,7 +3699,11 @@ async function backlogCmd() {
     }
   }
   for (const f of (brief && !verbose ? [] : result.stateFiles)) {
-    const tag = f.error ? `${RED}unparsed${RESET}  ${f.file} ${DIM}— unreadable: ${f.error}${RESET}` : `${GREEN}parsed${RESET}    ${f.file} ${DIM}(state-live-sections, ${f.items.length} open)${RESET}`;
+    const tag = f.error
+      ? `${RED}unparsed${RESET}  ${f.file} ${DIM}— unreadable: ${f.error}${RESET}`
+      : f.format === "pointer-stub"
+        ? `${DIM}stub${RESET}      ${f.file} ${DIM}(${f.detail})${RESET}`
+        : `${GREEN}parsed${RESET}    ${f.file} ${DIM}(state-live-sections, ${f.items.length} open)${RESET}`;
     console.log(`  ${tag}`);
   }
   console.log();
