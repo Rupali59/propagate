@@ -232,3 +232,27 @@ actual CLI output caught it.
 change both or neither — and check the CLI output, never the intermediate flag.
 The general form is `rule:discernment-checks` §3: verify the work, not the report.
 Here the "report" was my own instrumentation agreeing with me.
+
+### G25 · A published Claude Artifact describing a project is invisible to this tool
+Found 2026-08-29, updating astro-studio's own architecture explainer. "The Content
+Flywheel" (a claude.ai Artifact — C4 diagrams + a production-readiness rubric for
+astro-studio's daily-post pipeline) had drifted exactly the way this skill exists to
+catch: it described a mechanism ("packaging → card render, one shared carousel.json")
+that had since been redesigned, with no warning anywhere. But it has **no calling node
+this tool can ever find** — it is not a file in the repo, `discovery.mjs` cannot walk to
+it, and no citation graph reaches a URL on a different host under a different auth
+model. It is the same failure mode this skill exists to prevent (**STALE**: "describes
+something still standing, gone quiet"), in a medium `cli.mjs` cannot see at all — a
+structural blind spot, not a bug to fix in this tool.
+
+**The mitigation is a citation, not a feature**: link the artifact's URL from a real
+tracked doc this tool already walks (`STATE.md`, `README.md`, or the doc it's a
+diagram of) — that citation IS a calling node, and gives a human editor something to
+re-check the artifact against the next time that source doc changes. An artifact
+linked from nowhere in the repo is the same as an orphaned `.md` file with the added
+problem that this tool cannot even report it as orphaned.
+
+**Cost, if unaddressed**: none yet measured — the drift was caught by chance (asked to
+update it) rather than by any check. Recorded as a known instrument limit before a
+first real incident, per `rule:discernment-checks §1` — a blind spot named in advance
+is cheaper than one discovered by someone trusting a stale diagram.

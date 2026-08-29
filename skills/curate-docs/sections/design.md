@@ -27,6 +27,13 @@ human's evidence, can close:
 A document nothing calls is not wrong. It is **undecided**, and this skill is how the
 decision gets made.
 
+**A published Claude Artifact describing this project can go `STALE` too, and this
+tool cannot see it at all** — no local file, no calling node it can walk to. See
+`GOTCHAS.md` G25. The mitigation isn't a feature of this tool; it's a discipline: link
+the artifact's URL from a real tracked doc (`STATE.md`, `README.md`, or the doc it
+diagrams) so that citation becomes the calling node a human can re-check next time the
+source doc changes.
+
 ## Before archiving: `impact`
 
 ```bash
