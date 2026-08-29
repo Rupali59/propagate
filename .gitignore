@@ -36,3 +36,10 @@ SKILLS_LIFECYCLE.jsonl
 # doctor's per-run metrics record (docs/OBSERVABILITY.md §6 step 1) — per-
 # machine state, not source, same as state.json above.
 metrics.jsonl
+
+# Retired v1 watcher logs — deleted 2026-08-29 when this repo went public.
+# They were runtime logs of file paths across every client workspace: 27,923
+# client-name occurrences, and the gzipped one held twice the plaintext one
+# while being invisible to any text search. The watcher itself was retired
+# 2026-08-14 and deleted 2026-08-22; its logs had no readers.
+docs/archive/*watcher*.log*
