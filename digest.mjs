@@ -22,7 +22,7 @@
  */
 
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
@@ -49,6 +49,21 @@ import { scanSkills, probeTranscripts } from "./lib/skills/skills-scan.mjs";
 import { readMetricsRecords, evaluateExpectations } from "./lib/report/metrics.mjs";
 import { inventory as buildInventory } from "./lib/report/inventory.mjs";
 import { readSystemsTable, pickAdoptionAsk, formatAdoptionLines } from "./lib/report/adoption.mjs";
+import { backlog as buildBacklog } from "./lib/report/backlog.mjs";
+import {
+  rollup as buildRollup,
+  renderRollup as renderRollupBody,
+  bodyHash as rollupBodyHash,
+  parseFooter as parseRollupFooter,
+  compareInputs as compareRollupInputs,
+} from "./lib/report/rollup.mjs";
+// `artifactPath()` only — never anything that writes. commands/rollup.mjs is
+// the one file in this codebase allowed to call writeFileSync on
+// ECOSYSTEM.md (its own header says so); importing its READ-ONLY path helper
+// avoids a second, driftable copy of "SEARCH_ROOTS[0] + ARTIFACT_NAME" (the
+// same two-ledger reasoning backlog.mjs:836-846 already gives for not
+// copying an item between registers, one layer down at a single constant).
+import { artifactPath as rollupArtifactPath } from "./commands/rollup.mjs";
 
 const HOME = os.homedir();
 const DIGEST_STATE_PATH = path.join(HOME, ".claude", "propagate-digest-state.json");
@@ -522,9 +537,26 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
   const inbound = inboundSnapshot(reconcileResult);
   const drift = driftSnapshot(reconcileResult);
 
+  // Walked ONCE here, shared by the digest's own INVENTORY section below AND
+  // by the ecosystem rollup further down (rollup.mjs's own doc comment:
+  // "pass that existing result into rollup() rather than walking a second
+  // time — rollup({searchRoots, backlogResult, inventoryResult}) accepts
+  // pre-computed results for exactly this reason"). A throw here is
+  // swallowed to `null` rather than caught-and-reported directly: each of
+  // the two consumers below (inventorySnapshot(), rollupSnapshot()) falls
+  // back to re-deriving on its own and reports ITS OWN failure independently
+  // — one walk failing must not silently make the OTHER section look like
+  // "zero items" instead of "could not measure" (G2).
+  let invRawResult = null;
+  try {
+    invRawResult = buildInventory();
+  } catch {
+    invRawResult = null;
+  }
+
   let inv;
   try {
-    inv = inventorySnapshot();
+    inv = inventorySnapshot(invRawResult);
   } catch (err) {
     // Same belt-and-suspenders as disk/skills/lifecycle above: a bug in the
     // self-adoption probe must never take down the only reporting channel
@@ -540,6 +572,28 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     // bug in the adoption trigger must never take down the only reporting
     // channel that currently works.
     adoption = { available: false, error: String(err.message || err) };
+  }
+
+  // backlog() has no other caller in this file (unlike inventory() above,
+  // which the INVENTORY section already needed) — walked here solely for
+  // rollup(). Still computed once and threaded through, per the same
+  // "pre-computed results" contract, so a future second consumer of backlog
+  // data in this file does not reintroduce a duplicate walk by accident.
+  let backlogRawResult = null;
+  try {
+    backlogRawResult = buildBacklog({ searchRoots: SEARCH_ROOTS });
+  } catch {
+    backlogRawResult = null;
+  }
+
+  let roll;
+  try {
+    roll = rollupSnapshot({ backlogResult: backlogRawResult, inventoryResult: invRawResult });
+  } catch (err) {
+    // Same belt-and-suspenders as disk/skills/lifecycle/inventory/adoption
+    // above: a bug in the ecosystem rollup must never take down the only
+    // reporting channel that currently works.
+    roll = { available: false, error: String(err.message || err) };
   }
 
   return {
@@ -559,6 +613,7 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     drift,
     inventory: inv,
     adoption,
+    rollup: roll,
   };
 }
 
@@ -641,9 +696,14 @@ function skillsSnapshot(indexDb) {
  * goes unused, its own digest section — driven by the same appeared/
  * disappeared diffing as SKILLS below — reports nothing changed and, after
  * enough quiet days, that silence is itself visible in the quiet-day line.
+ *
+ * Accepts an optional pre-computed `inv` (from `buildInventory()`) so
+ * `buildSnapshot()` can walk once and share the result with `rollupSnapshot()`
+ * below — falls back to walking itself when called with no argument (every
+ * existing test and every other caller of this function).
  */
-function inventorySnapshot() {
-  const inv = buildInventory();
+function inventorySnapshot(inv) {
+  inv = inv ?? buildInventory();
   const ids = [];
   for (const items of Object.values(inv.categories)) {
     for (const item of items) ids.push({ id: item.id, status: item.status });
@@ -671,6 +731,129 @@ function adoptionSnapshot() {
   if (error) return { available: false, error };
   const ask = pickAdoptionAsk(rows);
   return { available: true, ask };
+}
+
+/**
+ * Mirrors `commands/rollup.mjs`'s `detectHandEdit` test EXACTLY — recompute
+ * the on-disk body hash via the SAME `bodyHash` function `renderRollup`
+ * itself uses to write the footer, and compare it to the footer's stored
+ * `body:` field. That function is not exported (this lane does not touch
+ * `commands/`, per the plan's build sequence: Lane C owns that file), so the
+ * three-way test is restated here against the same imported primitives
+ * (`parseFooter`, `bodyHash`) rather than re-derived a second, subtly
+ * different way. If `commands/rollup.mjs`'s test ever changes, this one must
+ * change with it by hand — there is no shared call site to keep the two
+ * honest beyond both importing the same `lib/report/rollup.mjs` functions.
+ */
+function rollupIsHandEdited(existingText) {
+  const parsed = parseRollupFooter(existingText);
+  if (parsed === null || parsed.malformed) return true;
+  const actualFull = rollupBodyHash(existingText);
+  if (actualFull === null) return true;
+  return actualFull.slice(0, 12) !== parsed.body;
+}
+
+/**
+ * The ecosystem rollup — "what have we built, what is open" across the
+ * whole tree, via `lib/report/rollup.mjs`'s `rollup()`. Read-only, same
+ * belt-and-suspenders contract as disk/skills/lifecycle/inventory/adoption
+ * above: this function is free to throw; `buildSnapshot()`'s own try/catch
+ * around the call site is what keeps a bug here from taking down the only
+ * reporting channel that currently works.
+ *
+ * *** THE CONSTRAINT THAT MATTERS MOST IN THIS WHOLE SLOT, STATED HERE
+ * BECAUSE THIS IS WHERE SOMEONE WOULD "HELPFULLY" BREAK IT: this function
+ * calls `rollup()` and `renderRollup()` to DERIVE the current state of the
+ * tree, in memory, so it can compare that derivation against whatever is
+ * ALREADY on disk. It never calls `writeFileSync` and never regenerates
+ * `ECOSYSTEM.md`. If it did, the comparison below would become a check that
+ * cannot fail — the file it just wrote would always match a fresh
+ * derivation, because it IS that derivation, computed moments earlier. That
+ * is the exact failure this file's own header was written about ("reading
+ * 'Watcher healthy' for a month while frozen"), one layer up. `commands/
+ * rollup.mjs` is the only file in this codebase permitted to write
+ * ECOSYSTEM.md — see its own header — and the "helpful" auto-regenerate
+ * refactor that collapses the two is a two-line change someone will propose
+ * within a month of reading this comment. Don't make it.
+ *
+ * Computes TWO independent facts about the tree, because they answer two
+ * different questions and one can be true while the other is false for
+ * weeks at a time (plan: "Two independent diffs, both needed"):
+ *
+ *   (a) `fileStale` / `handEdited` — is `ECOSYSTEM.md`, as it sits ON DISK
+ *       RIGHT NOW, current against a fresh derivation? Re-read and
+ *       re-compared EVERY digest run (never cached), because a human can
+ *       run `propagate rollup` between one digest run and the next and this
+ *       function must see that the moment it happens, not a day later.
+ *       `fileStale` is true when the file is absent, hand-edited, OR its
+ *       stored input hashes disagree with a fresh derivation — the same
+ *       three "not safe to trust" cases `propagate rollup --check` treats
+ *       as non-current.
+ *   (b) the input-transition slot computed separately in `computeDiff`
+ *       (`inputsChanged`/`inputsAppeared`/`inputsVanished`/
+ *       `becameUnreadable`) — has anything changed in the TREE's inputs
+ *       since the LAST DIGEST RUN, independent of whether `ECOSYSTEM.md`
+ *       has ever been generated at all. (a) can be true for weeks (nobody
+ *       ran `propagate rollup`) while (b) is empty (nothing has moved since
+ *       yesterday's digest) — see the file header for why the digest leads
+ *       with diffs, never restated totals.
+ *
+ * Accepts pre-computed `backlogResult`/`inventoryResult` so a caller that
+ * already walked the tree (this file's own `buildSnapshot()`, which already
+ * calls `inventory()` for the INVENTORY section) does not pay for a second
+ * walk — `rollup({searchRoots, backlogResult, inventoryResult})` exists in
+ * `lib/report/rollup.mjs` for exactly this.
+ */
+function rollupSnapshot({ backlogResult, inventoryResult } = {}) {
+  const result = buildRollup({ searchRoots: SEARCH_ROOTS, backlogResult, inventoryResult });
+  const rendered = renderRollupBody(result);
+  const fullBodyHash = rollupBodyHash(rendered);
+  const currentInputs = result.inputs; // Map<shortPath, sha12|"ABSENT"|"UNREADABLE:...">
+
+  const artifact = rollupArtifactPath();
+  let artifactExists = false;
+  let handEdited = false;
+  let fileStale = true; // absent == stale, same reading `rollup --check` gives an ungenerated file
+
+  if (artifact && existsSync(artifact)) {
+    artifactExists = true;
+    let existingText = null;
+    try {
+      existingText = readFileSync(artifact, "utf8");
+    } catch {
+      // Unreadable existing file: treat like hand-edited/foreign rather than
+      // throwing this whole snapshot away over one stat-then-read race.
+      handEdited = true;
+      fileStale = true;
+    }
+    if (existingText !== null) {
+      handEdited = rollupIsHandEdited(existingText);
+      if (handEdited) {
+        fileStale = true;
+      } else {
+        const parsed = parseRollupFooter(existingText);
+        const storedInputs = parsed && !parsed.malformed ? parsed.inputs : new Map();
+        const diff = compareRollupInputs(storedInputs, currentInputs);
+        fileStale =
+          diff.changed.length > 0 ||
+          diff.appeared.length > 0 ||
+          diff.vanished.length > 0 ||
+          diff.becameUnreadable.length > 0;
+      }
+    }
+  }
+
+  return {
+    available: true,
+    // Short (12-hex) to match the footer's own `body:` field and
+    // toStateRollup's lean-prior discipline below — never the full 64-hex,
+    // never the rendered body itself.
+    bodyHash: fullBodyHash ? fullBodyHash.slice(0, 12) : null,
+    inputs: Object.fromEntries(currentInputs),
+    artifactExists,
+    handEdited,
+    fileStale,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -730,6 +913,22 @@ function toStateInventory(inv) {
   return { counts: inv.counts, statusById };
 }
 
+/**
+ * Lean prior-rollup record: ONLY the body hash and the per-input hash map —
+ * never the rendered `ECOSYSTEM.md` Markdown body itself. Same discipline as
+ * `toStateInventory` above not carrying inventory's evidence strings: the
+ * body can run to hundreds of KB across a growing tree, and the whole point
+ * of this record is that `compareInputs()` (a pure hash comparison) can
+ * re-derive everything the next digest needs from it — the body text itself
+ * is neither read nor needed for that comparison, so keeping it here would
+ * be pure bloat on `~/.claude/propagate-digest-state.json`, growing forever,
+ * for zero downstream benefit.
+ */
+function toStateRollup(roll) {
+  if (!roll || !roll.available) return null;
+  return { bodyHash: roll.bodyHash, inputs: roll.inputs };
+}
+
 function snapshotToDigestState(snapshot) {
   const workspaces = {};
   for (const ws of snapshot.workspaces) workspaces[ws.name] = toStateWorkspace(ws);
@@ -742,6 +941,7 @@ function snapshotToDigestState(snapshot) {
     skills: toStateSkills(snapshot.skills),
     metrics: toStateMetrics(snapshot.metrics),
     inventory: toStateInventory(snapshot.inventory),
+    rollup: toStateRollup(snapshot.rollup),
   };
 }
 
@@ -1110,6 +1310,96 @@ export function computeDiff(snapshot, prior) {
     adoptionLines.push(`!! adoption trigger unavailable: ${snapshot.adoption.error}`);
   }
 
+  // ── Ecosystem rollup (Phase 1 Task E) ───────────────────────────────────
+  // Two INDEPENDENT facts, computed and rendered together because they
+  // share one section but must never be collapsed into one boolean — see
+  // rollupSnapshot()'s doc comment for the full argument:
+  //
+  //   (a) fileStale / handEdited / artifactExists — STATE-based, like
+  //       INBOUND/DRIFT/ADOPTION above, not diff-based: whether ECOSYSTEM.md
+  //       is currently trustworthy is a fact about right now, not about what
+  //       changed since yesterday's digest, so it renders every run it is
+  //       true, never only on the day it became true. Read straight off the
+  //       snapshot (computed against the live file at snapshot time,
+  //       PURELY-COMPUTED-FROM-HERE-ON in this function) — this function
+  //       itself never touches a filesystem, keeping computeDiff pure.
+  //   (b) inputsChanged / inputsAppeared / inputsVanished / becameUnreadable
+  //       — DIFF-based, same idiom as SKILLS/METRICS/INVENTORY above:
+  //       last digest's stored `rollup.inputs` (this file's own lean prior,
+  //       `toStateRollup`) vs the current snapshot's, via the SAME
+  //       `compareInputs()` `commands/rollup.mjs --check` uses — never a
+  //       second, hand-rolled diff. Suppressed on firstRun (no prior to
+  //       diff against, same as every other diff-based section); a single
+  //       "online" line the first time a prior digest state exists but
+  //       carries no `rollup` key yet (this feature shipped after that
+  //       state file was written) — same idiom as the skills/metrics/
+  //       inventory "online" lines above, never a full false-appeared dump
+  //       of every tracked input on the day this feature is deployed.
+  //
+  // `+` (appeared) is the transition an mtime-based design could never
+  // report at all (nothing to compare a NEW file's timestamp against).
+  // `!` (becameUnreadable) is the one a naive design reports as "unchanged"
+  // (a file that goes from readable to EACCES has no later mtime to notice).
+  const ecosystemLines = [];
+  let inputsChanged = [];
+  let inputsAppeared = [];
+  let inputsVanished = [];
+  let becameUnreadable = [];
+  let fileStale = null; // null == unknown (rollup unavailable), never "false"
+  let handEdited = null;
+
+  if (snapshot.rollup?.available) {
+    fileStale = snapshot.rollup.fileStale;
+    handEdited = snapshot.rollup.handEdited;
+
+    if (!snapshot.rollup.artifactExists) {
+      ecosystemLines.push("ECOSYSTEM.md does not exist yet — `propagate rollup` to generate it.");
+    } else if (handEdited) {
+      ecosystemLines.push(
+        "ECOSYSTEM.md was hand-edited since it was last generated — `propagate rollup --force` to discard and regenerate.",
+      );
+    } else if (fileStale) {
+      ecosystemLines.push(
+        "ECOSYSTEM.md is stale — the tree has moved since it was last generated. `propagate rollup` to refresh.",
+      );
+    }
+
+    const priorRollup = prior?.rollup ?? null;
+    if (priorRollup && priorRollup.inputs) {
+      const priorInputs = new Map(Object.entries(priorRollup.inputs));
+      const currentInputs = new Map(Object.entries(snapshot.rollup.inputs || {}));
+      const cmp = compareRollupInputs(priorInputs, currentInputs);
+      inputsChanged = cmp.changed;
+      inputsAppeared = cmp.appeared;
+      inputsVanished = cmp.vanished;
+      becameUnreadable = cmp.becameUnreadable;
+
+      // No leading indentation baked in here — formatDigest adds exactly one
+      // level of indent uniformly to every ecosystemLines entry, same as
+      // diskLines/skillLines/adoptionLines. Baking a second indent in here
+      // would double it for these lines only.
+      for (const { key, after } of inputsAppeared) ecosystemLines.push(`+ ${key} (${after})`);
+      for (const { key, before } of inputsVanished) ecosystemLines.push(`- ${key} (was ${before})`);
+      for (const { key, before, after } of inputsChanged) ecosystemLines.push(`~ ${key} (${before} -> ${after})`);
+      for (const { key, before, after } of becameUnreadable) {
+        ecosystemLines.push(`! ${key} became unreadable (${before} -> ${after})`);
+      }
+    } else if (!firstRun) {
+      ecosystemLines.push(
+        `ecosystem rollup online: ${Object.keys(snapshot.rollup.inputs || {}).length} tracked input(s)`,
+      );
+    }
+  } else if (snapshot.rollup?.error && !firstRun) {
+    // Vanished-signal / outright-failure case, same shape as INBOUND/DRIFT
+    // above: reported every run it is true, never collapsed into silence
+    // (G2) and never rendered as "ECOSYSTEM.md is fine" (fileStale/
+    // handEdited stay `null` — unknown — rather than `false`, per
+    // rule:discernment-checks §2/§6: absence must be attributable, and a
+    // reader that cannot report ITS OWN failure must not report absence
+    // instead).
+    ecosystemLines.push(`!! ecosystem rollup unavailable: ${snapshot.rollup.error}`);
+  }
+
   return {
     firstRun,
     broken,
@@ -1129,6 +1419,18 @@ export function computeDiff(snapshot, prior) {
     driftLines,
     inventoryLines,
     adoptionLines,
+    ecosystemLines,
+    // Raw, structured rollup-diff fields, exposed alongside the rendered
+    // `ecosystemLines` above so a test can assert on the classification
+    // directly (per-transition) rather than only on rendered text — same
+    // reason `newByWorkspace`/`closedByWorkspace` are exposed as structured
+    // data next to the rendered NEW DRIFT / CLOSED sections.
+    inputsChanged,
+    inputsAppeared,
+    inputsVanished,
+    becameUnreadable,
+    fileStale,
+    handEdited,
   };
 }
 
@@ -1150,6 +1452,7 @@ export function formatDigest(diff) {
   const driftLines = diff.driftLines || [];
   const inventoryLines = diff.inventoryLines || [];
   const adoptionLines = diff.adoptionLines || [];
+  const ecosystemLines = diff.ecosystemLines || [];
 
   if (
     diff.broken.length === 0 &&
@@ -1161,7 +1464,8 @@ export function formatDigest(diff) {
     inboundLines.length === 0 &&
     driftLines.length === 0 &&
     inventoryLines.length === 0 &&
-    adoptionLines.length === 0
+    adoptionLines.length === 0 &&
+    ecosystemLines.length === 0
   ) {
     // Quiet day. One short line, not a full report. Disk hygiene prints ZERO
     // lines here too, on purpose — see digest.mjs disk-hygiene section: a
@@ -1210,6 +1514,19 @@ export function formatDigest(diff) {
   if (adoptionLines.length > 0) {
     lines.push(`ADOPTION — one question (docs/SYSTEMS.md):`);
     for (const l of adoptionLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  // ECOSYSTEM — the rollup section (Phase 1 Task E). `ecosystemLines` is
+  // already fully rendered by computeDiff() above (the "+ appeared / -
+  // vanished / ~ changed / ! became-unreadable" glyphs and the
+  // stale/hand-edited state lines) — this block only decides WHETHER a
+  // section header wraps them, same shape as every section above it.
+  // Emitted only when non-empty: a header with nothing under it would be
+  // exactly the wallpaper this whole file exists to avoid.
+  if (ecosystemLines.length > 0) {
+    lines.push(`ECOSYSTEM — ECOSYSTEM.md rollup:`);
+    for (const l of ecosystemLines) lines.push(`  ${l}`);
     lines.push("");
   }
 
@@ -1409,5 +1726,6 @@ export {
   driftSnapshot as driftSnapshotForTest,
   inventorySnapshot as inventorySnapshotForTest,
   adoptionSnapshot as adoptionSnapshotForTest,
+  rollupSnapshot as rollupSnapshotForTest,
   safeNewestMtimeMs as safeNewestMtimeMsForTest,
 };

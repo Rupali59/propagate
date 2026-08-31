@@ -1134,3 +1134,50 @@ auto-mode classifier, which is correct: that file controls permissions and hooks
 **Refs:** `hooks/load-rules.mjs`, `tests/hooks/load-rules-drift.test.mjs`,
 `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
 `skills-marketplace/.claude-plugin/marketplace.json`
+
+## 2026-08-31: the derived answer goes on the read path, and judgment is split from mechanism
+
+**What.** `propagate rollup` derives what exists and what is open across every workspace and
+**writes** `ECOSYSTEM.md` at the hub root. `propagate claims check` runs five deterministic
+checks over the declared-edge corpus. `digest.mjs` reports when the rollup has moved;
+`hooks/load-rules.mjs` points an agent at both files once per session. The authored
+counterpart, `NORTH_STAR.md`, states what the tree is building toward.
+
+**Why.** Every cross-project capability here — `backlog`, `status --all`, `graph`,
+`inventory`, `journal`, `digest` — was already correct and already tree-wide, and none of it
+reached anyone. They are all command-shaped, and agents read files. The answer existed and was
+unreachable on the read path. So this stores a derived view, which is not the thing
+`rule:delegation-criteria` §2 forbids: that rule kills a *mutable baseline* whose loss loses
+information and which must catch a change to record it. A derived cache is regenerable from
+content, cannot miss a change that happened while nobody looked, and loses nothing when
+deleted. Freshness is therefore a content-hash footer over the EXPECTED input set — absent and
+unreadable inputs are rows, not omissions, because a footer listing only files that exist can
+never notice a new one appearing.
+
+**Gotchas.**
+- `ECOSYSTEM.md` is deliberately NOT a declared edge in either direction. It regenerates
+  whenever any of ~62 registers changes, so an edge would fire most days and train everyone to
+  ignore propagate — the same refusal, with the same reasoning, as `cli.mjs` -> `REFERENCE.md`.
+- `authority: counsel` was declared on `NORTH_STAR.md` -> `CLAUDE.md` and reverted to `spec`
+  within the hour. `counsel` makes `doc-authority.mjs` exit 2 with **no bypass**, so it made
+  the hub `CLAUDE.md` uneditable by any agent. `authority` is file-level and edges have no
+  sub-file granularity, so "protect one section" silently means "freeze the file".
+- Two documented exit codes were wrong while 1336 tests passed: absent reported `1` (stale)
+  instead of `2` (could-not-run), and content appended AFTER the footer was silently destroyed
+  because the body hash covers only the body. Both found by hand, both now asserted on the
+  EXIT CODE and the BYTES rather than the message.
+- The version fan-out has FIVE locations, not four. `gateVersionManifests` checks the four
+  in-repo files; the hub's `skills-marketplace/.claude-plugin/marketplace.json` is the fifth
+  and is not covered, so a "complete" bump can still leave the served plugin behind.
+
+**The split, stated so nobody moves it.** `lib/claims/check.mjs` is mechanical and may import
+no model client; judgment belongs in a later `judge` lane. This is not a preference — three
+times in one session a judgment call was implemented as a regex and failed in both directions:
+N35 (fingerprint too narrow, matched 0 of 47 files while green), N63 (too broad, 7 of 8 sampled
+were pure pointers), and a date suppressor written here that broke four tests within minutes of
+the comment warning against it.
+
+**Affects:** propagate, hub, Vipin Kaushik
+
+**Refs:** `40ec5dd`, `c0858a1`, `6a25f93`; plan
+`~/.claude/plans/claude-propagation-plugin-has-buzzing-jellyfish.md`; N63, N64, N65.

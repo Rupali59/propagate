@@ -158,6 +158,32 @@ function detectHandEdit(existingText) {
       reason: `stored body hash (${parsed.body}) does not match the file's current body (${actualShort}) — the generated section was edited by hand since it was last written`,
     };
   }
+
+  // TRAILING CONTENT AFTER THE FOOTER. The body hash covers only the bytes BETWEEN
+  // the body marker and the footer, so anything appended after the footer's closing
+  // `-->` is invisible to it — and was therefore silently destroyed on the next run.
+  //
+  // Measured 2026-08-31: appending one line to the end of a freshly generated
+  // ECOSYSTEM.md, then running `rollup`, discarded it with no warning and exit 0.
+  // The command's own promise is "REFUSES rather than clobbering"; for the most
+  // natural way a human edits a long generated file — scroll to the bottom, type —
+  // it clobbered. `rule:safety-flag-needs-a-test`: the guard was written for the
+  // body, and "the body" was quietly assumed to mean "the file".
+  //
+  // The whole suite was green with this wrong, because every hand-edit test edited
+  // the body. The test that would have caught it is the one nobody wrote: construct
+  // the input that takes the unsafe path, then assert the effect is absent.
+  const closeIdx = existingText.lastIndexOf("-->");
+  if (closeIdx !== -1) {
+    const trailing = existingText.slice(closeIdx + 3);
+    if (trailing.trim().length > 0) {
+      return {
+        edited: true,
+        reason: `${trailing.trim().split("\n").length} line(s) of content follow the footer — appended by hand, and outside the body hash's reach`,
+      };
+    }
+  }
+
   return { edited: false, parsed };
 }
 
@@ -232,6 +258,26 @@ async function runCheck({ artifact, json }) {
       }
       return 3;
     }
+  }
+
+  // ABSENT IS NOT STALE. Measured 2026-08-31: a missing ECOSYSTEM.md returned 1
+  // ("stale") with the message "does not exist yet" — two different facts sharing
+  // one exit code, and the whole point of the four-way vocabulary is that they do
+  // not. "Stale" means the file exists and the tree moved past it; there is a body
+  // to compare and a diff to show. Absent means there is nothing to check at all.
+  //
+  // It matters to a caller, not just to a reader: `rule:core/release.mjs`'s
+  // vocabulary treats `could-not-run` as distinct from `failed` precisely so a gate
+  // can tell "I checked and it is wrong" from "I could not check". Collapsing them
+  // makes a fresh clone — which has no ECOSYSTEM.md by construction — report the
+  // same status as a genuinely drifted tree.
+  //
+  // 1336 tests passed with this wrong. The suite asserted the message, not the code.
+  if (existingText === null) {
+    return couldNotRun(
+      { artifact, json },
+      `${artifact} does not exist yet — nothing to check. Run \`propagate rollup\` to generate it.`,
+    );
   }
 
   let result;

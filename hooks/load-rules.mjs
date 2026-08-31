@@ -204,7 +204,78 @@ try {
   drift = `\n\n⚠️  RULES CHECK did not run: ${err?.message ?? err}. Nothing was checked.`;
 }
 
-emit(`${summary}${warn}${drift}`);
+/**
+ * ECOSYSTEM — one line when the derived rollup has moved. Phase 1 Task F.
+ *
+ * WHY THIS BLOCK EXISTS AT ALL. The whole point of `ECOSYSTEM.md` is that agents
+ * read FILES and do not run commands nobody pointed them at. This is the one place
+ * an agent — rather than a human reading DAILY.md — is told the file exists, where
+ * it is, and that `NORTH_STAR.md` is its authored counterpart. It converts a
+ * command-shaped capability into a file pointer, which is the thing agents act on.
+ *
+ * IT MUST NOT WALK, AND THAT IS THE WHOLE DESIGN OF IT. This hook states its own
+ * budget: 98ms over 48 CLAUDE.md files plus ~40ms of import, "affordable per
+ * session; if it ever is not, the fix is to move it, not to make it quieter."
+ * `rollup()`'s backlog walk alone has a 20-SECOND budget — 200x that, on every
+ * `startup|resume|clear|compact`. So this block derives NOTHING. It reads one small
+ * JSON file the digest already wrote (~1ms) and reports what the digest last saw.
+ *
+ * THE DATE IN THE TEXT IS LOAD-BEARING, not decoration. This line is only as fresh
+ * as the last digest run, which is daily. Without the date an agent reads it as
+ * live, and acts on a picture up to 24h old believing it is current.
+ *
+ * AND A MISSING STATE FILE GETS ITS OWN LINE, never silence. Silence would mean
+ * "nothing changed" — the ambiguous-absence failure (`rule:discernment-checks` §2,
+ * and G2). "The digest has not run, so nothing is known" is a different fact from
+ * "the digest ran and found nothing", and only the second is a pass.
+ *
+ * SILENT WHEN CLEAN otherwise, matching this file's stated posture: "a detector
+ * that speaks when there is nothing to say becomes the thing everyone scrolls past."
+ */
+let ecosystem = "";
+try {
+  const { readFileSync: rf, existsSync: ex } = await import("node:fs");
+  const os = await import("node:os");
+  const p = `${os.homedir()}/.claude/propagate-digest-state.json`;
+  if (ex(p)) {
+    const st = JSON.parse(rf(p, "utf8"));
+    const r = st?.rollup;
+    if (!r) {
+      // The digest has run, but not since the rollup section shipped. Distinct
+      // from "never ran" and from "ran and found nothing" — three states.
+      ecosystem =
+        `\n\n📊  ECOSYSTEM.md status is UNKNOWN — the digest has run but carries no rollup` +
+        ` record yet. Do not read that as "nothing changed".`;
+    } else {
+      const moved =
+        (r.inputsChanged?.length ?? 0) + (r.inputsAppeared?.length ?? 0) +
+        (r.inputsVanished?.length ?? 0) + (r.becameUnreadable?.length ?? 0);
+      const when = st.lastRunAt ? String(st.lastRunAt).slice(0, 10) : "an unknown date";
+      if (r.handEdited) {
+        ecosystem =
+          `\n\n📊  ECOSYSTEM.md was HAND-EDITED (as of the ${when} digest). It is generated;` +
+          ` the edit belongs in ~/Documents/GitHub/NORTH_STAR.md.`;
+      } else if (r.fileStale || moved > 0) {
+        ecosystem =
+          `\n\n📊  ECOSYSTEM.md is stale as of the ${when} digest` +
+          (moved > 0 ? ` — ${moved} input(s) changed` : "") +
+          `.\n    ~/Documents/GitHub/ECOSYSTEM.md — what exists across the tree.` +
+          `\n    ~/Documents/GitHub/NORTH_STAR.md — what we are building toward.` +
+          `\n    \`propagate rollup\` refreshes it; \`rollup --check\` confirms it.`;
+      }
+    }
+  } else {
+    ecosystem =
+      `\n\n📊  The propagate digest has not run, so nothing is known about ECOSYSTEM.md.` +
+      ` This is not "no change".`;
+  }
+} catch (err) {
+  // Fails LOUD, unlike the loader's other blocks, because the failure mode here is
+  // reporting "no change" for a tree that moved.
+  ecosystem = `\n\n📊  ECOSYSTEM status unreadable: ${err?.message ?? err}. Nothing was checked.`;
+}
+
+emit(`${summary}${warn}${drift}${ecosystem}`);
 
 function emit(text) {
   process.stdout.write(JSON.stringify({
