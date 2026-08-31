@@ -4310,7 +4310,13 @@ if (_invokedDirectly) {
   // blocks: `updateNotice` swallows every failure by construction.
   if (mode === "status" || mode === "doctor") {
     const notice = formatUpdateNotice(updateNotice(), { dim: DIM, reset: RESET });
-    if (notice) console.log(notice);
+    // STDERR, not stdout. Both `status` and `doctor` have a `--json` mode, and a
+    // human-facing line printed to stdout lands AHEAD of the JSON, so every machine
+    // consumer dies on `JSON.parse`. Latent until someone bumps VERSION — which the
+    // release gate REQUIRES — so it fires at release time, when the tooling is most
+    // trusted. Measured 2026-08-31: bumping 0.3.0 -> 0.4.0 turned 6 status-coverage
+    // tests red with `Unexpected token, "[2mpropag"... is not valid JSON`. Filed N65.
+    if (notice) console.error(notice);
   }
 
   if (mode === "status") {
@@ -4382,9 +4388,19 @@ if (_invokedDirectly) {
     await graphIndexCmd();
   } else if (mode === "monitor") {
     await monitorCmd();
+  } else if (mode === "rollup") {
+    // Dynamic, like manifest/registers/docs (D5): a static import would pull
+    // the commands layer into every `propagate status` / `check` invocation.
+    const { rollupCmd } = await import("./commands/rollup.mjs");
+    process.exitCode = await rollupCmd(process.argv.slice(3));
+  } else if (mode === "claims") {
+    // Dynamic, same reason as rollup/manifest/registers/docs (D5). Phase 2
+    // lane 1 — `check` only; scan/judge/render/contradict are later lanes.
+    const { claimsCmd } = await import("./commands/claims.mjs");
+    process.exitCode = await claimsCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]]");
     process.exit(2);
   }
 }

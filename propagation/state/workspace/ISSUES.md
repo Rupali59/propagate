@@ -1403,6 +1403,132 @@ non-conformance with the *wrong* mechanism.
 Do **not** re-add body injection to `load-rules.mjs` to recover `scope:` — that reinstates
 51,112 B/session of duplication to save 53 lines. See the 2026-08-29 DECISIONS entry.
 
+### N63 · `referencedRestatements` is dominated by false positives — the shape N35 asserts was never sampled — **S2** — **OPEN**
+
+**Filed 2026-08-31**, found while answering "how is rule promotion working out".
+
+N35's body introduced this bucket for a sound reason: `checkRules` carried a blanket
+``if (raw.includes(`rule:${r.id}`)) continue;``, so a file that pointed at a rule in one line
+and kept a stale copy in another was excused entirely. Closing that hole was right.
+
+**What is wrong is the claim attached to the number.** N35 states the pointer-plus-stale-copy
+shape "is the most likely shape, not a hypothetical", and the printed label calls each file
+"a pointer and a copy in one file, which is what a half-finished conversion looks like".
+Neither was measured. The bucket has never been sampled.
+
+**Sampled 2026-08-31 — 8 of the 20 entries, and 7 are false positives:**
+
+| Flagged | What the line actually is |
+|---|---|
+| `Tushar/CLAUDE.md:88` | ``See `rule:tool-priority`.`` — a pure pointer |
+| `Tathya/CLAUDE.md:57` | ``Tool priority / freshness-check workflow: `rule:tool-priority`.`` — pure pointer |
+| hub `CLAUDE.md:25` | the Motherboard **repo-map row**, about `go.work` module counts |
+| `Rupali/Obsidian/CLAUDE.md:170` | the heading `## MCP Tools: code-review-graph` |
+| hub `CLAUDE.md:192` | a citation of the `secrets-source-of-truth.md -> CLAUDE.md` **edge** |
+| `Keerti/Keerti-portfolio/CLAUDE.md:82` | pointer + a `kirti-portfolio` Doppler fact — project **compliance** |
+| `PanditPawanKaushik/SSJK-mb/CLAUDE.md:16` | pointer + `dev-up.sh --doppler` mechanics — compliance |
+| `Vipin Kaushik/CLAUDE.md:166` | a docs-table cell, "Append-only… Never edit past entries" — **borderline**, the only arguable one |
+
+Six of the seven are exactly what the conversion was supposed to produce. Two are
+project-specific compliance statements, which `rule:nextjs-dev-server-port` and
+`rule:environment-vocabulary` both explicitly exempt in their own bodies: *"A project
+describing its own config is compliance, not restatement."*
+
+**Why this matters more than a bad count.** The reading it invites is backwards. The bucket
+presents as a 20-item conversion backlog; the conversion is in better shape than that. Acting
+on it means editing files that are already correct, and the most likely edit — deleting the
+"copy" that is actually a compliance fact — removes real project knowledge.
+
+**It is also N35's own defect pointing the other way.** N35 says the fingerprints are too
+NARROW, proven by `never-commit-unless-asked` matching 0 of 47 files while `selftest` passed.
+This says that near a `rule:` pointer they are too BROAD. One root cause: **the fingerprint is
+a proxy for the claim, and `selftest` only ever tests it against the house-style body it was
+derived from.** A check whose only test is self-match cannot detect either error, which is
+`rule:discernment-checks` §1 wearing a green badge.
+
+**What would settle it, and the order:**
+1. Sample the remaining 12 and record the true positive rate per rule. Cheap, no code.
+2. Until then, **relabel** the printed line. "restate a rule they also reference" asserts a
+   finding; "fingerprint matched near a reference — unverified" states what is known. Do not
+   delete the bucket: the hole N35 closed is real.
+3. The real fix is N35's own: a **corpus test** asserting each fingerprint against known real
+   restatements AND known correct pointers, rather than against its own prose. That single
+   test closes the narrow case and the broad case together.
+
+---
+
+### N64 · `rules promote` is declared in three places and built in none — **S3** — **OPEN**
+
+**Filed 2026-08-31**, same pass as N63.
+
+`cli.mjs`'s `rules` dispatch accepts `promote`, and answers:
+
+```
+not implemented — `rules promote` is declared in the Phase 5 plan and not built.
+```
+
+exit 2. `docs/LIFECYCLE.md` defines PROMOTE, `rules/_TODO.md` describes promotion as the
+mechanism, and the usage string advertises it: `rules <list|check|selftest|promote>`.
+
+**Credit where it is due, because this is the good failure mode.** It exits non-zero, names
+the gap, and tells you to write the rule file by hand and run `selftest`. Its own comment says
+why: *"a command that silently did nothing would be worse than one that admits the gap."* That
+is `rule:discernment-checks` §2 applied correctly, and it is the reason this is S3 and not S2.
+
+**The cost is not the missing automation — the practice works by hand.** Active rules went
+6 → 11 → 13 → 18, and the 2026-08-16 pass is the model: `plan-opus-execute-sonnet` was
+**merged into `model-routing`** rather than promoted to its own rule, "because a second rule
+restating Opus-plans/Sonnet-executes is the exact failure this document is about", and the
+source memories were deleted so it was a move and not another copy. No command would have made
+that judgment.
+
+**The cost is that the usage string promises a capability the tool does not have.** Per
+`rule:description-standard`, a thing that announces itself must say when it applies; an
+advertised subcommand that always exits 2 is an announcement with no referent. Either build it
+or drop `promote` from the usage line and leave the stub reachable for anyone who types it.
+
+### N65 · The update notice printed to stdout, corrupting every `--json` consumer — **S1** — **RESOLVED 2026-08-31**
+
+**Found 2026-08-31** by bumping `VERSION` 0.3.0 → 0.4.0 to finish a half-done fan-out.
+Six `tests/cli/status-coverage.test.mjs` tests went red with:
+
+```
+SyntaxError: Unexpected token '', "[2mpropag"... is not valid JSON
+```
+
+`cli.mjs` wired the update check for `status` and `doctor` and emitted it with
+**`console.log`**. Both commands have a `--json` mode, so the dim human line
+
+```
+propagate 0.3.0 → 0.4.0 available: git -C … pull · silence it with `updateCheck: off`
+```
+
+landed **ahead of the JSON document**. Every machine consumer died on `JSON.parse`.
+
+**Fixed** by changing that one call to `console.error`. The notice is still shown to a human
+in a terminal; it is no longer in the data stream. Suite: 1257/1257 and 91/91 green.
+
+**Why it stayed invisible.** The notice only renders when a newer version is detected, and on
+a normal working tree `VERSION` equals the served plugin version, so it never fires. It
+becomes reachable the moment someone bumps `VERSION` — **which `gateVersionManifests` requires
+before a release.** So the failure was scheduled to arrive at release time, on the run where
+the tooling is trusted most, and could not appear before then.
+
+**The part worth keeping.** `lib/core/update-notice.mjs`'s own header records that it exists
+*because* the check "was written and then invoked by nothing … GOTCHAS G48, an enforcement
+point that does not watch anything." Wiring it up was right. But the fix for *"a capability
+nobody invokes"* introduced *"a capability that corrupts every automated caller"* — and it did
+so in a way no existing test could see, because the tests that parse `--json` only exercise
+the version-equal path.
+
+**The general form, which is not fixed by this commit.** Nothing asserts that a command with a
+`--json` mode emits *only* JSON on stdout. Any future banner, hint, deprecation notice or
+warning added near a `--json` path reintroduces this exact defect, silently. A cheap guard
+would be a test that runs every `--json`-capable command with a forced notice condition and
+asserts `JSON.parse(stdout)` succeeds — `rule:discernment-checks` §1: construct the input that
+makes the check fail before shipping it. **Filed here rather than done, deliberately: the
+one-line fix is verified, the general guard is a separate change.**
+
 ## Rotated to archive
 
 Closed entries live in [`archive/ISSUES-2026-08.md`](archive/ISSUES-2026-08.md), byte-identical.
