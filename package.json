@@ -1,9 +1,9 @@
 {
   "name": "claude-propagate",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
   "type": "module",
-  "description": "Use when a change to one file needs to reach files that must move with it \u2014 across branches, worktrees, or repos. Declares those couplings in a sidecar, derives drift from content on demand, and records every verification in an append-only ledger. Never edits a downstream; it tells a human.",
+  "description": "Use when a change to one file needs to reach files that must move with it — across branches, worktrees, or repos. Declares those couplings in a sidecar, derives drift from content on demand, and records every verification in an append-only ledger. Never edits a downstream; it tells a human.",
   "main": "cli.mjs",
   "bin": {
     "propagate": "cli.mjs"

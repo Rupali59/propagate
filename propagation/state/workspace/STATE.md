@@ -37,7 +37,20 @@ CLAUDE.md-style file injection — *not* via the loader, whose heading above is 
 Do not read "the rules are loaded" as "SessionStart dispatched"; that is the instrument
 answering a wider question than the one asked (`rule:discernment-checks` §4).
 
-Also confirm rules are injected **once**, not twice.
+~~Also confirm rules are injected **once**, not twice.~~ **ANSWERED 2026-08-29: twice,
+for 15 days.** `.claude/rules/` is a native Claude Code memory directory (verified against
+the 2.1.236 binary), and `~/.claude/rules` symlinks to this tree's `rules/` — so every file
+under it was already in context as user memory, while `load-rules.mjs` injected 16 of the
+same bodies again. Measured: 51,112 B duplicated per session. The hook now emits 370 B and
+keeps only restatement detection; delivery is the platform's. See
+`docs/DECISIONS.md`-equivalent entry `2026-08-29: .claude/rules/ is native`.
+
+**Still open, and it is a HUMAN action** — `claudeMdExcludes` in `~/.claude/settings.json`,
+to stop `rules/conventions/**` (46 KB), `rules/_TODO.md` and `rules/gotchas-global.md`
+loading as memory. None of the three is a rule and `load-rules.mjs` never read any of them.
+Three attempts to apply it (Bash, Edit, the `update-config` skill) were refused by the
+auto-mode classifier — correctly, since that file controls permissions and hooks. The exact
+block to paste is in the 2026-08-29 decision entry's session notes.
 **Restore if broken:** `~/.propagate/uninstall-capture-2026-08-22.json` holds the 4 removed
 registrations verbatim.
 

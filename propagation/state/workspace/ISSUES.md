@@ -1169,6 +1169,240 @@ state-live-sections`, and the mutation was confirmed present in the file before 
 (`rule:discernment-checks` §4 — a `sed` that matches nothing silently no-ops this check).
 Suite: 61 pass, 0 fail.
 
+### N57 · `claudeMdExcludes` is unset, so 76,038 B of non-rules load as memory every session — **S2** — **APPLIED 2026-08-29, VERIFICATION PENDING**
+
+`.claude/rules/` is a NATIVE Claude Code memory directory (verified against the 2.1.236
+binary, 2026-08-29) and is walked **recursively**. `~/.claude/rules` symlinks to the hub
+`rules/`, so three things that are not rules load into every session in every repo:
+
+```
+conventions/     46,116 B   long-form docs; load-rules.mjs has NEVER read them (flat readdir)
+_TODO.md         16,984 B   a backlog document
+gotchas-global.md 12,938 B  a data file for gotcha-guard.mjs, delivered per tool call
+                 -------
+                 76,038 B
+```
+
+The platform supports exactly this: `claudeMdExcludes`, an array of picomatch globs whose
+own documented example is `"**/some-dir/.claude/rules/**"`. Excluding these cannot affect
+rule delivery — `load-rules.mjs` skips all three already (no `id:` frontmatter).
+
+**Why this is not done.** Three attempts to write `~/.claude/settings.json` — Bash, `Edit`,
+and the `update-config` skill — were all refused by the auto-mode classifier. That is
+correct behaviour, not a defect: that file controls permissions and hooks. It needs a human.
+Backup taken at `~/.claude/backups/settings.json.bak.pre-claudemdexcludes-20260829-111105`.
+The exact block is in the 2026-08-29 DECISIONS entry.
+
+**APPLIED 2026-08-29 by Rupali**, running the command by hand. Verified from disk: 22 keys,
+6 patterns, valid JSON, `hooks` / `permissions` / `mcpServers` byte-intact. The command was
+tested against a COPY of the real file first (21 -> 22 keys, nothing lost) rather than handed
+over untested — a global config that stops parsing breaks every session on the machine.
+
+**STILL UNVERIFIED, and this is the honest status.** Nobody has confirmed the bytes actually
+left a session's context. A session cannot introspect its own context from bash, the
+transcript does not store the injected block (checked: 0 of 863 records), and the only agent
+that could answer — a session started AFTER the change — has the probe queued behind its own
+user's approval gate.
+
+Two suggestive-but-insufficient signals, recorded so they are not mistaken for proof:
+the hook payload is no longer written as a persisted tool-result file (that happens only
+above a size threshold the old 49,152 B payload crossed and 370 B does not), and the plugin
+cache serves 0.4.0 byte-matching source.
+
+**To close this, in a session started after the change, ask it — do not grep, that measures
+the disk rather than the context:**
+
+```
+is the string "brain_score is not a health metric" in your context?   (expect ABSENT)
+is "Verify the instrument before believing a surprising number"?      (expect PRESENT)
+does the body of rules/discernment-checks.md appear ONCE or TWICE?    (expect ONCE)
+```
+
+The third is the whole change. Until someone answers it, this entry is applied, not proven —
+`rule:discernment-checks` §3: a report saying "verified" is a claim about verification.
+
+**FIRST ATTEMPT, 2026-08-29 — the probe was answered by a session that predates the change,
+and the answer is worth keeping precisely because it looks like a failure and is not.** It
+reported `discernment-checks.md` present TWICE, citing a `## Canonical rules (16 loaded…)`
+header and a 49.6 KB persisted payload. Both are the PRE-change artifacts.
+
+The cause is documented in this file's own `STATE.md` from 2026-08-22: **a `/compact` fires
+`SessionStart` but does not reload plugin config.** A session open since before the 11:24
+plugin update keeps its loaded version through any number of compacts, so it re-emits the old
+51,112 B payload and correctly observes two copies. It was not a fresh session.
+
+**Independent evidence the HOOK half is live, from artifacts rather than testimony:** every
+old payload was 51,112 B — above the size that forces a tool result to be persisted to disk.
+Timeline: last persisted payload **10:19**; plugin 0.4.0 cached **11:24**; sessions started
+after that (`propagate-75`, ~11:56) and were active at 12:23; **payloads persisted since
+11:24: zero**. Had the old hook still been running, each of those SessionStarts would have
+written another 51,112 B file. This is inference from a threshold, not direct observation —
+but the absence is attributable, which a bare "looks fine" would not be.
+
+**The `claudeMdExcludes` half remains untested and no artifact can test it.** That 46 KB
+arrives by the file-injection path, which writes nothing to disk. It needs a session started
+after **11:55**, asked directly — see the three questions above.
+
+**Method note for whoever closes this:** a session cannot be asked to verify a change that
+landed after it started, and it cannot tell you when its own plugin config was loaded. Check
+the session's start time against the change's timestamp BEFORE trusting its report. That is
+`rule:discernment-checks` §4 — the instrument answered a narrower question (its own stale
+context) than the one asked (the current state).
+
+---
+
+### N58 · A live decision sits untracked at a retired path that `doctor` never reads — **S2** — **OPEN**
+
+`propagate/docs/DECISIONS.md` — 64 lines, **untracked** (`?? docs/DECISIONS.md`), written
+2026-08-29 10:32 by a concurrent session. It holds a real finding: `propagate monitor` at
+2,359 runs over 11.6 days, and **76% of its notifications were an edge already notified,
+re-fired because its bytes changed**.
+
+Two failures compound:
+
+1. `docs/DECISIONS.md` is the path this repo **retired** on 2026-08-23. `git log` shows
+   history there, so the file was deleted and has now been recreated.
+2. `lib/report/doctor/decisions.mjs:50-54` is a first-match-wins `candidates.find(...)` that
+   prefers `propagation/state/workspace/DECISIONS.md` — so **doctor never opens it**, and
+   reported `24 entries, 24 with tokens` while this sat unread.
+
+`git clean` deletes it. Decide: fold into the canonical ledger, or track it where it is.
+
+---
+
+### N59 · The graph indexed **zero** decision entries, and the stat meant to expose that counted the project tier instead — **S1** — **RESOLVED 2026-08-29**
+
+`lib/graph/graph-index.mjs:153` iterates `["docs/DECISIONS.md", "DECISIONS.md"]` relative to
+each workspace root. At every workspace root those are the 15-line **pointer stubs** left by
+the 2026-08-21 move (`# DECISIONS.md — moved … Do not edit this file`), each with 0 `##`
+headings. The 33 real ledgers live at `propagation/state/<project>/DECISIONS.md`, which
+`defaultDecisionsFiles` never looks at.
+
+So the `decision` node kind and the `AFFECTS` edge kind (`graph-index.mjs:43-45`) are
+populated from nothing, and the run exits clean. `rule:discernment-checks` §6 — a reader that
+cannot report failure reports **absence**, which is worse than a wrong count because absence
+is actionable and gets acted on.
+
+**CORRECTION to this entry's own first draft.** It was filed asserting "zero decision
+entries", carried over from the reviewer's report and a read of `:153` — *without measuring
+the count*. The stats line actually said `decisions: 45`, which looks healthy. Both the
+reviewer and the first draft of this entry were right about the conclusion and wrong about
+the evidence. What settled it was querying the sqlite the real code path had just written:
+
+```
+node table: file 762 · project 45 · decision 0        <- zero decision rows
+stats:      decisions 45 · affects 0 · decisionsFiles 8
+```
+
+**The second defect is why the first survived, and it is the more interesting one.**
+`graph-index.mjs:365` computed `decisions: nodes.length - fileKeys.length` — "everything
+that is not a file". The PROJECT tier is also not a file, so **45 projects were reported as
+45 decisions**, exactly matching `projects: 45` one line below. `graph-index.mjs:147` states
+this stat exists so that *"zero decisions is visibly a finding rather than a silent pass"*.
+Computed that way it did the precise opposite: the instrument built to expose the empty tier
+was the thing concealing it. `rule:enforcement-watches-itself`.
+
+**Fixed 2026-08-29.** `defaultDecisionsFiles` now reads `propagation/state/*/DECISIONS.md`
+first (legacy paths kept and deduped, so an unmigrated repo still resolves), and
+`stats.decisions` counts `kind === "decision"`. Measured after:
+
+```
+decisionsFiles  8 -> 36      decision nodes  0 -> 443
+AFFECTS edges   0 -> 748     (344 resolved, 404 UNRESOLVED_TARGET)
+```
+
+**The 404 unresolved `Affects:` tokens are a NEW visible finding, not a regression** — 54%
+of decision attributions name something that is not a known project node. They were always
+unresolvable; there were simply no edges to be unresolved. Worth its own entry once someone
+looks at what the tokens actually say.
+
+**Guarded by `tests/unit/graph-index-decisions.test.mjs`** (3 tests). The full suite was
+**1234 green before AND after** the fix, which is the whole point: nothing covered this.
+The fixture must contain a declared edge — project nodes derive from file nodes, and with
+zero projects the buggy `nodes - files` formula coincidentally equals the right answer and
+passes. Mutation-tested: reintroducing both defects turns two tests red with
+`expected >=1 decision node, got 0` and `stats.decisions must equal stored decision nodes`.
+
+---
+
+### N60 · Decision-entry identity is POSITIONAL for 20 of propagate's own 36 entries — **S2** — **OPEN**
+
+The key is `<date>:sha8(affectsRaw)` (`lib/report/decisions.mjs:74`) with a `#N` suffix
+appended by **file order** on collision (`:76-78`). Measured 2026-08-29 by importing
+`parseDecisions` directly:
+
+```
+state/curate-docs   12 entries ->  1 distinct base key (affectsRaw is "" for all 12), 11 positional
+state/workspace     24 entries -> 15 distinct base keys,                                9 positional
+```
+
+Tree-wide, 211 of 503 entries carry a `#N`; 91 have no `Affects:` line at all, so their key
+is `<date>:e3b0c442` — sha8 of the empty string.
+
+The `#N` counter correctly stops two entries sharing a key **within one parse**, and by doing
+so makes the key unstable **across** parses: insert or reorder one entry and every key below
+it shifts. It reads as a safety feature and is a stability hazard. Anything that ever
+persists a verdict, a relay row or a graph node id against these keys inherits it —
+`graph-index.mjs:236` already uses the key as a node identity.
+
+---
+
+### N61 · Five ledgers parse to 0 entries, and the fix as first designed would have made it silent — **S2** — **OPEN**
+
+`HEADING` at `lib/report/decisions.mjs:12` requires the date immediately after `##`. Five
+ledgers use an id-first form (`## D1 · 2026-08-15 · title`) and report **0 entries** across
+1,222 lines: `Keerti/…/keerti-job-radar` (799), `Divyansh/…/workspace` (247),
+`Keerti/…/workspace` (96), `Divyansh/…/AuroraV3` (40), `Keerti/…/Keerti-mb` (40).
+
+**The trap, and the reason this entry exists rather than a patch.** Widening the regex to
+accept the id-first form fixes 15 of `keerti-job-radar`'s 19 entries and **silently loses
+4**, which put the date at the END:
+
+```
+## D16 · Seniority is scored again, narrowly — entry-level UX is the target (2026-08-17)
+```
+
+Today the file parses to 0 and is loudly wrong. After a naive widening it parses 15 > 0, so
+any `unreadable` predicate goes false and the 4 vanish — and because `decisions.mjs:54-56`
+appends non-heading lines to the current entry, their ~200 lines get absorbed into D15's
+body. **The fix must ship with a per-file assertion that parsed entries equals the count of
+entry-level `##` headings**, or it makes the defect quieter instead of smaller.
+
+### N62 · `scope:` no longer filters delivery; convert `nextjs-dev-server-port` to native `paths:` — **S3** — **OPEN (TODO)**
+
+Fallout from the 2026-08-29 change that stopped `load-rules.mjs` injecting rule bodies.
+Delivery is now the platform's, and **the native loader has no concept of `scope:`** — that
+key is this tree's invention, read only by `applies(rule, cwd)` in `hooks/load-rules.mjs`.
+
+Measured cost: exactly **one** rule. 16 of the 17 `id:`-bearing rules are `scope: global`
+and would be delivered everywhere anyway. `nextjs-dev-server-port.md` is
+`scope: next-projects` (53 lines) and now reaches every session in every repo, Next.js or
+not. `applies()` still filters what the hook *counts* — this session parsed 16, not 17 — so
+the hook's own number stays honest; it is only delivery that is unfiltered.
+
+**The native replacement is `paths:` frontmatter**, and it is strictly better: it scopes on
+the files being worked with rather than on cwd, so a rule about Next dev servers can fire
+when someone opens `next.config.*` rather than whenever cwd happens to sit inside a repo
+with `next` in its `package.json`.
+
+**Why this is a TODO and not already done.** The 2.1.236 binary confirms the feature —
+*"can be scoped to specific file paths using `paths` frontmatter"* — but does **not** expose
+the accepted YAML shape (string vs array, glob dialect, whether it composes with an unknown
+`scope:` key). A wrong value would make the rule load never, silently, which is precisely
+the failure class this whole thread exists to fix: `rule:discernment-checks` §1, and the
+same shape as the "three legacy `paths:`-format drafts" that were deleted for
+non-conformance with the *wrong* mechanism.
+
+**What would settle it, cheapest first:**
+1. Ask the `claude-code-guide` agent for the `.claude/rules/` frontmatter schema — it is the
+   sanctioned reader for "does Claude Code do X".
+2. Or write a throwaway `~/.claude/rules/zz-probe.md` with a `paths:` value and a unique
+   sentinel string, start one fresh session inside a Next project and one outside, and ask
+   each whether the sentinel is in context. Two sessions, one deletion, definitive.
+
+Do **not** re-add body injection to `load-rules.mjs` to recover `scope:` — that reinstates
+51,112 B/session of duplication to save 53 lines. See the 2026-08-29 DECISIONS entry.
+
 ## Rotated to archive
 
 Closed entries live in [`archive/ISSUES-2026-08.md`](archive/ISSUES-2026-08.md), byte-identical.

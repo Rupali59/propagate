@@ -1,22 +1,52 @@
 #!/usr/bin/env node
 /**
- * SessionStart hook — deliver canonical rules from ~/.claude/rules/ to the session.
+ * SessionStart hook — RESTATEMENT DETECTOR for the canonical rules in ~/.claude/rules/.
  *
- * Why this exists: rules were being restated inline in 49 CLAUDE.md files, which
- * produced 9 copies of one rule making 4 contradictory claims. The fix is
- * single-source + reference. That only works if the single source actually
- * reaches the session, which is this file's whole job.
+ * THIS NO LONGER DELIVERS RULE BODIES, as of 2026-08-29. It parses them, and it
+ * reports drift. Claude Code delivers them.
  *
- * DESIGN NOTE — the failure this is built against. `~/.claude/rules/` sat with
- * three rule files for months and nothing loaded them; the directory looked
- * populated and delivered nothing. A loader that silently emits zero rules
- * recreates that exact state while appearing to work. So: emitting zero rules is
- * treated as a LOUD failure, never as "nothing applied here". Silence must never
- * be indistinguishable from success (propagate GOTCHAS.md G2).
+ * WHY THE CHANGE. `.claude/rules/` is a NATIVE Claude Code memory directory —
+ * verified against the CLI binary (2.1.236), which documents it as: "organizing
+ * instructions into `.claude/rules/` as separate focused files ... These are
+ * loaded automatically alongside CLAUDE.md", walked "including nested
+ * directories", scopable with `paths` frontmatter. `~/.claude/rules` is the
+ * User-scope instance, so every file under it was ALREADY in every session's
+ * context, labelled "(user's private global instructions for all projects)".
  *
- * Only files with an `id:` in frontmatter are loaded. That deliberately excludes
- * `_TODO.md` and the three legacy `paths:`-format drafts, without needing a
- * denylist that would go stale.
+ * This hook was written 2026-08-14 to close a gap the platform had already closed,
+ * so from then until now the same 16 rule bodies arrived TWICE — measured
+ * 2026-08-29 at 51,112 bytes of duplication per session. propagate's own STATE.md
+ * carried "confirm rules are injected once, not twice" as an open question. The
+ * answer was twice.
+ *
+ * WHAT WAS DELIBERATELY KEPT, and why deleting this file would have been wrong.
+ * Injection was never its only job. It also runs the restatement scan below — the
+ * detector for the 9-divergent-copies failure the whole rules layer exists to
+ * prevent — and that has no native equivalent. Delivery moved to the platform;
+ * detection stayed here.
+ *
+ * WHAT WAS GIVEN UP. `applies(r, cwd)` still filters what this file COUNTS, but it
+ * can no longer filter what the session RECEIVES: the native loader has no concept
+ * of `scope:`, so a `scope: next-projects` rule reaches every session regardless.
+ * Measured cost: one rule (`nextjs-dev-server-port`, 53 lines). The native
+ * equivalent is `paths:` frontmatter, which is finer-grained — it scopes on the
+ * files being touched rather than on cwd. Converting that rule is the fix;
+ * re-adding body injection here is not.
+ *
+ * G2 IS STILL HONOURED, AND ITS SCOPE IS NOW NARROWER — read this before
+ * "restoring" anything. Emitting zero rules is still a LOUD failure. But the
+ * guarantee is now "the rule FILES are present and parseable", NOT "the session
+ * received them": this hook cannot observe the native memory load and must not
+ * claim to. That is why the summary line names the mechanism — a reader seeing a
+ * count but no rule bodies must be able to tell that this is by design.
+ *
+ * TO REVERT: restore `header`/`body` and the old `emit(...)` at the foot of this
+ * file, and drop `claudeMdExcludes` from ~/.claude/settings.json. One edit each.
+ *
+ * Only files with an `id:` in frontmatter are counted. Note that `paths:` is the
+ * NATIVE scoping key, not a legacy format — the three files this comment used to
+ * call "legacy `paths:`-format drafts" were written for the real mechanism and
+ * judged non-conforming by this one.
  */
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
@@ -92,16 +122,27 @@ if (loaded.length === 0) {
   process.exit(0);
 }
 
-const header =
-  `## Canonical rules (${loaded.length} loaded from ~/.claude/rules/)\n\n` +
-  `These are the single source for the rules below. **Do not restate them in any ` +
-  `CLAUDE.md** — reference them as \`rule:<id>\`. Restating is what produced 9 ` +
-  `divergent copies of the tool-priority rule. A genuine per-repo deviation must ` +
-  `be declared, not written as if it were the rule.\n`;
-
-const body = loaded
-  .map((r) => `### rule:${r.id}${r.scope !== "global" ? `  _(scope: ${r.scope})_` : ""}\n\n${r.body}`)
-  .join("\n\n---\n\n");
+/**
+ * ONE LINE, where this used to emit 51,112 bytes of rule bodies.
+ *
+ * Claude Code has already placed every `.md` under ~/.claude/rules/ into this
+ * session's context as user memory; re-emitting them here is what produced the
+ * duplication. What this line buys is ATTRIBUTABILITY (rule:discernment-checks
+ * §2): once the bodies stop appearing under a "## Canonical rules" heading, a
+ * reader has no way to tell "delivered natively, by design" from "the rules layer
+ * is broken" — and those two must not look the same. So the count and the
+ * mechanism are stated, every session, in one line.
+ *
+ * It is NOT silent-when-clean like the drift block below, and the asymmetry is
+ * deliberate: a finding should speak only when there is a finding, but a delivery
+ * mechanism that has gone quiet must still say it is alive.
+ */
+const summary =
+  `_Rules: ${loaded.length} canonical rule file(s) parsed in ~/.claude/rules/ and ` +
+  `delivered natively by Claude Code as user memory — this hook stopped injecting ` +
+  `bodies on 2026-08-29 (they were arriving twice). Reference a rule as ` +
+  `\`rule:<id>\`; never restate one in a CLAUDE.md. Restating is what produced 9 ` +
+  `divergent copies of the tool-priority rule making 4 mutually exclusive claims._`;
 
 const warn = problems.length
   ? `\n\n⚠️  ${problems.length} rule file(s) failed to parse and were skipped: ${problems.join("; ")}`
@@ -163,7 +204,7 @@ try {
   drift = `\n\n⚠️  RULES CHECK did not run: ${err?.message ?? err}. Nothing was checked.`;
 }
 
-emit(`${header}\n${body}${warn}${drift}`);
+emit(`${summary}${warn}${drift}`);
 
 function emit(text) {
   process.stdout.write(JSON.stringify({

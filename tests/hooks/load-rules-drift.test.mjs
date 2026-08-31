@@ -79,7 +79,19 @@ test("SILENT when no CLAUDE.md restates a rule — the property that would rot f
   await withFixture(async ({ home, roots }) => {
     await writeFile(path.join(roots, "CLAUDE.md"), "# A project\n\nNothing here restates anything.\n");
     const { ctx } = runHook({ home, roots });
-    assert.match(ctx, /Canonical rules/, "the rules themselves must still load");
+    // Was `/Canonical rules/` — an assertion that the hook had emitted the rule
+    // BODIES. It stopped doing that on 2026-08-29 (Claude Code loads
+    // ~/.claude/rules/ natively; this hook was a second copy). The property that
+    // replaced it is ATTRIBUTABILITY, not delivery: this hook cannot observe the
+    // native memory load and must not assert one. What it must still do is say how
+    // many rule files parsed and by what mechanism they arrive, so that "no bodies
+    // visible, by design" cannot be mistaken for "the rules layer is broken".
+    assert.match(ctx, /\b1 canonical rule file\(s\) parsed\b/, "must state how many rule files parsed");
+    assert.match(ctx, /delivered natively/, "must name the delivery mechanism, not leave it implied");
+    // And it must NOT go back to shipping bodies — this is the regression guard for
+    // the 51,112-byte duplication, which was invisible for two weeks precisely
+    // because nothing asserted its absence.
+    assert.doesNotMatch(ctx, /^### rule:/m, `must not re-inject rule bodies:\n${ctx.slice(0, 300)}`);
     assert.doesNotMatch(ctx, /RESTATEMENT/, `must not speak when clean:\n${ctx.slice(-400)}`);
     assert.doesNotMatch(ctx, /did not run|could not run/, `the check must have actually run:\n${ctx.slice(-400)}`);
   });
