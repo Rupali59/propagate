@@ -1446,6 +1446,29 @@ a proxy for the claim, and `selftest` only ever tests it against the house-style
 derived from.** A check whose only test is self-match cannot detect either error, which is
 `rule:discernment-checks` §1 wearing a green badge.
 
+**UPDATE 2026-09-01 — the same defect was ALSO producing the headline number, and it is
+now zero.** `rules check` reported **1 restatement across 50 files** all session, which reads
+as "almost clean". It was an eighth false positive, from the same cause one level up: the
+fingerprint for `secrets-source-of-truth` carried a bare `|Doppler|` alternative, so ANY
+mention of the vendor anywhere read as restating the rule.
+
+The flagged passage was `Motherboard/CLAUDE.md:379-380` describing Motherboard's OWN
+`environments.json`, in a sentence that explicitly says *"It is DERIVED from
+`rule:environment-vocabulary`, which wins if they disagree"*. Textbook compliance, and
+flagged under the WRONG RULE — the content belongs to `environment-vocabulary`.
+
+Narrowing the fingerprint to require the CLAIM rather than the vendor name
+(`source of truth.{0,60}(env|secret)|vercel-env-(all|audit|sync)`) took the tree to **0
+restatements across 51 files scanned**, and dropped the excused bucket from **20 to 16** —
+`secrets-source-of-truth` went 6 to 2 there. **Five false positives from one regex
+alternative.** `selftest` still passes: the rule body says "Doppler is the source of truth
+for deployed env", which the first alternative matches.
+
+So the true-positive rate of this detector on this tree is now measured at approximately
+**zero**, in both buckets. That does not mean the detector is worthless — it means every
+number it has ever printed was noise, and nobody could tell because the numbers were small
+and plausible. A corpus test is no longer a nice-to-have.
+
 **What would settle it, and the order:**
 1. Sample the remaining 12 and record the true positive rate per rule. Cheap, no code.
 2. Until then, **relabel** the printed line. "restate a rule they also reference" asserts a
