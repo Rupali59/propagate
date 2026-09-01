@@ -471,6 +471,41 @@ const GRAPH_MCP_CACHE_TTL_MS = 60 * 60 * 1000;
  *
  * @param {{cachePath?: string, ttlMs?: number, now?: () => number}} [opts] test seams
  */
+/**
+ * Is `code-review-graph` registered as an MCP server, read from disk?
+ *
+ * Returns a STRING so it drops straight into the existing `/code-review-graph/`
+ * test below — the shape `claude mcp list` used to return. Deliberately not a
+ * boolean: the caller already distinguishes registered / not-registered / error,
+ * and collapsing that here would lose the distinction this register is about.
+ *
+ * Scope order matches Claude Code's own: project `.mcp.json` walking up from cwd,
+ * then user scope in `~/.claude.json`. Never throws for an absent or malformed
+ * config — an unreadable file is 'not found here', and the walk continues.
+ */
+function readGraphRegistration() {
+  const names = [];
+  let dir = process.cwd();
+  for (let i = 0; i < 12; i++) {
+    const f = path.join(dir, ".mcp.json");
+    try {
+      if (existsSync(f)) names.push(...Object.keys(JSON.parse(readFileSync(f, "utf8")).mcpServers || {}));
+    } catch {
+      /* malformed .mcp.json is 'nothing declared here', not a crash */
+    }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  try {
+    const home = path.join(homedir(), ".claude.json");
+    if (existsSync(home)) names.push(...Object.keys(JSON.parse(readFileSync(home, "utf8")).mcpServers || {}));
+  } catch {
+    /* same */
+  }
+  return names.join("\n");
+}
+
 export async function checkGraphMcpStatus(opts = {}) {
   const cachePath = opts.cachePath ?? GRAPH_MCP_CACHE_PATH;
   const ttlMs = opts.ttlMs ?? GRAPH_MCP_CACHE_TTL_MS;
@@ -479,7 +514,20 @@ export async function checkGraphMcpStatus(opts = {}) {
   try {
     if (existsSync(cachePath)) {
       const cached = JSON.parse(await readFile(cachePath, "utf8"));
-      if (typeof cached.checkedAt === "number" && now() - cached.checkedAt < ttlMs) {
+      // KEYED BY CWD, added 2026-09-01 with the config-read change above.
+      // The answer became cwd-DEPENDENT the moment this stopped shelling out:
+      // 24 of the 26 .mcp.json files in this tree declare code-review-graph at
+      // PROJECT scope, and none declares it at user scope. A cwd-independent
+      // cache therefore served a project answer to the hub and vice versa —
+      // measured immediately: from Motherboard/motherboard-infra, whose own
+      // .mcp.json declares it, doctor reported "not registered (cached 2m ago)".
+      // With the cache cleared it correctly reported registered.
+      //
+      // A mismatch is a MISS, not a stale hit. Recomputing costs a handful of
+      // existsSync calls; the old 17,793ms subprocess is what the cache existed
+      // for and it is gone, so the cheap thing to do when unsure is recompute.
+      const sameCwd = cached.cwd === undefined || cached.cwd === process.cwd();
+      if (sameCwd && typeof cached.checkedAt === "number" && now() - cached.checkedAt < ttlMs) {
         return { ...cached, fromCache: true };
       }
     }
@@ -487,19 +535,40 @@ export async function checkGraphMcpStatus(opts = {}) {
     /* corrupt or unreadable cache -- fall through and recompute */
   }
 
-  const runMcpList = opts.runMcpList ?? (() => execSync("claude mcp list 2>&1", { encoding: "utf8", timeout: 2000 }));
+  // N16, closed 2026-09-01. This shelled out to `claude mcp list`, which
+  // `rule:tool-priority` explicitly forbids here: "claude mcp list health-checks
+  // ~30 remote servers and is slow (tens of seconds). Never put it in a
+  // health-check path." Measured 2026-08-13 it was 17,793ms — 94% of doctor's
+  // whole run. The 2s timeout added afterwards did not fix that; it guaranteed
+  // the check could never SUCCEED, so doctor reported `status unknown` on every
+  // run. Honest, per rule:discernment-checks §2, and useless.
+  //
+  // Registration is readable from disk with no subprocess at all. The gstack
+  // preamble already does this and says why: "Read claude.json directly to keep
+  // this preamble fast (no subprocess to claude CLI on every skill start)."
+  //
+  // BUT USER SCOPE ALONE IS THE WRONG ANSWER, and measuring saved this fix from
+  // being wrong in a new way. `~/.claude.json`'s top-level `mcpServers` holds 4
+  // entries and NONE is the graph. All 24 registrations are PROJECT-scoped
+  // `.mcp.json` files (of 26 in the tree). Reading only user scope would have
+  // reported a confident `not-registered` for a server that is registered
+  // almost everywhere — trading a slow honest unknown for a fast wrong answer.
+  //
+  // So: walk cwd upward for `.mcp.json`, then fall back to user scope. That is
+  // the same resolution order Claude Code itself uses, and it is milliseconds.
+  const runMcpList = opts.runMcpList ?? (() => readGraphRegistration());
 
   let result;
   try {
     const out = runMcpList();
-    result = { status: /code-review-graph/.test(out) ? "registered" : "not-registered", checkedAt: now() };
+    result = { status: /code-review-graph/.test(out) ? "registered" : "not-registered", checkedAt: now(), cwd: process.cwd() };
   } catch (err) {
     // execSync throws on nonzero exit AND on hitting `timeout` -- the timeout
     // case is marked by `killed`/`signal` (Node kills the child with
     // `killSignal`, default SIGTERM) and must stay distinguishable from "ran
     // fine and said no" or "the `claude` binary errored for some other reason".
     const timedOut = err.killed === true || err.signal === "SIGTERM" || err.code === "ETIMEDOUT";
-    result = { status: timedOut ? "timeout" : "error", checkedAt: now(), detail: err.message };
+    result = { status: timedOut ? "timeout" : "error", checkedAt: now(), cwd: process.cwd(), detail: err.message };
   }
 
   try {

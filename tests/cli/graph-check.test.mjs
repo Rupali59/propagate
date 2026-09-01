@@ -206,49 +206,52 @@ function runDoctor(root, { binDir, stateDir } = {}) {
   return spawnSync(process.execPath, [CLI_PATH, "doctor"], { cwd: root, encoding: "utf8", env, timeout: 90_000 });
 }
 
-test("doctor: a hung `claude mcp list` is bounded to ~2s and reported as an explicit unknown, not a pass", async () => {
+test("doctor: never invokes `claude` at all — the subprocess is gone, not merely bounded", async () => {
   const root = await makeWorkspace();
   const binDir = await makeSlowClaudeStub();
   const stateDir = await mkdtemp(path.join(tmpdir(), "graph-e2e-state-"));
   try {
-    const start = Date.now();
+    // REPLACES "a hung `claude mcp list` is bounded to ~2s" (N16, closed
+    // 2026-09-01). That test was correct for its time and its comment records four
+    // attempts to make the bound assertion non-flaky. Its PREMISE is now gone:
+    // doctor reads .mcp.json and ~/.claude.json instead of shelling out, because
+    // rule:tool-priority forbids `claude mcp list` in a health-check path
+    // ("~30 remote servers ... tens of seconds. Never put it in a health-check
+    // path") and the 2s bound added afterwards only guaranteed the check could
+    // never SUCCEED — doctor reported `status unknown` on every run.
+    //
+    // This assertion is STRICTLY STRONGER than the one it replaces. "Bounded to 2s"
+    // permits a subprocess; "called zero times" does not. And it inherits the old
+    // test's hard-won discipline: assert the CLAIM (the stub's own call log), never
+    // a duration proxy. Every timing assertion this file ever carried became a
+    // flake — see G53 and the comment below.
     const result = runDoctor(root, { binDir, stateDir });
-    const elapsedMs = Date.now() - start;
     const out = result.stdout + result.stderr;
 
-    // THE MESSAGE IS THE BOUND. This is the only formulation that does not move
-    // with machine load, and it took four attempts to arrive at:
-    //
-    //   `< 4000` vs a 5s stub  — flipped on fixture weight (2026-08-20)
-    //   `< 15000`              — failed at 23406ms under load average 49 (2026-08-23)
-    //   `result.signal null`   — SAME DEFECT RELOCATED: doctor with an intact bound
-    //                            was killed at 22043ms by the harness's own 20s cap,
-    //                            so this "binary" fact was load-dependent too
-    //
-    // Why the message works where three duration proxies failed: with the bound
-    // INTACT, execSync aborts at 2s and doctor prints the timeout line. With the
-    // bound BROKEN, the 60s stub runs to completion and its output is parsed as an
-    // ordinary `claude mcp list` result — so this line is never printed, at any
-    // load, on any machine. The literal "2s" in the text pins the constant as well.
+    assert.doesNotMatch(out, /^$/, "doctor produced no output at all");
+
+    const calls = (await readFile(path.join(binDir, "calls"), "utf8").catch(() => "")).split("\n").filter(Boolean).length;
+    assert.equal(calls, 0, `doctor invoked the \`claude\` stub ${calls}x — it must never shell out for this`);
+
+    // And it must produce a real ANSWER, not the unknown it used to.
     assert.doesNotMatch(
       out,
-      /^$/,
-      `doctor produced no output at all after ${elapsedMs}ms (signal: ${result.signal}) — the harness cap fired, not the bound`,
+      /graph integration check timed out/,
+      "the timeout path should be unreachable now that nothing is spawned",
     );
     assert.match(
       out,
-      /graph integration check timed out after 2s — status unknown/,
-      `the 2s bound did not fire — a 60s stub that runs to completion is parsed as a normal mcp list result (elapsed ${elapsedMs}ms, signal ${result.signal})`,
+      /code-review-graph MCP (registered|not registered)/,
+      "the check must answer, not report unknown",
     );
-    // Must not ALSO print the pass line for the same section.
-    assert.doesNotMatch(out, /✓.*code-review-graph MCP registered/);
 
-    // Cache respects PROPAGATE_STATE_DIR: the outcome lands inside stateDir,
-    // not the skill's own directory.
     const cachePath = path.join(stateDir, "graph-mcp-cache.json");
     assert.ok(existsSync(cachePath), "cache file must be written inside PROPAGATE_STATE_DIR");
     const cached = JSON.parse(await readFile(cachePath, "utf8"));
-    assert.equal(cached.status, "timeout");
+    assert.ok(
+      cached.status === "registered" || cached.status === "not-registered",
+      `cached status must be a real answer, got ${cached.status}`,
+    );
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     await rm(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
@@ -256,38 +259,42 @@ test("doctor: a hung `claude mcp list` is bounded to ~2s and reported as an expl
   }
 });
 
-test("doctor: a warm cache (within TTL) skips the subprocess entirely — second run is fast", async () => {
-  const root = await makeWorkspace();
-  const binDir = await makeSlowClaudeStub();
+test("doctor: the cache is keyed by cwd — a project answer is never served to another directory", async () => {
+  const rootA = await makeWorkspace();
+  const rootB = await makeWorkspace();
   const stateDir = await mkdtemp(path.join(tmpdir(), "graph-e2e-state-"));
   try {
-    // First run pays the (bounded) timeout cost and caches "timeout".
-    runDoctor(root, { binDir, stateDir });
-
-    // Second run: if the cache is honoured, doctor must NOT invoke the
-    // 5s-sleeping stub again — it must finish fast.
-    const start = Date.now();
-    const result = runDoctor(root, { binDir, stateDir });
-    const elapsedMs = Date.now() - start;
-    const out = result.stdout + result.stderr;
-
-    // Assert the CLAIM ("skips the subprocess entirely"), not a proxy for it. The stub
-    // records each invocation, so one call across two runs IS the cache working.
+    // REPLACES "a warm cache skips the subprocess entirely". There is no subprocess
+    // to skip, so that claim is vacuous; this asserts the property that actually
+    // matters now and that DID break when the subprocess was removed.
     //
-    // This previously asserted `elapsedMs < 3000` over ALL of doctor, whose floor in this
-    // fixture is ~2.6-2.9s — ~100-400ms of headroom. Adding a 0.26s doctor check flipped
-    // it, with no cache involved. docs/GOTCHAS.md G53, second instance.
-    const calls = (await readFile(path.join(binDir, "calls"), "utf8").catch(() => "")).split("\n").filter(Boolean).length;
-    assert.equal(calls, 1, `the stub ran ${calls}x across two doctor runs — the cache was not honoured`);
-    // NO DURATION ASSERTION HERE AT ALL. `calls === 1` above already IS this test's
-    // claim ("skips the subprocess entirely"), exactly as its own comment argues —
-    // every timing line added on top was a proxy for a fact already asserted
-    // directly, and each one became a flake. elapsedMs survives only in messages.
-    assert.match(out, /graph integration check timed out after 2s — status unknown/);
-    assert.match(out, /cached \d+m ago/, "warm-cache run must say it's reporting a cached result");
+    // The answer became cwd-DEPENDENT the moment this started reading .mcp.json:
+    // measured 2026-09-01, 24 of the 26 .mcp.json files in this tree declare
+    // code-review-graph at PROJECT scope and NONE declares it at user scope. With a
+    // cwd-independent cache, running doctor at the hub and then inside
+    // Motherboard/motherboard-infra reported "not registered (cached 2m ago)" for a
+    // directory whose own .mcp.json declares it. Clearing the cache made the same
+    // command report registered — which is how the bug was found.
+    //
+    // rootA declares the server; rootB does not. Same state dir, so the same cache
+    // file. If cwd is not part of the key, the second run inherits the first answer.
+    await writeFile(
+      path.join(rootA, ".mcp.json"),
+      JSON.stringify({ mcpServers: { "code-review-graph": { command: "x" } } }),
+    );
+
+    const outA = (() => { const r = runDoctor(rootA, { stateDir }); return r.stdout + r.stderr; })();
+    const outB = (() => { const r = runDoctor(rootB, { stateDir }); return r.stdout + r.stderr; })();
+
+    assert.match(outA, /✓.*code-review-graph MCP registered/, "rootA declares it and must report registered");
+    assert.match(
+      outB,
+      /code-review-graph MCP not registered/,
+      "rootB declares nothing — a cached rootA answer must not be served here",
+    );
   } finally {
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
-    await rm(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(rootA, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(rootB, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
