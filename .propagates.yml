@@ -1,6 +1,8 @@
 # propagate's own couplings.
 #
-# Reachable from the hub via the `propagate-skill` -> ~/.claude/skills/propagate
+# Served as a plugin from `skills-marketplace/propagate` (a symlink to this repo).
+# The old `propagate-skill` -> ~/.claude/skills/propagate route was deleted by the
+# 2026-08-22 plugin cutover; corrected 2026-09-01.
 # symlink, exactly as the rules layer is reached via `rules` -> ~/.claude/rules.
 # Until this file existed, `doctor` reported that symlink as "no marker —
 # nothing lost", which was true only because nothing had been declared: the
