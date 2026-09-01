@@ -208,6 +208,39 @@ Per `~/.claude/plans/status-temporal-plum.md` §3 (release mechanics, defined no
 
 ## Now (in flight)
 
+### 2026-09-01 — the acceptance corpus moved out of the repo, and `make-public` cannot run
+
+**`origin` for this working copy IS the public repo.** `gh repo view` reports
+`Rupali59/propagate` PUBLIC, and there is no second remote — so `bin/make-public.mjs`
+builds a scrubbed distribution that has never been the thing anyone pulls. Established by
+measurement, not assumption, because the whole push decision turned on it.
+
+Two consequences, and only the first is closed.
+
+**Closed — `tests/cli/claims-check-known-positives.test.mjs` no longer carries the corpus.**
+It hardcoded a sibling workspace path and asserted nine positives by name: a person's
+service labels, a doctrine branch, diacritic vocabulary. The mechanism (do the five checks
+fire on a real tree?) is general and ships; the expectations are a fact about one private
+tree and now live beside it, named by `PROPAGATE_ACCEPTANCE_EXPECT`. Documented in
+`docs/REFERENCE.md`. **Coverage was preserved, not traded away** — all nine still assert,
+verified through the indirection before the split was committed. Unset skips with a reason;
+set-but-broken fails hard, because a typo'd path reading as "no corpus configured" is a
+check that cannot fail.
+
+**Open — N66.** `make-public --check` refuses at the watchlist with three unmapped
+directories, two of which are `propagate` and `propagation`: the tool's own repo and its
+own ledger. The release path therefore completes on no machine, and CI does not notice
+because it asserts the exit code *without* an identity map and never the one *with*.
+
+**The larger question is a decision, not a defect, and is deliberately not resolved here.**
+66 files on `origin/main` already carry workspace and client names. Either the posture is
+"the repo is public and the names are acceptable", in which case `make-public` is dead
+weight and should be retired rather than repaired — or "the published repo should have been
+the scrubbed copy", in which case N66 is the smallest part of the work. The tree currently
+asserts both. Whoever picks one should also decide whether the general form of the split
+above applies to the other 66 files, or only to content about a person.
+
+
 ### 2026-08-21 — one ledger per workspace: three migrated, branch sweep started, two blockers open
 
 **Architecture:** one propagation ledger per workspace at depth 1; sub-projects roll their
@@ -622,14 +655,14 @@ should have happened and did not."
 
 **The instance that proved it.** `docs/DECISIONS.md:1287` (2026-07-15) records
 Vastu as **removed — a refusal, not paused**. Thirty days later
-`docs/constitution/VIPIN.md` still carried a `Vastu site visit · ₹21,000` row,
+`docs/constitution/the constitution doc` still carried a `Vastu site visit · ₹21,000` row,
 still described the locked model as three tiers "plus Vastu", and still called it
 "(paused)".
 
 The important part, and the thing I got wrong on first reading: **the edge was
 declared the whole time.** `Vipin Kaushik/docs/.propagates.yml:10-17` has
-`constitution/VIPIN.md → ../VipinKaushik/lib/pricing.ts` as `kind: code`. It is
-not a missing coupling. It never fired because VIPIN.md was never edited after
+`constitution/the constitution doc → ../VipinKaushik/lib/pricing.ts` as `kind: code`. It is
+not a missing coupling. It never fired because the constitution doc was never edited after
 the decision — and it has no baseline (`NEVER_VERIFIED`), because the two files
 never co-committed inside the walk, so bootstrap could not seed it either.
 
@@ -663,6 +696,6 @@ scope (workspace, project, or both); whether it runs on decision-append or on a
 schedule; whether it reports per-decision or per-document; and whether it lives
 as its own skill or as a mode of an existing one.
 
-**Related:** the immediate Vastu correction in `VIPIN.md` is separate, live work
+**Related:** the immediate Vastu correction in the constitution doc is separate, live work
 and is Rupali's call — it touches the pricing table, the 2026-06-02
 reconciliation note, and the pending-asks row.

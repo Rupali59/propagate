@@ -48,7 +48,7 @@ const NOW = new Date("2026-08-31T00:00:00Z");
 // Check 1 — expired dates
 // ─────────────────────────────────────────────────────────────────────────
 
-test("findExpiredDates: an arrow range whose end date has passed fires (VIPIN.md known positive, shape)", () => {
+test("findExpiredDates: an arrow range whose end date has passed fires (the constitution doc known positive, shape)", () => {
   const text = "### Online-only window (2026-05-04 → ~2026-08-04)\n";
   const findings = findExpiredDates(text, { now: NOW });
   assert.equal(findings.length, 1);
@@ -230,7 +230,7 @@ test("checkFooterVsInline: no footer at all returns null, not a false 'not stale
 // Check 4a — self-line citations
 // ─────────────────────────────────────────────────────────────────────────
 
-test("findSelfLineCitations: citing a line that is a markdown table separator is rotted (VIPIN.md known positive, shape)", () => {
+test("findSelfLineCitations: citing a line that is a markdown table separator is rotted (the constitution doc known positive, shape)", () => {
   const lines = [];
   lines[116] = "| Service | Price (INR) | Notes |"; // line 117
   lines[117] = "|---------|-------------|-------|"; // line 118 — the separator
@@ -377,7 +377,7 @@ writeFixture(
   "docs/.propagates.yml",
   [
     "sources:",
-    "  VIPIN.md:",
+    "  the constitution doc:",
     "    propagates_to:",
     '      - path: pricing.ts',
     '        why: "price literals"',
@@ -393,7 +393,7 @@ writeFixture(
   ].join("\n"),
 );
 writeFixture(
-  "docs/VIPIN.md",
+  "docs/the constitution doc",
   [
     "# Fixture doc",
     "",
@@ -444,8 +444,8 @@ test("buildClaimsCorpus: resolves sources + non-glob downstreams, and records gl
   assert.equal(corpus.globsSkipped.length, 1);
   assert.equal(corpus.globsSkipped[0].path, "glob/**/*.md");
 
-  const vipinEdge = corpus.sourceEdges.find((e) => e.sourceKey === "VIPIN.md");
-  assert.ok(vipinEdge, "expected a source edge for VIPIN.md");
+  const vipinEdge = corpus.sourceEdges.find((e) => e.sourceKey === "the constitution doc");
+  assert.ok(vipinEdge, "expected a source edge for the constitution doc");
   assert.deepEqual(vipinEdge.concepts, { "§Pricing": ["pricing", "9999"] });
   assert.equal(vipinEdge.downstreams.length, 1); // the glob one is excluded from this list
   assert.equal(vipinEdge.downstreams[0].kind, "code");
@@ -454,7 +454,7 @@ test("buildClaimsCorpus: resolves sources + non-glob downstreams, and records gl
 test("claimsCheck: three-outcome discipline — checked files are counted, unreadable files are named with a reason, never silently dropped", async () => {
   const result = await claimsCheck({ workspaces: FIXTURE_WORKSPACES, now: new Date("2026-08-31T00:00:00Z") });
 
-  // 4 unique corpus files total (VIPIN.md, pricing.ts, second/UNREADABLE.md,
+  // 4 unique corpus files total (the constitution doc, pricing.ts, second/UNREADABLE.md,
   // the directory-masquerading-as-a-file downstream) — 3 checked, 1 not.
   assert.equal(result.coverage.filesChecked, 3, "expected exactly the 3 readable fixture files to be checked");
   assert.equal(result.coverage.filesUnreadable, 1, "the directory-named-as-a-file downstream must be reported unreadable, not silently skipped");

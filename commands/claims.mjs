@@ -216,8 +216,8 @@ async function judgeSub(rest, json) {
  * `claims render <file> [--apply]` — write each block's verdict beside it.
  *
  * DRY-RUN IS THE DEFAULT, inverting `rollup`'s posture on purpose. `rollup` writes
- * a file it OWNS; this writes into a file a PERSON wrote — VIPIN.md is 420 lines of
- * someone's writing, mode 0600, about a real human. The repo already sets this
+ * a file it OWNS; this writes into a file a PERSON wrote — the constitution doc is 420 lines of
+ * authored prose the caller did not write. The repo already sets this
  * precedent for anything editing what it does not own (`verify`, `bootstrap`), and
  * rule:safety-flag-needs-a-test requires the write path be provably unreachable
  * without the flag.

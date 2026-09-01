@@ -1588,3 +1588,53 @@ One line each so an id stays findable from here.
 - N45 · ~~S2~~ · **RESOLVED 2026-08-24 (fix 2)** · Gotchas documented as auto-firing could not fire, and `--selftest` passed anyway
 - N46 · ~~S3~~ · **RESOLVED 2026-08-24** · `watchPathsFor()` hardcoded `docs/`, and stale watch paths were undetectable
 - N51 · `parseHandovers` reads fenced examples as real sections — **S2** — **RESOLVED 2026-08-26**
+
+### N66 · `make-public` refuses because its watchlist does not recognise propagate's own directories — **S2** — **OPEN**
+
+**Found 2026-09-01**, while checking whether the publishable tree could be rebuilt before
+pushing the claims lane. `bin/make-public.mjs --out <tmp> --check` never reaches the scrub:
+
+```
+3 WATCHLIST DIRECTORIES ARE UNMAPPED:
+   Divyansh
+   propagate
+   propagation
+```
+
+Two of those three **are this tool's own directories.** The watchlist source is every
+depth-1 directory under `SEARCH_ROOTS` — chosen deliberately, and correctly, over workspace
+discovery, because real client names leak into docs without carrying a `.propagates.yml`
+marker (`tests/portability/make-public-watchlist.test.mjs` states that reasoning). But the
+hub root holds `propagate/` and `propagation/`, which are the plugin and its ledger, not
+identities. So the check demands they be mapped to pseudonyms or allow-listed, and until
+someone does that by hand on each machine the release path cannot run at all.
+
+`Divyansh` is a genuine gap of the intended kind — a workspace added after the map was
+last written, which is exactly what the watchlist exists to catch. The other two are the
+mechanism failing to exempt itself.
+
+**Why S2 and not S3.** `rule:enforcement-watches-itself` names this shape directly: *"a
+mechanism that enforces a property on others and is exempt from it reports success
+forever"* — here it is the mirror, a mechanism that cannot complete because it does not
+recognise itself, which is the same missing question. And the consequence is not cosmetic:
+the scrub is the only thing standing between the private working copy and a public
+distribution, so a scrub that never runs is a scrub nobody notices is absent. The CI job
+asserts `make-public` exits 2 *without* an identity map; it does not assert that it exits
+**0 with one**, so a green suite is compatible with a release path that has never
+completed on any machine.
+
+**The fix is mechanical, not data.** Adding `propagate` and `propagation` to a per-machine
+`allow` array works and is wrong — it must be re-done on every clone, and a per-machine
+data edit is invisible to the next reader. The tool knows its own repo root (`REPO`) and
+its ledger directory; both should be exempt by construction, with `Divyansh` left to fail
+loudly as designed. Then assert it: a test that runs `--check` against a harness root
+containing a directory named like the tool's own and expects exit 0.
+
+**Note the scope this does NOT cover.** `origin` for this working copy IS the public repo
+(`Rupali59/propagate`, verified PUBLIC via `gh repo view` 2026-09-01) — there is no second,
+scrubbed remote. So `make-public` builds a distribution that has never been the thing
+anyone pulls, and 66 files on `origin/main` already carry workspace and client names. That
+is a larger question than this entry: **is the intended posture "the repo is public and the
+names are acceptable", or "the repo should have been the scrubbed copy all along"?** The
+two answers imply very different work and the tree currently asserts both. Filed separately
+rather than resolved here, because it is a decision, not a defect.

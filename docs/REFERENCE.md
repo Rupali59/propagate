@@ -491,6 +491,51 @@ you lose proactive notification and nothing else.
 Distinct from two neighbouring verbs, deliberately: `init <dir>` scaffolds **one**
 sidecar, `bootstrap` baselines **edges**, `setup` configures **the machine**.
 
+### `PROPAGATE_ACCEPTANCE_EXPECT` — the real-tree acceptance corpus, held outside the repo
+
+`tests/cli/claims-check-known-positives.test.mjs` runs `claims check --json` against a
+**real document tree** and asserts that hand-found positives are still found. A run that
+reports none of them is broken, not clean (`rule:discernment-checks` §1) — which is
+precisely what a fixture-only suite cannot tell you.
+
+**The corpus and its expectations both live outside this repo**, named by one env var
+pointing at a JSON file:
+
+```sh
+PROPAGATE_ACCEPTANCE_EXPECT=/path/to/claims-known-positives.json npm test
+```
+
+```json
+{
+  "corpusRoot": "/abs/path/to/tree",
+  "expect": [
+    { "name": "label used in the failure message",
+      "count": 1,
+      "match": { "check": "expired-date", "file~": "NOTES.md", "reason/": "table sep" } }
+  ]
+}
+```
+
+A plain key means strict equality, a `~` suffix substring, a `/` suffix regex. Plain JSON
+with the operator in the key, so an expectations file is data — there is nothing to
+evaluate and a malformed entry is a data error rather than an injection point.
+
+**Why the split, and it is not only privacy.** The value of that test is *"the five checks
+fire on a real tree"*, which is mechanism and general. *Which* positives a given tree holds
+is a fact about that tree — often someone's private working notes, their pricing, their
+branch names — and generalises to nobody. Holding both in one file meant a public repo
+asserting a stranger's vocabulary in order to test a property that has nothing to do with
+them, and it meant the only way to drop the exposure was to drop the acceptance coverage.
+
+**Unset ⇒ every test in that file SKIPS WITH A REASON. Set-but-broken ⇒ the suite FAILS.**
+Those are different facts and collapsing them is the failure this whole tool is about: a
+typo'd path that reads as "no corpus configured" is a check that cannot fail. `--check`-
+style silence is not available here.
+
+**The suite is expected to go red as the corpus is repaired.** If a flagged gap is fixed or
+an expired window resolves, the acceptance lane SHOULD fail — that failure is the ledger
+doing its job. Update the expectations file, never the corpus.
+
 ## Initial install (once per machine) — watcher steps are HISTORICAL, RETIRED 2026-08-14
 
 Steps 2–4 below install/verify the v1 watcher and no longer apply — step 3 in
@@ -523,7 +568,7 @@ node ${CLAUDE_PLUGIN_ROOT}/watcher.mjs
 # 4. Verify by touching a watched file — HISTORICAL; nothing listens for
 #    this anymore. Use `node cli.mjs reconcile` to check drift on demand
 #    instead.
-touch "$HOME/Documents/GitHub/Vipin Kaushik/docs/VIPIN.md"
+touch "$HOME/Documents/GitHub/Vipin Kaushik/docs/the constitution doc"
 # Within ~10s, a notification should appear and a new row added to
 # Vipin Kaushik/docs/PROPAGATION_LEDGER.jsonl
 ```

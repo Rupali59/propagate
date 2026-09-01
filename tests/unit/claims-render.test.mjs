@@ -15,8 +15,8 @@
  * the real file) but never form part of a block. The two tests that matter are
  * therefore "identity survives rendering" and "rendering twice changes nothing".
  *
- * The other half is that this writes into files a PERSON wrote. `VIPIN.md` is 420
- * lines of someone's writing, mode 0600, about a real human. So: dry-run default,
+ * The other half is that this writes into files a PERSON wrote. the constitution doc is 420
+ * lines of authored prose the tool did not write. So: dry-run default,
  * `--apply` required, one explicit path, no walking — and a hand-edited marker is
  * REFUSED rather than overwritten, because a marker disagreeing with the store means
  * an opinion was recorded in the output instead of in the judgment.

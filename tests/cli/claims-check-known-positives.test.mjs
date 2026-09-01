@@ -1,55 +1,104 @@
 /**
- * `node cli.mjs claims check --json` against the REAL `Vipin Kaushik`
- * corpus — the acceptance test the Phase 2 lane 1 brief asked for: five
- * known positives, each found by hand this session, each reproduced here
- * by name. A run reporting none of them is broken, not clean
- * (`rule:discernment-checks` §1).
+ * `node cli.mjs claims check --json` against a REAL tree — the acceptance test
+ * the Phase 2 lane 1 brief asked for. A run that reports none of a corpus's
+ * hand-found positives is broken, not clean (`rule:discernment-checks` §1).
  *
- * DELIBERATELY reads the live tree, not a fixture — `PROPAGATE_SEARCH_ROOTS`
- * is scoped to `~/Documents/GitHub/Vipin Kaushik` (read-only; `claims check`
- * has no writer, so there is nothing to guard against). This makes the
- * suite fragile to Rupali's own future edits of that corpus by design: if
- * she fixes the "Complex Muhurta" pricing gap, or the "line 118" citation,
- * or lets the online-only window resolve, this test SHOULD start failing —
- * that failure is the propagation ledger doing its job, not a broken test.
- * If a known positive ever needs updating because the underlying fact
- * changed, update the assertion, not the corpus this session is reading.
+ * THE CORPUS IS NOT IN THIS REPO, AND NEITHER ARE THE EXPECTATIONS. Both come
+ * from `PROPAGATE_ACCEPTANCE_EXPECT`, a JSON file outside the tree. That split
+ * is the point: the value of this test is "the five checks fire on a real
+ * document tree", which is mechanism and belongs here; *which* positives a
+ * given tree holds is a fact about that tree — often someone's private working
+ * notes — and belongs with it. Hardcoding both put a person's pricing table,
+ * branch names and vocabulary inside a public repo to assert a property that
+ * has nothing to do with any of them.
  *
- * Slow relative to the rest of the suite (a real tree walk + several `git
- * rev-parse` subprocess calls) — one `before()` hook runs the CLI exactly
- * once; every `test()` below asserts against that single captured result,
- * so the cost is paid once, not five times.
+ * Unset env => every test SKIPS WITH A REASON, never silently passes
+ * (`rule:discernment-checks` §2 — "looked at nothing" and "found nothing" are
+ * different facts). Malformed env => the suite FAILS rather than skipping: a
+ * typo'd path that reads as "no corpus configured" is a check that cannot fail.
+ *
+ * Expectations file shape:
+ *
+ *   {
+ *     "corpusRoot": "/abs/path/to/tree",     // becomes PROPAGATE_SEARCH_ROOTS
+ *     "expect": [
+ *       { "name": "human label for the failure message",
+ *         "count": 1,                         // optional, default 1 (a floor)
+ *         "match": { "check": "expired-date", // plain key  => strict equal
+ *                    "file~": "NOTES.md",     // `~` suffix => substring
+ *                    "reason/": "table sep" } // `/` suffix => regex
+ *       }
+ *     ]
+ *   }
+ *
+ * DELIBERATELY reads the live tree, not a fixture. That makes the suite fragile
+ * to future edits of the corpus BY DESIGN: if a flagged gap is fixed, or an
+ * expired window resolves, this SHOULD start failing — that failure is the
+ * propagation ledger doing its job. Update the expectations file, never the
+ * corpus, when a known positive legitimately goes away.
+ *
+ * `claims check` has no writer, so pointing it at a real tree is read-only.
+ * `PROPAGATE_STATE_DIR` is still redirected to a temp dir — G56: a test run
+ * must never be able to touch the production store, whatever the command claims
+ * about itself.
+ *
+ * Slow relative to the rest of the suite (a real tree walk plus several `git
+ * rev-parse` subprocesses) — one `before()` hook runs the CLI exactly once and
+ * every test asserts against that single captured result.
  */
 
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const CLI_PATH = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
-const VIPIN_KAUSHIK_ROOT = fileURLToPath(new URL("../../../Vipin Kaushik", import.meta.url));
+const EXPECT_PATH = process.env.PROPAGATE_ACCEPTANCE_EXPECT || "";
 
 let result = null;
+let spec = null;
 let skipReason = null;
 
+/**
+ * One field predicate. The suffix carries the operator so the expectations file
+ * stays plain JSON — no code, nothing to eval, and a malformed entry is a data
+ * error rather than an injection point.
+ */
+function fieldMatches(finding, key, want) {
+  if (key.endsWith("~")) return String(finding[key.slice(0, -1)] ?? "").includes(String(want));
+  if (key.endsWith("/")) return new RegExp(want).test(String(finding[key.slice(0, -1)] ?? ""));
+  return finding[key] === want;
+}
+
+const matches = (f, m) => Object.entries(m).every(([k, v]) => fieldMatches(f, k, v));
+
 before(async () => {
-  if (!existsSync(VIPIN_KAUSHIK_ROOT)) {
-    skipReason = `Vipin Kaushik/ not present at ${VIPIN_KAUSHIK_ROOT} — acceptance corpus unavailable on this machine`;
+  if (!EXPECT_PATH) {
+    skipReason =
+      "PROPAGATE_ACCEPTANCE_EXPECT is unset — no acceptance corpus configured on this machine. " +
+      "Point it at a JSON expectations file (see this file's header) to run the real-tree checks.";
     return;
   }
+
+  // From here on every failure is a HARD failure. The env said a corpus exists;
+  // if it does not, that is a broken configuration, not an absent one, and
+  // reporting it as a skip is exactly the "check that cannot fail" this suite
+  // is meant to be.
+  assert.ok(existsSync(EXPECT_PATH), `PROPAGATE_ACCEPTANCE_EXPECT points at ${EXPECT_PATH}, which does not exist`);
+  spec = JSON.parse(readFileSync(EXPECT_PATH, "utf8"));
+  assert.ok(spec.corpusRoot, `${EXPECT_PATH}: missing "corpusRoot"`);
+  assert.ok(Array.isArray(spec.expect) && spec.expect.length > 0, `${EXPECT_PATH}: "expect" must be a non-empty array`);
+  assert.ok(existsSync(spec.corpusRoot), `${EXPECT_PATH}: corpusRoot ${spec.corpusRoot} does not exist`);
+
   const stateDir = await mkdtemp(path.join(tmpdir(), "claims-check-known-positives-state-"));
   const proc = spawnSync(process.execPath, [CLI_PATH, "claims", "check", "--json"], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
-    env: {
-      ...process.env,
-      PROPAGATE_SEARCH_ROOTS: VIPIN_KAUSHIK_ROOT,
-      PROPAGATE_STATE_DIR: stateDir,
-    },
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: spec.corpusRoot, PROPAGATE_STATE_DIR: stateDir },
   });
   await rm(stateDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 
@@ -57,8 +106,8 @@ before(async () => {
     proc.status === 0 || proc.status === 1,
     `claims check --json should exit 0 (clean) or 1 (findings), got ${proc.status}. stderr: ${proc.stderr}`,
   );
-  // --json discipline (N65's lesson, restated for this command): nothing
-  // but the JSON blob may be on stdout.
+  // --json discipline (N65's lesson, restated for this command): nothing but
+  // the JSON blob may be on stdout.
   try {
     result = JSON.parse(proc.stdout);
   } catch (err) {
@@ -66,95 +115,74 @@ before(async () => {
   }
 });
 
-function requireResult() {
-  if (skipReason) return null;
+test("acceptance corpus: every declared known positive is still found", (t) => {
+  if (skipReason) return t.skip(skipReason);
   assert.ok(result, "expected a parsed claims check result — did the before() hook run?");
-  return result;
-}
 
-test("known positive 1 — expired dates: VIPIN.md's online-only window (2026-05-04 → ~2026-08-04) has lapsed and nothing marks it", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const hit = r.findings.find(
-    (f) => f.check === "expired-date" && f.file.includes("VIPIN.md") && f.dateText.includes("2026-08-04"),
-  );
-  assert.ok(hit, `expected an expired-date finding on VIPIN.md's ~2026-08-04 window. All expired-date findings: ${JSON.stringify(r.findings.filter((f) => f.check === "expired-date"), null, 2)}`);
-});
-
-test("known positive 1b — expired dates: VipinKaushik/lib/pricing.ts's \"Resumes August 2026\" is also unmarked", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const hit = r.findings.find((f) => f.check === "expired-date" && f.file.includes("pricing.ts"));
-  assert.ok(hit, "expected an expired-date finding on pricing.ts's availabilityNote");
-});
-
-test("known positive 1c — expired dates: the workspace CLAUDE.md's \"through ~2026-08-04\" is also unmarked (three files, not one)", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const hit = r.findings.find(
-    (f) => f.check === "expired-date" && /(^|\/)CLAUDE\.md$/.test(f.file) && f.dateText.includes("2026-08-04"),
-  );
-  assert.ok(hit, "expected an expired-date finding on the workspace CLAUDE.md's online-only-window line");
-});
-
-test("known positive 2 — price literal drift: \"Complex Muhurta\" has no match in lib/pricing.ts", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const hit = r.findings.find(
-    (f) => f.check === "price-literal-drift" && f.direction === "doc-not-in-code" && f.label === "Complex Muhurta",
-  );
-  assert.ok(hit, "expected 'Complex Muhurta' flagged doc-not-in-code");
-});
-
-test("known positive 2b — price literal drift: \"double_kundli\" exists in code and not in VIPIN.md", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const hit = r.findings.find(
-    (f) => f.check === "price-literal-drift" && f.direction === "code-not-in-doc" && f.label === "double_kundli",
-  );
-  assert.ok(hit, "expected 'double_kundli' flagged code-not-in-doc");
-});
-
-test("known positive 3 — footer staleness: NORTH_STAR.md's \"Last amended: 2026-03-19\" footer is behind its own newest inline date", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const hit = r.findings.find((f) => f.check === "footer-stale" && f.file.includes("NORTH_STAR.md"));
-  assert.ok(hit, "expected a footer-stale finding on NORTH_STAR.md");
-  assert.equal(hit.footer, "2026-03-19");
-  assert.ok(hit.newestInline > hit.footer, `newest inline date ${hit.newestInline} should postdate the footer ${hit.footer}`);
-});
-
-test("known positive 4 — rotted citation: VIPIN.md cites its own \"line 118\", which is a table separator", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const hit = r.findings.find(
-    (f) => f.check === "rotted-citation" && f.subtype === "self-line" && f.file.includes("VIPIN.md") && f.citedLine === 118,
-  );
-  assert.ok(hit, "expected a self-line rotted-citation finding at VIPIN.md line 118");
-  assert.match(hit.reason, /table separator/);
-});
-
-test("known positive 4b — rotted citation: VIPIN.md cites branch `chore/correct-remedies-doctrine`, which does not exist", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const hit = r.findings.find(
-    (f) => f.check === "rotted-citation" && f.subtype === "dead-branch" && f.branch === "chore/correct-remedies-doctrine",
-  );
-  assert.ok(hit, "expected a dead-branch rotted-citation finding for chore/correct-remedies-doctrine");
-});
-
-test("known positive 5 — dead concepts: at least 5 of VIPIN.md's 19 declared §Pricing/§Philosophy/§Wordmark tokens never match its own text", (t) => {
-  const r = requireResult();
-  if (!r) return t.skip(skipReason);
-  const dead = r.findings.filter((f) => f.check === "dead-concept-token" && f.file.includes("VIPIN.md"));
-  const tokens = dead.map((f) => f.token);
-  // Named individually, not just counted: these are the exact tokens the
-  // brief called out by hand. "5100"/"8100"/"21000" are dead because the
-  // doc writes "₹5,100" (comma-formatted) — a different substring. "jadui"/
-  // "haathi"/"wordmark" are dead because the doc uses diacritic forms
-  // ("jādūī", "haathī") or never uses the plain word at all.
-  for (const expectedDead of ["5100", "21000", "jadui", "haathi", "wordmark"]) {
-    assert.ok(tokens.includes(expectedDead), `expected "${expectedDead}" among VIPIN.md's dead concept tokens; got ${JSON.stringify(tokens)}`);
+  const misses = [];
+  for (const e of spec.expect) {
+    const floor = e.count ?? 1;
+    const hits = result.findings.filter((f) => matches(f, e.match));
+    if (hits.length < floor) {
+      // Name the near-misses: "0 of the 12 expired-date findings matched" is
+      // actionable; "expected 1, got 0" sends the reader back to the corpus.
+      const sameCheck = result.findings.filter((f) => f.check === e.match.check);
+      misses.push(
+        `  ✗ ${e.name}\n` +
+          `      want ≥${floor} matching ${JSON.stringify(e.match)}, found ${hits.length}\n` +
+          `      (${sameCheck.length} finding(s) of check "${e.match.check}" in this run)`,
+      );
+    }
   }
-  assert.ok(dead.length >= 5, `expected at least 5 dead tokens (brief's own floor), found ${dead.length}: ${JSON.stringify(tokens)}`);
+
+  assert.equal(
+    misses.length,
+    0,
+    `${misses.length} of ${spec.expect.length} known positive(s) no longer found in ${spec.corpusRoot}:\n${misses.join("\n")}\n` +
+      `If a gap was genuinely fixed, update the expectations file — never the corpus.`,
+  );
+});
+
+/**
+ * Corpus-independent invariants. These assert properties of the CHECKS rather
+ * than of any tree, so they hold for every corpus and are the part worth having
+ * even when the expectations file names positives this session never saw.
+ */
+test("acceptance corpus: findings are internally consistent whatever the tree", (t) => {
+  if (skipReason) return t.skip(skipReason);
+
+  for (const f of result.findings) {
+    assert.ok(f.file, `every finding names a file: ${JSON.stringify(f)}`);
+    assert.ok(f.check, `every finding names a check: ${JSON.stringify(f)}`);
+
+    // A footer is only "stale" relative to something newer. If these are ever
+    // equal or inverted the comparison is backwards, and no corpus is needed to
+    // know that.
+    if (f.check === "footer-stale") {
+      assert.ok(
+        f.newestInline > f.footer,
+        `footer-stale on ${f.file} claims footer ${f.footer} is behind ${f.newestInline} — which is not newer`,
+      );
+    }
+    if (f.check === "expired-date") {
+      assert.ok(f.daysExpired > 0, `expired-date on ${f.file} reports ${f.daysExpired} days expired`);
+    }
+    if (f.check === "price-literal-drift") {
+      assert.ok(
+        f.direction === "doc-not-in-code" || f.direction === "code-not-in-doc",
+        `price-literal-drift needs a direction, got ${JSON.stringify(f.direction)}`,
+      );
+    }
+  }
+});
+
+test("acceptance corpus: coverage is reported, so zero findings is attributable", (t) => {
+  if (skipReason) return t.skip(skipReason);
+  // `rule:discernment-checks` §2 at the command level: a clean run must still
+  // say what it looked at, or "no findings" is indistinguishable from "no input".
+  assert.ok(result.coverage, "claims check --json must report coverage");
+  assert.ok(
+    result.coverage.filesChecked > 0,
+    `acceptance corpus ${spec.corpusRoot} yielded 0 files checked — the corpus is misconfigured, not clean`,
+  );
 });
