@@ -22,9 +22,11 @@
  * different, non-existent file from inside `commands/`.
  */
 
+import path from "node:path";
 import { RESET, DIM, RED, YELLOW, BOLD } from "./ansi.mjs";
 import { claimsCheck } from "../lib/claims/check.mjs";
-import { WORKSPACES } from "../lib/core/config.mjs";
+import { judgeStatus, asQuestions } from "../lib/claims/judge.mjs";
+import { WORKSPACES, shortPath } from "../lib/core/config.mjs";
 
 const CHECK_LABELS = {
   "expired-date": "expired date",
@@ -59,11 +61,14 @@ export async function claimsCmd(argv = []) {
   const json = argv.includes("--json");
   const sub = argv[0] === "check" ? "check" : argv[0];
 
+  if (sub === "judge") return judgeSub(argv.slice(1), json);
+
   if (sub !== "check") {
     const msg =
       `unknown claims subcommand: ${sub ?? "(none)"}\n` +
       `usage: propagate claims check [--json]\n` +
-      `(scan/judge/render/contradict are later lanes, not yet implemented)`;
+      `       propagate claims judge <file> [--json]\n` +
+      `(render/contradict are later lanes, not yet implemented)`;
     if (json) console.log(JSON.stringify({ error: msg }));
     else console.error(msg);
     return 2;
@@ -120,4 +125,83 @@ export async function claimsCmd(argv = []) {
 
   console.log(`\n  ${result.findings.length} finding(s) total`);
   return 1;
+}
+
+
+/**
+ * `claims judge <file>` — pose the questions, and say what is already settled.
+ *
+ * PRINTS AND RECORDS; IT DOES NOT DECIDE. propagate carries no model and makes no
+ * network call (dependencies: ajv, proper-lockfile, yaml), and adding one here to
+ * classify prose would make every deterministic guarantee in this codebase
+ * conditional on a remote service. The judge is the caller — an agent session, or
+ * a person. This hands out the blocks and stores the answers.
+ *
+ * `--json` is the agent-facing surface: the question set, verbatim block text,
+ * each keyed by the sha a verdict must be recorded against. Nothing about the
+ * shape asks the caller to recompute a hash or re-normalise text, because a judge
+ * that normalises differently from the store writes verdicts that never match.
+ */
+async function judgeSub(rest, json) {
+  const file = rest.find((a) => !a.startsWith("--"));
+  if (!file) {
+    const msg = "usage: propagate claims judge <file> [--json]";
+    if (json) console.log(JSON.stringify({ error: msg }));
+    else console.error(msg);
+    return 2;
+  }
+  const abs = path.resolve(file);
+  const status = await judgeStatus(abs);
+
+  if (status.error) {
+    // could-not-run, not "nothing to judge" — the two must never share an exit code.
+    const msg = `${abs}: ${status.error}`;
+    if (json) console.log(JSON.stringify({ error: msg, file: abs }));
+    else console.error(msg);
+    return 2;
+  }
+
+  if (json) {
+    console.log(JSON.stringify({
+      file: abs,
+      storeExists: status.storeExists,
+      counts: {
+        judged: status.judged.length,
+        unjudged: status.unjudged.length,
+        structure: status.structure.length,
+        orphaned: status.orphaned.length,
+      },
+      questions: asQuestions(status),
+    }, null, 2));
+    return 0;
+  }
+
+  console.log(`${BOLD}# claims judge${RESET}  ${DIM}${shortPath(abs)}${RESET}`);
+  console.log(
+    `  ${status.judged.length} judged · ${status.unjudged.length} unjudged · ` +
+      `${status.structure.length} structure (not claims) · ${status.orphaned.length} orphaned verdict(s)`,
+  );
+  if (!status.storeExists) {
+    // Distinct from an empty store. Nothing has ever been judged anywhere, which
+    // is a different fact from "this file has not been judged".
+    console.log(`  ${DIM}no verdict store yet — nothing has been judged anywhere${RESET}`);
+  }
+  if (status.orphaned.length > 0) {
+    console.log(
+      `\n  ${YELLOW}orphaned (${status.orphaned.length})${RESET} ${DIM}— verdicts whose block no longer exists in this file; re-judge or drop, never archive${RESET}`,
+    );
+  }
+  if (status.unjudged.length === 0) {
+    console.log(`\n  nothing awaiting judgment in this file.`);
+    return 0;
+  }
+  console.log(`\n  ${YELLOW}awaiting judgment (${status.unjudged.length})${RESET}`);
+  for (const b of status.unjudged.slice(0, 20)) {
+    const oneLine = b.text.replace(/\s+/gu, " ").trim();
+    console.log(`    ${DIM}${b.sha.slice(0, 12)} L${b.startLine}${RESET}  ${oneLine.slice(0, 110)}${oneLine.length > 110 ? " …" : ""}`);
+  }
+  if (status.unjudged.length > 20) {
+    console.log(`    ${DIM}+${status.unjudged.length - 20} more — --json for the full question set${RESET}`);
+  }
+  return 0;
 }
