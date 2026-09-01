@@ -27,7 +27,9 @@ import { RESET, DIM, RED, YELLOW, GREEN, BOLD } from "./ansi.mjs";
 import { claimsCheck } from "../lib/claims/check.mjs";
 import { judgeStatus, asQuestions } from "../lib/claims/judge.mjs";
 import { renderStatus } from "../lib/claims/render.mjs";
-import { WORKSPACES, shortPath } from "../lib/core/config.mjs";
+import { contradictStatus } from "../lib/claims/contradict.mjs";
+import { rollup } from "../lib/report/rollup.mjs";
+import { WORKSPACES, SEARCH_ROOTS, shortPath } from "../lib/core/config.mjs";
 
 const CHECK_LABELS = {
   "expired-date": "expired date",
@@ -64,6 +66,7 @@ export async function claimsCmd(argv = []) {
 
   if (sub === "judge") return judgeSub(argv.slice(1), json);
   if (sub === "render") return renderSub(argv.slice(1), json);
+  if (sub === "contradict") return contradictSub(argv.slice(1), json);
 
   if (sub !== "check") {
     const msg =
@@ -71,7 +74,7 @@ export async function claimsCmd(argv = []) {
       `usage: propagate claims check [--json]\n` +
       `       propagate claims judge <file> [--json]\n` +
       `       propagate claims render <file> [--apply] [--json]\n` +
-      `(contradict is a later lane, not yet implemented)`;
+      `       propagate claims contradict <authored-file> [--json]`;
     if (json) console.log(JSON.stringify({ error: msg }));
     else console.error(msg);
     return 2;
@@ -304,5 +307,92 @@ async function renderSub(rest, json) {
   summary.applied = true;
   if (json) console.log(JSON.stringify({ ...summary, status: "applied" }, null, 2));
   else console.log(GREEN + "wrote" + RESET + " " + shortPath(abs) + " — +" + status.added + ", " + status.removed + " removed.");
+  return 0;
+}
+
+/**
+ * `claims contradict <authored-file>` — hold an authored claim against a derived fact.
+ *
+ * READ-ONLY. It writes nothing, ever: it derives the facts, pairs them with the
+ * claims that could be about them, and reports which pairs nobody has ruled on.
+ * The judgment is the caller's — propagate carries no model.
+ *
+ * Three counts, and the third is the one a simpler design would drop. `unpaired`
+ * means a claim names no workspace, so nothing in the derived picture can confirm
+ * or refute it. That is not a pass and not a failure; it is the honest statement
+ * that this claim is outside what any derivation can check, and most
+ * constitutional prose is legitimately in that category.
+ */
+async function contradictSub(rest, json) {
+  const file = rest.find((a) => !a.startsWith("--"));
+  if (!file) {
+    const msg = "usage: propagate claims contradict <authored-file> [--json]";
+    if (json) console.log(JSON.stringify({ error: msg }));
+    else console.error(msg);
+    return 2;
+  }
+  const abs = path.resolve(file);
+
+  let roll;
+  try {
+    roll = rollup({ searchRoots: SEARCH_ROOTS });
+  } catch (err) {
+    // could-not-run: the derived half is unavailable, so NOTHING can be said
+    // about contradictions. Never reported as 'no contradictions found'.
+    const msg = "could not derive the rollup: " + err.message;
+    if (json) console.log(JSON.stringify({ error: msg }));
+    else console.error(msg);
+    return 2;
+  }
+
+  const status = await contradictStatus(abs, roll);
+  if (status.error) {
+    const msg = abs + ": " + status.error;
+    if (json) console.log(JSON.stringify({ error: msg, file: abs }));
+    else console.error(msg);
+    return 2;
+  }
+
+  if (json) {
+    console.log(JSON.stringify({
+      file: abs,
+      facts: status.factCount,
+      counts: { judged: status.judged.length, unjudged: status.unjudged.length, unpaired: status.unpaired.length },
+      questions: status.unjudged.map((q) => ({
+        pair_sha: q.pairSha,
+        block_sha: q.claim.sha,
+        against: q.fact.sha,
+        claim: q.claim.text,
+        fact: q.fact.text,
+        startLine: q.claim.startLine,
+      })),
+    }, null, 2));
+    return 0;
+  }
+
+  console.log(BOLD + "# claims contradict" + RESET + "  " + DIM + shortPath(abs) + RESET);
+  console.log(
+    "  " + status.factCount + " derived fact(s) · " + status.judged.length + " pair(s) judged · " +
+      status.unjudged.length + " awaiting judgment · " + status.unpaired.length + " claim(s) unpaired",
+  );
+  if (status.unpaired.length > 0) {
+    console.log(
+      "  " + DIM + "unpaired = names no workspace, so no derived fact can confirm or refute it — " +
+        "not a pass" + RESET,
+    );
+  }
+  if (status.unjudged.length === 0) {
+    console.log("\n  nothing awaiting judgment.");
+    return 0;
+  }
+  console.log("\n  " + YELLOW + "awaiting judgment (" + status.unjudged.length + ")" + RESET);
+  for (const q of status.unjudged.slice(0, 15)) {
+    const claimLine = q.claim.text.replace(/\s+/gu, " ").trim().slice(0, 96);
+    console.log("    " + DIM + "L" + q.claim.startLine + RESET + "  claim: " + claimLine);
+    console.log("           fact:  " + q.fact.text);
+  }
+  if (status.unjudged.length > 15) {
+    console.log("    " + DIM + "+" + (status.unjudged.length - 15) + " more — --json for the full set" + RESET);
+  }
   return 0;
 }
