@@ -23,9 +23,10 @@
  */
 
 import path from "node:path";
-import { RESET, DIM, RED, YELLOW, BOLD } from "./ansi.mjs";
+import { RESET, DIM, RED, YELLOW, GREEN, BOLD } from "./ansi.mjs";
 import { claimsCheck } from "../lib/claims/check.mjs";
 import { judgeStatus, asQuestions } from "../lib/claims/judge.mjs";
+import { renderStatus } from "../lib/claims/render.mjs";
 import { WORKSPACES, shortPath } from "../lib/core/config.mjs";
 
 const CHECK_LABELS = {
@@ -62,13 +63,15 @@ export async function claimsCmd(argv = []) {
   const sub = argv[0] === "check" ? "check" : argv[0];
 
   if (sub === "judge") return judgeSub(argv.slice(1), json);
+  if (sub === "render") return renderSub(argv.slice(1), json);
 
   if (sub !== "check") {
     const msg =
       `unknown claims subcommand: ${sub ?? "(none)"}\n` +
       `usage: propagate claims check [--json]\n` +
       `       propagate claims judge <file> [--json]\n` +
-      `(render/contradict are later lanes, not yet implemented)`;
+      `       propagate claims render <file> [--apply] [--json]\n` +
+      `(contradict is a later lane, not yet implemented)`;
     if (json) console.log(JSON.stringify({ error: msg }));
     else console.error(msg);
     return 2;
@@ -203,5 +206,103 @@ async function judgeSub(rest, json) {
   if (status.unjudged.length > 20) {
     console.log(`    ${DIM}+${status.unjudged.length - 20} more — --json for the full question set${RESET}`);
   }
+  return 0;
+}
+
+/**
+ * `claims render <file> [--apply]` — write each block's verdict beside it.
+ *
+ * DRY-RUN IS THE DEFAULT, inverting `rollup`'s posture on purpose. `rollup` writes
+ * a file it OWNS; this writes into a file a PERSON wrote — VIPIN.md is 420 lines of
+ * someone's writing, mode 0600, about a real human. The repo already sets this
+ * precedent for anything editing what it does not own (`verify`, `bootstrap`), and
+ * rule:safety-flag-needs-a-test requires the write path be provably unreachable
+ * without the flag.
+ *
+ * IT TAKES ONE EXPLICIT PATH AND NEVER WALKS. No --all, no glob, no discovery. A
+ * command that edits authored prose must not be able to find files on its own; the
+ * blast radius of a bug is then exactly the one file the caller named.
+ *
+ * A hand-edited marker REFUSES (exit 3) rather than being overwritten: a marker
+ * disagreeing with the store means someone recorded an opinion in the rendered
+ * output instead of in the judgment. Regenerating over it deletes that opinion and
+ * teaches people the file lies.
+ */
+async function renderSub(rest, json) {
+  const apply = rest.includes("--apply");
+  const file = rest.find((a) => !a.startsWith("--"));
+  if (!file) {
+    const msg = "usage: propagate claims render <file> [--apply] [--json]";
+    if (json) console.log(JSON.stringify({ error: msg }));
+    else console.error(msg);
+    return 2;
+  }
+  const abs = path.resolve(file);
+  const status = await renderStatus(abs);
+
+  if (status.error) {
+    // could-not-run, never 'nothing to render'.
+    const msg = abs + ": " + status.error;
+    if (json) console.log(JSON.stringify({ error: msg, file: abs }));
+    else console.error(msg);
+    return 2;
+  }
+
+  if (status.handEdited.length > 0) {
+    if (json) {
+      console.log(JSON.stringify({ status: "hand-edited", file: abs, handEdited: status.handEdited }, null, 2));
+    } else {
+      console.error(RED + "hand-edited marker(s)" + RESET + " in " + shortPath(abs) + " — nothing written.");
+      for (const h of status.handEdited) {
+        console.error("    L" + h.line + "  found:    " + h.found);
+        console.error("           expected: " + h.expected);
+      }
+      console.error("\n  A marker is GENERATED from the verdict store. If the store is wrong, fix it");
+      console.error("  with `propagate claims judge` — editing the marker records an opinion where");
+      console.error("  nothing will ever read it.");
+    }
+    return 3;
+  }
+
+  const summary = {
+    file: abs, added: status.added, updated: status.updated,
+    removed: status.removed, unchanged: status.unchanged, applied: false,
+  };
+
+  if (status.nothingJudged) {
+    // NOT "current". Nothing has been judged, so there is nothing to render —
+    // a different fact, and the one a path-spelling bug hid behind "current".
+    if (json) console.log(JSON.stringify({ ...summary, status: "nothing-judged", judgeable: status.judgeable }, null, 2));
+    else {
+      console.log(
+        YELLOW + "nothing judged" + RESET + " — " + shortPath(abs) + " has " + status.judgeable +
+          " judgeable block(s) and 0 verdicts. Nothing to render.",
+      );
+      console.log("  " + DIM + "`propagate claims judge " + shortPath(abs) + "` lists what is awaiting judgment." + RESET);
+    }
+    return 0;
+  }
+
+  if (status.unchanged) {
+    if (json) console.log(JSON.stringify({ ...summary, status: "current", verdicts: status.verdicts }, null, 2));
+    else console.log(GREEN + "current" + RESET + " — " + shortPath(abs) + " markers match the store (" + status.verdicts + " verdict(s)).");
+    return 0;
+  }
+
+  if (!apply) {
+    if (json) console.log(JSON.stringify({ ...summary, status: "would-change" }, null, 2));
+    else {
+      console.log(YELLOW + "would change" + RESET + " " + shortPath(abs) + " — +" + status.added +
+        " marker(s), " + status.removed + " removed. Nothing written.");
+      console.log("  " + DIM + "re-run with --apply to write." + RESET);
+    }
+    return 0;
+  }
+
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(abs, status.text);
+  summary.applied = true;
+  if (json) console.log(JSON.stringify({ ...summary, status: "applied" }, null, 2));
+  else console.log(GREEN + "wrote" + RESET + " " + shortPath(abs) + " — +" + status.added + ", " + status.removed + " removed.");
   return 0;
 }

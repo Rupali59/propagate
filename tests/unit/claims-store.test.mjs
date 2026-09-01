@@ -164,3 +164,29 @@ test("same-millisecond ties break by claim_id, not by read order", () => {
   const b = [...a].reverse();
   assert.equal(latestByBlock(a).get(SHA).kind, latestByBlock(b).get(SHA).kind, "order of lines must not change the answer");
 });
+
+// ── path identity ───────────────────────────────────────────────────────────
+
+test("canonicalFile collapses symlinked spellings of one path", async () => {
+  const { canonicalFile } = await import("../../lib/claims/store.mjs");
+  // On macOS /tmp is a symlink to /private/tmp. THIS is the bug that shipped for
+  // an hour: a verdict written under one spelling was invisible to a lookup under
+  // the other, and `render` reported that as "current — markers already match the
+  // store". Found end-to-end, never by a unit test, because both halves used the
+  // same spelling in every fixture.
+  assert.equal(canonicalFile("/tmp"), canonicalFile("/private/tmp"));
+});
+
+test("canonicalFile does not throw for a path that does not exist", async () => {
+  const { canonicalFile } = await import("../../lib/claims/store.mjs");
+  // A verdict may outlive the document it was about — that is an ORPHANED verdict,
+  // a state this store reports. Throwing here would make recording one impossible.
+  const p = canonicalFile("/definitely/not/here/DOC.md");
+  assert.equal(typeof p, "string");
+  assert.ok(p.startsWith("/"), "falls back to an absolute path rather than failing");
+});
+
+test("canonicalFile always returns an absolute path, even for a relative input", async () => {
+  const { canonicalFile } = await import("../../lib/claims/store.mjs");
+  assert.ok(canonicalFile("some/relative/DOC.md").startsWith("/"));
+});
