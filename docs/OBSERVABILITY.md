@@ -49,6 +49,14 @@ column; without it the metric is decoration.
 > 103 -> 104, on the commit that added this table row (the detector later stopped counting
 > fenced blocks, taking it 105 -> 101). Rewording a non-claim is not
 > gaming the number; rewording an actual claim would be.
+>
+> **2026-09-10, 101 -> 34.** The detector now also requires the line to name a `.md`
+> target, so a description of the check no longer trips it and the avoidance above is
+> belt-and-braces rather than load-bearing. The narrowing removed 77 entries that named
+> no target at all and therefore could never gain a `supersedes:` key — a ratchet was
+> counting items its own stated remedy could not pay, and growing with authorship while
+> it did. The trigger was a red doctor at 111 that looked like ten rotted docs and was
+> not: 96 pre-existed the baseline, 15 were newly written, 5 had been fixed.
 
 | Metric | Type | Expectation (the alert) | Catches |
 |---|---|---|---|
@@ -64,7 +72,7 @@ column; without it the metric is decoration.
 | `graph.cycles` | gauge | **== 0** | a mutually-declared pair has no fix order — verify either side and the other re-arms |
 | `graph.duplicate_pairs` | gauge | **== 0** | one coupling declared twice gets two edge_ids; close one and the other stays open forever |
 | `docs.supersedes_unresolvable` | gauge | **== 0** | a `supersedes:` naming a path that does not exist looks machine-checked and is not |
-| `docs.supersession_prose_only` | gauge | **≤ 101**, ratchet — must not grow | a claim made only in prose is one-way: the overruled doc never learns it was replaced |
+| `docs.supersession_prose_only` | gauge | **≤ 34**, ratchet — must not grow | a claim made only in prose is one-way: the overruled doc never learns it was replaced |
 | `ledger.unknown_types` | gauge | **0** | N1 · a `manual` row invisible since 2026-06-20 |
 | `ledger.duplicate_ids` | gauge | **0** | N2/N3 · id 256 existed twice |
 | `ledger.rows_open_multi_ledger` | gauge | **0** | A2 · 28 live instances |

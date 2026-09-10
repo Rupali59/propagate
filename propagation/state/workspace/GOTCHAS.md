@@ -717,6 +717,12 @@ threshold and a dated `basis`, and **4 of 8 expectations turned out to be absent
 `docs/OBSERVABILITY.md` §1** — the table that edge exists to keep in sync. The number moved
 107 → 105 → 103 → 101 across three sessions and the doc never learned any of it.
 
+**2026-09-10 — the fourth move, and the first the doc learned about.** 101 → 34. The
+edge fired at commit time and named `docs/OBSERVABILITY.md` before the change was
+finished, so the row moved with the value instead of three sessions later. That is the
+mechanism working exactly as this entry describes it failing, which is worth recording
+alongside the failure: the declaration is what closed the gap, not anyone remembering.
+
 **Signal:** you can describe the failure fluently in a comment. Prose about a hazard is not
 a check for it, and the fluency is what makes it feel handled.
 
