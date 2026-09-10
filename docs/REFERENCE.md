@@ -462,7 +462,10 @@ behaviour that already works on a machine that exports it.
 are **not** configured separately: `searchRoots` (when not declared), the skills
 marketplace directory, and the three execution registries — `scripts/execution/`'s
 `ports.yml`, `deploy.yml` and `mongo.yml`. Derive the list rather than trusting this
-sentence: they are exactly the `underHub()` call sites in `lib/core/config.mjs`.
+sentence: the last four are exactly the `underHub()` call sites in
+`lib/core/config.mjs`, and `searchRoots` falls back to `[HUB_ROOT]` directly rather
+than through `underHub()`. (This sentence said all five were `underHub()` call sites
+until 2026-09-10, so deriving it returned four and disagreed with its own list.)
 
 It exists because that path was previously restated four times, each independently
 overridable and each defaulting to one author's layout — so `portsFile` had to be
