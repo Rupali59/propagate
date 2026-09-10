@@ -107,6 +107,53 @@ test("findExpiredDates: counters NEVER change what is returned — suppression s
   assert.equal(without.length, 2);
 });
 
+// ── units: findings vs scanned lines ────────────────────────────────────────
+// On 2026-09-10 `commands/claims.mjs` subtracted a scanned-LINE counter from a
+// FINDING total and published "17 not past-tense" where the like-for-like answer
+// was 48. rule:discernment-checks §5 — compare like with like. These pin the
+// units so the subtraction cannot silently return.
+
+test("findExpiredDates: each finding carries its OWN historical flag, in finding units", () => {
+  const text = [
+    "This line said 3120 until 2026-08-04.",   // past-tense record
+    "Window through ~2026-08-04.",              // forward-looking commitment
+  ].join("\n");
+  const findings = findExpiredDates(text, { now: NOW });
+  assert.equal(findings.length, 2);
+  assert.equal(findings[0].looksHistorical, true);
+  assert.equal(findings[1].looksHistorical, false);
+});
+
+test("claimsCheck: total === looksHistorical + notHistorical, and the line counters are NOT part of that sum", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "claims-units-"));
+  try {
+    // Many historical LINES, exactly one of which also produces a finding. If the
+    // summary counted lines, looksHistorical would exceed the finding total.
+    const filler = Array.from({ length: 12 }, (_, i) =>
+      `Note ${i}: the value was wrong until it was corrected.`).join("\n");
+    writeFileSync(path.join(dir, "doc.md"), `${filler}\nThis said 3120 until 2026-08-04.\n`);
+    writeFileSync(path.join(dir, ".propagates.yml"),
+      "workspace: true\nsources:\n  doc.md:\n    propagates_to:\n      - path: doc.md\n        why: \"self, for a corpus of one\"\n        kind: prose\n");
+    // workspaces are {root,name} objects, not bare paths — a bare string is
+    // discovered as nothing, which made the first version of this test vacuous.
+    const r = await claimsCheck({ workspaces: [{ root: dir, name: "units" }], now: NOW });
+    const ec = r.expiredDateCandidates;
+    const ed = r.findings.filter((f) => f.check === "expired-date");
+    assert.ok(ed.length > 0, "fixture must actually produce an expired-date finding, or this test proves nothing");
+    assert.equal(ec.total, ed.length, "total must be a FINDING count");
+    assert.equal(ec.looksHistorical, ed.filter((f) => f.looksHistorical).length,
+      "looksHistorical must count FINDINGS, not scanned lines");
+    assert.equal(ec.total, ec.looksHistorical + ec.notHistorical,
+      "the three finding-unit fields must be internally consistent");
+    // The line counters are a different unit and must be visibly larger here:
+    // the fixture carries 12 historical LINES and exactly 1 historical FINDING.
+    assert.ok(ec.scannedLinesHistorical > ec.looksHistorical,
+      "the fixture is built so the line counter and the finding counter DIFFER — if they are equal, this test cannot detect the units being mixed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("findExpiredDates: omitting counters still returns a BARE array (deepEqual [] must hold)", () => {
   assert.deepEqual(findExpiredDates("nothing dated here\n", { now: NOW }), []);
   assert.deepEqual(findExpiredDates("nothing dated here\n", { now: NOW, counters: { acknowledged: 0, historical: 0 } }), []);

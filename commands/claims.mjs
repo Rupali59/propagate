@@ -119,11 +119,13 @@ export async function claimsCmd(argv = []) {
   // decides. This only stops a reader mistaking 71 candidates for 71 defects.
   const ec = result.expiredDateCandidates;
   if (ec && ec.total > 0) {
-    const rest = ec.total - ec.looksHistorical;
+    // Every number on this line is a FINDING count. It briefly subtracted a
+    // scanned-LINE counter from a finding total and published "17 not
+    // past-tense" where the like-for-like answer was 48.
     console.log(
-      `\n  ${DIM}expired-date are CANDIDATES, not defects: ${ec.total} passed date(s), ` +
-        `${ec.looksHistorical} match the past-tense "was X until <date>" shape, ${rest} do not. ` +
-        `Nothing suppressed — \`claims judge\` decides.${RESET}`,
+      `\n  ${DIM}expired-date are CANDIDATES, not defects: ${ec.total} finding(s), ` +
+        `${ec.looksHistorical} match the past-tense "was X until <date>" shape, ` +
+        `${ec.notHistorical} do not. Nothing suppressed — \`claims judge\` decides.${RESET}`,
     );
   }
 
