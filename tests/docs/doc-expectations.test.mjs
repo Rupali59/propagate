@@ -29,19 +29,22 @@ test("prose-only supersession ratchet holds at baseline, and FAILS when it grows
   // This test is the coupling alarm for that value, and it worked: the 105 -> 103 change
   // landed in lib/metrics.mjs without touching this file and turned the suite red on the
   // next run. Move both together, always.
-  assert.equal(e.assert({ "docs.supersession_prose_only": 101 }), true, "baseline must hold");
+  // Lowered 101 -> 34 on 2026-09-10 when the detector began requiring the line to
+  // name a `.md` target. 77 of the 111 then-flagged docs named no target and could
+  // never gain a `supersedes:` key, so they were debt the stated remedy could not pay.
+  assert.equal(e.assert({ "docs.supersession_prose_only": 34 }), true, "baseline must hold");
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 102 }),
+    e.assert({ "docs.supersession_prose_only": 35 }),
     false,
     "one more prose-only supersession must fail the run — this is the whole point of a ratchet",
   );
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 103 }),
+    e.assert({ "docs.supersession_prose_only": 101 }),
     false,
     "the OLD baseline must now fail — otherwise lowering the ratchet did nothing",
   );
-  assert.equal(e.assert({ "docs.supersession_prose_only": 90 }), true, "shrinking must hold");
-  assert.match(e.detail({ "docs.supersession_prose_only": 102 }), /GREW/);
+  assert.equal(e.assert({ "docs.supersession_prose_only": 30 }), true, "shrinking must hold");
+  assert.match(e.detail({ "docs.supersession_prose_only": 35 }), /GREW/);
 });
 
 test("unresolvable supersedes target fails — a declaration that lies is worse than prose", () => {

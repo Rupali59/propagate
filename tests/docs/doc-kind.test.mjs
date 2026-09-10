@@ -83,7 +83,7 @@ test("supersedes parses a list or a scalar, with anchors preserved", () => {
 test("prose-only supersession is flagged — this is the 75-instance case", async () => {
   const root = await tree();
   const p = path.join(root, "docs/plans/2026-06-20-a-thing.md");
-  await writeFile(p, "# Plan\n\nSupersedes the 2026-06-14 Vipin lock.\n", "utf8");
+  await writeFile(p, "# Plan\n\nSupersedes the 2026-06-14 Vipin lock in `../DECISIONS.md`.\n", "utf8");
   const hit = proseOnlySupersession(p);
   assert.ok(hit, "a prose supersession claim with no declaration must be flagged");
   assert.equal(hit.hits.length, 1);
@@ -207,8 +207,14 @@ test("proseOnlySupersession ignores the archival FILENAME, but still catches a p
     ["markdown link", "See [the audit](docs/archive/x-superseded-2026-06-21.md).", false],
     ["bare path", "Moved to docs/archive/x-superseded-2026-06-21.md today.", false],
     ["bare filename", "Renamed to x-superseded-2026-06-21.md today.", false],
-    ["prose claim", "This supersedes the 2026-06-14 Vipin lock.", true],
-    ["prose claim, capitalised", "Supersedes the earlier posture.", true],
+    ["prose claim naming a target", "This supersedes `../DECISIONS.md#2026-06-14`.", true],
+    ["prose claim, capitalised, naming a target", "Supersedes `../old-posture.md`.", true],
+    // Narrowed 2026-09-10: a claim naming NO target cannot gain a `supersedes:`
+    // key, so counting it made the ratchet unactionable and grew it with
+    // authorship. 77 of 111 flagged docs were this shape.
+    ["prose claim naming NO target", "Supersedes the earlier posture.", false],
+    ["convention line, not a claim", "Append-only; supersede by appending.", false],
+    ["domain vocabulary, not a document", "stuck-claim supersession and superseded-owner silence.", false],
     // The one that matters most: a real claim on the SAME line as a filename must
     // still fire. Stripping paths must not become a blanket amnesty.
     ["claim beside a path", "This supersedes `docs/archive/x-superseded-2026-06-21.md`.", true],
@@ -255,7 +261,7 @@ test("a real claim OUTSIDE a fence still counts when the doc also has fences", a
   const p = path.join(root, "docs/plans/2026-06-20-mixed.md");
   await writeFile(
     p,
-    "# Doc\n\nSupersedes the 2026-06-14 lock.\n\n```sh\necho superseded\n```\n",
+    "# Doc\n\nSupersedes the 2026-06-14 lock in `../DECISIONS.md`.\n\n```sh\necho superseded\n```\n",
     "utf8",
   );
   const hit = proseOnlySupersession(p);
@@ -269,17 +275,27 @@ test("an UNTERMINATED fence must not swallow the rest of the file", async () => 
   // typo, and a typo must not silently disable the check for everything below it.
   const root = await tree();
   const p = path.join(root, "docs/plans/2026-06-20-unterminated.md");
-  await writeFile(p, "# Doc\n\n```sh\necho hi\n\nSupersedes the 2026-06-14 lock.\n", "utf8");
+  await writeFile(p, "# Doc\n\n```sh\necho hi\n\nSupersedes the 2026-06-14 lock in `../DECISIONS.md`.\n", "utf8");
   const hit = proseOnlySupersession(p);
   assert.ok(hit, "an unterminated fence must fall back to scanning, never to silence");
   assert.match(hit.hits[0].text, /Supersedes the 2026-06-14/);
+});
+
+test("a claim whose target sits on the NEXT line is missed — a stated floor", async () => {
+  // The known limit of a line-wise scan, asserted rather than left implied so
+  // nobody reads the count as a total. If this ever needs fixing, it is a
+  // deliberate widening and the baseline moves with it.
+  const root = await tree();
+  const p = path.join(root, "docs/plans/2026-06-20-wrapped.md");
+  await writeFile(p, "# Doc\n\n**Supersedes:** the original draft of\n`../other.md`.\n", "utf8");
+  assert.equal(proseOnlySupersession(p), null, "same-line only: this is a floor, not a total");
 });
 
 test("a doc with no fences counts exactly as before", async () => {
   // The regression guard: this is the overwhelmingly common case and must not move.
   const root = await tree();
   const p = path.join(root, "docs/plans/2026-06-20-plain.md");
-  await writeFile(p, "# Doc\n\nSupersedes the lock.\nAnd supersedes another thing.\n", "utf8");
+  await writeFile(p, "# Doc\n\nSupersedes the lock in `a.md`.\nAnd supersedes `b.md` too.\n", "utf8");
   const hit = proseOnlySupersession(p);
   assert.ok(hit);
   assert.equal(hit.hits.length, 2, "both prose lines still count");
