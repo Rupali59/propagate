@@ -77,6 +77,41 @@ test("findExpiredDates: FIX — a future Month+Year does not fire", () => {
   assert.deepEqual(findExpiredDates(text, { now: NOW }), []);
 });
 
+// ── the historical-shape counter ────────────────────────────────────────────
+// `claims check` promises to report every passed date as a CANDIDATE and print how
+// many look historical. Until 2026-09-10 the count was computed and discarded by a
+// `void suppressed`, so the printing half had nothing to print and 71 candidates
+// rendered as 71 defects. These pin the contract in both directions.
+
+test("findExpiredDates: a caller-supplied counters object receives the historical count", () => {
+  const historical = "This line said 3120 until 2026-08-04, which was wrong.\n";
+  const counters = { acknowledged: 0, historical: 0 };
+  const findings = findExpiredDates(historical, { now: NOW, counters });
+  assert.equal(findings.length, 1, "the candidate is still returned — nothing is suppressed");
+  assert.equal(counters.historical, 1, "and the caller learns it carries the past-tense shape");
+});
+
+test("findExpiredDates: a forward-looking window is a candidate that does NOT look historical", () => {
+  const forward = "Online-only booking window through ~2026-08-04.\n";
+  const counters = { acknowledged: 0, historical: 0 };
+  const findings = findExpiredDates(forward, { now: NOW, counters });
+  assert.equal(findings.length, 1);
+  assert.equal(counters.historical, 0, "no past-tense verb, so it is real work rather than a record");
+});
+
+test("findExpiredDates: counters NEVER change what is returned — suppression stays impossible", () => {
+  const text = "This line said 3120 until 2026-08-04.\nWindow through ~2026-08-04.\n";
+  const withCounters = findExpiredDates(text, { now: NOW, counters: { acknowledged: 0, historical: 0 } });
+  const without = findExpiredDates(text, { now: NOW });
+  assert.deepEqual(withCounters, without, "the diagnostic must not become a filter");
+  assert.equal(without.length, 2);
+});
+
+test("findExpiredDates: omitting counters still returns a BARE array (deepEqual [] must hold)", () => {
+  assert.deepEqual(findExpiredDates("nothing dated here\n", { now: NOW }), []);
+  assert.deepEqual(findExpiredDates("nothing dated here\n", { now: NOW, counters: { acknowledged: 0, historical: 0 } }), []);
+});
+
 test("findExpiredDates: a through/until ISO date behaves the same as an arrow range (CLAUDE.md known positive, shape)", () => {
   const text = "Online-only booking window through ~2026-08-04.\n";
   const findings = findExpiredDates(text, { now: NOW });

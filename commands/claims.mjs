@@ -110,6 +110,23 @@ export async function claimsCmd(argv = []) {
     );
   }
 
+  // `expired-date` is the one check whose findings are CANDIDATES rather than
+  // defects, and this tree's dominant idiom — "this line said X until <date>" —
+  // matches its shape. Reporting the split is what `lib/claims/check.mjs`'s
+  // HISTORICAL_RECORD_RE comment promises ("prints how many look historical")
+  // and, until 2026-09-10, silently did not: 71 of 71 rendered identically while
+  // 68 carried the past-tense shape. Nothing is filtered here — `claims judge`
+  // decides. This only stops a reader mistaking 71 candidates for 71 defects.
+  const ec = result.expiredDateCandidates;
+  if (ec && ec.total > 0) {
+    const rest = ec.total - ec.looksHistorical;
+    console.log(
+      `\n  ${DIM}expired-date are CANDIDATES, not defects: ${ec.total} passed date(s), ` +
+        `${ec.looksHistorical} match the past-tense "was X until <date>" shape, ${rest} do not. ` +
+        `Nothing suppressed — \`claims judge\` decides.${RESET}`,
+    );
+  }
+
   if (result.findings.length === 0) {
     console.log(`\n  no findings — ${result.coverage.filesChecked} file(s) checked, 0 flagged`);
     return 0;
