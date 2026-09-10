@@ -1552,6 +1552,43 @@ asserts `JSON.parse(stdout)` succeeds — `rule:discernment-checks` §1: constru
 makes the check fail before shipping it. **Filed here rather than done, deliberately: the
 one-line fix is verified, the general guard is a separate change.**
 
+### N67 · `rotted-citation` cannot tell a live citation from a recorded supersede — **S3** — **OPEN**
+
+Found 2026-09-10 while fixing the very thing it reports, in `Vipin Kaushik`.
+
+`findDeadBranchCitations` fires on any literal occurrence of an absent branch name. It has no
+way to distinguish **"cited as if the branch still exists"** from **"explicitly recorded as
+gone, and here is where the work landed"** — and a supersede note *must* name the branch, or
+a reader cannot tell what was superseded.
+
+Measured: three `rotted-citation` findings on `docs/constitution/VIPIN.md` and
+`docs/design/DESIGN.md`. Fixing all three — rewriting each citation to say the branch is gone
+and to name the merge commit that carries the work (`b0ce3fc`, `df63c32`/PR #185) — moved the
+count **4 → 3**. Only the self-line citation cleared. The three dead-branch findings survive
+their own fix, because the fixed text still contains the branch name.
+
+**The perverse incentive is the point.** The only way to satisfy this check is to delete the
+branch name, which destroys the information the supersede note exists to carry. A checker
+that rewards making a record less useful will be ignored, and then it protects nothing.
+
+**Suggested:** treat a citation as settled when the branch name is adjacent to a supersede
+marker — a merge SHA, "no longer exists", "superseded", "landed in". Narrow is fine; the
+current behaviour has a 100% false-positive rate on correctly-superseded citations.
+
+**A second defect in the same check, found in the same pass.** For
+`DESIGN.md:1000` → `feat/hero-v4-rebuild`, `resolveRepo` resolved the CITING file to the
+workspace repo (`repoRoot: Vipin Kaushik`, branches: `main` only) and checked there — but that
+branch only ever existed in `VipinKaushik/`. The verdict came out right **by luck, not by
+mechanism**. The latent form: a workspace doc citing any live sibling-repo branch — including
+`` `production` ``, which does not exist in the workspace repo — reports as dead. This is the
+citation-side analogue of G13, "`check --changed` only sees the repo it runs from".
+
+**Related, cosmetic but easy to trip over.** `asQuestions` (`lib/claims/judge.mjs:105`) emits
+`kind_hint` from the *structural* block kind — `prose` / `list-item`. A verdict's `kind` wants
+a CLAIM kind (`fact` / `policy` / `quote` / `impression` / `aspiration`). Passing the hint
+straight through is rejected by `validateClaim`, which is the good outcome; the bad one is a
+reader assuming the tool has pre-classified the claim. Two vocabularies, one field name.
+
 ## Rotated to archive
 
 Closed entries live in [`archive/ISSUES-2026-08.md`](archive/ISSUES-2026-08.md), byte-identical.
