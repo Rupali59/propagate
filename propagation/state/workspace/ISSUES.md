@@ -860,7 +860,7 @@ name belongs:
 
 ```
 undefined Motherboard/chore/shared-as-versioned-module
-undefined Motherboard//Users/rupali.b/Documents/GitHub/Motherboard/.claude/worktrees/hardcore-villani-778ff0
+undefined Motherboard//Users/<user>/Documents/GitHub/Motherboard/.claude/worktrees/hardcore-villani-778ff0
 undefined Rishabh/null
 undefined curate-docs-skill/null
 ```
@@ -1866,7 +1866,7 @@ substantive `reason`. Not one is a baseline gap.
 
 **The data is not missing — the summary discards it.** `reconcile --json` returns a full
 `deferred` object beside the state for these edges (`{disposition: "deferred", by:
-"rupali.b", observed_at_commit: fc4564df…}`), exactly as `lib/edges/reconcile.mjs:283`
+"<user>", observed_at_commit: fc4564df…}`), exactly as `lib/edges/reconcile.mjs:283`
 declares (`state, since, last, deferred`). `status` reads that structure and prints only
 the state name.
 
