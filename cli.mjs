@@ -836,6 +836,55 @@ async function doctor() {
     void counts;
   }
 
+  // # Goals — arrival conditions. Surfaced HERE rather than left to whoever
+  // remembers to type `propagate goals`, because a capability nobody invokes is
+  // indistinguishable from one that was never built
+  // (`rule:enforcement-watches-itself` lists nine such mechanisms in this tree).
+  //
+  // Informational, never a doctor failure: a workspace with no GOALS.md is the
+  // expected state today — one exists, of sixteen — and "not adopted yet" must
+  // not read as broken. The line that WOULD justify escalating is `uncheckable`
+  // going above zero: a goal asserting an arrival condition nobody can check,
+  // which does not admit that it cannot be checked.
+  console.log(`\n${BOLD}# Goals${RESET}`);
+  {
+    try {
+      const { parseGoalsFile, goalCounts } = await import("./lib/report/goals.mjs");
+      const { discoverBacklogFiles } = await import("./lib/report/backlog.mjs");
+      const files = (discoverBacklogFiles().goalsMd ?? []).map(parseGoalsFile);
+      const g = goalCounts(files);
+      if (g.files === 0) {
+        // "No GOALS.md anywhere" and "all of them empty" are different facts.
+        console.log(
+          `  ${DIM}·${RESET} goal states  ${DIM}no GOALS.md under the search roots — an empty scan, not a clean one${RESET}`,
+        );
+      } else {
+        console.log(
+          `  ${DIM}·${RESET} goal states  ${DIM}${g.total} across ${g.files} file(s) — ` +
+            `${g.open} open · ${g.closed} closed · ${g.unknown} unknown${RESET}`,
+        );
+        console.log(
+          `  ${DIM}·${RESET} derivation  ${DIM}${g.claimed} name a command · ${g.waived} declared judgement · ` +
+            `${g.uncheckable} neither${RESET}`,
+        );
+        if (g.uncheckable > 0) {
+          console.log(
+            `  ${YELLOW}!${RESET} ${g.uncheckable} goal(s) nobody can check  ${DIM}run \`propagate goals\` — each asserts` +
+              ` an arrival condition with no \`Derived by:\` and no \`Judgement, not derivable:\`${RESET}`,
+          );
+        }
+        if (g.unread > 0) {
+          console.log(
+            `  ${YELLOW}!${RESET} ${g.unread} GOALS.md could not be read  ${DIM}a reader that failed, not an empty file${RESET}`,
+          );
+        }
+      }
+    } catch (err) {
+      // Absence must be attributable — never let a thrown reader read as "no goals".
+      console.log(`  ${YELLOW}!${RESET} goal states  ${DIM}could not be derived: ${err.message}${RESET}`);
+    }
+  }
+
   console.log(`\n${BOLD}# Graph integration${RESET}`);
   {
     const graphResult = await checkGraphMcpStatus();
@@ -4465,6 +4514,9 @@ if (_invokedDirectly) {
   } else if (mode === "registers") {
     const { registersCmd } = await import("./commands/registers.mjs");
     process.exitCode = await registersCmd(process.argv.slice(3));
+  } else if (mode === "goals") {
+    const { goalsCmd } = await import("./commands/goals.mjs");
+    process.exitCode = await goalsCmd(process.argv.slice(3));
   } else if (mode === "docs") {
     const { docsCmd } = await import("./commands/docs.mjs");
     await docsCmd();
@@ -4488,7 +4540,7 @@ if (_invokedDirectly) {
     process.exitCode = await claimsCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]]");
     process.exit(2);
   }
 }
