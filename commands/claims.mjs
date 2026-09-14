@@ -23,14 +23,18 @@
  */
 
 import path from "node:path";
+import os from "node:os";
 import { RESET, DIM, RED, YELLOW, GREEN, BOLD } from "./ansi.mjs";
 import { claimsCheck } from "../lib/claims/check.mjs";
 import { judgeStatus, asQuestions } from "../lib/claims/judge.mjs";
 import { renderStatus } from "../lib/claims/render.mjs";
 import { contradictStatus } from "../lib/claims/contradict.mjs";
+import { restateStatus, asQuestions as asRestateQuestions } from "../lib/claims/restate.mjs";
+import { appendClaim, dryValidateClaim, CLAIM_FINDINGS } from "../lib/claims/store.mjs";
 import { appendRunStart, appendRunEnd, RUN_OUTCOMES } from "../lib/claims/runs.mjs";
 import { rollup } from "../lib/report/rollup.mjs";
-import { WORKSPACES, SEARCH_ROOTS, shortPath } from "../lib/core/config.mjs";
+import { checkRules } from "../lib/rules/rules-check.mjs";
+import { WORKSPACES, SEARCH_ROOTS, RULES_DIR, shortPath } from "../lib/core/config.mjs";
 
 const CHECK_LABELS = {
   "expired-date": "expired date",
@@ -68,6 +72,8 @@ export async function claimsCmd(argv = []) {
   if (sub === "judge") return judgeSub(argv.slice(1), json);
   if (sub === "render") return renderSub(argv.slice(1), json);
   if (sub === "contradict") return contradictSub(argv.slice(1), json);
+  if (sub === "restate") return restateSub(argv.slice(1), json);
+  if (sub === "verdict") return verdictSub(argv.slice(1), json);
   if (sub === "answer") return answerSub(argv.slice(1), json);
 
   if (sub !== "check") {
@@ -77,6 +83,7 @@ export async function claimsCmd(argv = []) {
       `       propagate claims judge <file> [--json]\n` +
       `       propagate claims render <file> [--apply] [--json]\n` +
       `       propagate claims contradict <authored-file> [--json]\n` +
+      `       propagate claims restate [--json]\n` +
       `       propagate claims answer <file> start [--json]\n` +
       `       propagate claims answer <file> end --run <id> --outcome <${RUN_OUTCOMES.join("|")}> [--reason ...] [--json]`;
     if (json) console.log(JSON.stringify({ error: msg }));
@@ -513,6 +520,209 @@ async function contradictSub(rest, json) {
   }
   if (status.unjudged.length > 15) {
     console.log("    " + DIM + "+" + (status.unjudged.length - 15) + " more — --json for the full set" + RESET);
+  }
+  return 0;
+}
+
+/**
+ * `claims restate` — Phase 2a: hold each rule's own text against the copy of
+ * it a `CLAUDE.md` restates.
+ *
+ * THE CORPUS IS HANDED TO US, NOT SEARCHED FOR. `checkRules`'s
+ * `referencedRestatements` already names every (rule, file) pair that both
+ * matches a rule's fingerprint AND cites it — the population the parent
+ * detector excuses and never checks further (docs/ISSUES.md N35). No ranking,
+ * no threshold: this command takes exactly that list and asks one question per
+ * pair. The silent set (a restatement with no citation) is Phase 2b and is
+ * out of scope here.
+ *
+ * READ-ONLY, same posture as `claims contradict`: it derives, it pairs, it
+ * reports which pairs await judgment. It writes nothing and decides nothing —
+ * propagate carries no model.
+ *
+ * Takes no file argument, unlike `contradict` — the corpus spans every
+ * `CLAUDE.md` under `SEARCH_ROOTS` at once (tool-priority alone names 11), so
+ * there is no single "authored file" to scope this to.
+ */
+async function restateSub(rest, json) {
+  // Same carve-out `rulesCmd` (cli.mjs) makes: the global CLAUDE.md is the
+  // rules' former home and legitimately contains every fingerprint, so it is
+  // scanned for overrides but excluded from findings.
+  const globalMd = path.join(os.homedir(), ".claude", "CLAUDE.md");
+  let res;
+  try {
+    res = checkRules({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS, extra: [globalMd], exclude: [globalMd] });
+  } catch (err) {
+    const msg = "could not run the rules check: " + err.message;
+    if (json) console.log(JSON.stringify({ error: msg }));
+    else console.error(msg);
+    return 2;
+  }
+
+  if (res.diagnostic !== "ok") {
+    // could-not-run, never "nothing to restate" — same posture as every other
+    // could-not-derive path in this file.
+    const why = {
+      "no-rules": `no rules found in ${RULES_DIR}`,
+      "roots-missing": `configured root(s) do not exist: ${res.missing.join(", ")}`,
+      "no-files-scanned": `roots exist but contain no CLAUDE.md — nothing was checked`,
+    }[res.diagnostic] ?? res.diagnostic;
+    const msg = "rules check did not run: " + why;
+    if (json) console.log(JSON.stringify({ error: msg }));
+    else console.error(msg);
+    return 2;
+  }
+
+  const status = await restateStatus(res.referencedRestatements, res.rules);
+
+  if (json) {
+    console.log(JSON.stringify({
+      corpus: status.corpusCount,
+      facts: status.factCount,
+      counts: { judged: status.judged.length, unjudged: status.unjudged.length, unpaired: status.unpaired.length },
+      unpaired: status.unpaired,
+      questions: asRestateQuestions(status),
+    }, null, 2));
+    return 0;
+  }
+
+  console.log(BOLD + "# claims restate" + RESET + "  " + DIM + "(the excused set — cites AND restates)" + RESET);
+  console.log(
+    "  " + status.corpusCount + " pair(s) handed to us · " + status.factCount + " distinct rule fact(s) · " +
+      status.judged.length + " judged · " + status.unjudged.length + " awaiting judgment · " +
+      status.unpaired.length + " unpaired",
+  );
+  if (status.unpaired.length > 0) {
+    console.log(
+      "\n  " + YELLOW + "unpaired (" + status.unpaired.length + ")" + RESET +
+        " " + DIM + "— could not be checked, not a pass" + RESET,
+    );
+    for (const u of status.unpaired) {
+      console.log("    " + DIM + u.rule + RESET + "  " + shortPath(u.file) + ":" + u.line);
+      console.log("      " + u.reason);
+    }
+  }
+  if (status.unjudged.length === 0) {
+    console.log("\n  nothing awaiting judgment.");
+    return 0;
+  }
+  console.log("\n  " + YELLOW + "awaiting judgment (" + status.unjudged.length + ")" + RESET);
+  for (const p of status.unjudged) {
+    console.log("    " + DIM + p.rule + RESET + "  " + shortPath(p.file) + ":" + p.claim.startLine);
+    console.log("      claim: " + p.claim.text.replace(/\s+/gu, " ").trim().slice(0, 96));
+  }
+  return 0;
+}
+
+
+/**
+ * `claims verdict` — the write path the judgment lane was missing.
+ *
+ * WHY THIS EXISTS. `claims restate` poses questions and `claims judge` reports
+ * which blocks await one, but until now NOTHING could record an answer: there
+ * was no `appendClaim` caller anywhere in `commands/`. A lane that poses
+ * questions nobody can answer does not converge — every run re-reports the same
+ * 15 entries forever, which is a worklist that reads as coverage.
+ *
+ * VERDICTS ARRIVE ON STDIN, and the caller is outside the tool. That is the
+ * whole architecture, stated in `judge.mjs`: propagate poses the question and
+ * stores the answer; the judge is whoever is calling. So this reads JSON and
+ * writes it — it does not decide anything, contains no model, and makes no
+ * network call.
+ *
+ * DRY RUN BY DEFAULT, `--apply` TO WRITE. The house posture, and it is not
+ * decoration: `rule:safety-flag-needs-a-test` records three separate incidents
+ * in this tree where a command documented as a preview wrote to an append-only
+ * store anyway, the worst costing 11 spurious events and 3 silently-closed
+ * worklist items. Validation runs identically on both paths, so the preview
+ * cannot promise a write that `--apply` then rejects.
+ *
+ * Accepts a JSON array or JSONL, because both are what a caller naturally has.
+ */
+async function verdictSub(rest, json) {
+  const apply = rest.includes("--apply");
+  const usage =
+    `usage: propagate claims verdict [--apply] [--json]  < verdicts.json\n` +
+    `       stdin: a JSON array, or one JSON object per line. Each needs\n` +
+    `       {file, block_sha, kind} and, to record a judgement,\n` +
+    `       {against, finding} together — finding one of: ${CLAIM_FINDINGS.join(", ")}`;
+
+  let raw = "";
+  try {
+    for await (const chunk of process.stdin) raw += chunk;
+  } catch (err) {
+    if (json) console.log(JSON.stringify({ error: `could not read stdin: ${err.message}` }));
+    else console.error(`could not read stdin: ${err.message}`);
+    return 2;
+  }
+  if (!raw.trim()) {
+    if (json) console.log(JSON.stringify({ error: usage }));
+    else console.error(usage);
+    return 2;
+  }
+
+  // Array or JSONL, and a parse failure names the line rather than dying with
+  // "Unexpected token" — absence of a usable input is attributable too.
+  let verdicts;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    try { verdicts = JSON.parse(trimmed); } catch (err) {
+      const msg = `stdin is not valid JSON: ${err.message}`;
+      if (json) console.log(JSON.stringify({ error: msg })); else console.error(msg);
+      return 2;
+    }
+  } else {
+    verdicts = [];
+    const lines = trimmed.split("\n").filter((l) => l.trim());
+    for (const [i, line] of lines.entries()) {
+      try { verdicts.push(JSON.parse(line)); } catch (err) {
+        const msg = `stdin line ${i + 1} is not valid JSON: ${err.message}`;
+        if (json) console.log(JSON.stringify({ error: msg })); else console.error(msg);
+        return 2;
+      }
+    }
+  }
+  if (!Array.isArray(verdicts)) verdicts = [verdicts];
+
+  // Validate EVERY verdict before writing ANY. A partial write to an
+  // append-only store cannot be taken back, so a batch with one bad row is
+  // refused whole rather than half-applied.
+  const refused = [];
+  verdicts.forEach((v, i) => {
+    const why = dryValidateClaim(v);
+    if (why) refused.push({ index: i, file: v?.file ?? null, error: why });
+  });
+
+  if (refused.length) {
+    if (json) console.log(JSON.stringify({ applied: 0, refused }, null, 2));
+    else {
+      console.error(`${RED}refused ${refused.length} of ${verdicts.length}${RESET} — nothing written`);
+      for (const r of refused) console.error(`  [${r.index}] ${r.file ?? "(no file)"}: ${r.error}`);
+    }
+    return 2;
+  }
+
+  if (!apply) {
+    if (json) console.log(JSON.stringify({ applied: 0, wouldWrite: verdicts.length, dryRun: true }, null, 2));
+    else {
+      console.log(`${BOLD}would write ${verdicts.length} verdict(s)${RESET} ${DIM}— nothing has been written${RESET}`);
+      for (const v of verdicts) {
+        console.log(`  ${DIM}${v.finding ?? "(no finding)"}${RESET}  ${shortPath(v.file)}  ${DIM}${String(v.block_sha).slice(0, 12)}${RESET}`);
+      }
+      console.log(`\n  ${DIM}pass ${RESET}${BOLD}--apply${RESET}${DIM} to write these to the claim store${RESET}`);
+    }
+    return 0;
+  }
+
+  const written = [];
+  for (const v of verdicts) {
+    const stamped = await appendClaim(v);
+    written.push({ claim_id: stamped?.claim_id ?? null, file: v.file, finding: v.finding ?? null });
+  }
+  if (json) console.log(JSON.stringify({ applied: written.length, written }, null, 2));
+  else {
+    console.log(`${GREEN}wrote ${written.length} verdict(s)${RESET}`);
+    for (const w of written) console.log(`  ${w.finding ?? "(no finding)"}  ${shortPath(w.file)}  ${DIM}${w.claim_id ?? ""}${RESET}`);
   }
   return 0;
 }
