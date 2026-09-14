@@ -3376,6 +3376,7 @@ async function bootstrapCmd() {
           noCoCommit: outcomes.noCoCommit.length,
           boundReached: outcomes.boundReached.length,
           ineligibleCrossRepo: outcomes.ineligibleCrossRepo.length,
+          examinedAndDeferred: outcomes.examinedAndDeferred.length,
         },
         applied,
         failed,
@@ -3439,6 +3440,9 @@ async function bootstrapCmd() {
   );
   console.log(
     `  ${YELLOW}${String(outcomes.ineligibleCrossRepo.length).padStart(4)}${RESET}  ineligible-cross-repo  ${DIM}${pct(outcomes.ineligibleCrossRepo.length)}${RESET}`,
+  );
+  console.log(
+    `  ${YELLOW}${String(outcomes.examinedAndDeferred.length).padStart(4)}${RESET}  examined-and-deferred  ${DIM}${pct(outcomes.examinedAndDeferred.length)} — a human judgement, not a baseline gap; see \`why <edge>\`${RESET}`,
   );
 
   if (!apply) {

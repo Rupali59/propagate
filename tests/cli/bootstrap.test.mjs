@@ -317,6 +317,91 @@ test("planBaseline — --baseline-all baselines every NEVER_VERIFIED row without
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// S1 REGRESSION (ISSUES.md N71/N39, GOTCHAS G61): a row can carry
+// state === "NEVER_VERIFIED" and STILL have been examined — `deferred` is a
+// FLAG beside the state, not a ninth state (lib/edges/migrate-ledger.mjs:507),
+// and reconcile() attaches it to a NEVER_VERIFIED row whenever the edge was
+// read, judged, and deliberately deferred with no later verifying event
+// (lib/edges/reconcile.mjs:283/398-419). Baselining such a row overwrites a
+// written human judgement with "asserted consistent now, without inspection"
+// — silently destroying it. This must hold under EVERY policy, not just
+// baseline-all: baseline-from-git's cross-repo/no-co-commit/bound-reached
+// buckets must not swallow a deferred row either.
+// ─────────────────────────────────────────────────────────────────────────
+
+function deferredRow(overrides = {}) {
+  return {
+    state: "NEVER_VERIFIED",
+    sameRepo: true,
+    edge_id: "deferred-edge",
+    node_id: "n-deferred",
+    source: { path: "/tmp/x/src.txt" },
+    downstream: { path: "/tmp/x/dst.txt" },
+    deferred: {
+      disposition: "deferred",
+      by: "test-user",
+      ts: "2026-09-10T00:00:00.000Z",
+      reason: "examined 2026-09-10: intentionally left inconsistent, tracked in N50",
+      observed_at_commit: "fc4564df",
+    },
+    ...overrides,
+  };
+}
+
+test("planBaseline (--baseline-all) — a deferred NEVER_VERIFIED row is NOT baselined; it is reported as its own outcome", () => {
+  const rows = [deferredRow(), { state: "NEVER_VERIFIED", sameRepo: true, edge_id: "plain", node_id: "n-plain", source: { path: "a" }, downstream: { path: "b" } }];
+  const { outcomes } = planBaseline(rows, "baseline-all", {});
+
+  assert.ok(
+    !outcomes.baselined.some((b) => b.row.edge_id === "deferred-edge"),
+    "a deferred edge must never be pushed into outcomes.baselined under --baseline-all",
+  );
+  assert.equal(outcomes.baselined.length, 1, "the plain NEVER_VERIFIED row is still eligible");
+  assert.equal(outcomes.baselined[0].row.edge_id, "plain");
+
+  assert.ok(outcomes.examinedAndDeferred, "planBaseline must report a dedicated outcome bucket for deferred rows");
+  assert.equal(outcomes.examinedAndDeferred.length, 1);
+  assert.equal(outcomes.examinedAndDeferred[0].edge_id, "deferred-edge");
+});
+
+test("planBaseline (--baseline-from-git) — a deferred row is excluded from every git-derived bucket, even with real co-commit evidence", async () => {
+  const repo = await makeRepo();
+  await writeFile(path.join(repo, "src.txt"), "src v1\n");
+  await writeFile(path.join(repo, "dst.txt"), "dst v1\n");
+  const sha = await commitAll(repo, "src + dst"); // genuine co-commit evidence exists
+
+  const rows = [
+    deferredRow({
+      edge_id: "deferred-with-evidence",
+      node_id: `${path.basename(repo)}:src.txt`,
+      source: { path: path.join(repo, "src.txt") },
+      downstream: { path: path.join(repo, "dst.txt") },
+    }),
+  ];
+
+  const { outcomes } = planBaseline(rows, "baseline-from-git", { bound: 400 });
+
+  assert.equal(
+    outcomes.baselined.length,
+    0,
+    "co-commit evidence must not baseline a deferred row — the human judgement wins",
+  );
+  assert.equal(outcomes.noCoCommit.length, 0);
+  assert.equal(outcomes.boundReached.length, 0);
+  assert.equal(outcomes.ineligibleCrossRepo.length, 0);
+  assert.equal(outcomes.examinedAndDeferred.length, 1);
+  assert.equal(outcomes.examinedAndDeferred[0].edge_id, "deferred-with-evidence");
+  void sha;
+});
+
+test("planBaseline (--none) — a deferred row is still surfaced as examined-and-deferred, not silently folded into the never-verified count", () => {
+  const rows = [deferredRow()];
+  const { outcomes } = planBaseline(rows, "none", {});
+  assert.equal(outcomes.baselined.length, 0);
+  assert.equal(outcomes.examinedAndDeferred.length, 1, "`none` must not drop the deferred row from view either");
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // PURE: the git stage — non-git directory offers init, states the ref lens
 // does not apply, never throws (test #8).
 // ─────────────────────────────────────────────────────────────────────────
