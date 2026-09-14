@@ -1737,3 +1737,82 @@ is a larger question than this entry: **is the intended posture "the repo is pub
 names are acceptable", or "the repo should have been the scrubbed copy all along"?** The
 two answers imply very different work and the tree currently asserts both. Filed separately
 rather than resolved here, because it is a decision, not a defect.
+
+### N69 · `verify` silently discards unknown flags, so a justification can be written to nothing — **S1** — **OPEN**
+
+Found 2026-09-14, auditing this session's own verification events.
+
+`verify`'s documented flag is `--reason` (`cli.mjs:84`, parsed at `cli.mjs:2718` via
+`get("--reason")`). `--notes` exists, but only for `drain` (`cli.mjs:45`). **There is no
+unknown-flag rejection anywhere in the arg parser.** So `verify --edge X --disposition
+no-change-needed --apply --note "<the whole justification>"` is accepted, exits 0, prints
+`✓ <edge> no-change-needed → CLEAN` with an event id — and the note is silently dropped on
+the floor.
+
+**Measured, in this machine's own store:**
+
+```
+events in store                     2771
+carrying a `reason`                 2629   (95%)
+written 2026-09-14 with `--note`      20
+  ... carrying any justification       0
+```
+
+Twenty verification events — 5 `both-reconciled`, 15 `no-change-needed`, closing a real
+15-edge cascade — landed with no record of *why*. The measurements that justified them
+("0 matches for the changed claim in this downstream", and the per-edge reasoning for each
+override) exist now only in a chat transcript. The store is append-only, so they cannot be
+repaired in place; they can only be superseded by re-emitting.
+
+**This is the file's own root-defect section, in a new place.** The command reported
+success, wrote a well-formed row, and the only signal that anything was lost is that the
+`reason` field is absent — visible solely by reading the JSONL. A caller cannot distinguish
+"I chose not to give a reason" from "I gave one and the tool ate it".
+
+**Two fixes, and the second is the one that generalises.** Accept `--note` as an alias for
+`--reason` (cheap, and it is the obvious word). Then **reject unknown flags across every
+subcommand** — a typo'd or misremembered flag must exit non-zero, not proceed with a silently
+different meaning. `rule:discernment-checks` §2: absence must be attributable. A dropped
+argument is an absence that currently attributes to nothing.
+
+**Test it can fail:** invoke `verify` with a bogus flag and assert a non-zero exit; and
+invoke it with `--note` and assert the written event carries the text in `reason`. Both
+assertions must be made against the **event row**, not against stdout — stdout was correct
+and reassuring throughout this incident.
+
+### N70 · `--out-of-order` leaves no trace, so an overridden verification is indistinguishable from a clean one — **S1** — **OPEN**
+
+Found 2026-09-14, alongside N69.
+
+`verify` refuses (exit 3) when an edge's source is itself unsettled, and `--out-of-order`
+deliberately overrides that refusal. The skill documents the override as the sanctioned
+escape hatch. **But the flag is recorded nowhere in the emitted event.**
+
+```
+fields ever seen across 2771 events:
+  edge_id node_id disposition by event_id ts hash_alg observed_on_ref
+  source_content downstream_content reason observed_at_commit observed_on_branch
+  observed_dirty by_kind downstream_on_ref downstream_at_commit
+  downstream_on_branch downstream_dirty source_git_blob
+
+events carrying `out_of_order` / `override`:   0 of 2771
+```
+
+So an edge pinned against a source that was **known to be unsettled at the time** reads,
+forever after, exactly like one verified against a settled source. `status` shows CLEAN for
+both. The ordering guard exists precisely because verifying out of order "pins content
+against an unconfirmed source" — and the record of having done so is discarded at the moment
+it is created.
+
+**Why S1 rather than S3.** This is N19's shape (terminal status with no Transition, no audit
+trail) applied to the one operation the tool treats as dangerous enough to refuse by default.
+It also defeats review: `rule:adversarial-review-reads-the-ledger` says to read the ledger
+before trusting a green result, and the ledger cannot answer "which of these were forced?".
+Seven such overrides were written on 2026-09-14 and none is recoverable from the store — a
+subsequent agent searching the events for them concluded, reasonably and wrongly, that the
+cascade had never happened.
+
+**Fix:** persist the override as a first-class field (`out_of_order: true` plus the blocking
+upstream edge ids that were bypassed), and surface it — `status`/`graph` should mark a CLEAN
+edge whose last verification was forced, because that is a weaker claim than an ordinary
+CLEAN and currently renders identically.
