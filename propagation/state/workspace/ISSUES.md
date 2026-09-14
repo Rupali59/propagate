@@ -1840,3 +1840,62 @@ cascade had never happened.
 upstream edge ids that were bypassed), and surface it — `status`/`graph` should mark a CLEAN
 edge whose last verification was forced, because that is a weaker claim than an ordinary
 CLEAN and currently renders identically.
+
+### N71 · `NEVER_VERIFIED` is reported for edges that were examined and deferred, and the remediation offered is wrong for all of them — **S1** — **OPEN**
+
+Found 2026-09-14, after it caused a full round of duplicated work.
+
+`status` renders:
+
+```
+142 edges · 110 verified · 31 never verified · 1 need attention
+  never verified (31) — a baseline gap, not drift. `bootstrap` to triage.
+```
+
+Measured against the event store, all 31 of those edges carry an event:
+
+```
+edges reported NEVER_VERIFIED : 31
+  ...of which HAVE events      : 31
+  ...genuinely never touched   : 0
+dispositions: {'deferred': 31}   dates: {'2026-09-10': 31}
+```
+
+Every one was read, judged, and deliberately deferred four days earlier, each with a
+substantive `reason`. Not one is a baseline gap.
+
+**The data is not missing — the summary discards it.** `reconcile --json` returns a full
+`deferred` object beside the state for these edges (`{disposition: "deferred", by:
+"rupali.b", observed_at_commit: fc4564df…}`), exactly as `lib/edges/reconcile.mjs:283`
+declares (`state, since, last, deferred`). `status` reads that structure and prints only
+the state name.
+
+**Internally the state machine is defensible** — `lib/edges/migrate-ledger.mjs:507` records
+that deferred is deliberately "A FLAG, NOT A NINTH STATE", and `last` is genuinely `null`
+because no *verifying* disposition was applied. The defect is entirely in what the user is
+told.
+
+**What it cost.** Believing the summary, a session filed the 31 as a baselining backlog,
+confirmed via two `bootstrap --baseline-from-git` dry-runs that **0** were `baselineable`,
+then dispatched four subagents to hand-verify 26 of them. Three lanes returned before the
+duplication was noticed, and every finding they produced **already existed in the deferred
+reasons from 2026-09-10** — re-derived from scratch at roughly 390k subagent tokens.
+
+The re-derivation did earn two things, which is the only reason this is not a total loss:
+the recorded reasons were independently confirmed accurate, and one was found to carry a
+**wrong supporting timeline** (`d4496acc`/`ae4de1cd`/`4ec364cb` assert `-mb`'s
+`Appointment.js` postdates VK's model by three weeks; `git log --follow` shows two commits,
+the first `ad1ce8c` 2026-05-13, which *predates* it by six days — the conclusion stands on
+the import/enum evidence, the sequencing argument does not).
+
+**This is N68's shape and `rule:discernment-checks` §2 again: "not looked at" and "looked at
+and parked" rendering identically.** It is the third instance in this file.
+
+**Fix.** Split the count and the advice. "Never verified" must mean *no event of any kind*;
+edges carrying a `deferred` flag want their own line — `31 deferred (examined, not resolved)
+— see \`why <edge>\`` — and must not be offered `bootstrap`, which cannot touch them. If
+splitting the rendering is deferred, the minimum is to stop printing remediation that is
+provably wrong for every edge in the bucket.
+
+**Test it can fail:** defer an edge in a fixture, then assert `status` does not describe it
+as never-verified and does not recommend `bootstrap` for it.
