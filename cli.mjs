@@ -885,6 +885,68 @@ async function doctor() {
     }
   }
 
+  // # Claims — judgment states. Surfaced HERE for the same reason Goals is:
+  // `claims judge` takes ONE file, so without this nobody sees the tree-wide
+  // picture unless they already suspect something.
+  //
+  // Informational, never a doctor failure. `unjudged` is the expected state
+  // today — no lane emits questions yet — and "not adopted" must not read as
+  // broken. The line that WOULD justify escalating is `unanswerable` above
+  // zero: a caller tried to judge and could not, which is a fact about the
+  // machinery rather than about the corpus.
+  //
+  // The three states are never collapsed (`rule:discernment-checks` §2). In
+  // particular a corpus with no verdict store reports `0 runs`, NOT `0
+  // findings` — "nobody has looked" and "looked and found nothing" are
+  // different facts and only one of them is a pass.
+  console.log(`\n${BOLD}# Claims${RESET}`);
+  {
+    try {
+      const { buildClaimsCorpus } = await import("./lib/claims/check.mjs");
+      // The fold lives in lib/, same seam as `goalCounts` above: cli.mjs
+      // renders and never accumulates. It also reads each store ONCE —
+      // `readClaims({file})` per file is O(files x store-size), measured at
+      // 754ms here against 0ms for a single whole-store read.
+      const { claimsCounts } = await import("./lib/report/claims.mjs");
+      const corpus = await buildClaimsCorpus({ workspaces: WORKSPACES });
+      const files = [...corpus.fileEntries.keys()];
+      if (files.length === 0) {
+        // "No declared sources" and "sources with nothing judgeable" differ.
+        console.log(
+          `  ${DIM}·${RESET} judgment states  ${DIM}no declared source files under the search roots — an empty scan, not a clean one${RESET}`,
+        );
+      } else {
+        const { judged, unjudged, unanswerable, runs, unreadable, malformed } = await claimsCounts(files);
+        console.log(
+          `  ${DIM}·${RESET} judgment states  ${DIM}${judged} judged · ${unjudged} unjudged · ` +
+            `${unanswerable} unanswerable  across ${files.length} declared source(s), ${runs} answering run(s)${RESET}`,
+        );
+        if (unanswerable > 0) {
+          console.log(
+            `  ${YELLOW}!${RESET} ${unanswerable} block(s) nobody could judge  ${DIM}a caller attempted and failed —` +
+              ` \`claims judge <file>\` names the run; this is the machinery, not the corpus${RESET}`,
+          );
+        }
+        if (unreadable > 0) {
+          console.log(
+            `  ${YELLOW}!${RESET} ${unreadable} declared source(s) could not be read  ${DIM}a reader that failed, not an empty file${RESET}`,
+          );
+        }
+        if (malformed > 0) {
+          // store.mjs's premise is that corrupt lines are COUNTED on read and
+          // never silently skipped. Counting them and not printing them is the
+          // same silence one layer up.
+          console.log(
+            `  ${YELLOW}!${RESET} ${malformed} malformed line(s) in the claim/run stores  ${DIM}counted on read, not skipped — they are not judgments and never will be${RESET}`,
+          );
+        }
+      }
+    } catch (err) {
+      // Absence must be attributable — never let a thrown reader read as "nothing to judge".
+      console.log(`  ${YELLOW}!${RESET} judgment states  ${DIM}could not be derived: ${err.message}${RESET}`);
+    }
+  }
+
   console.log(`\n${BOLD}# Graph integration${RESET}`);
   {
     const graphResult = await checkGraphMcpStatus();

@@ -28,6 +28,7 @@ import { claimsCheck } from "../lib/claims/check.mjs";
 import { judgeStatus, asQuestions } from "../lib/claims/judge.mjs";
 import { renderStatus } from "../lib/claims/render.mjs";
 import { contradictStatus } from "../lib/claims/contradict.mjs";
+import { appendRunStart, appendRunEnd, RUN_OUTCOMES } from "../lib/claims/runs.mjs";
 import { rollup } from "../lib/report/rollup.mjs";
 import { WORKSPACES, SEARCH_ROOTS, shortPath } from "../lib/core/config.mjs";
 
@@ -67,6 +68,7 @@ export async function claimsCmd(argv = []) {
   if (sub === "judge") return judgeSub(argv.slice(1), json);
   if (sub === "render") return renderSub(argv.slice(1), json);
   if (sub === "contradict") return contradictSub(argv.slice(1), json);
+  if (sub === "answer") return answerSub(argv.slice(1), json);
 
   if (sub !== "check") {
     const msg =
@@ -74,7 +76,9 @@ export async function claimsCmd(argv = []) {
       `usage: propagate claims check [--json]\n` +
       `       propagate claims judge <file> [--json]\n` +
       `       propagate claims render <file> [--apply] [--json]\n` +
-      `       propagate claims contradict <authored-file> [--json]`;
+      `       propagate claims contradict <authored-file> [--json]\n` +
+      `       propagate claims answer <file> start [--json]\n` +
+      `       propagate claims answer <file> end --run <id> --outcome <${RUN_OUTCOMES.join("|")}> [--reason ...] [--json]`;
     if (json) console.log(JSON.stringify({ error: msg }));
     else console.error(msg);
     return 2;
@@ -193,31 +197,59 @@ async function judgeSub(rest, json) {
       counts: {
         judged: status.judged.length,
         unjudged: status.unjudged.length,
+        unanswerable: status.unanswerable.length,
         structure: status.structure.length,
         orphaned: status.orphaned.length,
       },
+      runs: status.runs,
       questions: asQuestions(status),
     }, null, 2));
     return 0;
   }
 
   console.log(`${BOLD}# claims judge${RESET}  ${DIM}${shortPath(abs)}${RESET}`);
+  // The exact phrase "unjudged, N run(s)" is load-bearing: a client with no
+  // brain and no answering run ever attempted must read as
+  // "N unjudged, 0 run(s)" and NEVER "0 findings" — those are different facts
+  // (`rule:discernment-checks` §2), and this line is the one place that
+  // distinction has to survive contact with a human reader.
+  const runWord = status.runs.count === 1 ? "run" : "runs";
   console.log(
-    `  ${status.judged.length} judged · ${status.unjudged.length} unjudged · ` +
-      `${status.structure.length} structure (not claims) · ${status.orphaned.length} orphaned verdict(s)`,
+    `  ${status.judged.length} judged · ${status.unjudged.length} unjudged, ${status.runs.count} ${runWord} · ` +
+      `${status.unanswerable.length} unanswerable · ${status.structure.length} structure (not claims) · ` +
+      `${status.orphaned.length} orphaned verdict(s)`,
   );
   if (!status.storeExists) {
     // Distinct from an empty store. Nothing has ever been judged anywhere, which
     // is a different fact from "this file has not been judged".
     console.log(`  ${DIM}no verdict store yet — nothing has been judged anywhere${RESET}`);
   }
+  if (status.runs.status === "crashed") {
+    console.log(
+      `  ${YELLOW}latest answering run for this file has no end record${RESET} ${DIM}— started, never resolved (crash or still in flight); unjudged blocks read as unanswerable until an "end" is recorded${RESET}`,
+    );
+  } else if (status.runs.status === "completed" && status.runs.outcome !== "ok") {
+    console.log(
+      `  ${YELLOW}latest answering run ended "${status.runs.outcome}"${RESET} ${DIM}— unjudged blocks read as unanswerable, not unjudged${RESET}`,
+    );
+  }
   if (status.orphaned.length > 0) {
     console.log(
       `\n  ${YELLOW}orphaned (${status.orphaned.length})${RESET} ${DIM}— verdicts whose block no longer exists in this file; re-judge or drop, never archive${RESET}`,
     );
   }
+  if (status.unanswerable.length > 0) {
+    console.log(`\n  ${YELLOW}unanswerable (${status.unanswerable.length})${RESET} ${DIM}— a prior answering run tried and could not; still a question, not a pass${RESET}`);
+    for (const b of status.unanswerable.slice(0, 20)) {
+      const oneLine = b.text.replace(/\s+/gu, " ").trim();
+      console.log(`    ${DIM}${b.sha.slice(0, 12)} L${b.startLine}${RESET}  ${oneLine.slice(0, 110)}${oneLine.length > 110 ? " …" : ""}`);
+    }
+    if (status.unanswerable.length > 20) {
+      console.log(`    ${DIM}+${status.unanswerable.length - 20} more — --json for the full question set${RESET}`);
+    }
+  }
   if (status.unjudged.length === 0) {
-    console.log(`\n  nothing awaiting judgment in this file.`);
+    console.log(`\n  nothing else awaiting judgment in this file.`);
     return 0;
   }
   console.log(`\n  ${YELLOW}awaiting judgment (${status.unjudged.length})${RESET}`);
@@ -228,6 +260,75 @@ async function judgeSub(rest, json) {
   if (status.unjudged.length > 20) {
     console.log(`    ${DIM}+${status.unjudged.length - 20} more — --json for the full question set${RESET}`);
   }
+  return 0;
+}
+
+/**
+ * `claims answer <file> start|end` — record an answering-RUN attempt, never a
+ * verdict. This is what makes `unanswerable` possible at all: propagate never
+ * probes whether a judge is alive (Premise 1), so the only way it can ever
+ * know "something tried and could not" is a record the CALLER writes.
+ *
+ * `start` must be invoked before any answering work begins (Reviewer Concern
+ * 2) — a run that crashes after `start` but before `end` is reported by
+ * `claims judge` as `crashed`, distinguishable from `never` (no attempt) and
+ * from a deliberate `no-brain`/`error` outcome. `end` requires the `run_id`
+ * `start` printed, so the two records are correlated without guessing which
+ * start belongs to which end.
+ *
+ * CALLS THE CLI SURFACE, NOT THE LIBRARY DIRECTLY — the answering skill lives
+ * outside propagate (open question in the plan) and must not import `lib/`;
+ * this subcommand is its only door in, matching the same posture `claims
+ * check`/`judge`/`contradict` already take.
+ */
+async function answerSub(rest, json) {
+  const mode = rest.find((a) => a === "start" || a === "end");
+  const file = rest.find((a) => !a.startsWith("--") && a !== "start" && a !== "end");
+  const usage =
+    `usage: propagate claims answer <file> start [--json]\n` +
+    `       propagate claims answer <file> end --run <id> --outcome <${RUN_OUTCOMES.join("|")}> [--reason ...] [--json]`;
+
+  if (!file || !mode) {
+    if (json) console.log(JSON.stringify({ error: usage }));
+    else console.error(usage);
+    return 2;
+  }
+  const abs = path.resolve(file);
+
+  if (mode === "start") {
+    const { run_id } = await appendRunStart(abs);
+    if (json) console.log(JSON.stringify({ file: abs, run_id, phase: "start" }, null, 2));
+    else console.log(`${GREEN}started${RESET} run ${run_id} for ${shortPath(abs)} — pass this id to \`claims answer ${file} end --run ${run_id} ...\` when done.`);
+    return 0;
+  }
+
+  // mode === "end"
+  const runIdx = rest.indexOf("--run");
+  const outcomeIdx = rest.indexOf("--outcome");
+  const reasonIdx = rest.indexOf("--reason");
+  const run_id = runIdx >= 0 ? rest[runIdx + 1] : undefined;
+  const outcome = outcomeIdx >= 0 ? rest[outcomeIdx + 1] : undefined;
+  const reason = reasonIdx >= 0 ? rest[reasonIdx + 1] : undefined;
+
+  if (!run_id || !outcome) {
+    if (json) console.log(JSON.stringify({ error: usage }));
+    else console.error(usage);
+    return 2;
+  }
+
+  try {
+    await appendRunEnd(abs, run_id, outcome, { reason });
+  } catch (err) {
+    // A rejected write (bad outcome, missing reason on no-brain/error) is a
+    // caller mistake, not "nothing to record" — exit 2, same posture as every
+    // other usage error in this file.
+    if (json) console.log(JSON.stringify({ error: err.message }));
+    else console.error(err.message);
+    return 2;
+  }
+
+  if (json) console.log(JSON.stringify({ file: abs, run_id, phase: "end", outcome }, null, 2));
+  else console.log(`${GREEN}recorded${RESET} run ${run_id} for ${shortPath(abs)} — outcome "${outcome}".`);
   return 0;
 }
 

@@ -55,13 +55,27 @@ import { reconcile } from "../lib/edges/reconcile.mjs";
 
 
 /**
- * Bucket reconcile's rows into the four numbers `status` leads with.
+ * Bucket reconcile's rows into the numbers `status` leads with.
  *
  * Every edge lands in exactly one bucket and the buckets sum to the total —
- * asserted in tests/status-coverage.test.mjs, because a bucket that silently
+ * asserted in tests/cli/status-coverage.test.mjs, because a bucket that silently
  * drops a state is how a real row stayed invisible for two months (ISSUES N1).
  * An unrecognised state is therefore COUNTED as unevaluable and named, never
  * skipped: a state we do not understand is not a pass.
+ *
+ * `deferred` is its own bucket, split out of `never_verified` (ISSUES N71).
+ * `state === "NEVER_VERIFIED"` means "no PINNING event" (reconcile.mjs's
+ * `last`), but a row can carry a `deferred` event beside that — someone
+ * looked at it and deliberately parked it with a reason, which is not the
+ * same fact as "nobody has looked." Those rows must not be described as a
+ * baseline gap or pointed at `bootstrap`: N71 measured 31 such edges, every
+ * one examined and parked on 2026-09-10, none a gap `bootstrap` should be
+ * filling. (Whether `lib/edges/bootstrap.mjs`'s `planBaseline` itself
+ * excludes deferred rows from what it will act on is a separate, unverified
+ * question — it filters on `state === "NEVER_VERIFIED"` alone, with no
+ * `deferred` check visible at the point this was written, so the remediation
+ * text here may be undoing less than it claims. That is `status`'s wording,
+ * not `bootstrap`'s behaviour, and out of this fix's scope.)
  *
  * `ok` is deliberately strict — it requires full coverage, not merely the
  * absence of known problems. The defect this replaces was `✓ no open drift
@@ -171,12 +185,18 @@ const ACTIONABLE_STATES = ["DRIFTED", "REVERSED", "DIVERGED"];
 
 function coverageFrom(rows) {
   const byState = {};
-  let verified = 0, actionable = 0, never_verified = 0, cannot_evaluate = 0;
+  let verified = 0, actionable = 0, never_verified = 0, cannot_evaluate = 0, deferred = 0;
   const unknown_states = {};
   for (const r of rows) {
     const s = r.state;
     byState[s] = (byState[s] || 0) + 1;
     if (s === "CLEAN") verified++;
+    // A deferred row is split OUT of never_verified here (N71): it has an
+    // event — someone examined it and parked it with a reason — so "no event
+    // of any kind" is false for it, even though reconcile's `state` still
+    // reads NEVER_VERIFIED (deferred never pins). Checked before the plain
+    // NEVER_VERIFIED branch so it wins the bucket.
+    else if (s === "NEVER_VERIFIED" && r.deferred) deferred++;
     else if (s === "NEVER_VERIFIED") never_verified++;
     else if (ACTIONABLE_STATES.includes(s)) actionable++;
     else if (UNEVALUABLE_STATES.includes(s)) cannot_evaluate++;
@@ -188,9 +208,12 @@ function coverageFrom(rows) {
   }
   const edges = rows.length;
   return {
-    edges, verified, actionable, never_verified, cannot_evaluate,
+    edges, verified, actionable, never_verified, cannot_evaluate, deferred,
     byState, unknown_states,
-    ok: edges > 0 && actionable === 0 && cannot_evaluate === 0 && never_verified === 0,
+    // deferred keeps `ok` false too — "examined, not resolved" is still
+    // outstanding, just not a baseline gap and not what `bootstrap` fixes.
+    ok: edges > 0 && actionable === 0 && cannot_evaluate === 0
+      && never_verified === 0 && deferred === 0,
   };
 }
 
@@ -282,7 +305,8 @@ export async function status() {
     const cov = coverageFrom(recRows);
     console.log(
       `  ${cov.edges} edges · ${cov.verified} verified · ` +
-        `${cov.never_verified} never verified · ${cov.actionable} need attention` +
+        `${cov.never_verified} never verified · ${cov.deferred} deferred · ` +
+        `${cov.actionable} need attention` +
         (cov.ok ? `  ${GREEN}✓${RESET}` : ""),
     );
 
@@ -314,6 +338,15 @@ export async function status() {
       console.log(
         `\n  ${DIM}never verified (${cov.never_verified}) — a baseline gap, not drift. ` +
           `\`bootstrap\` to triage.${RESET}`,
+      );
+    }
+    if (cov.deferred > 0) {
+      // NOT a baseline gap (N71): these edges carry a deferred event, so
+      // someone already looked and parked them with a reason. Never offered
+      // `bootstrap` — that remediation is for edges nobody has examined.
+      console.log(
+        `\n  ${DIM}deferred (${cov.deferred}) — examined, not resolved. ` +
+          `\`why <edge>\` for the reason.${RESET}`,
       );
     }
 
