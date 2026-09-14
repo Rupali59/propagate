@@ -1780,6 +1780,30 @@ invoke it with `--note` and assert the written event carries the text in `reason
 assertions must be made against the **event row**, not against stdout — stdout was correct
 and reassuring throughout this incident.
 
+**The 20 lost justifications, recorded here because the store will not take them back.**
+Re-emitting was attempted and **refused**, correctly: `verify --edge fa432c23 --disposition
+both-reconciled --reason "..."` returns *"both-reconciled only applies to a DIVERGED edge;
+this edge is CLEAN"*. The edges resolved, so their state no longer admits the disposition
+that was recorded against them — which means a justification lost at write time can **never**
+be attached later by any supported path. That raises the severity of N69: it is not a
+cosmetic gap pending a backfill, it is unrecoverable the moment the command returns.
+
+| edge | disposition | the reason that was dropped |
+|---|---|---|
+| `fa432c23` | both-reconciled | INVENTORY + DATA_GAPS both edited 2026-09-14; DATA_GAPS named SarvarthaChintamani, JaiminiSutras, JatakaTattvam as undigitised, all three held since 2026-09-04 (astroacharya `ab381b6`) |
+| `e82c6e94` | both-reconciled | `reference.md`'s chapter workflow was stale three ways — a Youvan BPHS path that no longer holds BPHS, `split_chapters.py` (0 found), and `english_meaning`/`hindi_meaning` (banned, 0 occurrences). Rewritten in `58c69a7` |
+| `e377000b` | both-reconciled | Both restructured together in sanskrit-texts `e7de37b`; `check_inventory.py` now fails if they disagree |
+| `2cb348a4` | no-change-needed | `list_sources.py` derives `text_id → path` at runtime (`rglob`, line 321); its own comment at line 282 records that re-hardcoding was tried and rejected |
+| `6a114165` | both-reconciled | Both stale in the same direction, both now defer to INVENTORY §"Acquisition status" |
+| `044c244c` `443b497a` `7ba9fb83` `eabf9f7f` `4a1ed4dd` `d637fc1b` `c4ea2ba6` `0ff35726` `c560f4a7`† `ddb50853`† | no-change-needed | Workspace `CLAUDE.md` was edited independently (`53ea6a8`, a stale Vedic held-count replaced by the command that derives it). None of these ten sources moved; the edge read REVERSED only because the downstream post-dates it |
+| `dba8ae6a`† `f86b500c`† `0def67b0`† `e2488f80`† | no-change-needed | Measured against each downstream: **0 matches** for `29 held`, `24 Upanisad`, `51 mapped` or `mukhya`. Nothing there restates the changed claim |
+| `c0e01c6d`† | both-reconciled | Both edited and read together; neither claim depends on the other |
+
+**† = written with `--out-of-order`** (7 edges). Each was blocked by an upstream that is
+`NEVER_VERIFIED` — a baseline gap, not a known-wrong source — and each disposition rested on a
+direct measurement of the *downstream*, not on the upstream being correct. **That fact is
+recoverable only from this table; the events themselves record nothing (N70).**
+
 ### N70 · `--out-of-order` leaves no trace, so an overridden verification is indistinguishable from a clean one — **S1** — **OPEN**
 
 Found 2026-09-14, alongside N69.
