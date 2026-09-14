@@ -1552,6 +1552,68 @@ asserts `JSON.parse(stdout)` succeeds — `rule:discernment-checks` §1: constru
 makes the check fail before shipping it. **Filed here rather than done, deliberately: the
 one-line fix is verified, the general guard is a separate change.**
 
+### N68 · A nested `.propagates-cross.yml` is unreachable, so `doctor`'s cross-repo check reports clean over edges it never enumerated — **S1** — **RESOLVED 2026-09-14**
+
+Found 2026-09-14, draining the worklist in `Vipin Kaushik/astro-studio`.
+
+`discoverCrossReposSync` (`lib/edges/cross-repo.mjs:138`) stops descending the moment it finds
+a cross sidecar:
+
+```js
+if (existsSync(path.join(dir, FILE_NAME))) {
+  out.push({ name: path.basename(dir), root: dir });
+  return; // don't recurse below a found cross repo
+}
+```
+
+`Vipin Kaushik/.propagates-cross.yml` exists, so the walk returns at that directory and
+`Vipin Kaushik/astro-studio/.propagates-cross.yml` — **7 declared cross edges** — was never
+enumerated. Not a `maxDepth` problem; reproduced at `maxDepth: 5` on a two-level fixture,
+2 sidecars on disk, 1 discovered.
+
+**Why it is S1 rather than S3.** `doctor` has a check for exactly this failure and it was
+GREEN throughout: `✓ cross-repo edges resolve  4 edges, 0 missing, 0 outside-allowlist`.
+Meanwhile all 7 undiscovered edges resolved `{ok:false, reason:"missing"}` — they pointed at
+`~/.hermes/hermes-agent`, a repo absent from the machine, through a `../../../` that lands in
+`~/Documents` rather than `~/`, for an integration removed around 2026-09-02. The count stayed
+at `4 edges` after the file was deleted, which is how the gap was confirmed.
+
+So this is not "a check that is missing". It is `rule:discernment-checks` §2 and
+`rule:enforcement-watches-itself` together: **"found nothing" and "looked at nothing" rendered
+identically**, and the one that was true read as a pass. A reviewer trusting that line would
+have concluded the tree's cross edges were healthy.
+
+**FIXED, same day.** Two changes, both in this entry's own terms:
+
+1. `lib/edges/cross-repo.mjs` — the walk no longer `return`s after pushing a found sidecar. A
+   sidecar marks a participating directory, not a subtree boundary.
+2. `cli.mjs` `checkCrossRepo` — now returns `sidecars` and `unreadable` alongside the edge
+   counts, and doctor leads its detail line with the CORPUS:
+   `✓ cross-repo edges resolve  2 sidecar file(s) scanned — 4 edges, 0 missing, 0 outside-allowlist`.
+   An `unreadable` sidecar now FAILS the check rather than being skipped in silence — a check
+   declining to look must never render as a pass.
+
+**Verified against the real tree, not only fixtures.** The deleted
+`astro-studio/.propagates-cross.yml` was restored from `b91f494` and `checkCrossRepo` re-run
+over the hub:
+
+| | sidecars | edges | missing | doctor |
+|---|---|---|---|---|
+| before the fix | *(not reported)* | 4 | 0 | ✓ green |
+| after the fix | 3 | 11 | **7** | ✗ red, naming all 7 |
+
+The same tree, the same file: a silent green became a correct red. That comparison is the
+evidence, because the edge count *alone* did not move once the offending file was deleted —
+`2 sidecars, 4 edges, 0 missing` looks identical before and after, and only the corpus figure
+distinguishes them. Which is the whole point of adding it.
+
+**Guards, 4 of them** (`tests/unit/cross-repo.test.mjs`, `tests/cli/cross-doctor.test.mjs`):
+nesting is discovered; nesting is discovered at `maxDepth` 2 AND 5, so a future "fix" that only
+widens the bound still fails; `checkCrossRepo` reaches the nested sidecar and reports
+`sidecars === 2`; an unparseable sidecar counts as `unreadable`, never as clean. All four were
+written FIRST and confirmed red on the old code. Re-mutating the `return` back turns exactly
+the three nesting guards red and leaves the orthogonal `unreadable` one green.
+
 ### N67 · `rotted-citation` cannot tell a live citation from a recorded supersede — **S3** — **OPEN**
 
 Found 2026-09-10 while fixing the very thing it reports, in `Vipin Kaushik`.
