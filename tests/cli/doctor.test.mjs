@@ -58,11 +58,11 @@ function driftLine(id, overrides = {}) {
  * writes metrics.jsonl every run, so without this every test invocation
  * would append to the real production metrics.jsonl.
  */
-function runDoctor(root, stateDir = root) {
+function runDoctor(root, stateDir = root, extraEnv = {}) {
   return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir },
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, ...extraEnv },
   });
 }
 
@@ -453,7 +453,14 @@ test("doctor FAILS when an ARMED monitor has gone quiet, and names how long", as
   try {
     await armMonitor(root);
     await seedMonitorLog(root, 6 * 60 * 60 * 1000); // 6h, against a 30m interval
-    const result = runDoctor(root);
+    // Pin the wake stamp older than the run, or this fixture measures the HOST
+    // machine's sleep history instead of its own seeded log: the freshness check
+    // takes its verdict on awake-elapsed, so a laptop that woke 20 minutes ago
+    // makes a genuinely dead 6h-quiet monitor read as fine. Found the day
+    // sleep-awareness landed — this test went green for the wrong reason.
+    const result = runDoctor(root, root, {
+      PROPAGATE_WAKE_MS: String(Date.now() - 7 * 60 * 60 * 1000),
+    });
     const out = strip(result.stdout + result.stderr);
     // Assert the CHECK LINE, never the process exit code: this fixture fails
     // doctor for unrelated reasons (makeWorkspace writes no ledger .md), so
@@ -463,6 +470,32 @@ test("doctor FAILS when an ARMED monitor has gone quiet, and names how long", as
       out,
       /✗ monitor is running on schedule[^\n]*\d/,
       "the failure must quantify the staleness on its own line, not just assert it",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("doctor PASSES an armed monitor whose whole quiet stretch was spent asleep", async () => {
+  // The other half of the check above, and the reason it exists: launchd does
+  // not fire a StartInterval through sleep, so the SAME 6h gap is a dead agent
+  // when the machine was awake and nothing at all when it was not. Before
+  // 2026-09-14 the check saw only wall-clock and failed the first `doctor` of
+  // every morning — a daily false alarm on a probe whose whole value is being
+  // believed the day it is right.
+  const { root } = await makeWorkspace([driftLine("001")]);
+  try {
+    await armMonitor(root);
+    await seedMonitorLog(root, 6 * 60 * 60 * 1000); // identical fixture to above
+    const result = runDoctor(root, root, {
+      PROPAGATE_WAKE_MS: String(Date.now() - 5 * 60 * 1000), // woke 5 min ago
+    });
+    const out = strip(result.stdout + result.stderr);
+    assert.match(out, /✓ monitor is running on schedule/, `probe must pass:\n${out}`);
+    assert.match(
+      out,
+      /✓ monitor is running on schedule[^\n]*awake/,
+      "a pass that was decided by sleep must SAY so — otherwise it is indistinguishable from a monitor that simply ran",
     );
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
