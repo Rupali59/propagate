@@ -183,9 +183,17 @@ import {
 export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
   const repos = discoverCrossReposSync(searchRoots);
   let edges = 0, missing = 0, outsideAllowlist = 0;
+  // N68: report the CORPUS, not only the verdict. `0 missing` over a corpus
+  // that was silently short is indistinguishable from `0 missing` over the
+  // whole tree, and for a month it was the former — the walk stopped at the
+  // first sidecar it found, hiding 7 dead edges one directory deeper. Saying
+  // how many sidecar files were opened, and how many could not be, is what
+  // makes "found nothing" and "looked at nothing" different outputs
+  // (rule:discernment-checks §2).
+  let sidecars = 0, unreadable = 0;
   for (const repo of repos) {
     let e;
-    try { e = loadCrossRepoSync(repo.root); } catch { continue; }
+    try { e = loadCrossRepoSync(repo.root); sidecars++; } catch { unreadable++; continue; }
     const targets = [
       ...e.pushEdges.flatMap((p) => p.affects.map((a) => a.path)),
       ...e.pullEdges.map((p) => p.watch),
@@ -197,7 +205,7 @@ export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
       else if (r.reason === "outside-partner" || r.reason === "not-contract") outsideAllowlist++;
     }
   }
-  return { edges, missing, outsideAllowlist };
+  return { edges, missing, outsideAllowlist, sidecars, unreadable };
 }
 import { discoverWorkspacesSync, isWorkspaceMarker, liveLedgerCandidates } from "./lib/core/discovery.mjs";
 import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS, migrateLegacyState } from "./lib/core/setup.mjs";
@@ -722,7 +730,12 @@ async function doctor() {
     } catch {
       allowlistConfigured = false;
     }
-    const crossDetail = `${x.edges} edges, ${x.missing} missing, ${x.outsideAllowlist} outside-allowlist`;
+    // N68: name the corpus first. A verdict over an unstated corpus is what let
+    // `0 missing` stand for a month while a whole sidecar went unopened.
+    const crossDetail =
+      `${x.sidecars} sidecar file(s) scanned` +
+      (x.unreadable ? `, ${x.unreadable} UNREADABLE` : "") +
+      ` — ${x.edges} edges, ${x.missing} missing, ${x.outsideAllowlist} outside-allowlist`;
     if (!allowlistConfigured && x.outsideAllowlist > 0 && x.missing === 0) {
       info(
         "cross-repo edges resolve",
@@ -730,7 +743,13 @@ async function doctor() {
           `Add partner_roots to $PROPAGATE_STATE_DIR/cross-allow.yml to enable these edges.`,
       );
     } else {
-      check("cross-repo edges resolve", x.missing === 0 && x.outsideAllowlist === 0, crossDetail);
+      // `unreadable` fails too: a sidecar that could not be parsed is the check
+      // declining to look, and a decline must never render as a pass.
+      check(
+        "cross-repo edges resolve",
+        x.missing === 0 && x.outsideAllowlist === 0 && x.unreadable === 0,
+        crossDetail,
+      );
     }
     // G7: every fired row must carry a normalized `partner` join key.
     //

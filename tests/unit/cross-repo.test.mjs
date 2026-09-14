@@ -107,6 +107,56 @@ test("discoverCrossReposSync finds repos with a cross file only", () => {
   assert.deepEqual(found.map((r) => r.name), ["RepoA"]);
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// N68. The walk used to `return` the moment it found a cross sidecar, so a
+// nested one was unreachable at ANY maxDepth. Measured 2026-09-14:
+// `Vipin Kaushik/.propagates-cross.yml` exists, so the walk stopped there and
+// `Vipin Kaushik/astro-studio/.propagates-cross.yml` — 7 declared edges, every
+// one resolving {ok:false, reason:"missing"} — was never enumerated. Meanwhile
+// doctor printed `✓ cross-repo edges resolve  4 edges, 0 missing`.
+//
+// That is the failure this whole file exists to prevent, one level up: not a
+// missing check, but a check whose CORPUS was silently short. "Found nothing"
+// and "looked at nothing" rendered identically and the false one read as a
+// pass (rule:discernment-checks §2, rule:enforcement-watches-itself).
+// ─────────────────────────────────────────────────────────────────────────
+
+test("a cross sidecar nested under another is still discovered (N68)", () => {
+  const parent = mkdtempSync(path.join(os.tmpdir(), "xnest-"));
+  const outer = path.join(parent, "Workspace");
+  const inner = path.join(outer, "project");
+  mkdirSync(inner, { recursive: true });
+  writeFileSync(path.join(outer, ".propagates-cross.yml"), "platform_contracts: []\n");
+  writeFileSync(path.join(inner, ".propagates-cross.yml"), "platform_contracts: []\n");
+
+  const found = discoverCrossReposSync([parent]);
+  assert.deepEqual(
+    found.map((r) => r.name).sort(),
+    ["Workspace", "project"],
+    "a sidecar marks a participating directory, not a subtree boundary — stopping at the outer one hides every edge declared beneath it",
+  );
+});
+
+test("nesting is discovered regardless of maxDepth — it was never a depth bug (N68)", () => {
+  const parent = mkdtempSync(path.join(os.tmpdir(), "xnestd-"));
+  const outer = path.join(parent, "Workspace");
+  const inner = path.join(outer, "project");
+  mkdirSync(inner, { recursive: true });
+  writeFileSync(path.join(outer, ".propagates-cross.yml"), "platform_contracts: []\n");
+  writeFileSync(path.join(inner, ".propagates-cross.yml"), "platform_contracts: []\n");
+
+  // Both are well inside the default bound. Raising it changed nothing before
+  // the fix, which is how the early `return` was distinguished from a depth
+  // limit — worth pinning so a future "fix" that only widens maxDepth fails.
+  for (const depth of [2, 5]) {
+    assert.equal(
+      discoverCrossReposSync([parent], depth).length,
+      2,
+      `maxDepth ${depth} must find both; this was never a depth problem`,
+    );
+  }
+});
+
 test("crossCorrelationId is order-independent", () => {
   const parent = mkdtempSync(path.join(os.tmpdir(), "xcorr-"));
   const f1 = path.join(parent, "a.ts"); writeFileSync(f1, "1");
