@@ -61,7 +61,7 @@ column; without it the metric is decoration.
 | Metric | Type | Expectation (the alert) | Catches |
 |---|---|---|---|
 | `workspaces.discovered` | gauge | **≥ 1 always**; any drop ≥50% run-over-run | N7 · discovery break |
-| `plist.watchpaths` | gauge | **≥ workspaces.discovered**; never 0 | **N14** · the init wipe |
+| `plist.watchpaths` | gauge | **== 0** — INVERTED 2026-08-14, see below | **N14** · the init wipe (historical) |
 | `state.tracked_files` | gauge | never drops >20% run-over-run | N13 · baseline loss |
 | `sidecars.loaded` / `.rejected` | counter | `rejected == 0` | N9 · schema rejection kills a sidecar |
 | `edges.declared` / `.enforced` | gauge | **equal**; the gap is the unenforced set | N6 · glob `kind: code` never fires |
@@ -88,6 +88,21 @@ Two of these would have paid for the whole exercise on their own.
 `close.calls` sitting at **0 for months** is the entire missing-close-path story in
 one number. `plist.watchpaths` dropping to **0** is the incident I caused today,
 visible in one gauge.
+
+> **`plist.watchpaths` inverted on 2026-08-14 and this table did not follow it
+> until 2026-09-14.** The v1 watcher was retired that day, taking WatchPaths with
+> it (`lib/core/plist.mjs` `watchPathsFor`). `doctor` now asserts the OPPOSITE of
+> the row above — `lib/report/doctor/discovery.mjs:146`: *"WatchPaths are retired,
+> so the correct content is NONE. Any entry is stale by construction."* For a
+> month the table demanded `never 0` for a gauge the code required to be 0, while
+> the live value sat at 0 and `doctor` passed. That is this file's own thesis
+> turned on itself: a documented expectation nothing enforced, reading as
+> machine-checked. The paragraph above is kept as it was written — it is a true
+> record of 2026-08-13 — but it describes a world with a watcher in it.
+>
+> The edge that caught it is `lib/report/metrics.mjs -> docs/OBSERVABILITY.md`,
+> declared for exactly this and DIVERGED the whole time. It was found by draining
+> the worklist, not by reading the file.
 
 ## 2 · Events — discrete, attributed, and *expected to be rare*
 
@@ -168,7 +183,7 @@ something fires a lot and you need to know why, fast.
 | N11 `../` breaks on move | `downstream.unresolved` step change — designed, not built | M |
 | N12 `Affects:` parses to nothing | `decisions.with_tokens == decisions.entries` — **built**, asserted every `doctor` run | M |
 | N13 state not scoped | `state.tracked_files` — **recorded** every run, but **uncalibrated**: no run-over-run history yet to set the >20% drop threshold against; `state.baseline_changed` event still designed only | E+M |
-| **N14 plist not scoped** | `plist.watchpaths >= workspaces.discovered` — **built**, asserted; `plist.regenerated` event still designed only | E+M |
+| **N14 plist not scoped** | **MOOT 2026-08-14** — the v1 watcher was retired and WatchPaths with it, so the defect has no surface left. `plist.watchpaths` is still recorded and is now asserted `== 0` by `doctor`'s inline check (`lib/report/doctor/discovery.mjs`), the inverse of the original. It is NOT in `EXPECTATIONS`; `plist.regenerated` was never built and now never will be | E+M |
 | **N17** `pathProblems` never incremented | **RESOLVED 2026-08-13** (docs/ISSUES.md), before this metrics work started. `sidecars.problems` — **recorded** every run (uncalibrated: no basis yet for what count is normal) | M |
 | **N18** source keys never validated to exist | none — `doctor` validates downstream paths (N17's fix) but never stats a sidecar's `sources:` keys. No metric, no check, nothing in this build touches it | — |
 | **N19** 39 rows terminal with no Transition | none — `rows.closed_without_transition` is designed in §1 but not built; would need a schema-level pass over every ledger this session did not do | M (planned) |
@@ -219,10 +234,14 @@ Cheapest first, and each is independently useful.
      `ledger.unknown_types/.malformed`, `rows.open`, `decisions.entries/.with_tokens`,
      `plist.watchpaths`, `state.tracked_files`, `doctor.duration_ms`,
      `doctor.problems`) and appends one record per run.
-   - The five equality/non-zero expectations from §1 that needed no rate-style
-     guessing (N7, N12, N1, N9, N14) are asserted every run, each carrying the
-     concrete incident that motivated its threshold (`EXPECTATIONS` in
-     `lib/report/metrics.mjs`) — not invented numbers (GOTCHAS G16).
+   - The equality/non-zero expectations from §1 that needed no rate-style
+     guessing are asserted every run, each carrying the concrete incident that
+     motivated its threshold (`EXPECTATIONS` in `lib/report/metrics.mjs`) — not
+     invented numbers (GOTCHAS G16). **Derive the count, never restate it**
+     (`rule:state-and-decisions`: a count in a doc rots faster than anything
+     else in it) — `doctor`'s `# Metrics` section prints `N checked`. This line
+     read "The five … (N7, N12, N1, N9, N14)" until 2026-09-14; by then it was
+     **8**, and N14 had left the table entirely when the watcher was retired.
    - Six more metrics are recorded but explicitly marked `UNCALIBRATED`
      (`rows.open`, `doctor.duration_ms`, `sidecars.loaded`, `sidecars.problems`,
      `ledger.malformed`, `state.tracked_files`) — no threshold exists for them
