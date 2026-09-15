@@ -30,8 +30,20 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false          # one version failing must not hide the others
+      # TRIMMED FOR QUOTA, 2026-09-14 — the full matrix is NOT deleted, it is moved
+      # behind `workflow_dispatch`. Every push used to spend 5 jobs (3 here + 2 in
+      # curate-docs); it now spends 2, and the version-floor measurement above is one
+      # manual run away rather than a rewrite.
+      #
+      # 22 is the kept version because it is the measured floor: `fs.globSync`
+      # (cli.mjs:100) landed in 22, which is what `engines.node: >=22` rests on. Testing
+      # the floor catches a regression below it; testing 24 only catches one above it.
+      #
+      # Run the full matrix from the Actions tab (Run workflow) whenever `engines.node`
+      # is about to change, or when quota allows — that is the ONLY thing that re-measures
+      # the floor, and a floor asserted without a run is a guess.
       matrix:
-        node: ['20', '22', '24']
+        node: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["20", "22", "24"]') || fromJSON('["22"]') }}
     name: node ${{ matrix.node }}
     # 20 is the below-floor probe: its failure is the measurement, not a broken build.
     continue-on-error: ${{ matrix.node == '20' }}
@@ -145,8 +157,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Same quota trim as the job above, same restore path: full set on
+      # workflow_dispatch, floor-only otherwise.
       matrix:
-        node: ['22', '24']
+        node: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["22", "24"]') || fromJSON('["22"]') }}
     name: curate-docs node ${{ matrix.node }}
     steps:
       - uses: actions/checkout@v4
