@@ -84,6 +84,7 @@ export async function claimsCmd(argv = []) {
       `       propagate claims render <file> [--apply] [--json]\n` +
       `       propagate claims contradict <authored-file> [--json]\n` +
       `       propagate claims restate [--json]\n` +
+      `       propagate claims verdict [--apply] [--json]  < verdicts.json\n` +
       `       propagate claims answer <file> start [--json]\n` +
       `       propagate claims answer <file> end --run <id> --outcome <${RUN_OUTCOMES.join("|")}> [--reason ...] [--json]`;
     if (json) console.log(JSON.stringify({ error: msg }));
