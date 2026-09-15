@@ -84,6 +84,7 @@ export async function claimsCmd(argv = []) {
       `       propagate claims render <file> [--apply] [--json]\n` +
       `       propagate claims contradict <authored-file> [--json]\n` +
       `       propagate claims restate [--json]\n` +
+      `       propagate claims verdict [--apply] [--json]  < verdicts.json\n` +
       `       propagate claims answer <file> start [--json]\n` +
       `       propagate claims answer <file> end --run <id> --outcome <${RUN_OUTCOMES.join("|")}> [--reason ...] [--json]`;
     if (json) console.log(JSON.stringify({ error: msg }));
@@ -579,8 +580,20 @@ async function restateSub(rest, json) {
     console.log(JSON.stringify({
       corpus: status.corpusCount,
       facts: status.factCount,
-      counts: { judged: status.judged.length, unjudged: status.unjudged.length, unpaired: status.unpaired.length },
+      counts: {
+        judged: status.judged.length,
+        unjudged: status.unjudged.length,
+        unpaired: status.unpaired.length,
+        // The three unpaired buckets are reported separately because "could not
+        // be paired" and "still needs a decision" are different facts, and only
+        // the second is outstanding work.
+        unpaired_judged: status.unpairedJudged.length,
+        unpaired_awaiting: status.unpairedAwaiting.length,
+        unpaired_undispositionable: status.unpairedUndispositionable.length,
+      },
       unpaired: status.unpaired,
+      unpaired_awaiting: status.unpairedAwaiting,
+      unpaired_undispositionable: status.unpairedUndispositionable,
       questions: asRestateQuestions(status),
     }, null, 2));
     return 0;
@@ -592,20 +605,40 @@ async function restateSub(rest, json) {
       status.judged.length + " judged · " + status.unjudged.length + " awaiting judgment · " +
       status.unpaired.length + " unpaired",
   );
-  if (status.unpaired.length > 0) {
+  if (status.unpairedJudged.length > 0) {
     console.log(
-      "\n  " + YELLOW + "unpaired (" + status.unpaired.length + ")" + RESET +
+      "\n  " + DIM + "unpaired, dispositioned (" + status.unpairedJudged.length + ")" +
+        " — checked and ruled on; not outstanding work" + RESET,
+    );
+  }
+  if (status.unpairedAwaiting.length > 0) {
+    console.log(
+      "\n  " + YELLOW + "unpaired, awaiting a verdict (" + status.unpairedAwaiting.length + ")" + RESET +
         " " + DIM + "— could not be checked, not a pass" + RESET,
     );
-    for (const u of status.unpaired) {
+    for (const u of status.unpairedAwaiting) {
       console.log("    " + DIM + u.rule + RESET + "  " + shortPath(u.file) + ":" + u.line);
       console.log("      " + u.reason);
     }
   }
-  if (status.unjudged.length === 0) {
+  if (status.unpairedUndispositionable.length > 0) {
+    // Named apart from "awaiting" on purpose: no verdict can be written for
+    // these until the RULE is fixed, so listing them as pending judgment would
+    // advertise work nobody can do.
+    console.log(
+      "\n  " + YELLOW + "unpaired, no derived fact (" + status.unpairedUndispositionable.length + ")" + RESET +
+        " " + DIM + "— the rule is missing or unreadable; fix the rule, not the claim" + RESET,
+    );
+    for (const u of status.unpairedUndispositionable) {
+      console.log("    " + DIM + u.rule + RESET + "  " + shortPath(u.file) + ":" + u.line);
+      console.log("      " + u.reason);
+    }
+  }
+  if (status.unjudged.length === 0 && status.unpairedAwaiting.length === 0) {
     console.log("\n  nothing awaiting judgment.");
     return 0;
   }
+  if (status.unjudged.length === 0) return 0;
   console.log("\n  " + YELLOW + "awaiting judgment (" + status.unjudged.length + ")" + RESET);
   for (const p of status.unjudged) {
     console.log("    " + DIM + p.rule + RESET + "  " + shortPath(p.file) + ":" + p.claim.startLine);

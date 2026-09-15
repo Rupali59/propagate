@@ -309,3 +309,69 @@ test("deriveRuleFact returns null, not a throw, for an unreadable rule file", ()
   const fact = deriveRuleFact({ id: "ghost", __file: "/definitely/not/here.md" });
   assert.equal(fact, null);
 });
+
+// ── the unpaired drain: identity existed, nothing consumed it ──────────────
+
+test("an unpaired entry carrying a verdict moves OUT of awaiting — the lane converges", async () => {
+  // THE DEFECT THIS PINS. `unpairedSha` was added so an unpairable entry could
+  // be dispositioned, and `claims-verdict.test.mjs` asserts it yields "a valid
+  // block_sha, so a verdict can key to it" — but `restateStatus` built
+  // `judgedByKey` and consulted it for `pairs` only, returning `unpaired`
+  // verbatim. So every verdict written for an unpairable entry was inert and
+  // the same entries re-reported forever: the lane could not converge, which
+  // is the one thing the hash was introduced to fix.
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "code-review-graph", "Run code-review-graph status first.");
+    const file = f.claudeMd("headed", "# X\n\n## MCP: code-review-graph\n\nSee `rule:tool-priority`.\n");
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    const { unpaired } = restatementPairs(rc.referencedRestatements, rc.rules);
+    assert.equal(unpaired.length, 1, "fixture must produce exactly one unpairable entry");
+    const u = unpaired[0];
+    assert.match(u.against, /^[0-9a-f]{64}$/, "the entry must expose the fact sha a verdict keys to");
+
+    const readClaims = async () => ({
+      claims: [{ file, block_sha: u.pairSha, against: u.against, finding: "unrelated", ts: "2026-01-01T00:00:00.000Z", claim_id: "01A" }],
+      storeExists: true,
+    });
+    const status = await restateStatus(rc.referencedRestatements, rc.rules, { readClaims });
+    assert.equal(status.unpairedJudged.length, 1, "a recorded verdict must disposition the entry");
+    assert.equal(status.unpairedAwaiting.length, 0, "and it must stop being reported as outstanding work");
+    assert.equal(status.unpairedJudged[0].verdict.finding, "unrelated");
+    assert.equal(status.unpaired.length, 1, "`unpaired` stays the FULL set — that question did not change");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("the same entry with an EMPTY store stays awaiting — proving the test above measures something", async () => {
+  // Without this, the assertion above would also pass on a build where every
+  // unpaired entry was classed judged regardless of the store.
+  // `rule:discernment-checks` §1.
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "code-review-graph", "Run code-review-graph status first.");
+    f.claudeMd("headed", "# X\n\n## MCP: code-review-graph\n\nSee `rule:tool-priority`.\n");
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    const status = await restateStatus(rc.referencedRestatements, rc.rules, { readClaims: NO_CLAIMS });
+    assert.equal(status.unpairedAwaiting.length, 1, "no verdict means still awaiting one");
+    assert.equal(status.unpairedJudged.length, 0);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("an entry with no derived fact is UNDISPOSITIONABLE, not awaiting — a broken rule is not pending work", async () => {
+  // `validateClaim` refuses a `finding` without an `against`, and there is no
+  // fact to be against when the rule is missing. Folding these into "awaiting
+  // judgment" would advertise work that cannot be done — the two-states-worn-
+  // as-one failure (`rule:discernment-checks` §2) one level up.
+  const status = await restateStatus(
+    [{ rule: "no-such-rule", file: "/tmp/nonexistent/CLAUDE.md", line: 1 }],
+    [],
+    { readClaims: NO_CLAIMS },
+  );
+  assert.equal(status.unpairedUndispositionable.length, 1);
+  assert.equal(status.unpairedAwaiting.length, 0, "must NOT be advertised as awaiting a verdict");
+  assert.equal(status.unpairedUndispositionable[0].against, null, "no fact means nothing to judge against");
+});

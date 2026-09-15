@@ -301,6 +301,13 @@ them stays in `cli.mjs`.
 | `rollup --check` | Read-only. **Four exit codes carrying three distinct facts plus a pass:** `0` current · `1` stale (exists, tree moved past it) · `2` could-not-run (**absent** — nothing to check; a fresh clone hits this by construction) · `3` hand-edited. `1` and `2` were conflated until 2026-08-31, and 1336 tests passed anyway because they asserted the message rather than the code. |
 | `rollup --force` | Discard a hand edit and regenerate. NOT a safety flag — it enables the write rather than promising to withhold it — so `rule:safety-flag-needs-a-test` governs `--dry-run`, not this. |
 | `claims check` | Five **deterministic** checks over the declared-edge corpus: expired dates, literals against declared downstreams, footer-vs-newest-inline date, rotted citations (self-line, dead branch, dead path), and `concepts:` tokens that can never fire. `lib/claims/check.mjs` may import no model client and make no network call, and a test asserts that against the module's own source. It reports CANDIDATES — the judgment step is a later lane, deliberately. |
+| `claims judge <file>` | Partition one document's blocks against the verdict store: `judged` / `unjudged` / `unanswerable` / `structure` / `orphaned`. Identity IS the sha of the normalised block text, so editing a block re-opens it automatically — no staleness field. `orphaned` is the store's decay mode: verdicts whose block no longer exists. |
+| `claims answer <file> start` | Record that an answering attempt BEGAN, returning a run id. |
+| `claims answer <file> end --run <id> --outcome <o>` | Close that attempt with what it concluded. A run that starts and never ends reads as `crashed`, which is what makes `unanswerable` distinguishable from never-attempted (`rule:discernment-checks` §2). |
+| `claims restate` | Hold a rule's own text against the copy a `CLAUDE.md` restates — the **excused** set (cites AND restates). Poses questions and writes nothing. Entries whose fingerprint lands on a heading, table or comment are reported UNPAIRED with a reason, never silently judged. |
+| `claims verdict [--apply]` | **The write path** — the only claims subcommand that mutates the store. Reads a JSON array on stdin. Dry-run by default; one invalid row refuses the WHOLE batch, because an append-only store cannot be half-written. |
+| `claims contradict <authored-file>` | Hold an authored document against a derived fact. |
+| `claims render <file> [--apply]` | Write each block's recorded verdict beside it in the document. |
 | `check --changed` | Default when no range/staged flag given: working tree + staged vs HEAD, unioned. |
 | `check --range <a>..<b>` | Explicit git range (for CI or a hook). |
 | `check --staged` | Staged files only (pre-commit use). |
