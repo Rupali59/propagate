@@ -587,6 +587,29 @@ unexercised count, so the unknown is at least visible. Making it *decidable* nee
 per-rule probe — a known-positive sample of how each claim is actually phrased — which
 is judgment work, one rule at a time, and is what this issue tracks.
 
+**2026-09-15 — Phase 2a judged 15 restatements and this issue is UNCHANGED by it.** That
+is worth writing down, because the plan that built the restate lane asserted it would close
+N35 and the assertion was wrong in a way only measurement caught.
+
+`claims restate`'s corpus is `checkRules`'s `referencedRestatements` — entries that both
+CITE a rule and restate it. An unexercised rule is by definition one with `restated 0,
+referenced 0`. **The two sets are disjoint by construction**, so no amount of work in this
+lane can ever reach the rules this issue is about. All 15 verdicts landed on four rules that
+were already `firing`: `tool-priority` (12 restatements), `secrets-source-of-truth` (3),
+`environment-vocabulary` and `state-and-decisions` (1 each).
+
+The count has moved on its own, and the membership churned — derive it, never trust this
+line (`propagate rules list`). At filing it was 7; on 2026-09-15 it is **5**:
+`adversarial-review-reads-the-ledger`, `browser-only-when-asked`,
+`enforcement-watches-itself`, `no-waiting-on-deploys`, `safety-flag-needs-a-test`.
+Four named at filing have since become adopted or firing — and `enforcement-watches-itself`,
+which was NOT on the original list, has since joined it. A rule about checks that exempt
+themselves, itself unexercised, is the joke writing itself.
+
+What would actually close this is still what the entry already says: a per-rule known-positive
+probe. Phase 2b (the silent set — restates WITHOUT citing) is nearer to it, since it drops the
+citation requirement, but it still cannot see a rule that nothing restates at all.
+
 **Do not "fix" this by widening fingerprints speculatively.** The opposite error is
 already recorded: `nextjs-dev-server-port` matched the helper script's name and produced
 7 false positives (N34). Widen only against a real sample.
@@ -1841,7 +1864,7 @@ upstream edge ids that were bypassed), and surface it — `status`/`graph` shoul
 edge whose last verification was forced, because that is a weaker claim than an ordinary
 CLEAN and currently renders identically.
 
-### N71 · `NEVER_VERIFIED` is reported for edges that were examined and deferred, and the remediation offered is wrong for all of them — **S1** — **OPEN**
+### N71 · `NEVER_VERIFIED` is reported for edges that were examined and deferred, and the remediation offered is wrong for all of them — **S1** — **RESOLVED 2026-09-15**
 
 Found 2026-09-14, after it caused a full round of duplicated work.
 
@@ -1893,9 +1916,107 @@ and parked" rendering identically.** It is the third instance in this file.
 
 **Fix.** Split the count and the advice. "Never verified" must mean *no event of any kind*;
 edges carrying a `deferred` flag want their own line — `31 deferred (examined, not resolved)
-— see \`why <edge>\`` — and must not be offered `bootstrap`, which cannot touch them. If
+— see \`why <edge>\`` — and must not be offered `bootstrap`.
+
+**CORRECTED 2026-09-15 — this sentence used to end "which cannot touch them", and that was
+false.** `bootstrap --baseline-all` filtered on `state === "NEVER_VERIFIED"` and the word
+`deferred` appeared nowhere in `lib/edges/bootstrap.mjs`, so it could overwrite a deliberate
+defer with a baseline. That is the S1 fixed in #14 — filed a day later, by someone who went
+looking rather than believing this line. An issue asserting a safety property the code does
+not enforce is `rule:safety-flag-needs-a-test` one level up: the unverified claim was in the
+tracker instead of in a flag, and it is *more* dangerous there, because a flag at least gets
+read at the call site. If
 splitting the rendering is deferred, the minimum is to stop printing remediation that is
 provably wrong for every edge in the bucket.
 
 **Test it can fail:** defer an edge in a fixture, then assert `status` does not describe it
 as never-verified and does not recommend `bootstrap` for it.
+
+---
+
+**RESOLVED.** Two commits, because the defect had two halves and only the first was visible
+from this entry.
+
+| | |
+|---|---|
+| `d167be6` (#13) | `status` splits the count: `316 never verified · 33 deferred`, and stops offering `bootstrap` where it cannot help |
+| `6da8b72` (#14) | `bootstrap` genuinely cannot touch a deferred edge — the split happens **before** any policy branch, so no future flag re-opens the hole |
+
+The second is the one this entry's own text argued was unnecessary. Reading the guard at the
+call site, rather than the sentence describing it, is what found it.
+
+### N72 · The restatement pairer anchors on the heading, so real restatements are never examined — **S2** — **OPEN**
+
+Found 2026-09-15, while judging the 15 entries Phase 2a handed over.
+
+`checkRules` reports the line where a rule's fingerprint matched. For the `tool-priority`
+fingerprint that line is very often a section title — `## MCP: code-review-graph` — or the
+HTML comment above it. `splitBlocks` correctly classes both as structure rather than a
+claim, so `findClaimBlock` returns no block and the entry is reported UNPAIRED.
+
+That reporting is honest. The problem is what it hides.
+
+```
+15 corpus entries
+   5  paired and judged
+  10  unpaired  ← 9 anchored on a heading or comment, 1 a genuine filename false positive
+```
+
+**Two of those ten carry a real restatement in the paragraph directly below the anchor**,
+which the lane never read:
+
+| file | what sits 2 lines under the anchor |
+|---|---|
+| `Rupali/Obsidian/CLAUDE.md` | "this repo has the `code-review-graph` **pre-commit** git hook installed, so its graph refreshes on commit — not on file change, and never for uncommitted work" |
+| `Vipin Kaushik/VipinKaushik/CLAUDE.md` | "run `code-review-graph status` to check the built commit is an ancestor of HEAD before trusting it" |
+
+Both restate the rule, both are accurate, and both were ruled `consistent` **only because a
+human read the file**. Effective automated coverage of this corpus is 5 of 15, and nothing
+in the output distinguishes "the anchor was structure" from "this file does not restate the
+rule" — which is the same two-states-worn-as-one shape as N71 and N68
+(`rule:discernment-checks` §2), now in the pairer.
+
+The severity is in the direction of the error. An unpairable entry is reported and visible;
+a real restatement sitting under it is **invisible**, and would stay invisible through any
+future drift.
+
+**Fix.** `findClaimBlock` should walk forward from a structure anchor to the next judgeable
+block rather than giving up — a heading is a *label for* the prose beneath it, so that prose
+is the natural claim candidate. Bound the walk (one or two blocks) so it cannot drag in an
+unrelated section.
+
+**Test it can fail:** a fixture whose `## Heading <fingerprint>` is followed by a paragraph
+that restates the rule; assert it PAIRS and that the paired block is the paragraph, not the
+heading. Then mutate the walk away and confirm it goes back to unpaired.
+
+### N73 · A verdict written for an unpairable entry was inert — **S2** — **RESOLVED 2026-09-15**
+
+Found 2026-09-15 by grepping for callers of a function that had just been built.
+
+`unpairedSha` was added in #16 so an entry the pairer cannot pair could still be
+dispositioned, and `tests/unit/claims-verdict.test.mjs` asserts it yields "a valid
+`block_sha`, so a verdict can key to it". **Nothing ever keyed one.** `restateStatus` built
+`judgedByKey`, consulted it for `pairs`, and returned `unpaired` verbatim — so every verdict
+written for an unpairable entry was a no-op, and the same entries would re-report on every
+run forever. The lane could not converge, which is the single thing the hash was introduced
+to fix.
+
+Identity built, unit-tested, no consumer: `rule:enforcement-watches-itself`. The tests passed
+identically whether or not a consumer existed, because they tested the hash rather than the
+wiring. **Grepping for callers of what you just built is the check that catches this shape,
+and it costs one command** — the same move that found the dead `radar.mjs` and the
+zero-caller filesystem walk recorded in that rule.
+
+Caught before it cost anything: the defect was found while preparing the first 15 verdicts,
+so no inert verdict was ever written.
+
+**Fixed.** Each unpaired entry now carries `against` (the derived fact's sha), and
+`restateStatus` splits unpaired into `judged` / `awaiting` / `undispositionable` — the third
+because an entry whose rule will not load has no fact, `validateClaim` refuses a `finding`
+without an `against`, and advertising it as "awaiting judgment" would promise work nobody can
+do.
+
+**Guards** (`tests/unit/claims-restate.test.mjs`): a verdict moves an entry out of awaiting;
+the same entry with an EMPTY store stays awaiting (so the first test measures something); a
+fact-less entry is undispositionable rather than awaiting. Mutation-checked — disabling the
+lookup fails exactly one test with the stated message, and the revert is byte-identical.
