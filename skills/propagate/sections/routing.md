@@ -17,6 +17,13 @@ every command below: `docs/REFERENCE.md`.
 | `graph` | What depends on what, and in what order should I fix it? | See Worklist semantics below. `--all`, `--node <path>`, `--html out.html`. |
 | `drain` | What's open, grouped for closing? | Bare = read-only list grouped by `correlation_id`. Writing closes is the `reconcile` skill's job, not this one's. |
 | `rules <list\|check\|selftest\|promote>` | Does a `CLAUDE.md` restate a canonical rule instead of referencing it? | See Rules check below. |
+| `claims check` | Which declared claims look rotten? | Five DETERMINISTIC checks — expired dates, literals vs downstreams, footer-vs-inline dates, rotted citations, dead `concepts:` tokens. Reports candidates; it does not judge. |
+| `claims judge <file>` | Which blocks of this document has anyone ruled on? | Partitions into judged / unjudged / unanswerable / structure / orphaned. `unanswerable` means a recorded attempt failed — not that nobody tried. |
+| `claims restate` | Does a `CLAUDE.md` that CITES a rule still match it? | The excused set: cites AND restates. Poses questions; records nothing. The silent set (restates without citing) is not covered yet. |
+| `claims verdict [--apply]` | Record the answers. | **The only claims subcommand that writes.** Dry-run by default; reads a JSON array on stdin; one bad row refuses the whole batch. Append-only, so a later human verdict supersedes an earlier agent one rather than overwriting it. |
+| `claims answer <file> start\|end` | Record that an answering attempt happened. | Separate from what it concluded. A `start` with no `end` reads as crashed, which is how `unanswerable` is distinguished from never-attempted. |
+| `claims contradict <file>` | Does this authored doc disagree with a derived fact? | |
+| `claims render <file> [--apply]` | Write each block's verdict beside it in the document. | |
 | `registers` | Has a register grown past the point anyone opens it? | Read-only. Reports which `ISSUES.md` / `TODOS.md` / handover / `GOTCHAS.md` files are hot, which carry finished work that could rotate out, and which could not be read at all. **Gotchas never rotate** — a hazard does not expire. There is deliberately no writer: rotation is `git mv` into `archive/` plus an index line. `--json`, `--all`. |
 | `setup [--roots …]` | Install-time bootstrap, once per machine. | Writes `~/.propagate/config.yml`; exits non-zero unless discovery then finds ≥1 workspace. Safe to re-run. |
 | `init <dir>` | Scaffold an empty `.propagates.yml`. | Configures one directory, not the machine — `setup` is for that. |

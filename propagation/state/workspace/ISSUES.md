@@ -587,6 +587,29 @@ unexercised count, so the unknown is at least visible. Making it *decidable* nee
 per-rule probe — a known-positive sample of how each claim is actually phrased — which
 is judgment work, one rule at a time, and is what this issue tracks.
 
+**2026-09-15 — Phase 2a judged 15 restatements and this issue is UNCHANGED by it.** That
+is worth writing down, because the plan that built the restate lane asserted it would close
+N35 and the assertion was wrong in a way only measurement caught.
+
+`claims restate`'s corpus is `checkRules`'s `referencedRestatements` — entries that both
+CITE a rule and restate it. An unexercised rule is by definition one with `restated 0,
+referenced 0`. **The two sets are disjoint by construction**, so no amount of work in this
+lane can ever reach the rules this issue is about. All 15 verdicts landed on four rules that
+were already `firing`: `tool-priority` (12 restatements), `secrets-source-of-truth` (3),
+`environment-vocabulary` and `state-and-decisions` (1 each).
+
+The count has moved on its own, and the membership churned — derive it, never trust this
+line (`propagate rules list`). At filing it was 7; on 2026-09-15 it is **5**:
+`adversarial-review-reads-the-ledger`, `browser-only-when-asked`,
+`enforcement-watches-itself`, `no-waiting-on-deploys`, `safety-flag-needs-a-test`.
+Four named at filing have since become adopted or firing — and `enforcement-watches-itself`,
+which was NOT on the original list, has since joined it. A rule about checks that exempt
+themselves, itself unexercised, is the joke writing itself.
+
+What would actually close this is still what the entry already says: a per-rule known-positive
+probe. Phase 2b (the silent set — restates WITHOUT citing) is nearer to it, since it drops the
+citation requirement, but it still cannot see a rule that nothing restates at all.
+
 **Do not "fix" this by widening fingerprints speculatively.** The opposite error is
 already recorded: `nextjs-dev-server-port` matched the helper script's name and produced
 7 false positives (N34). Widen only against a real sample.
@@ -1841,7 +1864,7 @@ upstream edge ids that were bypassed), and surface it — `status`/`graph` shoul
 edge whose last verification was forced, because that is a weaker claim than an ordinary
 CLEAN and currently renders identically.
 
-### N71 · `NEVER_VERIFIED` is reported for edges that were examined and deferred, and the remediation offered is wrong for all of them — **S1** — **OPEN**
+### N71 · `NEVER_VERIFIED` is reported for edges that were examined and deferred, and the remediation offered is wrong for all of them — **S1** — **RESOLVED 2026-09-15**
 
 Found 2026-09-14, after it caused a full round of duplicated work.
 
@@ -1893,9 +1916,221 @@ and parked" rendering identically.** It is the third instance in this file.
 
 **Fix.** Split the count and the advice. "Never verified" must mean *no event of any kind*;
 edges carrying a `deferred` flag want their own line — `31 deferred (examined, not resolved)
-— see \`why <edge>\`` — and must not be offered `bootstrap`, which cannot touch them. If
+— see \`why <edge>\`` — and must not be offered `bootstrap`.
+
+**CORRECTED 2026-09-15 — this sentence used to end "which cannot touch them", and that was
+false.** `bootstrap --baseline-all` filtered on `state === "NEVER_VERIFIED"` and the word
+`deferred` appeared nowhere in `lib/edges/bootstrap.mjs`, so it could overwrite a deliberate
+defer with a baseline. That is the S1 fixed in #14 — filed a day later, by someone who went
+looking rather than believing this line. An issue asserting a safety property the code does
+not enforce is `rule:safety-flag-needs-a-test` one level up: the unverified claim was in the
+tracker instead of in a flag, and it is *more* dangerous there, because a flag at least gets
+read at the call site. If
 splitting the rendering is deferred, the minimum is to stop printing remediation that is
 provably wrong for every edge in the bucket.
 
 **Test it can fail:** defer an edge in a fixture, then assert `status` does not describe it
 as never-verified and does not recommend `bootstrap` for it.
+
+---
+
+**RESOLVED.** Two commits, because the defect had two halves and only the first was visible
+from this entry.
+
+| | |
+|---|---|
+| `d167be6` (#13) | `status` splits the count: `316 never verified · 33 deferred`, and stops offering `bootstrap` where it cannot help |
+| `6da8b72` (#14) | `bootstrap` genuinely cannot touch a deferred edge — the split happens **before** any policy branch, so no future flag re-opens the hole |
+
+The second is the one this entry's own text argued was unnecessary. Reading the guard at the
+call site, rather than the sentence describing it, is what found it.
+
+### N72 · The restatement pairer anchors on the heading, so real restatements are never examined — **S2** — **OPEN**
+
+Found 2026-09-15, while judging the 15 entries Phase 2a handed over.
+
+`checkRules` reports the line where a rule's fingerprint matched. For the `tool-priority`
+fingerprint that line is very often a section title — `## MCP: code-review-graph` — or the
+HTML comment above it. `splitBlocks` correctly classes both as structure rather than a
+claim, so `findClaimBlock` returns no block and the entry is reported UNPAIRED.
+
+That reporting is honest. The problem is what it hides.
+
+```
+15 corpus entries
+   5  paired and judged
+  10  unpaired  ← 9 anchored on a heading or comment, 1 a genuine filename false positive
+```
+
+**Two of those ten carry a real restatement in the paragraph directly below the anchor**,
+which the lane never read:
+
+| file | what sits 2 lines under the anchor |
+|---|---|
+| `Rupali/Obsidian/CLAUDE.md` | "this repo has the `code-review-graph` **pre-commit** git hook installed, so its graph refreshes on commit — not on file change, and never for uncommitted work" |
+| `Vipin Kaushik/VipinKaushik/CLAUDE.md` | "run `code-review-graph status` to check the built commit is an ancestor of HEAD before trusting it" |
+
+Both restate the rule, both are accurate, and both were ruled `consistent` **only because a
+human read the file**. Effective automated coverage of this corpus is 5 of 15, and nothing
+in the output distinguishes "the anchor was structure" from "this file does not restate the
+rule" — which is the same two-states-worn-as-one shape as N71 and N68
+(`rule:discernment-checks` §2), now in the pairer.
+
+The severity is in the direction of the error. An unpairable entry is reported and visible;
+a real restatement sitting under it is **invisible**, and would stay invisible through any
+future drift.
+
+**Fix.** `findClaimBlock` should walk forward from a structure anchor to the next judgeable
+block rather than giving up — a heading is a *label for* the prose beneath it, so that prose
+is the natural claim candidate. Bound the walk (one or two blocks) so it cannot drag in an
+unrelated section.
+
+**Test it can fail:** a fixture whose `## Heading <fingerprint>` is followed by a paragraph
+that restates the rule; assert it PAIRS and that the paired block is the paragraph, not the
+heading. Then mutate the walk away and confirm it goes back to unpaired.
+
+### N73 · A verdict written for an unpairable entry was inert — **S2** — **RESOLVED 2026-09-15**
+
+Found 2026-09-15 by grepping for callers of a function that had just been built.
+
+`unpairedSha` was added in #16 so an entry the pairer cannot pair could still be
+dispositioned, and `tests/unit/claims-verdict.test.mjs` asserts it yields "a valid
+`block_sha`, so a verdict can key to it". **Nothing ever keyed one.** `restateStatus` built
+`judgedByKey`, consulted it for `pairs`, and returned `unpaired` verbatim — so every verdict
+written for an unpairable entry was a no-op, and the same entries would re-report on every
+run forever. The lane could not converge, which is the single thing the hash was introduced
+to fix.
+
+Identity built, unit-tested, no consumer: `rule:enforcement-watches-itself`. The tests passed
+identically whether or not a consumer existed, because they tested the hash rather than the
+wiring. **Grepping for callers of what you just built is the check that catches this shape,
+and it costs one command** — the same move that found the dead `radar.mjs` and the
+zero-caller filesystem walk recorded in that rule.
+
+Caught before it cost anything: the defect was found while preparing the first 15 verdicts,
+so no inert verdict was ever written.
+
+**Fixed.** Each unpaired entry now carries `against` (the derived fact's sha), and
+`restateStatus` splits unpaired into `judged` / `awaiting` / `undispositionable` — the third
+because an entry whose rule will not load has no fact, `validateClaim` refuses a `finding`
+without an `against`, and advertising it as "awaiting judgment" would promise work nobody can
+do.
+
+**Guards** (`tests/unit/claims-restate.test.mjs`): a verdict moves an entry out of awaiting;
+the same entry with an EMPTY store stays awaiting (so the first test measures something); a
+fact-less entry is undispositionable rather than awaiting. Mutation-checked — disabling the
+lookup fails exactly one test with the stated message, and the revert is byte-identical.
+
+### N74 · The restatement walk pairs the FIRST judgeable block, which is often the citation — **S3** — **OPEN**
+
+Found 2026-09-16, immediately after N72's fix landed, by judging what it produced.
+
+N72 made `findClaimBlock` walk forward from a structure anchor to the next judgeable
+block. That raised coverage from 5 of 15 to 8 of 15. But it takes the FIRST judgeable
+block, and in this corpus the first block under a `## MCP: code-review-graph` heading
+is very often a pointer line rather than the restatement.
+
+Worked example, `Rupali/Obsidian/CLAUDE.md`:
+
+```
+## MCP Tools: code-review-graph          <- anchor (structure)
+See `rule:tool-priority` for general …   <- block the walk pairs: a CITATION
+Local: this repo has the `code-review-   <- the actual restatement, one block further
+graph` **pre-commit** git hook installed …
+```
+
+So the entry pairs, gets judged `unrelated` — correctly, *for that block* — and the
+real restatement below it remains unexamined. The verdict is not wrong; it is about
+the wrong text. That is a subtler failure than N72's, because the lane now reports
+the file as handled.
+
+**Not worth widening the bound.** Walking further would pair headings with
+arbitrary later prose, which N72's own fixture deliberately guards against. The fix
+is candidate SELECTION, not distance: among judgeable blocks within the bound,
+prefer the one whose text actually matches the rule's fingerprint most strongly,
+rather than the first one encountered. A bare `See rule:x.` line matches a
+fingerprint only incidentally.
+
+**Test it can fail:** a heading followed by a pointer line and THEN a restating
+paragraph must pair the paragraph. That fixture does not exist today — N72's
+fixtures all place the restatement first.
+
+### N75 · `plans --check` counts subagent plan-mode artifacts as authored plans — **S2** — **OPEN**
+
+Found 2026-09-16, the day `plans --check` was built, by running it on the real corpus.
+
+Of 11 post-template plans it flagged, **5 are `*-agent-<id>.md`** — files written
+automatically when a subagent inherits plan mode and drafts a plan it never executes.
+One more is a design doc that merely lives in `plans/`. Only a handful were authored
+by a person as plans.
+
+Those artifacts will never carry an arrival condition and should not. Worse, the
+count rises every time a subagent enters plan mode — **eight times in the session
+that built this checker**. That is exactly the shape prior learning
+`count-ratchet-over-growing-population` names: *"a raw COUNT over a population that
+grows with authorship measures output, not debt — it trips when you write, not when
+quality drops."* The lane was built specifically to avoid that trap via the
+2026-09-14 date gate, and then walked into it through a different door.
+
+**Fix.** Classify `*-agent-<id>.md` as its own kind and report it as a separate
+count, never folded into the conformance total. Do NOT simply exclude it silently —
+"0 flagged because we stopped looking at half the corpus" is the failure this repo
+keeps paying for. Report it as `N agent-generated (not graded — not authored plans)`,
+the same way the lane already reports what doc-kind excluded and why.
+
+**Note the naming is a convention, not a guarantee.** The `-agent-<hex>` suffix is
+produced by the harness; a future change to it would silently re-merge the two
+populations. Assert the pattern in a test so the drift is visible.
+
+### N76 · The rule fingerprints are self-quotations, so `rules check` detects COPY-PASTE, not restatement — **S2** — **OPEN**
+
+Found 2026-09-16 while investigating whether Phase 2b was worth building. It is the
+structural reason N35 has stayed open, and it is larger than N35.
+
+**The measurement.** Take a rule, write its substance in your own words the way
+another author's `CLAUDE.md` would, and test the live fingerprint against it.
+Across 12 rules, with two independent sets of samples (a subagent's, then the
+reviewer's own, written without seeing the first), **11 of 12 do not fire.**
+
+The one that fires is `tool-priority`, and it fires for a reason that proves the
+point rather than contradicting it: its fingerprint contains `code-review-graph` —
+a **proper noun**. Nobody paraphrases a vendor string, so the token survives
+rewording. Its claim does not.
+
+Look at what the fingerprints actually are:
+
+```
+safety-flag-needs-a-test   safety flag is a claim|unsafe path is unreachable|A flag that promises
+no-waiting-on-deploys      waiting on a Vercel deploy|do not poll .vercel list.|push.{0,20}move on
+model-routing              Opus plans|Sonnet executes|opus for plan|sonnet.{0,30}(execut|implement)
+```
+
+Every alternation is a phrase lifted verbatim from the rule's own body. **A detector
+built from a document's own sentences can only find copies of that document.** It
+cannot find a restatement, because a restatement is by definition the same claim in
+different words.
+
+**What this means for the numbers everyone has been reading.** `rules check` reports
+`0 silent restatements`, and that zero is TRUE as a statement about fingerprint hits
+— verified today, every hit in the tree is cited. But it has been read as "nobody is
+restating rules uncited", and it does not support that reading. The honest statement
+is: *nobody has copy-pasted a rule without citing it.* Whether anyone has restated
+one in their own words is **unknown and currently unknowable**, which is exactly the
+unknown-vs-clean collapse N35 names — now shown to apply to the detector itself, not
+just to the unexercised rules.
+
+It also explains the distribution nobody had explained: `tool-priority` carries 12
+restatements while most rules carry 0 or 1. That is not because tool-priority is
+restated twelve times more often. It is because it is the only rule whose fingerprint
+keys on something that survives paraphrase.
+
+**Do not "fix" this by widening fingerprints speculatively** — N35 already records
+the opposite error costing 8 files flagged to find 1. The fix N35 itself prescribes
+is a per-rule known-positive probe: for each of 18 rules, hand-construct a real-style
+restatement and widen that one fingerprint until it fires on the sample and still
+does not fire on ordinary prose. Eighteen units of bounded work, one rule at a time,
+each independently verifiable — not a heuristic over 936 pairs.
+
+**Test it can fail:** for any rule, assert its fingerprint fires on a hand-written
+paraphrase held in a fixture beside the rule. `--selftest` today asserts only that a
+fingerprint matches its own body, which is the tautology this issue is about.

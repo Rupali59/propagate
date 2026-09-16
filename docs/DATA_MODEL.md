@@ -669,6 +669,60 @@ machine and gets deleted the first time CI hiccups, which is how a performance
 property silently stops being one. Mutation-checked: forcing the gate open makes
 it report `expected 0, actual 2`.
 
+## 12. The claim store: two record kinds, one directory
+
+`~/.propagate/claims/YYYY-MM.jsonl`, sharded by month, append-only, honouring
+`PROPAGATE_STATE_DIR`. Two kinds share the directory and are read by different
+functions — `readClaims` (`lib/claims/store.mjs`) and `readRuns`
+(`lib/claims/runs.mjs`).
+
+### 12.1 The verdict
+
+What somebody concluded about one block of one document.
+
+| Field | Meaning |
+|---|---|
+| `file` | The document. Canonicalised on read, so two spellings of one path do not become two records |
+| `block_sha` | 64 lowercase hex — sha256 of the **normalised** block text. Identity IS the content, so editing a block re-opens it with no staleness field and no invalidation pass |
+| `kind` | `fact` · `policy` · `quote` · `impression` · `aspiration` |
+| `against` | 64 hex — the derived fact this was judged against. Optional |
+| `finding` | `consistent` · `contradicts` · `unrelated` |
+| `reason` | Free text. **Required when `finding` is `contradicts`** |
+| `by_kind` | `human` · `agent` · `hook` · `digest` · `bootstrap` |
+| `ts`, `claim_id` | Minted on append; a ULID, which sorts lexicographically by mint time |
+
+**`against` and `finding` travel together in both directions**, and
+`validateClaim` enforces it. One without the other is a half-recorded judgment
+that reads as a whole one — the same two-states-worn-as-one hazard
+`rule:discernment-checks` §2 names, at field level.
+
+**Append-only is what makes agent drafting safe.** A verdict is never edited;
+`latestByBlock` takes the newest per `block_sha`, so a human correction wins
+over an earlier `by_kind: "agent"` draft *because it is newer*, and the
+disagreement stays on the record. A systematically wrong drafting pass is
+therefore visible rather than invisible. The corollary: re-running
+`claims verdict --apply` over the same input does not error and does not
+de-duplicate — it mints a second set that shadows the first.
+
+### 12.2 The run record
+
+That an answering attempt **happened**, kept separate from what it concluded.
+
+Three states, and the separation is the whole point: `never` (no run),
+`crashed` (a `start` with no `end`), `completed` (both, with an outcome).
+Ranked by START timestamp, not end.
+
+This exists because propagate never calls out to check whether a judge is alive.
+Without it, "no verdict" is structurally ambiguous between *nobody tried* and
+*something tried and could not answer* — so `judgeStatus` folds the run summary
+in and reports `unanswerable` as a distinct outcome from `unjudged`. A client
+with no brain reports "N unjudged, 0 runs" and never "0 findings".
+
+**Runs are read BEFORE the document, and that ordering is a fix rather than a
+style choice.** A file can be deleted while a run is in flight; reading the text
+first and returning early on failure reported `runs.status: "never"` for it —
+byte-identical to a file nobody ever attempted.
+
 ## What this document does not do
 
 No recommendations, no fixes, no roadmap — that's a later pass (see the plan

@@ -308,7 +308,12 @@ test("includeRemoteOnly adds branches that exist only on origin", async (t) => {
   const seed = await mkdtemp(path.join(tmpdir(), "seed-"));
   t.after(() => rm(seed, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const g = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { stdio: ["ignore", "pipe", "pipe"] });
-  execFileSync("git", ["init", "-q", seed]);
+  // Pin the branch name explicitly (matches makeTempRepo above). Without `-b
+  // main`, `git init` takes whatever `init.defaultBranch` says, which is "main"
+  // here only because of this machine's Apple-CLT SYSTEM gitconfig — plain git
+  // (verified via GIT_CONFIG_NOSYSTEM=1) defaults to "master", which makes the
+  // `push origin main ...` below fail with "src refspec main does not match any".
+  execFileSync("git", ["init", "-q", "-b", "main", seed]);
   g(seed, "config", "user.email", "t@e.st");
   g(seed, "config", "user.name", "t");
   await writeFile(path.join(seed, "f.txt"), "x\n");
@@ -346,7 +351,10 @@ test("a remote-only branch names its upstream, and does not fake a tracking stat
   for (const d of [origin, seed, clone]) t.after(() => rm(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   execFileSync("git", ["init", "-q", "--bare", origin]);
   const g = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { stdio: ["ignore", "pipe", "pipe"] });
-  execFileSync("git", ["init", "-q", seed]);
+  // See the sibling test above: pin the branch explicitly rather than relying
+  // on init.defaultBranch, which is "main" only via this machine's Apple-CLT
+  // system gitconfig.
+  execFileSync("git", ["init", "-q", "-b", "main", seed]);
   g(seed, "config", "user.email", "t@e.st");
   g(seed, "config", "user.name", "t");
   await writeFile(path.join(seed, "f.txt"), "x\n");

@@ -309,3 +309,150 @@ test("deriveRuleFact returns null, not a throw, for an unreadable rule file", ()
   const fact = deriveRuleFact({ id: "ghost", __file: "/definitely/not/here.md" });
   assert.equal(fact, null);
 });
+
+// ── the unpaired drain: identity existed, nothing consumed it ──────────────
+
+test("an unpaired entry carrying a verdict moves OUT of awaiting — the lane converges", async () => {
+  // THE DEFECT THIS PINS. `unpairedSha` was added so an unpairable entry could
+  // be dispositioned, and `claims-verdict.test.mjs` asserts it yields "a valid
+  // block_sha, so a verdict can key to it" — but `restateStatus` built
+  // `judgedByKey` and consulted it for `pairs` only, returning `unpaired`
+  // verbatim. So every verdict written for an unpairable entry was inert and
+  // the same entries re-reported forever: the lane could not converge, which
+  // is the one thing the hash was introduced to fix.
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "code-review-graph", "Run code-review-graph status first.");
+    const file = f.claudeMd("headed", "# X\n\n## MCP: code-review-graph\n\nSee `rule:tool-priority`.\n");
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    const { unpaired } = restatementPairs(rc.referencedRestatements, rc.rules);
+    assert.equal(unpaired.length, 1, "fixture must produce exactly one unpairable entry");
+    const u = unpaired[0];
+    assert.match(u.against, /^[0-9a-f]{64}$/, "the entry must expose the fact sha a verdict keys to");
+
+    const readClaims = async () => ({
+      claims: [{ file, block_sha: u.pairSha, against: u.against, finding: "unrelated", ts: "2026-01-01T00:00:00.000Z", claim_id: "01A" }],
+      storeExists: true,
+    });
+    const status = await restateStatus(rc.referencedRestatements, rc.rules, { readClaims });
+    assert.equal(status.unpairedJudged.length, 1, "a recorded verdict must disposition the entry");
+    assert.equal(status.unpairedAwaiting.length, 0, "and it must stop being reported as outstanding work");
+    assert.equal(status.unpairedJudged[0].verdict.finding, "unrelated");
+    assert.equal(status.unpaired.length, 1, "`unpaired` stays the FULL set — that question did not change");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("the same entry with an EMPTY store stays awaiting — proving the test above measures something", async () => {
+  // Without this, the assertion above would also pass on a build where every
+  // unpaired entry was classed judged regardless of the store.
+  // `rule:discernment-checks` §1.
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "code-review-graph", "Run code-review-graph status first.");
+    f.claudeMd("headed", "# X\n\n## MCP: code-review-graph\n\nSee `rule:tool-priority`.\n");
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    const status = await restateStatus(rc.referencedRestatements, rc.rules, { readClaims: NO_CLAIMS });
+    assert.equal(status.unpairedAwaiting.length, 1, "no verdict means still awaiting one");
+    assert.equal(status.unpairedJudged.length, 0);
+  } finally {
+    f.cleanup();
+  }
+});
+
+// ── N72: the forward walk from a structure anchor to the next judgeable block ──
+
+test("N72: a heading anchor followed by a paragraph that RESTATES the rule PAIRS, and the paired block is the paragraph, not the heading", async () => {
+  const f = fixture();
+  try {
+    const ruleFile = f.rule(
+      "tool-priority",
+      "code-review-graph",
+      "Run code-review-graph status first, before trusting the graph.",
+    );
+    // The fingerprint hit is on the HEADING line — the exact live shape (N72):
+    // `## MCP: code-review-graph` matches by bare substring, and the real
+    // restatement sits in the prose directly beneath it.
+    const file = f.claudeMd(
+      "heading-then-restatement",
+      "# X\n\n## MCP: code-review-graph\n\n" +
+        "See `rule:tool-priority`. This repo has the code-review-graph pre-commit hook " +
+        "installed, so run code-review-graph status first to check the graph before trusting it.\n",
+    );
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    assert.equal(rc.referencedRestatements.length, 1, "the corpus must hand us this entry");
+
+    const { pairs, unpaired } = restatementPairs(rc.referencedRestatements, rc.rules);
+    assert.equal(unpaired.length, 0, "a real restatement below the heading must now PAIR");
+    assert.equal(pairs.length, 1);
+    assert.equal(pairs[0].file, file);
+    assert.doesNotMatch(pairs[0].claim.text, /^##/, "the paired block must NOT be the heading line");
+    assert.match(pairs[0].claim.text, /pre-commit hook installed/, "the paired block must be the restating paragraph");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("N72: a heading anchor followed by a BARE pointer with no restated content stays UNPAIRED — the walk must not manufacture a pair out of a citation", async () => {
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "code-review-graph", "Run code-review-graph status first.");
+    const file = f.claudeMd(
+      "heading-then-bare-pointer",
+      "# X\n\n## MCP: code-review-graph\n\nSee `rule:tool-priority`.\n",
+    );
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    assert.equal(rc.referencedRestatements.length, 1);
+
+    const { pairs, unpaired } = restatementPairs(rc.referencedRestatements, rc.rules);
+    assert.equal(pairs.length, 0, "a bare citation is not a restatement, walk or no walk");
+    assert.equal(unpaired.length, 1);
+    assert.match(unpaired[0].reason, /does not restate the rule's/, "must say WHY: the candidate itself doesn't match");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("N72: the forward walk is BOUNDED — a heading followed by two structure blocks then unrelated prose must not reach that prose", async () => {
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "code-review-graph", "Run code-review-graph status first.");
+    // anchor: heading (contains the fingerprint) -> comment (structure) ->
+    // table (structure) -> prose that HAPPENS to restate the rule but sits
+    // three blocks past the anchor, outside the bound.
+    const file = f.claudeMd(
+      "heading-then-two-structure-then-prose",
+      "# X\n\n" +
+        "`rule:tool-priority`\n\n" +
+        "## MCP: code-review-graph\n\n" +
+        "<!-- unrelated comment -->\n\n" +
+        "| a | b |\n|---|---|\n| 1 | 2 |\n\n" +
+        "Run code-review-graph status first, before trusting the graph.\n",
+    );
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    assert.equal(rc.referencedRestatements.length, 1);
+
+    const { pairs, unpaired } = restatementPairs(rc.referencedRestatements, rc.rules);
+    assert.equal(pairs.length, 0, "the restatement is outside the bound and must NOT be reached");
+    assert.equal(unpaired.length, 1);
+    assert.match(unpaired[0].reason, /no judgeable block restating the fingerprint follows within \d blocks/);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("an entry with no derived fact is UNDISPOSITIONABLE, not awaiting — a broken rule is not pending work", async () => {
+  // `validateClaim` refuses a `finding` without an `against`, and there is no
+  // fact to be against when the rule is missing. Folding these into "awaiting
+  // judgment" would advertise work that cannot be done — the two-states-worn-
+  // as-one failure (`rule:discernment-checks` §2) one level up.
+  const status = await restateStatus(
+    [{ rule: "no-such-rule", file: "/tmp/nonexistent/CLAUDE.md", line: 1 }],
+    [],
+    { readClaims: NO_CLAIMS },
+  );
+  assert.equal(status.unpairedUndispositionable.length, 1);
+  assert.equal(status.unpairedAwaiting.length, 0, "must NOT be advertised as awaiting a verdict");
+  assert.equal(status.unpairedUndispositionable[0].against, null, "no fact means nothing to judge against");
+});

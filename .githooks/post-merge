@@ -1,0 +1,97 @@
+#!/bin/sh
+# Deliver the plugin at the moment VERSION changes.
+#
+# THE DEFECT THIS CLOSES, measured 2026-09-16. The served plugin was 0.5.0 while
+# source was 0.6.1 — FOUR merged PRs (#13 #14 #15 #16 #17) authored and not
+# delivered. `commands/goals.mjs` and `lib/claims/restate.mjs` were absent from the
+# served tree entirely, so the whole judgment lane ran nowhere while every check in
+# this repo stayed green.
+#
+# The `tathya` marketplace is a local DIRECTORY source and `skills-marketplace/propagate`
+# is a symlink to this repo, which makes it feel as though the plugin is served from
+# here. It is not. Claude Code COPIES into ~/.claude/plugins/cache/<mkt>/propagate/<version>/
+# at install time and serves that snapshot. Editing this repo, merging a PR and bumping
+# VERSION move no served bytes. Only `claude plugin update` re-copies.
+#
+# `hooks/hooks.json:12-22` already documented this hazard in prose and prescribed
+# bumping plugin.json. The bump was done every single time. The update never was.
+# So the prescribed remedy was insufficient and nothing measured the served state —
+# rule:enforcement-watches-itself, landing on the repo whose job is catching exactly
+# this. Prose about a hazard is not a check for it.
+#
+# WHY post-merge AND NOT A SESSION HOOK. rule:delegation-criteria §2: prefer
+# derive-on-demand over remember-in-background. A SessionStart updater would run on
+# every launch and be a no-op almost every time — the shape that rule records a
+# 60-second watcher running 4,420 times and finding nothing in 4,384 of them. VERSION
+# changing is the only moment delivery is actually needed, so that is when this fires
+# and the only time it costs anything.
+#
+# NON-BLOCKING BY CONSTRUCTION, not by choice: git ignores post-merge's exit code.
+# So this cannot gate anything and must instead be LOUD. A failed update prints and
+# says what to run; it never fails silently, because silent is the failure mode that
+# cost four PRs.
+#
+# Bypass: PROPAGATE_SKIP=1 git pull ...
+
+[ -n "${PROPAGATE_SKIP:-}" ] && exit 0
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$ROOT" || exit 0
+
+# ORIG_HEAD is set by merge/pull. Absent on a first clone or an unusual invocation —
+# and "I could not tell whether VERSION changed" is NOT the same fact as "it did not
+# change" (rule:discernment-checks §2), so say so rather than exiting quietly.
+if ! git rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
+  echo "propagate: post-merge could not read ORIG_HEAD — skipped the delivery check."
+  echo "           If VERSION moved, run: claude plugin update propagate@tathya"
+  exit 0
+fi
+
+git diff-tree -r --name-only ORIG_HEAD HEAD 2>/dev/null | grep -qx 'VERSION' || exit 0
+
+SRC=$(cat VERSION 2>/dev/null)
+echo "propagate: VERSION changed in this merge (now ${SRC:-?}) — delivering the plugin."
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "propagate: \`claude\` is not on PATH, so the plugin was NOT updated."
+  echo "           The source is $SRC; whatever is served is now stale."
+  echo "           Run when you can: claude plugin update propagate@tathya"
+  exit 0
+fi
+
+# `-y` is REQUIRED here: a git hook has no TTY, and `update` refuses the confirmation
+# prompt without it. That flag auto-accepts a marketplace-declared install command,
+# which is only safe because `tathya` is a local directory marketplace pointing at
+# this repo — a path you own. Do NOT copy this hook for a remote marketplace without
+# re-reading what `-y` accepts there.
+if claude plugin update propagate@tathya -y >/dev/null 2>&1; then
+  : # fall through to verification — a success exit is a claim, not proof
+else
+  echo "propagate: \`claude plugin update\` FAILED. The served plugin is still stale."
+  echo "           Run manually and read the error: claude plugin update propagate@tathya"
+  exit 0
+fi
+
+# VERIFY THE FILES, NOT THE VERSION STRING. This is the whole lesson of the incident:
+# every manifest read 0.6.1 and agreed with every other manifest, and the served tree
+# was still missing two modules. A version that matches is not delivery.
+SERVED=$(ls -d "$HOME"/.claude/plugins/cache/*/propagate/"$SRC"/ 2>/dev/null | head -1)
+if [ -z "$SERVED" ]; then
+  echo "propagate: update reported success but no served tree exists at version $SRC."
+  echo "           Check: ls ~/.claude/plugins/cache/*/propagate/"
+  exit 0
+fi
+
+MISSING=""
+for f in cli.mjs commands/claims.mjs lib/claims/store.mjs; do
+  [ -f "$SERVED$f" ] || MISSING="$MISSING $f"
+done
+if [ -n "$MISSING" ]; then
+  echo "propagate: served tree at $SRC is INCOMPLETE — missing:$MISSING"
+  echo "           Version matched and files did not. Re-run the update and check its output."
+  exit 0
+fi
+
+echo "propagate: delivered $SRC — served tree verified by file, not by version."
+echo "           RESTART Claude Code to load it; a running session keeps the old code."
+exit 0

@@ -819,6 +819,19 @@ async function doctor() {
     void counts;
   }
 
+  // # Delivery — is the plugin anyone RUNS the same code as the one in this repo?
+  // Every other section in doctor reads the SOURCE tree, which is why the served
+  // plugin sat four versions behind through four merged PRs with doctor green the
+  // whole time (2026-09-16). Extracted rather than inlined for the same reason as
+  // the blocks above, and reached by dynamic import so `status` never pays for it.
+  {
+    const { checkDelivery } = await import("./lib/report/doctor/delivery.mjs");
+    const reporter = new Reporter();
+    await checkDelivery({ reporter, repoRoot: SKILL_DIR });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
   // # Registers — adjacent to # Backlog and deliberately separate from it.
   // Backlog answers "can every register be READ and every handover CLOSED";
   // this answers "has a register grown past the point anyone opens it". A file
@@ -849,10 +862,37 @@ async function doctor() {
   console.log(`\n${BOLD}# Goals${RESET}`);
   {
     try {
-      const { parseGoalsFile, goalCounts } = await import("./lib/report/goals.mjs");
+      const { parseGoalsFile, goalCounts, checkDirectionQuote } = await import("./lib/report/goals.mjs");
       const { discoverBacklogFiles } = await import("./lib/report/backlog.mjs");
       const files = (discoverBacklogFiles().goalsMd ?? []).map(parseGoalsFile);
       const g = goalCounts(files);
+      // Does each goal still test the DIRECTION it quotes? Derived, not an edge:
+      // the reverse GOALS.md -> NORTH_STAR.md edge was declared 2026-09-16 and
+      // reverted the same hour because propagate refuses mutual pairs (a cycle has
+      // no canonical direction, so no fix order exists). This closes the same gap
+      // by comparison instead. Normalisation matters — see the module header.
+      try {
+        // G24: an unconfigured root must NOT silently become a relative path.
+        // "not configured" and "configured wrong" are different facts and only
+        // one of them is the user's fault; joining onto "" hides both.
+        const root = SEARCH_ROOTS[0];
+        const nsPath = root ? path.join(root, "NORTH_STAR.md") : null;
+        const northStarText = nsPath && existsSync(nsPath) ? readFileSync(nsPath, "utf8") : null;
+        for (const f of files) {
+          if (f.unread) continue;
+          const v = northStarText === null
+            ? { state: "absent", why: root
+                ? `NORTH_STAR.md not found at ${nsPath} — the quote cannot be checked`
+                : "no search root configured, so NORTH_STAR.md cannot be located — not a clean result" }
+            : checkDirectionQuote({ goalsText: readFileSync(f.file, "utf8"), northStarText });
+          const label = "direction quote";
+          if (v.state === "matches") check(label, true, v.why);
+          else if (v.state === "unquoted") info(label, v.why);
+          else warn(`${label} — ${v.state}`, v.why);
+        }
+      } catch (err) {
+        info("direction quote", `could not be derived: ${err.message}`);
+      }
       if (g.files === 0) {
         // "No GOALS.md anywhere" and "all of them empty" are different facts.
         console.log(
@@ -4583,6 +4623,14 @@ if (_invokedDirectly) {
   } else if (mode === "goals") {
     const { goalsCmd } = await import("./commands/goals.mjs");
     process.exitCode = await goalsCmd(process.argv.slice(3));
+  } else if (mode === "plans") {
+    // Dynamic, same reason as goals/rollup/manifest/registers/docs (D5): a
+    // static import would pull the plans lane — and its curate-docs graph
+    // dependency — into every `propagate status` / `check` invocation. `status`
+    // is the hottest command in this tool; doctor alone defers 14 modules for
+    // exactly this reason.
+    const { plansCmd } = await import("./commands/plans.mjs");
+    process.exitCode = await plansCmd(process.argv.slice(3));
   } else if (mode === "docs") {
     const { docsCmd } = await import("./commands/docs.mjs");
     await docsCmd();
@@ -4606,7 +4654,7 @@ if (_invokedDirectly) {
     process.exitCode = await claimsCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|plans [--check] [--root <path> ...] [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]|claims judge <file> [--json]|claims render <file> [--apply] [--json]|claims contradict <authored-file> [--json]|claims restate [--json]|claims verdict [--apply] [--json] < verdicts.json|claims answer <file> start|end --run <id> --outcome <o> [--json]]");
     process.exit(2);
   }
 }
