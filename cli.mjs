@@ -862,10 +862,37 @@ async function doctor() {
   console.log(`\n${BOLD}# Goals${RESET}`);
   {
     try {
-      const { parseGoalsFile, goalCounts } = await import("./lib/report/goals.mjs");
+      const { parseGoalsFile, goalCounts, checkDirectionQuote } = await import("./lib/report/goals.mjs");
       const { discoverBacklogFiles } = await import("./lib/report/backlog.mjs");
       const files = (discoverBacklogFiles().goalsMd ?? []).map(parseGoalsFile);
       const g = goalCounts(files);
+      // Does each goal still test the DIRECTION it quotes? Derived, not an edge:
+      // the reverse GOALS.md -> NORTH_STAR.md edge was declared 2026-09-16 and
+      // reverted the same hour because propagate refuses mutual pairs (a cycle has
+      // no canonical direction, so no fix order exists). This closes the same gap
+      // by comparison instead. Normalisation matters — see the module header.
+      try {
+        // G24: an unconfigured root must NOT silently become a relative path.
+        // "not configured" and "configured wrong" are different facts and only
+        // one of them is the user's fault; joining onto "" hides both.
+        const root = SEARCH_ROOTS[0];
+        const nsPath = root ? path.join(root, "NORTH_STAR.md") : null;
+        const northStarText = nsPath && existsSync(nsPath) ? readFileSync(nsPath, "utf8") : null;
+        for (const f of files) {
+          if (f.unread) continue;
+          const v = northStarText === null
+            ? { state: "absent", why: root
+                ? `NORTH_STAR.md not found at ${nsPath} — the quote cannot be checked`
+                : "no search root configured, so NORTH_STAR.md cannot be located — not a clean result" }
+            : checkDirectionQuote({ goalsText: readFileSync(f.file, "utf8"), northStarText });
+          const label = "direction quote";
+          if (v.state === "matches") check(label, true, v.why);
+          else if (v.state === "unquoted") info(label, v.why);
+          else warn(`${label} — ${v.state}`, v.why);
+        }
+      } catch (err) {
+        info("direction quote", `could not be derived: ${err.message}`);
+      }
       if (g.files === 0) {
         // "No GOALS.md anywhere" and "all of them empty" are different facts.
         console.log(
