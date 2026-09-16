@@ -2020,3 +2020,117 @@ do.
 the same entry with an EMPTY store stays awaiting (so the first test measures something); a
 fact-less entry is undispositionable rather than awaiting. Mutation-checked — disabling the
 lookup fails exactly one test with the stated message, and the revert is byte-identical.
+
+### N74 · The restatement walk pairs the FIRST judgeable block, which is often the citation — **S3** — **OPEN**
+
+Found 2026-09-16, immediately after N72's fix landed, by judging what it produced.
+
+N72 made `findClaimBlock` walk forward from a structure anchor to the next judgeable
+block. That raised coverage from 5 of 15 to 8 of 15. But it takes the FIRST judgeable
+block, and in this corpus the first block under a `## MCP: code-review-graph` heading
+is very often a pointer line rather than the restatement.
+
+Worked example, `Rupali/Obsidian/CLAUDE.md`:
+
+```
+## MCP Tools: code-review-graph          <- anchor (structure)
+See `rule:tool-priority` for general …   <- block the walk pairs: a CITATION
+Local: this repo has the `code-review-   <- the actual restatement, one block further
+graph` **pre-commit** git hook installed …
+```
+
+So the entry pairs, gets judged `unrelated` — correctly, *for that block* — and the
+real restatement below it remains unexamined. The verdict is not wrong; it is about
+the wrong text. That is a subtler failure than N72's, because the lane now reports
+the file as handled.
+
+**Not worth widening the bound.** Walking further would pair headings with
+arbitrary later prose, which N72's own fixture deliberately guards against. The fix
+is candidate SELECTION, not distance: among judgeable blocks within the bound,
+prefer the one whose text actually matches the rule's fingerprint most strongly,
+rather than the first one encountered. A bare `See rule:x.` line matches a
+fingerprint only incidentally.
+
+**Test it can fail:** a heading followed by a pointer line and THEN a restating
+paragraph must pair the paragraph. That fixture does not exist today — N72's
+fixtures all place the restatement first.
+
+### N75 · `plans --check` counts subagent plan-mode artifacts as authored plans — **S2** — **OPEN**
+
+Found 2026-09-16, the day `plans --check` was built, by running it on the real corpus.
+
+Of 11 post-template plans it flagged, **5 are `*-agent-<id>.md`** — files written
+automatically when a subagent inherits plan mode and drafts a plan it never executes.
+One more is a design doc that merely lives in `plans/`. Only a handful were authored
+by a person as plans.
+
+Those artifacts will never carry an arrival condition and should not. Worse, the
+count rises every time a subagent enters plan mode — **eight times in the session
+that built this checker**. That is exactly the shape prior learning
+`count-ratchet-over-growing-population` names: *"a raw COUNT over a population that
+grows with authorship measures output, not debt — it trips when you write, not when
+quality drops."* The lane was built specifically to avoid that trap via the
+2026-09-14 date gate, and then walked into it through a different door.
+
+**Fix.** Classify `*-agent-<id>.md` as its own kind and report it as a separate
+count, never folded into the conformance total. Do NOT simply exclude it silently —
+"0 flagged because we stopped looking at half the corpus" is the failure this repo
+keeps paying for. Report it as `N agent-generated (not graded — not authored plans)`,
+the same way the lane already reports what doc-kind excluded and why.
+
+**Note the naming is a convention, not a guarantee.** The `-agent-<hex>` suffix is
+produced by the harness; a future change to it would silently re-merge the two
+populations. Assert the pattern in a test so the drift is visible.
+
+### N76 · The rule fingerprints are self-quotations, so `rules check` detects COPY-PASTE, not restatement — **S2** — **OPEN**
+
+Found 2026-09-16 while investigating whether Phase 2b was worth building. It is the
+structural reason N35 has stayed open, and it is larger than N35.
+
+**The measurement.** Take a rule, write its substance in your own words the way
+another author's `CLAUDE.md` would, and test the live fingerprint against it.
+Across 12 rules, with two independent sets of samples (a subagent's, then the
+reviewer's own, written without seeing the first), **11 of 12 do not fire.**
+
+The one that fires is `tool-priority`, and it fires for a reason that proves the
+point rather than contradicting it: its fingerprint contains `code-review-graph` —
+a **proper noun**. Nobody paraphrases a vendor string, so the token survives
+rewording. Its claim does not.
+
+Look at what the fingerprints actually are:
+
+```
+safety-flag-needs-a-test   safety flag is a claim|unsafe path is unreachable|A flag that promises
+no-waiting-on-deploys      waiting on a Vercel deploy|do not poll .vercel list.|push.{0,20}move on
+model-routing              Opus plans|Sonnet executes|opus for plan|sonnet.{0,30}(execut|implement)
+```
+
+Every alternation is a phrase lifted verbatim from the rule's own body. **A detector
+built from a document's own sentences can only find copies of that document.** It
+cannot find a restatement, because a restatement is by definition the same claim in
+different words.
+
+**What this means for the numbers everyone has been reading.** `rules check` reports
+`0 silent restatements`, and that zero is TRUE as a statement about fingerprint hits
+— verified today, every hit in the tree is cited. But it has been read as "nobody is
+restating rules uncited", and it does not support that reading. The honest statement
+is: *nobody has copy-pasted a rule without citing it.* Whether anyone has restated
+one in their own words is **unknown and currently unknowable**, which is exactly the
+unknown-vs-clean collapse N35 names — now shown to apply to the detector itself, not
+just to the unexercised rules.
+
+It also explains the distribution nobody had explained: `tool-priority` carries 12
+restatements while most rules carry 0 or 1. That is not because tool-priority is
+restated twelve times more often. It is because it is the only rule whose fingerprint
+keys on something that survives paraphrase.
+
+**Do not "fix" this by widening fingerprints speculatively** — N35 already records
+the opposite error costing 8 files flagged to find 1. The fix N35 itself prescribes
+is a per-rule known-positive probe: for each of 18 rules, hand-construct a real-style
+restatement and widen that one fingerprint until it fires on the sample and still
+does not fire on ordinary prose. Eighteen units of bounded work, one rule at a time,
+each independently verifiable — not a heuristic over 936 pairs.
+
+**Test it can fail:** for any rule, assert its fingerprint fires on a hand-written
+paraphrase held in a fixture beside the rule. `--selftest` today asserts only that a
+fingerprint matches its own body, which is the tautology this issue is about.
