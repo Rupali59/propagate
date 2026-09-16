@@ -819,6 +819,19 @@ async function doctor() {
     void counts;
   }
 
+  // # Delivery — is the plugin anyone RUNS the same code as the one in this repo?
+  // Every other section in doctor reads the SOURCE tree, which is why the served
+  // plugin sat four versions behind through four merged PRs with doctor green the
+  // whole time (2026-09-16). Extracted rather than inlined for the same reason as
+  // the blocks above, and reached by dynamic import so `status` never pays for it.
+  {
+    const { checkDelivery } = await import("./lib/report/doctor/delivery.mjs");
+    const reporter = new Reporter();
+    await checkDelivery({ reporter, repoRoot: SKILL_DIR });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
   // # Registers — adjacent to # Backlog and deliberately separate from it.
   // Backlog answers "can every register be READ and every handover CLOSED";
   // this answers "has a register grown past the point anyone opens it". A file
