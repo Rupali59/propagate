@@ -167,14 +167,35 @@ test("same-millisecond ties break by claim_id, not by read order", () => {
 
 // ── path identity ───────────────────────────────────────────────────────────
 
-test("canonicalFile collapses symlinked spellings of one path", async () => {
+test("canonicalFile collapses symlinked spellings of one path", async (t) => {
   const { canonicalFile } = await import("../../lib/claims/store.mjs");
-  // On macOS /tmp is a symlink to /private/tmp. THIS is the bug that shipped for
-  // an hour: a verdict written under one spelling was invisible to a lookup under
-  // the other, and `render` reported that as "current — markers already match the
-  // store". Found end-to-end, never by a unit test, because both halves used the
-  // same spelling in every fixture.
-  assert.equal(canonicalFile("/tmp"), canonicalFile("/private/tmp"));
+  // THIS is the bug that shipped for an hour: a verdict written under one
+  // spelling of a path was invisible to a lookup under a symlinked spelling of
+  // the same path, and `render` reported that as "current — markers already
+  // match the store". Found end-to-end, never by a unit test, because both
+  // halves used the same spelling in every fixture.
+  //
+  // The original version of this test asserted canonicalFile("/tmp") ===
+  // canonicalFile("/private/tmp") — true only because macOS's /tmp happens to
+  // be a symlink to /private/tmp. On Linux /tmp is a real directory and
+  // /private/tmp does not exist at all, so realpathSync("/private/tmp") throws
+  // ENOENT and canonicalFile falls back to the literal, unresolved path — the
+  // two sides then differ and the test fails for a reason that has nothing to
+  // do with canonicalFile being wrong. Construct the symlink deliberately so
+  // the test exercises the real behaviour on every platform.
+  const { mkdtemp, symlink, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const path = (await import("node:path")).default;
+  const real = await mkdtemp(path.join(tmpdir(), "claims-real-"));
+  const linkParent = await mkdtemp(path.join(tmpdir(), "claims-link-"));
+  t.after(() => Promise.all([
+    rm(real, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+    rm(linkParent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+  ]));
+  const alias = path.join(linkParent, "alias");
+  await symlink(real, alias, "dir");
+
+  assert.equal(canonicalFile(alias), canonicalFile(real));
 });
 
 test("canonicalFile does not throw for a path that does not exist", async () => {

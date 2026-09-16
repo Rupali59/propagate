@@ -41,7 +41,13 @@ function treeSnapshot(root) {
 async function fixture(t, { v1Branches = ["main", "gone-feat"], realBranches = ["main"] } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "mrefs-"));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  execFileSync("git", ["init", "-q", root]);
+  // Pin the initial branch name explicitly. `git init` with no `-b` falls back
+  // to whatever `init.defaultBranch` (or git's compiled-in default) says, which
+  // is "main" only because this machine's Apple-CLT git ships a SYSTEM gitconfig
+  // setting it — verified via GIT_CONFIG_NOSYSTEM=1, which reproduces plain
+  // git's "master" default. The fixture below hardcodes "main" as the branch
+  // name throughout, so the repo must actually have one, on every machine.
+  execFileSync("git", ["init", "-q", "-b", "main", root]);
   const git = (...a) => execFileSync("git", ["-C", root, ...a], { stdio: ["ignore", "pipe", "pipe"] });
   git("config", "user.email", "t@e.st");
   git("config", "user.name", "t");

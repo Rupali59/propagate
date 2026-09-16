@@ -113,6 +113,23 @@ onRepo("keerti-job-radar has a hub and is graded normally", path.join(GH, "Keert
     "the survey called this hubless; measured, its README does link — the survey was wrong, not the tool");
 });
 
-test("no repo was silently skipped", () => {
+test("no repo was silently skipped", (t) => {
+  // This whole file's premise is Rupali's own dev laptop: a `~/Documents/GitHub`
+  // tree holding Motherboard, Vipin Kaushik, PanditPawanKaushik, Tushar, Rupali
+  // and this repo, side by side. Every `onRepo` row already reports absence
+  // attributably (SKIPPED + the missing path) when ONE of those directories is
+  // missing — that is deliberate, per this file's own header. But GH itself
+  // being absent is a different fact: it means this is not that machine at
+  // all (a GitHub Actions runner, a fresh clone elsewhere, a contributor's
+  // box), and in that world EVERY row is expected to skip, which is not the
+  // "a row silently stopped running" regression this test exists to catch —
+  // that regression is only meaningful when the surrounding tree is present
+  // and one row within it went missing anyway (as happened with `propagate`
+  // itself on 2026-08-22, see the comment above its row).
+  if (!existsSync(GH)) {
+    t.diagnostic(`SKIPPED — ${GH} does not exist on this machine (not Rupali's dev tree, e.g. CI) — ` +
+      `the completeness invariant below cannot be checked here`);
+    return;
+  }
   assert.deepEqual(skipped, [], `these rows did not run: ${skipped.join(", ")}`);
 });
