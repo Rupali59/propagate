@@ -15,7 +15,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -436,11 +436,31 @@ const MONITOR_LABEL_FOR_TEST = "com.tathya.propagate.monitor";
 /** Seed a monitor.log whose last line is `ageMs` old, in the scoped state dir. */
 async function seedMonitorLog(stateDir, ageMs) {
   const ts = new Date(Date.now() - ageMs).toISOString();
+  const file = path.join(stateDir, "monitor.log");
   await writeFile(
-    path.join(stateDir, "monitor.log"),
+    file,
     `${ts} ran=1 rows=12 actionable=0 notified=0 suppressed=0 ms=800\n`,
     "utf8",
   );
+  // SET THE MTIME TO MATCH THE CONTENT, and this is not cosmetic. Freshness is
+  // read from the timestamp INSIDE the log, so this helper used to leave the
+  // mtime at "now" while the content said "six hours ago" — the file lied about
+  // itself, and one test depended on that lie by accident.
+  //
+  // environment.mjs:236-238 decides "the monitor crashed" from
+  // `stat(stderr).mtimeMs > stat(monitor.log).mtimeMs` — a STRICT comparison
+  // between two files the crashing-monitor fixture writes microseconds apart. On
+  // APFS that is 0 ties in 200 pairs, so it always passed locally; on a runner
+  // whose filesystem has coarser mtime granularity the two writes land in the
+  // same tick, `>` is false, and the crash goes undetected. That was the single
+  // failure left on CI after the seven fixture fixes (run 35075920870).
+  //
+  // Backdating here makes the gap the six hours the content already claims, so
+  // the comparison is unambiguous at ANY granularity. The production `>` is
+  // correct and unchanged: equal mtimes genuinely are not evidence of a crash,
+  // and loosening it to `>=` would invent one.
+  const past = new Date(Date.now() - ageMs);
+  await utimes(file, past, past);
 }
 
 /** Put a monitor plist in the scoped dir — PLIST_DIR follows STATE_DIR when scoped. */
