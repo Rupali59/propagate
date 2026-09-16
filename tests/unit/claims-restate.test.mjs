@@ -361,6 +361,87 @@ test("the same entry with an EMPTY store stays awaiting — proving the test abo
   }
 });
 
+// ── N72: the forward walk from a structure anchor to the next judgeable block ──
+
+test("N72: a heading anchor followed by a paragraph that RESTATES the rule PAIRS, and the paired block is the paragraph, not the heading", async () => {
+  const f = fixture();
+  try {
+    const ruleFile = f.rule(
+      "tool-priority",
+      "code-review-graph",
+      "Run code-review-graph status first, before trusting the graph.",
+    );
+    // The fingerprint hit is on the HEADING line — the exact live shape (N72):
+    // `## MCP: code-review-graph` matches by bare substring, and the real
+    // restatement sits in the prose directly beneath it.
+    const file = f.claudeMd(
+      "heading-then-restatement",
+      "# X\n\n## MCP: code-review-graph\n\n" +
+        "See `rule:tool-priority`. This repo has the code-review-graph pre-commit hook " +
+        "installed, so run code-review-graph status first to check the graph before trusting it.\n",
+    );
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    assert.equal(rc.referencedRestatements.length, 1, "the corpus must hand us this entry");
+
+    const { pairs, unpaired } = restatementPairs(rc.referencedRestatements, rc.rules);
+    assert.equal(unpaired.length, 0, "a real restatement below the heading must now PAIR");
+    assert.equal(pairs.length, 1);
+    assert.equal(pairs[0].file, file);
+    assert.doesNotMatch(pairs[0].claim.text, /^##/, "the paired block must NOT be the heading line");
+    assert.match(pairs[0].claim.text, /pre-commit hook installed/, "the paired block must be the restating paragraph");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("N72: a heading anchor followed by a BARE pointer with no restated content stays UNPAIRED — the walk must not manufacture a pair out of a citation", async () => {
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "code-review-graph", "Run code-review-graph status first.");
+    const file = f.claudeMd(
+      "heading-then-bare-pointer",
+      "# X\n\n## MCP: code-review-graph\n\nSee `rule:tool-priority`.\n",
+    );
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    assert.equal(rc.referencedRestatements.length, 1);
+
+    const { pairs, unpaired } = restatementPairs(rc.referencedRestatements, rc.rules);
+    assert.equal(pairs.length, 0, "a bare citation is not a restatement, walk or no walk");
+    assert.equal(unpaired.length, 1);
+    assert.match(unpaired[0].reason, /does not restate the rule's/, "must say WHY: the candidate itself doesn't match");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("N72: the forward walk is BOUNDED — a heading followed by two structure blocks then unrelated prose must not reach that prose", async () => {
+  const f = fixture();
+  try {
+    f.rule("tool-priority", "code-review-graph", "Run code-review-graph status first.");
+    // anchor: heading (contains the fingerprint) -> comment (structure) ->
+    // table (structure) -> prose that HAPPENS to restate the rule but sits
+    // three blocks past the anchor, outside the bound.
+    const file = f.claudeMd(
+      "heading-then-two-structure-then-prose",
+      "# X\n\n" +
+        "`rule:tool-priority`\n\n" +
+        "## MCP: code-review-graph\n\n" +
+        "<!-- unrelated comment -->\n\n" +
+        "| a | b |\n|---|---|\n| 1 | 2 |\n\n" +
+        "Run code-review-graph status first, before trusting the graph.\n",
+    );
+    const rc = checkRules({ rulesDir: f.rulesDir, roots: [f.tree] });
+    assert.equal(rc.referencedRestatements.length, 1);
+
+    const { pairs, unpaired } = restatementPairs(rc.referencedRestatements, rc.rules);
+    assert.equal(pairs.length, 0, "the restatement is outside the bound and must NOT be reached");
+    assert.equal(unpaired.length, 1);
+    assert.match(unpaired[0].reason, /no judgeable block restating the fingerprint follows within \d blocks/);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("an entry with no derived fact is UNDISPOSITIONABLE, not awaiting — a broken rule is not pending work", async () => {
   // `validateClaim` refuses a `finding` without an `against`, and there is no
   // fact to be against when the rule is missing. Folding these into "awaiting
