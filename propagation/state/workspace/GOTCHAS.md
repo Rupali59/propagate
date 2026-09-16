@@ -1407,3 +1407,38 @@ diff -q hooks/gotcha-guard.mjs ~/.claude/plugins/cache/tathya/propagate/<ver>/ho
 node ~/.claude/plugins/cache/tathya/propagate/<ver>/hooks/rule-guard.mjs --selftest
 ```
 Never conclude a hook change is live from a selftest run in this repo.
+
+### G64 · BSD `sed` does not support `\s`, and a strip that matches nothing passes the whole line through
+**Trigger:** `\bsed\s[^|;&]*['"][^'"]*\\s`
+**Fires on:** `sed -E 's/^\**[Ss]tatus\**\s*:\s*//'`
+
+`\s` works in `grep -E`, in perl, in node, and in GNU sed — which is exactly why it gets
+reached for on a Mac. BSD `sed` (macOS's `/usr/bin/sed`) does not implement it: the class is
+simply not special, so the pattern matches nothing and the substitution silently no-ops. A
+strip written as `sed -E 's/^\**[Ss]tatus\**\s*:\s*//'` to remove a `**Status:**` prefix left
+the entire line untouched.
+
+**Signal:** none from `sed` itself — it exits 0 either way, matched-nothing and
+matched-everything look identical. It surfaces one step downstream: a chained
+`awk '{print toupper($1)}'` then read the untouched line's first field, which was the
+literal field name, and reported it as the value. 18 plan files appeared to have a status
+of the word "Status". The number was plausible enough to publish.
+
+**Cost:** three wrong published numbers in one session before the instrument was
+suspected, per `rule:discernment-checks` §4 — every one plausible, every one from the
+measuring tool rather than the data.
+
+**On this entry's own trigger — it was widened 2026-09-16 and must not be narrowed back.**
+The first version was `sed\s+(-\S+\s+)*['"]…`, which required the script to be the FIRST
+quoted token. That misses `/usr/bin/sed -i '' 's/\s*$//'` — the canonical macOS in-place
+form, whose mandatory empty backup suffix `''` consumes the quote the pattern was waiting
+for. So an entry about a regex silently matching nothing shipped with a trigger that
+silently missed the commonest case (`rule:enforcement-watches-itself`). The current form is
+bounded by `[^|;&]` so it cannot reach across a pipe into a legitimate `grep -E '\s'`;
+verified against 8 cases, 3 positive and 5 negative.
+
+**Instead:** use `[[:space:]]` in place of `\s` in any `sed` invocation that must run on
+macOS, or reach for `perl -pe` / `node -e` instead of `sed` when `\s` is already written
+and working. And per the corollary this entry is itself an instance of
+(`rule:discernment-checks` §4): when a derived number is surprising, suspect the ruler
+before publishing it — re-measure a different way, don't just re-read the same output.
