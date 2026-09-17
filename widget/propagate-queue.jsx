@@ -144,106 +144,137 @@ export const updateState = (event, previousState) => {
 // originally specified 430px fixed, which is the same claim.
 export const className = `
   left: 0; top: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-  -webkit-font-smoothing: antialiased;
 
-  .card {
+  /* ── THE INHERITED SYSTEM, NOT A FORK ────────────────────────────────────
+     These tokens come from claude-usage-widget, which carries 103 of them with
+     light and dark palettes, a 5-step spacing scale and a documented concentric
+     bezel. The plan said to inherit it and cite it rather than re-invent, and
+     the first shipped version re-invented anyway: a cool grey-blue palette, a
+     fixed-width bar and a value floating mid-row. Side by side with the design
+     sketch the difference was obvious and entirely self-inflicted.
+
+     Two surfaces sharing one desktop must share one visual language, which is
+     the same reason rule:tool-priority exists: the divergence is never one
+     decision, it is nine copies later. */
+
+  --fg: rgba(255,255,255,0.92);
+  --dim: rgba(235,235,245,0.52);
+  --dimmer: rgba(235,235,245,0.38);
+  --track: rgba(235,235,245,0.16);
+
+  --ok: #5fd07c;
+  --caution: #e0a53a;
+  --warn: #ff8f6b;
+  --accent: #e09a5c;
+  --unknown: rgba(235,235,245,0.40);
+
+  --DRIFTED: #e0a53a;
+  --DIVERGED: #ff8f6b;
+  --REVERSED: #a276cb;
+
+  --s1: 3px; --s2: 6px; --s3: 9px; --s4: 12px; --s5: 15px;
+  --r-shell: 20px; --r-core: 15px;
+
+  --shell: rgba(255,255,255,0.07);
+  --core: linear-gradient(180deg, rgba(44,44,46,0.82) 0%, rgba(28,28,30,0.76) 100%);
+  --edge: rgba(255,255,255,0.13);
+  --edge-core: rgba(255,255,255,0.09);
+  --specular: rgba(255,255,255,0.16);
+  --cast-near: rgba(0,0,0,0.34);
+  --cast-far: rgba(0,0,0,0.52);
+
+  font: 11px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  letter-spacing: -.005em;
+  -webkit-font-smoothing: antialiased;
+  color: var(--fg);
+
+  /* THE CONCENTRIC DOUBLE BEZEL. The shell is a 5px translucent frame; the core
+     sits inside it at the smaller radius. Both carry an inset specular highlight
+     along the top edge, which is what makes it read as a physical object on a
+     photographic wallpaper rather than a flat rectangle pasted onto one. */
+  .shell {
     position: fixed;
     width: max-content;
     max-width: 560px;
-    color: #e6edf3;
-    background: rgba(11,13,16,0.88);
-    border: 1px solid rgba(90,105,125,0.35);
-    border-radius: 12px;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
-    font-variant-numeric: tabular-nums;
+    padding: 5px;
+    border-radius: var(--r-shell);
+    background: var(--shell);
+    border: .5px solid var(--edge);
+    box-shadow: 0 1px 1px var(--cast-near), 0 12px 32px -8px var(--cast-far), inset 0 1px 0 0 var(--specular);
   }
-  .card.dragging { border-color: rgba(47,129,247,0.7); box-shadow: 0 12px 40px rgba(0,0,0,0.6); }
+  .shell.dragging { border-color: rgba(224,154,92,0.55); }
+  .core {
+    border-radius: var(--r-core);
+    background: var(--core);
+    border: .5px solid var(--edge-core);
+    box-shadow: inset 0 1px 0 0 var(--specular);
+    padding: 13px 16px 15px;
+  }
 
-  /* The grip is the whole header strip, not a small handle — a 12px target is
+  /* The grip is the header strip, not a small handle: a 12px target is
      unhittable on a layer where the cursor is already doing something else. */
-  .grip { padding:11px 15px 3px; cursor: grab; }
-  .card.dragging .grip { cursor: grabbing; }
-  .body { padding: 0 15px 12px; }
+  .grip { cursor: grab; padding-bottom: var(--s1); }
+  .shell.dragging .grip { cursor: grabbing; }
 
-  .hd { display:flex; align-items:baseline; gap:9px; }
-  .ttl { font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#8b98a8; }
-  .big { font-size:21px; font-weight:600; line-height:1; }
-  .big.warn { color:#f0b429; }
-  .big.fail { color:#ff7b72; }
-  .big.ok   { color:#3fb950; }
-  .big.unknown { color:#8b98a8; }
-  .of  { font-size:11px; color:#8b98a8; }
+  .hd { display: flex; align-items: baseline; gap: var(--s3); }
+  .ttl { font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); }
+  .big { font-size: 20px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .big.warn { color: var(--caution); }
+  .big.fail { color: var(--warn); }
+  .big.ok { color: var(--ok); }
+  .big.unknown { color: var(--unknown); }
+  .of { color: var(--dim); }
 
-  .grp { font-size:9.5px; font-weight:600; letter-spacing:.11em; color:#5d6b7d;
-         margin:11px 0 4px; text-transform:uppercase; }
+  .grp { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
+         color: var(--dimmer); margin: var(--s4) 0 var(--s1); }
 
-  /* The 60px label / 9px gap rhythm is inherited from claude-usage.jsx rather
-     than re-invented — see the plan's visual spec. */
-  .row { display:flex; align-items:center; gap:9px; padding:2px 0; font-size:11px; }
-  .row.act { cursor:pointer; }
-  .row.act:hover .lbl { color:#e6edf3; }
-  .lbl { width:74px; flex:0 0 74px; color:#aab6c4; }
-  /* The display:inline-block here IS LOAD-BEARING. These are span elements,
-     and an inline element ignores width and height entirely — so every bar
-     rendered as a hairline with no fill, on a card whose numbers were right.
-     Nothing in the test suite could see it: the payload was right, the DOM was
-     right, the CSS was valid. It took looking at the screen. */
-  .track { display:inline-block; width:112px; flex:0 0 112px; height:6px; border-radius:3px;
-           background:rgba(90,105,125,0.22); overflow:hidden; vertical-align:middle; }
-  .fill { display:block; height:100%; border-radius:3px; background:#5d6b7d; min-width:1px; }
-  .fill.ok { background:#3fb950; }
-  .fill.warn { background:#f0b429; }
-  .fill.fail { background:#ff7b72; }
-  .fill.unknown { background:repeating-linear-gradient(90deg,#3a4552 0 3px,transparent 3px 6px); }
-  .val { min-width:96px; }
-  .val b { font-weight:600; }
-  .val.warn b { color:#f0b429; }
-  .val.fail b { color:#ff7b72; }
-  .val.unknown b { color:#8b98a8; }
-  .unit { color:#8b98a8; }
-  .go { margin-left:auto; color:#5d6b7d; font-size:11px; padding-left:8px; }
-  .row.act .go { color:#7d8fa3; }
-  .go.soon { color:#4a5563; font-size:9.5px; letter-spacing:.04em; }
+  /* ROW RHYTHM: 60px label, 9px gap, a bar that FLEXES to fill, then a 74px
+     right-aligned value column. The value column is what makes four rows
+     comparable at a glance; a value floating mid-row has to be hunted for. */
+  .row { display: flex; align-items: center; gap: var(--s3); height: 16px; margin-top: var(--s1); }
+  .row.act { cursor: pointer; }
+  .lbl { width: 60px; flex: 0 0 60px; color: var(--dim); white-space: nowrap; }
+  .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--track); position: relative; overflow: hidden; min-width: 90px; }
+  .fil { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--unknown); }
+  .fil.ok { background: var(--ok); }
+  .fil.warn { background: var(--caution); }
+  .fil.fail { background: var(--warn); }
+  .fil.unknown { background: repeating-linear-gradient(90deg, var(--track) 0 3px, transparent 3px 6px); }
+  .val { width: 74px; flex: 0 0 74px; text-align: right; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
+  .val .u { color: var(--dim); }
+  .val.warn { color: var(--caution); }
+  .val.fail { color: var(--warn); }
+  .val.unknown { color: var(--unknown); }
 
-  .rowgrp { }
-  .sub { font-size:10px; color:#6f7d8f; margin:0 0 3px 83px; }
+  /* Aligned to the bar, not the label: the sub-line is about the bar above it. */
+  .sub { margin-left: 69px; color: var(--dimmer); font-size: 10px; margin-top: 1px; }
 
-  /* DECISION 2 — the grid groups by STATE into labelled, counted runs. The
-     previous version encoded state by colour alone, in amber/red/violet: the
-     deutan-protan confusion pair, on a 7px cell, with no hover available on
-     this layer. Position and grouping carry the meaning now; colour is a
-     redundant second channel. */
-  .grid { display:flex; gap:16px; margin-top:11px; flex-wrap:wrap; }
-  .run { }
-  .runhd { font-size:9px; color:#6f7d8f; letter-spacing:.05em; margin-bottom:3px; }
-  /* WRAPPING, not a fixed 2-row column flow. The plan specified one, and
-     at today's counts it fits — but that is arithmetic about
-     the data, which is precisely the claim G9 says rots. A wrapping flex run
-     cannot push content past the card's edge at ANY count, so the max-width
-     above stays a bound rather than a bet. */
-  .cells { display:flex; flex-wrap:wrap; max-width:340px; gap:2px; align-content:flex-start; }
-  .cell { width:7px; height:7px; border-radius:1.5px; background:#5d6b7d; }
-  .cell.DRIFTED  { background:#b45309; }
-  .cell.DIVERGED { background:#b91c1c; }
-  .cell.REVERSED { background:#6d28d9; }
-  .cell.stale { outline:1px solid rgba(240,180,41,0.55); outline-offset:0; }
+  /* NOT-YET-BUILT IS A DIMMED ROW, NOT FOUR REPETITIONS OF A SENTENCE. The
+     first version printed "not built yet" on every unbuilt row -- four times,
+     in a card with nine rows, which is more words about what is missing than
+     about what is there. The dimming carries it, and the footer states the
+     count once. */
+  .row.soon .lbl, .row.soon .val { opacity: .55; }
+  .row.soon .bar { opacity: .5; }
 
-  .warn { color:#ff7b72; font-size:12px; }
-  .ok   { color:#3fb950; font-size:12px; }
-  .foot { display:flex; gap:10px; font-size:10px; color:#5d6b7d; margin-top:10px;
-          padding-top:8px; border-top:1px solid rgba(90,105,125,0.18); }
-  .foot .sp { margin-left:auto; }
-  .foot .lk { cursor:pointer; }
-  .foot .lk:hover { color:#9aa7b8; }
-  .stale { color:#f0b429; }
-  /* THE ONE LINE THAT EXPLAINS A DEAD-LOOKING CARD, so it must be readable.
-     It shipped at 9.5px in #4a5563 — barely above the background — and the
-     first person to hit it asked why nothing responded rather than reading the
-     answer already on screen. A note nobody can read is a note that is not
-     there, which is the same failure as not writing it. */
-  .gate { font-size:10.5px; color:#8b98a8; margin-top:7px; }
-  .gate b { color:#f0b429; font-weight:600; }
+  .grid { display: flex; gap: var(--s4); margin-top: var(--s4); flex-wrap: wrap; }
+  .runhd { font-size: 9px; color: var(--dimmer); letter-spacing: .05em; margin-bottom: var(--s1); }
+  .cells { display: flex; flex-wrap: wrap; max-width: 340px; gap: 2px; align-content: flex-start; }
+  .cell { width: 7px; height: 7px; border-radius: 1.5px; background: var(--unknown); }
+  .cell.DRIFTED { background: var(--DRIFTED); }
+  .cell.DIVERGED { background: var(--DIVERGED); }
+  .cell.REVERSED { background: var(--REVERSED); }
+  .cell.stale { outline: 1px solid rgba(224,165,58,0.55); }
+
+  .foot { display: flex; gap: var(--s4); margin-top: var(--s4); color: var(--dim); font-size: 10px;
+          border-top: .5px solid rgba(255,255,255,.07); padding-top: var(--s2); align-items: baseline; }
+  .foot .lk { cursor: pointer; color: var(--accent); }
+  .foot .sp { margin-left: auto; }
+  .foot .stale { color: var(--caution); }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+  .gate { font-size: 10px; color: var(--dim); margin-top: var(--s2); }
+  .gate b { color: var(--caution); font-weight: 600; }
 `;
 
 // Open a control. `run` is the documented shell-out; open-ui.sh starts the
@@ -268,22 +299,21 @@ const Row = ({ r, dispatch }) => {
   return (
     <div className="rowgrp">
       <div
-        className={live ? 'row act' : 'row'}
+        className={live ? "row act" : "row soon"}
         onClick={live ? () => openView(r.cta.route, dispatch) : undefined}
       >
         <span className="lbl">{r.label}</span>
-        <span className="track">
+        <span className="bar">
           <span
-            className={`fill ${r.tone}`}
-            style={{ width: r.ratio == null ? '100%' : `${Math.round(r.ratio * 100)}%` }}
+            className={`fil ${r.tone}`}
+            style={{ width: r.ratio == null ? "100%" : `${Math.round(r.ratio * 100)}%` }}
           />
         </span>
         <span className={`val ${r.tone}`}>
-          <b>{r.value == null ? '—' : r.value}</b> <span className="unit">{r.unit}</span>
+          {r.value == null ? "—" : r.value} <span className="u">{r.unit}</span>
         </span>
-        <span className={live ? 'go' : 'go soon'}>{live ? '›' : 'not built yet'}</span>
       </div>
-      {(r.extra || []).length ? <div className="sub">{r.extra.join(' · ')}</div> : null}
+      {(r.extra || []).length ? <div className="sub">{r.extra.join(" · ")}</div> : null}
     </div>
   );
 };
@@ -346,15 +376,17 @@ export const render = (state, dispatch) => {
   const at = pos || DEFAULT_POS;
 
   const card = (head, body) => (
-    <div className={dragging ? 'card dragging' : 'card'} style={{ left: at.left, top: at.top }}>
-      <div
-        className="grip"
-        onMouseDown={(e) => beginDrag(e, at, dispatch)}
-        onDoubleClick={() => dispatch({ type: 'RESET_POS' })}
-      >
-        {head}
+    <div className={dragging ? "shell dragging" : "shell"} style={{ left: at.left, top: at.top }}>
+      <div className="core">
+        <div
+          className="grip"
+          onMouseDown={(e) => beginDrag(e, at, dispatch)}
+          onDoubleClick={() => dispatch({ type: "RESET_POS" })}
+        >
+          {head}
+        </div>
+        {body}
       </div>
-      <div className="body">{body}</div>
     </div>
   );
 
@@ -395,15 +427,17 @@ export const render = (state, dispatch) => {
 
   const snap = d.snapshot || {};
   const stale = snap.ok && snap.ageMs != null && snap.ageMs > 3600000;
+  // Stated ONCE in the footer rather than repeated on every unbuilt row. Four
+  // copies of "not built yet" is more words about what is missing than about
+  // what is there; the rows carry it by dimming instead.
+  const soon = d.groups.reduce((n, g) => n + g.rows.filter((r) => !(r.cta && r.cta.available)).length, 0);
 
   return card(
     <div className="hd">
       <span className="ttl">propagate</span>
       <span className={`big ${h.tone}`}>{h.value == null ? '?' : h.value}</span>
       <span className="of">
-        {h.value == null
-          ? h.label
-          : `${h.label} of ${d.edges.expanded} edges · ${d.edges.declared} declared`}
+        {h.value == null ? h.label : `${h.label} · ${d.edges.declared} declared`}
       </span>
     </div>,
     <div>
@@ -419,9 +453,11 @@ export const render = (state, dispatch) => {
         : null}
 
       <div className="foot">
-        <span className="lk" onClick={() => openView('/queue', dispatch)}>queue &#8250;</span>
-        <span className={stale ? 'sp stale' : 'sp'}>
-          {snap.ok ? `snapshot ${ageText(snap.ageMs)}` : (snap.reason || 'no snapshot')}
+        <span className="lk" onClick={() => openView("graph", dispatch)}>graph &#8250;</span>
+        <span className="lk" onClick={() => openView("/queue", dispatch)}>queue &#8250;</span>
+        {soon ? <span>{soon} not built</span> : null}
+        <span className={stale ? "sp stale" : "sp"}>
+          {snap.ok ? `snapshot ${ageText(snap.ageMs)}` : (snap.reason || "no snapshot")}
         </span>
       </div>
       {gate}

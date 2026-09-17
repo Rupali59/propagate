@@ -225,12 +225,21 @@ test("the card width is derived, never asserted (G9)", () => {
   // G9: "a fixed card width is a claim about the cell count, and it rotted
   // immediately" — a 470px card whose heatmap needed 630px drew cells onto the
   // wallpaper with correct DOM, valid CSS, passing tests and the right data.
-  assert.match(code, /width:\s*max-content/, "the card must size to its widest child");
-  // `\b` is NOT enough here: it is satisfied by the hyphen in `max-width`, so
-  // the obvious regex flags a correct file. Caught by this test failing against
-  // a card that was already right — rule:discernment-checks §4, verify the
-  // instrument before believing a surprising result.
-  assert.doesNotMatch(code, /\.card\s*\{[^}]*(?<![-\w])width:\s*\d+px/, "a fixed .card width is the rotted claim");
+  // FIND THE CARD RULE FIRST, AND FAIL IF IT CANNOT. This check was written
+  // against a class called `.card`. The card was later renamed to `.shell`, and
+  // the negative assertion below stopped matching ANYTHING -- so it passed
+  // vacuously while checking nothing at all. A check that goes blind and stays
+  // green is worse than one that fails, because nothing ever asks about it
+  // again (rule:enforcement-watches-itself).
+  const cardRe = /\.(card|shell)\s*\{([^}]*)\}/;
+  const card = code.match(cardRe);
+  assert.ok(card, "no card rule found — this check has gone blind; the element was renamed");
+
+  assert.match(card[2], /width:\s*max-content/, "the card must size to its widest child");
+  // `\b` is NOT enough for the negative: it is satisfied by the hyphen in
+  // `max-width`, so the obvious regex flags a correct file. Caught by this test
+  // failing against a card that was already right — rule:discernment-checks §4.
+  assert.doesNotMatch(card[2], /(?<![-\w])width:\s*\d+px/, "a fixed card width is the rotted claim");
 
   // A max-width is a weaker claim than a fixed width, but still a claim. It is
   // only safe because the cells WRAP rather than running off the edge, so no
