@@ -1528,6 +1528,66 @@ restating Opus-plans/Sonnet-executes is the exact failure this document is about
 source memories were deleted so it was a move and not another copy. No command would have made
 that judgment.
 
+---
+
+**MEASURED 2026-09-17, and the numbers argue for a narrower fix than "build the command".**
+
+An audit of how all 18 rules actually came to exist, plus a full gotcha census, was run to
+answer whether promotion happens at all. It does.
+
+**6-7 of 18 rules (~35%) show direct, dated evidence of promotion** from a project,
+memory, or convention origin — not inferred, but named in commit messages and rule bodies:
+
+| rule | evidence |
+|---|---|
+| `skill-routing`, `state-and-decisions` | first commit: *"rules: **promote** … to canonical"* (2026-08-14) |
+| `enforcement-watches-itself` | first commit: *"**promote** 'an enforcement point that does not watch itself' to a rule"*; G48 records the other end |
+| `safety-flag-needs-a-test` | `_TODO.md`: *"generalises propagate GOTCHAS G22, N27, and G44"* |
+| `browser-only-when-asked`, `no-waiting-on-deploys` | `_TODO.md`: *"Three project-scoped memories promoted 2026-08-16"* |
+| `discernment-checks` §4 | `keerti-job-radar/GOTCHAS.md`: *"Cost: **promoted** to `rule:discernment-checks` §4"* |
+
+Cadence during the active window: **roughly one promotion every 3-4 days** (2026-08-14 …
+2026-08-24), tapering after.
+
+**So the hub `CLAUDE.md`'s line — "a proven local gotcha has no promotion path to
+`rules/gotchas-global.md`" — is accurate about MECHANISM and overstates the PRACTICE.**
+Worth correcting there, because "no path" reads as "never happens" and a third of the rule
+set says otherwise.
+
+**The real defect is LATENCY.** `rules/_TODO.md` has carried 4-5 unwritten rules since
+2026-08-14 (last touched 2026-09-10). `LIFECYCLE.md` already priced one lag: *"the general
+form of the most expensive one sat in `rules/_TODO.md` for three days while its hazard
+fired twice more, for 11 spurious events."* The hand path works; it is just slow, and slow
+is expensive when the thing waiting is a hazard that keeps firing.
+
+**The design Rupali chose 2026-09-17: ASSISTED, human decides.** Surface candidates,
+draft, let a person write and commit. Explicitly NOT mechanical promotion — this entry's
+own 2026-08-16 example (merging `plan-opus-execute-sonnet` into `model-routing` instead of
+creating a second rule) is the judgement no command would have made, and N76 spent a day
+proving machine-authored fingerprints are hard. `LIFECYCLE.md`'s exit criterion already
+demands *"the fingerprint does not punish the behaviour the rule wants"*, which is a
+judgement call by construction.
+
+**The candidate predicate already exists and nothing evaluates it.** `rules/gotchas-global.md`
+states its own admission bar: ***"it has already repeated, or it fired while documented."***
+Both halves are measurable — "repeated" is the same hazard present in ≥2 project
+`GOTCHAS.md` files; "fired while documented" is a guard hit on an entry that already
+existed. A surfacing pass against that bar is the whole of the assisted design, and it
+needs no new vocabulary because the bar was written down a month ago.
+
+**Census backing it** (2026-09-17): **23 `GOTCHAS.md` files**, 4 of them pointer stubs,
+**427 entries / 426 live**, of which **216 (~51%) carry a `**Trigger:**`** — the untriggered
+half is the documented correct default, not debt. Trigger liveness tree-wide:
+`selftestProblems()` reports **0 problems**, so every declared trigger fires. The per-file
+ratio is invisible for a separate reason — see **N80**.
+
+**One real duplication found, and it is not promotion:**
+`propagation/state/curate-docs-skill/GOTCHAS.md` and
+`propagate/propagation/state/curate-docs/GOTCHAS.md` are **byte-identical through line 203**,
+the second carrying two later entries. Two copies of one project's file at two paths, neither
+removed — the restatement failure `every-project-carries-gotchas` warns about, at
+project-to-project scope. Worth its own decision about which path is canonical.
+
 **The cost is that the usage string promises a capability the tool does not have.** Per
 `rule:description-standard`, a thing that announces itself must say when it applies; an
 advertised subcommand that always exits 2 is an announcement with no referent. Either build it
@@ -2082,6 +2142,313 @@ the same way the lane already reports what doc-kind excluded and why.
 produced by the harness; a future change to it would silently re-merge the two
 populations. Assert the pattern in a test so the drift is visible.
 
+### N82 · The workspace census cannot tell "looked and found nothing" from "looked at nothing" — two empty directories pass, one real repo is invisible — **S2** — **OPEN**
+
+Found 2026-09-17. Two symptoms, one root: the layout report tests for **presence of a
+path**, never for contents, and enumerates only what it already knows about.
+
+**Symptom 1 — an empty directory is reported conformant.** Measured:
+
+```
+Khushboo/propagation/state/workspace/   0 entries   ECOSYSTEM.md: "**Layout** — conformant."
+Rishabh/propagation/state/workspace/    0 entries   ECOSYSTEM.md: "**Layout** — conformant."
+```
+
+`rollup`'s conformance check asserts `state/` **exists**. Both directories do exist and
+hold nothing. Counted properly across the tree: **17 `propagation/state/workspace/`
+directories, 15 non-empty, and only 10 carrying the `STATE.md` the rule requires.** All
+four of Tushar's projects have a `.sidecar.yml` and neither `STATE.md` nor `DECISIONS.md`.
+`rule:discernment-checks` §2 in one sentence: found-nothing and looked-at-nothing must not
+render alike.
+
+**And the tool that defines the standard fails it.** `propagate` itself is one of only two
+NON-CONFORMANT workspaces, missing **4 of 5** required items (`README.md`, `INDEX.md`,
+`refs/snapshot.json`, `refs/lifecycle.jsonl`); `propagate/propagation/` holds only
+`state/`. `rule:enforcement-watches-itself`, landing on the repo whose job is catching
+exactly this.
+
+**Symptom 2 — `firstmate/` is enumerated nowhere.** A real git repo at the hub root,
+absent from `propagate status --all`, from `ECOSYSTEM.md`, and from the hub `CLAUDE.md`
+repo map. It has no `propagation/`. `Motion-Graphics` at least gets a NON-CONFORMANT row;
+`firstmate` gets no row at all.
+
+Its remote is `github.com/kunchenguid/firstmate` — **not** a `Rupali59/*` repo — so it may
+well be a vendored clone that *should* be exempt. **That is the finding, not a mitigation
+of it:** there is no way to tell a deliberate exemption from an invisible repo by reading
+any report. Both render as silence.
+
+**Why these are one issue.** Fixing the conformance check to read contents would still
+leave `firstmate` unlisted, and listing `firstmate` would still leave two empty
+directories green. The shared root is that the census has **no vocabulary for absence** —
+no "present but empty", no "exempt, because —", no "found, not enumerated". Three
+different silences currently render identically.
+
+**Expected consequence of fixing symptom 1, so nobody is surprised:** two workspaces flip
+from green to red. That is the check starting to work, not a regression.
+
+**Test it can fail:** create an empty `state/workspace/` in a fixture and assert the
+conformance line does NOT read `conformant`. Today it does.
+
+**Derive, do not trust the counts above** — `propagate rollup --check`, plus a `node` walk
+of `*/propagation/state/workspace/`. Not `grep`: the ugrep shim honours the hub's `/*`
+`.gitignore` and returns false zeros, measured again during this very census (a reference
+search returned 1 file by `grep -rl` and 41 by `find | xargs grep`).
+
+---
+
+### N83 · Hub `CLAUDE.md` currency is enforced for 4 of 16 workspaces — the other nine can rot invisibly — **S3** — **OPEN**
+
+Found 2026-09-17. The hub's repo map describes every workspace. Only four workspaces
+declare an edge that would notice when their row goes stale.
+
+**Declared `<workspace>/CLAUDE.md -> CLAUDE.md`:** Divyansh, Keerti (×3), Motherboard.
+**Not declared:** Vipin Kaushik, Tathya, PanditPawanKaushik, Rupali, Tushar, Anushka,
+ManavDaehi, and the rest.
+
+This is exactly the failure the `Rupali/.propagates-cross.yml` edge was added to close on
+2026-09-14 — after `claude-usage-sample` ran unregistered for four days — and the closure
+was never generalised beyond the one workspace that had just been bitten.
+
+**Evidence the rot is real, not theoretical.** The hub `CLAUDE.md`'s own `Rupali/` row
+carries a note that it *"was wrong about presence in both directions"* — three projects
+listed as live and absent, two listed as gone and present — and says why that is worse than
+being merely stale: **neither error is detectable by reading it.**
+
+**Not recommending the sweep.** Generalising means nine new declarations across nine repos
+with independent branch lines and pre-existing uncommitted work — the convention rollout
+declined on 2026-09-17. Filed so the exposure is visible and the decision is deliberate.
+
+**Test it can fail:** edit a workspace's `CLAUDE.md` identity section and assert
+`check --changed` names the hub `CLAUDE.md`. True for four workspaces today, false for nine.
+
+---
+
+### N84 · Every in-tree ledger is empty and all 2839 events live outside every git remote — undecided, undocumented — **S3** — **OPEN**
+
+Found 2026-09-17 while mapping what a workspace owns.
+
+**Measured:** all **17** `ledger.jsonl` files in the tree hold **0 rows**. The cross-ledger
+(`propagation/PROPAGATION_CROSS_LEDGER.jsonl`) has **never** recorded an entry — its
+rendered `.md` says *"Last entry: never"*. The live store is `~/.propagate/events/` —
+**2839 events**, outside the tree, outside every git remote, and outside every backup that
+follows a repo.
+
+**The consequence, stated plainly: a full-tree clone on another machine restores zero
+verification history.** Every disposition, every `no-change-needed` with its hand-written
+reasoning, every `both-reconciled` asserting a human looked — none of it travels with the
+repos it describes.
+
+**This may well be correct.** A machine-local event store is a defensible design: the
+events record what *this* machine verified, and `REFERENCE.md` §"`manifest`" exists
+precisely to stand a workspace up elsewhere. The `archive/ledger-v1-*.jsonl` files in-tree
+are explicitly FROZEN history.
+
+**The issue is that no document says which.** There is no `DECISIONS.md` entry stating
+"the event store is deliberately machine-local, and here is what that costs". So a reader
+finding 17 empty ledgers cannot tell a deliberate design from a migration that stalled —
+the same ambiguity as N82, one layer down.
+
+**The deliverable is a decision record, not code.** Whichever way it goes, write it down.
+If machine-local is intended, say so and name what a second machine is expected to do. If
+the ledgers should carry rows, they have been empty since at least the v2 cutover and that
+is a real gap.
+
+### N81 · Five more files colocate a machine-parsed grammar with append-only churn — N77's shape, before it bites — **S3** — **OPEN**
+
+Found 2026-09-17 by a census run to answer whether N77 is one bad edge or a pattern. It is
+a pattern, and the useful part is that **four of the five are not yet costing anything.**
+
+**The discriminator.** A file is an instance only if BOTH hold: the spec region is
+materially more stable than the file around it, AND something mechanically depends on the
+spec. A long file with a header nothing parses is just a long file.
+
+| file | lines | spec region | spec last moved | file / 60d commits | parsed by | declared edge? |
+|---|---|---|---|---|---|---|
+| `HANDOVERS.md` | 2374 | close protocol, L1–97 | 2026-08-28 | 2026-09-16 / **46** | `lib/report/handovers.mjs` | **yes — this is N77** |
+| `propagate/…/workspace/DECISIONS.md` | 1183 | `What/Why/Affects/Refs`, L3–7 | 2026-08-10, never since | 2026-08-31 / 19 | `lib/report/decisions.mjs`, `graph-index.mjs` | no — latent |
+| `Vipin Kaushik/…/sanskrit-texts/GOTCHAS.md` | 1769 | `**Trigger:**` grammar, L1–4 | 2026-08-24, never since | **2026-09-17** / **50** | `hooks/gotcha-guard.mjs` | no — latent |
+| `Vipin Kaushik/…/marketing-intel/GOTCHAS.md` | 846 | L1–7 | 2026-08-24, never since | 2026-09-02 / 21 | same | no — latent |
+| `Vipin Kaushik/…/workspace/GOTCHAS.md` | 491 | L1–9 | 2026-08-24 | 2026-09-14 / 8 | same | no — latent |
+| `Motherboard/…/workspace/GOTCHAS.md` | 413 | L1–11 | 2026-08-21 | 2026-08-30 / 7 | same | edge exists but scoped to the G-list, not the header |
+
+**The finding that changes the fix: none of the five has a declared `kind: code` edge on
+the header.** So none is currently manufacturing `no-change-needed` dispositions the way
+N77's does. This is *"fix it before someone declares an edge"*, not *"six live N77s"*. The
+day anyone declares one to keep a header honest, it starts firing on every `### G-n` append.
+
+**What the five GOTCHAS.md files actually did.** They independently restated the
+`### heading` / `**Trigger:**` / `**Fires on:**` grammar that `gotcha-guard.mjs` depends on,
+inline, at the top of their own append-only file. That grammar is already canonical in
+`rule:every-project-carries-gotchas`. So this is the restatement failure that rule exists to
+prevent, committed inside the files the rule governs.
+
+**And the correct pattern already exists in the same tree, which is why this is cheap.**
+`Vipin Kaushik`'s three `DECISIONS.md` files carry **no** grammar paragraph — they point at
+`rules/conventions/STATE_MANAGEMENT.md`, where the contract lives beside `decisions-check.sh`
+that enforces it. `propagate`'s own `DECISIONS.md` restates it inline instead. The model and
+the defect are both in this repo's tree; the fix is to copy the model.
+
+**Recommended, per file, one line each:**
+
+- `HANDOVERS.md` — N77's own recommendation; move the ~31-line protocol out, leave a pointer.
+- `propagate/…/DECISIONS.md` — move the `What/Why/Affects/Refs` grammar to `docs/` beside the
+  `decisions-check.sh` contract; leave a one-line pointer. Copy what Vipin Kaushik does.
+- The five GOTCHAS.md headers — **delete the restated grammar, cite
+  `rule:every-project-carries-gotchas`.** Nothing to relocate; the canonical text already
+  exists. This is the cheapest of the three and removes five future N77s.
+
+**Rejections are part of the result.** `ISSUES.md` (including the file this entry lives in)
+FAILS the discriminator — `lib/report/backlog.mjs` parses individual `### N81 ·` entries
+structurally, and nothing parses the header or severity legend. `ECOSYSTEM.md` fails by
+construction: it is regenerated wholesale, so header and body always move together and a
+hand-edit is refused by the footer hash. `NORTH_STAR.md` is not an instance — it is the
+TARGET pattern, a stable spec correctly kept out of a churning file. The hub `CLAUDE.md`
+placement test has the stability gap but nothing parses it, so it is prose, not a contract.
+
+**One claim from the census was checked and REJECTED.** It reported that
+`.propagates.yml`'s `NORTH_STAR.md -> CLAUDE.md` edge cites a section, *"§The client
+boundary"*, that no longer exists. It does exist — `## The client boundary` is in
+`NORTH_STAR.md`, which is what the `why` means by *"**its** §The client boundary"*. The
+check had been run against `CLAUDE.md`. Recorded because a phantom "declared edge cites a
+dead section" finding would have sent someone editing a correct sidecar.
+
+**Test it can fail:** for each file above, assert the spec region's last-changed commit is
+older than the file's, and that the region is reachable by the parser that depends on it.
+When a file stops satisfying the first, it has stopped being an instance.
+
+### N80 · `readGotchas` computes the trigger count and `row()` drops it, so gotcha LIVENESS reaches no reader — **S3** — **OPEN**
+
+Found 2026-09-17 during a promotion/liveness audit. A three-line defect sitting directly
+beneath a docstring about this exact class of mistake.
+
+**The mechanism.** `lib/report/registers.mjs:244` computes it:
+
+```js
+const triggered = parseEntries(file).entries.length;
+return row({ kind: "gotchas", file, lines, entries: heads.length, …, triggered });
+```
+
+`row()` at :122 destructures
+`{ kind, file, lines, entries, live, finished, rotatable, reason, unread, error }` and
+returns exactly those. **`triggered` is not among them.** It is computed, passed, and
+discarded — no consumer can ever see it.
+
+**Why it matters, and why it is not cosmetic.** `every-project-carries-gotchas` makes the
+whole argument that presence is easy and LIVENESS is what counts: *"a `GOTCHAS.md` can be
+present, current and correctly reconciled while delivering nothing, because its entries
+carry executable triggers and a trigger that cannot fire is a hazard documented but not
+delivered."* The per-file triggered/total ratio is the number that distinguishes those two
+states, and it is the one field that does not survive the row.
+
+Measured tree-wide today: **427 entries across 23 files, of which 216 (~51%) carry a
+`**Trigger:**`.** The spread per file is enormous and invisible —
+`Divyansh/…/AuroraV3` is 29 of 33 triggered, while
+`PanditPawanKaushik/…/gemastrology-shopify` is 4 of 29 and
+`propagate`'s own is 16 of 69. Nothing surfaces that.
+
+**The irony is local.** The comment immediately above `row()` explains that `reason` is
+load-bearing because *"0 rotatable because every entry is live"* and *"0 rotatable because
+this file did not parse"* are different facts (`rule:discernment-checks` §2). The author
+was thinking about exactly this hazard in the function where the drop happens.
+
+**Two things this issue explicitly does NOT claim:**
+
+- **The 49% without a trigger are not a defect.** `LIFECYCLE.md` makes untriggered the
+  correct default — *"most gotchas have no mechanical trigger and inventing one makes
+  noise."* The ratio is worth SEEING, not worth driving to 100%.
+- **Trigger liveness itself is currently healthy.** `selftestProblems()` run across all 20
+  content files plus the global one reports **0 problems** — every entry declaring a
+  `**Trigger:**` also declares a `**Fires on:**` literal that its own regex matches. So the
+  inert entries N45 found have since been fixed.
+
+  **`cli.mjs:1073` is NOT stale and must not be "corrected".** The audit that produced this
+  issue recommended editing it; that recommendation was wrong and is recorded here because
+  the distinction matters. The comment reads *"N45 measured 3 of 10 inert while --selftest
+  reported green"* — past tense, attributing a historical measurement to explain **why the
+  check exists**. A justification-by-history is not a claim about the present, and deleting
+  it would remove the only record of why anyone bothered to tally liveness at all. The same
+  reason the hub `CLAUDE.md` preserves its 2026-06-28 cleanup note. Leave it.
+
+**Test it can fail:** assert `row()`'s return carries `triggered` for a gotchas file, and
+that a file with 10 entries and 2 triggers renders differently from one with 10 entries and
+10 triggers. Today both render identically.
+
+**Related but separate:** `doctor`'s `86 live gotcha(s)` is **cwd-scoped**, not tree-wide —
+`lib/report/doctor/registers.mjs` deliberately uses `sourcesFor(process.cwd())`, i.e. "what
+would fire HERE" (propagate's 69 + hub workspace 2 + global 15 = 86). The tree-wide figure
+is **426 live**. Both are legitimate answers to different questions; the label does not say
+which question it answered.
+
+### N79 · `rules list` reports a RELEVANCE verdict from a scan of one file type, and calls the three most-cited rules in the tree `unexercised` — **S2** — **OPEN**
+
+Found 2026-09-17 while answering "how do we keep the hub and the workspaces relevant to
+each other". The answer had to start by admitting the instrument that reports hub
+relevance is measuring the wrong population.
+
+**What it prints.** `rules list` gives every rule a `status` and closes with
+`5 rule(s) unexercised`, explained as *"fingerprint matched nothing and nothing references
+them."*
+
+**What is actually true.** `rules check` — which `rules list` derives that column from —
+scans files literally named `CLAUDE.md`, 53 of them. Citations counted tree-wide instead
+(`node` walk over `.md`/`.mjs`/`.yml`/`.sh`/`.json`, excluding `rules/` itself):
+
+| rule | files citing it | of which `CLAUDE.md` | `rules list` says |
+|---|---|---|---|
+| `discernment-checks` | **256** | 2 | adopted |
+| `state-and-decisions` | 118 | 10 | firing |
+| `safety-flag-needs-a-test` | **77** | **0** | **unexercised** |
+| `enforcement-watches-itself` | **68** | **0** | **unexercised** |
+| `adversarial-review-reads-the-ledger` | **55** | **0** | **unexercised** |
+| `model-routing` | 12 | 0 | firing |
+| `browser-only-when-asked` | 2 | **0** | **unexercised** |
+| `no-waiting-on-deploys` | **0** | 0 | **unexercised** |
+
+**Six rules have zero `CLAUDE.md` footprint and 215 citations between them.** Exactly ONE
+of the five reported unexercised is genuinely unused, and the report cannot tell it apart
+from the three most-cited rules in the tree. For `safety-flag-needs-a-test` the 77 break
+down as **32 code files**, 12 `DECISIONS.md`, 5 `GOTCHAS.md`, 3 plans, 2 `ISSUES.md` — it
+is cited in source comments and tests, which is the most load-bearing place a rule can be
+cited and the one place this scan will never look.
+
+**The irony is load-bearing, not decorative.** `docs/LIFECYCLE.md` names
+`rules/safety-flag-needs-a-test.md` as *"a mechanism produced by PROMOTE"* — the one
+worked example of the promotion path succeeding. The tool reports that success as
+unexercised.
+
+**The scan is not the defect.** `CLAUDE.md` is the right corpus for the question
+`rules check` exists to answer: which instruction files RESTATE a rule instead of citing
+it, because that is where divergence causes harm (measured 2026-08-14: 9 inline copies of
+tool-priority making 4 mutually exclusive claims). The defect is that `rules list`
+overloads that one narrow scan into a **relevance verdict**, and then states it in words
+the scan cannot support. `nothing references them` is a claim about the whole tree made
+from a sample of one filename.
+
+**Two candidate fixes; they are not equivalent and this issue does not choose.**
+
+1. **Widen the scan corpus.** Tempting and probably wrong. Restatement in a `DECISIONS.md`
+   or a code comment is not the same failure as restatement in a `CLAUDE.md` — the latter
+   is an instruction another agent will follow. Widening would also flood
+   `referencedRestatements`, and N35 already records the cost of a fingerprint wide enough
+   to flag 8 files to find 1.
+2. **Keep the scan, fix the vocabulary.** `unexercised` becomes something that says what
+   was measured — `no CLAUDE.md footprint` — and the summary sentence stops asserting
+   "nothing references them", because it does not know that. Optionally print the tree-wide
+   citation count beside it as a separate, separately-derived number.
+
+**Recommended: the second.** It is honest, it is cheap, and it does not change what
+`rules check` means. `rule:discernment-checks` §2 — absence must be attributable, and
+"no hits in the corpus I scanned" and "nothing references this" are different facts.
+
+**Test it can fail:** assert that a rule cited in a non-`CLAUDE.md` file and in no
+`CLAUDE.md` is NOT reported with wording that claims nothing references it.
+`safety-flag-needs-a-test` is the live fixture — 77 files, 0 of them `CLAUDE.md`.
+
+**Derive the numbers, never trust the ones above** (`rule:state-and-decisions`): a `node`
+walk counting `rule:<id>` per file, split by whether the basename is `CLAUDE.md`. Do NOT
+use `grep` — the ugrep shim honours the hub's `/*` `.gitignore` and returns false zeros;
+that flaw has now fired four times in this tree.
+
 ### N78 · A code-only merge is undeliverable — both delivery mechanisms gate on VERSION, and only `doctor` reads content — **S2** — **OPEN**
 
 Found 2026-09-17, one minute after merging #21, by the `# Delivery` section that #19
@@ -2150,23 +2517,112 @@ duplicates mean one was never cleaned up; 0.5.0 has been there since the origina
 incident. Not urgent, not deleted here — removing directories from someone's plugin cache
 is their call.
 
-### N77 · A `kind: code` edge fires on the whole file while coupling only a HEADER — 7 of 12 dispositions on one edge are `no-change-needed` — **S3** — **OPEN**
+### N85 · 83% of edges with any history are majority `no-change-needed` — N77 is not an outlier, it is the median behaviour — **S2** — **OPEN**
+
+Measured 2026-09-17 by parsing all 2844 events over 1564 distinct edge ids, to answer
+whether N77 was one bad edge. **It is not.** This supersedes N77's framing while leaving
+N77's own diagnosis intact.
+
+**The number.** Of the **125 edges with ≥4 recorded dispositions**, **104 (83%)** are
+≥50% `no-change-needed`. They span **46 distinct source files across 14 workspaces**.
+**31 edges are at 100%** — every judgement ever made on them was "nothing needed to
+happen". The worst cluster is a single source, `Vipin Kaushik:docs/measurement/MEASUREMENT.md`,
+carrying **12** noisy edges.
+
+N77's own edge sits at 70%, which puts it **mid-table**, not at the extreme.
+
+**THE HYPOTHESIS IN N77 IS REFUTED, and that is the most useful part of this.** N77 said
+the cause was a high-churn source. Per-source commit counts over 60 days say otherwise:
+
+| group | sources | mean commits | median |
+|---|---|---|---|
+| noisy-edge sources | 46 | **7.3** | 4 |
+| non-noisy-edge sources | 15 | **12.7** | 6 |
+
+Noisy sources churn **less**, not more. The clean disproof is a single file:
+`sanskrit-texts:docs/INVENTORY.md` (49 commits/60d) has noisy edges at 0.75 **and**
+non-noisy edges at 0.10 and 0.18 — same source, same churn, different downstreams.
+
+**So the predictor is not how often the source changes. It is WHICH SLICE of the source
+the downstream actually depends on.** A downstream that tracks a *stable derived fact* —
+a pointer line, a count, a format grammar, a canon list — gets a re-check on every
+unrelated edit to the file that happens to contain it. That is N77's real mechanism,
+stated correctly and generalised: **granularity mismatch between the declaration and the
+dependency**, of which "header inside an append-only file" is one special case.
+
+**Six causes, classified with evidence:**
+
+| cause | example | why it is noisy |
+|---|---|---|
+| stable pointer inside a hub file | 7 clusters → `CLAUDE.md`, 24 edges | the edge asserts a one-line pointer stays consistent; most edits don't touch it |
+| stable slice of a churning catalog | `INVENTORY.md` → canon tracker | new texts change the catalog, not the canon list |
+| shared constant | `Makefile`/`go.work` → `CLAUDE.md` | doc restates a *count* (14 targets); targets change, count rarely |
+| aggregate restated in a rule | `mongo.yml` → `secrets-source-of-truth.md` | rule repeats one four-project figure |
+| glob broadcast | `gotchas-global.md` → `*/docs/GOTCHAS.md` | one rule edit, N per-project obligations, few real changes |
+| **stale declaration (new)** | `Motherboard:docs/{HISTORY,GOTCHAS}.md` | source migrated to `propagation/state/workspace/` in the v3 layout move; the old edge_id's history remains and **can never close** |
+
+**Repeated reasons are widespread, not a tell of one edge.** 51 of 125 edges (41%) carry
+at least one pair of dispositions whose reason text shares ≥50% of its wording — 46 of
+those 51 are in the noisy set. One 2026-08-19 batch wrote near-identical reasoning across
+**15+ unrelated edges within hours**. N77 spotted this on one edge and read it as
+significant; it is the house style of a bulk disposition pass.
+
+**Why this is S2 while N77 is S3.** A single noisy edge wastes a little attention. A
+ledger where 83% of judged edges are majority-no-op **trains the reader to answer "no"
+without looking**, and the eighth time is the one where the header actually moved. It also
+makes `actionable` a poor priority signal, which is the number the monitor reports.
+
+**What this does NOT say.** It does not say those 104 edges are wrong to exist — most
+assert a real coupling. It says the declaration is coarser than the dependency. And the
+fix is NOT the region-scoped edge rejected in N77 finding 4: that was rejected on
+architecture (git-blob whole-file identity), and 104 edges does not change that argument,
+it raises the stakes on finding a different answer.
+
+**Candidate directions, none chosen:**
+
+- **Declare the derived fact, not the file.** Where a downstream depends on a count or a
+  pointer, the honest source is often a smaller generated artifact, not the big doc.
+- **Let a disposition express "and expect this again".** A `no-change-needed` that records
+  *why re-firing is expected* could suppress the next N identical prompts without hiding
+  a real change — closer to a calibration than a silence.
+- **Reap stale declarations.** The orphaned `Motherboard:docs/*` edges can never close and
+  should be retired outright; that is pure noise with no coupling behind it.
+
+**Test it can fail:** recompute the ratio table; assert no edge with ≥4 dispositions is
+≥90% `no-change-needed` without a recorded justification for why re-firing is expected.
+31 edges are at 100% today.
+
+**Derive, never trust the table above:** parse `~/.propagate/events/*.jsonl` with `node`
+(never `grep -c` — it counts lines, and a disposition word inside reason prose is not an
+event; that exact error produced N77's wrong denominator). Exclude
+`events/archive/` — it is frozen v1 history, not a worklist.
+
+### N77 · A `kind: code` edge fires on the whole file while coupling only a HEADER — 7 of 10 dispositions on one edge are `no-change-needed` — **S3** — **OPEN**
 
 Found 2026-09-16 while disposing `HANDOVERS.md -> propagate/lib/report/handovers.mjs`
 (`4e8d1c1c`) after the N76 work.
 
-**The measurement.** Every disposition ever recorded against that edge:
+**The measurement — CORRECTED 2026-09-17.** Every disposition ever recorded against that
+edge, counted by parsing the event store rather than by grepping `why --all`:
 
 | disposition | count |
 |---|---|
 | `no-change-needed` | **7** |
-| `baselined` | 2 |
-| `both-reconciled` | 1 |
+| `baselined` | 1 |
 | `propagated` | 1 |
 | `source-corrected` | 1 |
+| **total** | **10** |
 
-**58% of the judgements on this edge are "nothing needed to happen", and the last
-three in a row are.** Two of those three carry near-identical hand-written reasons,
+**70% of the judgements on this edge are "nothing needed to happen", and the last three in
+a row are.**
+
+> **The original filing said "7 of 12" and the denominator was wrong.** It came from
+> `why 4e8d1c1c --all | grep -oE '<disposition names>' | sort | uniq -c`, which counts
+> every occurrence of a disposition WORD in the rendered output — including words appearing
+> inside the reason prose — not events. The real count is 10.
+> `rule:discernment-checks` §4: when a number is surprising, suspect the ruler. The ratio
+> got *worse* under re-measurement (58% → 70%), so the finding stands; the arithmetic
+> behind it did not. Two of those three carry near-identical hand-written reasons,
 independently arrived at weeks apart — 2026-09-10 said *"This edge governs the HEADER
 … None of that was touched"*, and today's said the same thing after re-deriving it
 from scratch.
@@ -2190,20 +2646,46 @@ changed. Manufacturing dispositions is the opposite of what the ledger is for, a
 erodes the signal: an edge whose answer is "no" seven times trains the reader to
 answer "no" the eighth time without looking — which is the time the header moves.
 
-**Not yet established, and it is the whole decision:** whether the sidecar schema can
-express a region — an anchor, a heading, a line range — or whether the only options
-are the current whole-file edge and no edge at all. I did not determine this; the
-grep for a region selector in `lib/edges/` was inconclusive and I stopped rather than
-guess. **Establish that before choosing a fix**, because the two worlds have different
-answers:
+**ESTABLISHED 2026-09-17 — region scoping does not exist, and it is not cheap.** The
+previous version of this issue left this open and said so; here is the answer.
 
-- **If region scoping exists or is cheap:** scope this edge to the header. The
-  coupling is real and worth keeping; only its granularity is wrong.
-- **If it does not:** the honest options are to keep paying the disposition tax
-  deliberately (and say so in the sidecar comment, so the next person does not
-  re-derive the reasoning an eighth time), or to move the close-protocol spec out of
-  `HANDOVERS.md`'s header into a file that does not churn — which makes the whole-file
-  edge correct again rather than working around it.
+**1 · The edge schema admits exactly four keys.** `propagates.schema.json`:
+`path`, `why`, `kind`, `authority` — with `additionalProperties: false` at all three
+levels (root, source object, edge object). There is no anchor, heading or line-range
+selector, and an undeclared key is rejected rather than ignored.
+
+**2 · Section anchors exist in the schema and nothing resolves them.** `concepts:` —
+a sibling of `propagates_to` — is documented as *"per-section concept tags … Keys are
+section anchors"*, and it is live: `lib/claims/check.mjs` reads it, 5 of 43 sidecars
+declare it. But `findDeadConceptTokens` **never locates the section**. It lowercases
+the WHOLE source file and substring-matches each token against all of it; the `section`
+key is carried into the finding as a reporting label only. So the vocabulary for
+addressing a region is present and the machinery is not.
+
+**3 · Content identity is whole-file by construction, and that is the expensive part.**
+`contentId(absPath)` hashes a file, and `batchTrackedBlobs` / `batchRefBlobs` take
+identity from **git blob hashes**, batched through one `git ls-tree` per repo. A slice
+of a file has no git blob hash. Scoping an edge to a region therefore means writing an
+anchor resolver AND dropping those edges off the batch fast path the whole module is
+built around — hashing a computed range per edge, per run.
+
+**So the three options, now costed:**
+
+| option | cost | effect |
+|---|---|---|
+| Scope the edge to the header | New anchor resolver + those edges leave the git-blob fast path | Correct, and the most machinery |
+| Keep paying the tax, documented | One sidecar comment | Noise continues; the 8th disposition still gets derived from scratch |
+| **Move the close-protocol spec out of the churning file** | ~31 lines relocated | **Makes the existing whole-file edge correct rather than working around it** |
+
+**Recommended: the third.** `HANDOVERS.md` is 2374 lines, of which the header —
+`## Two markers, and the difference matters` plus the preamble — is about 31. That
+section is the entire coupled surface. Move it to a file that does not receive dated
+appends, point the edge at that file, and leave `HANDOVERS.md`'s header as a pointer to
+it. The edge then fires when the protocol changes, which is what it was declared to
+watch, and stops firing on entries, which it was never about.
+
+It also needs no new propagate machinery, which matters: the alternative buys precision
+by making the tool's fastest path slower for everyone, to fix one edge's granularity.
 
 **Do not just delete the edge.** It was declared 2026-08-26 *"after the two ends
 disagreed for as long as both existed and nothing could see it"*, and one of its 12
@@ -2213,6 +2695,21 @@ caught genuine drift twice. The defect is the noise ratio, not the coupling.
 **Test it can fail:** append a dated entry to `HANDOVERS.md` that touches no header
 line, and assert the edge does NOT enter an actionable state. Today that assertion
 fails, which is the issue.
+
+**SUPERSEDED IN SCOPE 2026-09-17 — see N85.** A full census of the event store found
+**104 edges (83% of all with ≥4 dispositions)** are majority `no-change-needed`, and
+**refuted this entry's stated cause**: noisy sources churn LESS than non-noisy ones
+(mean 7.3 vs 12.7 commits/60d). The real predictor is which SLICE of the source the
+downstream depends on, not how often the source changes. This edge's diagnosis
+(header vs whole file) is correct and is one special case of that. Read N85 first.
+
+**GENERALISED 2026-09-17 — see N81.** A census found **five more files** with the same
+shape: a machine-parsed grammar colocated with append-only churn. The important
+difference is that **none of the five has a declared `kind: code` edge on its header**, so
+none is costing review cycles yet — this edge is the only live instance. Four of the five
+restate the `**Trigger:**`/`**Fires on:**` grammar that is already canonical in
+`rule:every-project-carries-gotchas`, so their fix is a deletion and a citation, not a
+relocation.
 
 ### N76 · The rule fingerprints are self-quotations, so `rules check` detects COPY-PASTE, not restatement — **S2** — **RESOLVED 2026-09-16**
 
