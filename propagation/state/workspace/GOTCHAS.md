@@ -1442,3 +1442,40 @@ macOS, or reach for `perl -pe` / `node -e` instead of `sed` when `\s` is already
 and working. And per the corollary this entry is itself an instance of
 (`rule:discernment-checks` §4): when a derived number is surprising, suspect the ruler
 before publishing it — re-measure a different way, don't just re-read the same output.
+
+### G65 · Code inside a template literal is escaped TWICE, and the second reader is a browser that cannot report the error
+**Trigger:** `(commands/ui\.mjs|propagate-queue\.jsx)`
+**Fires on:** `Edit commands/ui.mjs`
+
+`commands/ui.mjs` builds its whole page — including a ~120-line inline `<script>` — as
+one template literal. Every escape in that region is therefore consumed twice: once when
+`page()` runs, once by the browser.
+
+**Four instances on 2026-09-17, in one session, three of them in the FIX for the one
+before:**
+
+| written | what the browser got | symptom |
+|---|---|---|
+| `diff.split("\n")` | a real newline inside a string literal | header stuck on `loading…` forever |
+| a comment reading ``not `grid-auto-flow` `` | the literal closed early | widget never rendered |
+| a comment explaining that hazard, with backticks | same again | `node --check` failed |
+| `.replace(/^\/+/,"")` | `\/` collapsed to `/`, so the regex became `/^/+/` | SyntaxError, script dead |
+
+**Why nothing caught it.** `node --check commands/ui.mjs` passes every time — the MODULE
+is valid; the string it builds is not. The server returns 200, `/api/registers` answers
+in 130 ms, and no log anywhere records a thing. The only evidence lives in the browser
+console, which nothing in this repo reads. From the outside it is indistinguishable from
+a slow network.
+
+**Cost:** roughly 40 minutes across the session, and it shipped to a user, who reported
+it as "loading" — the entire page was dead, and the tooling reported perfect health.
+
+**Instead, in order:**
+1. **Write code the template cannot corrupt.** `/^[/]+/` needs no backslash at all, which
+   is why the final fix is a character class rather than a better-escaped regex. Prefer
+   the form with nothing to eat over the form that is escaped correctly today.
+2. **Never put a backtick in a comment inside the literal**, not even to quote code. This
+   is the habit that makes comments in this repo good, so it will keep happening.
+3. **Assert on the OUTPUT, never the source.** `tests/unit/ui-page.test.mjs` calls
+   `page()` and parses the script it emits with `node:vm`. That is the only check that
+   sees what the browser sees.

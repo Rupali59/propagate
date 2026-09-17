@@ -77,7 +77,7 @@ export function validateWrite({ edge_id, disposition, reason }, item) {
 
 const STATE_COLOUR = { DRIFTED: "#b45309", DIVERGED: "#b91c1c", REVERSED: "#6d28d9", UNMATCHED: "#374151" };
 
-function page(token) {
+export function page(token) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>propagate — the input surface</title>
 <style>
 :root{--bg:#0b0d10;--card:#151a21;--line:#232b36;--fg:#e6edf3;--dim:#8b98a8;--acc:#2f81f7}
@@ -208,10 +208,19 @@ function renderRegister(d,kind){
   window.__items=items;
 }
 function diffHtml(diff){
-  return '<div class="diff">'+diff.split("\n").map(l=>{
+  // DOUBLE-ESCAPED ON PURPOSE, and NO BACKTICKS IN THIS COMMENT. The whole page
+  // is a template literal, so a single backslash-n here is interpreted when
+  // page() RUNS: the browser receives a real newline inside a JS string
+  // literal, which is a SyntaxError that kills the ENTIRE inline script. The
+  // symptom is the header stuck on "loading..." forever, with a 200 on every
+  // request and nothing in the network tab.
+  //
+  // A backtick in a comment closes the literal the same way -- which is how the
+  // first version of THIS comment broke the file it was warning about.
+  return '<div class="diff">'+diff.split("\\n").map(l=>{
     const cls=l.startsWith("+")?"add":l.startsWith("-")?"del":"hdr";
     return '<span class="'+cls+'">'+esc(l)+'</span>';
-  }).join("\n")+'</div>';
+  }).join("\\n")+'</div>';
 }
 document.addEventListener("change",e=>{
   if(!e.target.classList.contains("a"))return;
@@ -255,7 +264,12 @@ document.addEventListener("click",async e=>{
     VIEW=e.target.dataset.v;location.hash=VIEW;load();
   }
 });
-let VIEW=(location.hash||"#queue").slice(1);
+// The fragment arrives as "#/todos" from open-ui.sh (which is handed a ROUTE
+// like /todos) and as "#todos" from a tab click, so the leading slash is
+// stripped rather than one of the two producers being declared wrong. Without
+// this a widget click on Todos silently lands on the queue tab -- no error, just
+// the wrong page, which is the hardest kind of wrong to notice.
+let VIEW=(location.hash||"#queue").slice(1).replace(/^[/]+/,"");
 if(!["queue","issues","todos"].includes(VIEW)) VIEW="queue";
 async function load(){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.v===VIEW));
