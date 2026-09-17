@@ -237,7 +237,13 @@ export const className = `
   .foot .lk { cursor:pointer; }
   .foot .lk:hover { color:#9aa7b8; }
   .stale { color:#f0b429; }
-  .gate { font-size:9.5px; color:#4a5563; margin-top:6px; }
+  /* THE ONE LINE THAT EXPLAINS A DEAD-LOOKING CARD, so it must be readable.
+     It shipped at 9.5px in #4a5563 — barely above the background — and the
+     first person to hit it asked why nothing responded rather than reading the
+     answer already on screen. A note nobody can read is a note that is not
+     there, which is the same failure as not writing it. */
+  .gate { font-size:10.5px; color:#8b98a8; margin-top:7px; }
+  .gate b { color:#f0b429; font-weight:600; }
 `;
 
 // Open a control. `run` is the documented shell-out; open-ui.sh starts the
@@ -381,7 +387,11 @@ export const render = (state, dispatch) => {
   // line says why.
   const gate = interactive || moved
     ? null
-    : <div className="gate">rows need an Übersicht interaction shortcut + Accessibility access</div>;
+    : (
+      <div className="gate">
+        <b>rows are inert</b> — Übersicht needs an interaction shortcut + Accessibility access
+      </div>
+    );
 
   const snap = d.snapshot || {};
   const stale = snap.ok && snap.ageMs != null && snap.ageMs > 3600000;
