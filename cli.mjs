@@ -1366,13 +1366,51 @@ async function rulesCmd() {
   if (sub === "selftest") {
     const res = selftest({ rulesDir: RULES_DIR });
     if (asJson) return void console.log(JSON.stringify(res, null, 2));
+
+    // Probe checks are per-SAMPLE (108 of them for 18 rules), so they are folded
+    // to one line per rule. Rendering them raw is not merely noisy — before this
+    // was written every probe check fell through the fingerprint/override ternary
+    // and printed as `override true  undefined`, so the newest half of the
+    // selftest was both invisible and wrong on screen while the summary line
+    // claimed only that fingerprints fire. rule:enforcement-watches-itself, in
+    // the selftest whose job is catching exactly that.
+    const probes = new Map();
     for (const c of res.checks) {
+      if (c.kind !== "probe" || c.id === "(file)") continue;
+      const e = probes.get(c.id) ?? { pos: 0, posOk: 0, neg: 0, negOk: 0, unprobed: false };
+      if (c.unprobed) e.unprobed = true;
+      else if (c.want === true) { e.pos += 1; if (c.pass) e.posOk += 1; }
+      else if (c.want === false) { e.neg += 1; if (c.pass) e.negOk += 1; }
+      probes.set(c.id, e);
+    }
+
+    for (const c of res.checks) {
+      if (c.kind === "probe") continue;
       const label = c.kind === "fingerprint" ? `${c.id.padEnd(32)} fingerprint fires on its own body` : `override ${String(c.want).padEnd(5)} ${c.why}`;
       console.log(`  ${c.pass ? GREEN + "✓" + RESET : RED + "✗" + RESET} ${label}`);
     }
+
+    // UNPROBED is its own line and its own colour. A rule nobody wrote a
+    // paraphrase for has NOT been shown to detect restatement — that is a
+    // different fact from passing, and folding it into the pass count is the
+    // exact conflation N76 was filed about (rule:discernment-checks §2).
+    const unprobed = [...probes].filter(([, e]) => e.unprobed).map(([id]) => id);
+    if (probes.size) {
+      console.log("");
+      for (const [id, e] of probes) {
+        if (e.unprobed) { console.log(`  ${YELLOW}?${RESET} ${id.padEnd(32)} UNPROBED — no paraphrase asserts this fingerprint detects restatement`); continue; }
+        const ok = e.posOk === e.pos && e.negOk === e.neg;
+        console.log(`  ${ok ? GREEN + "✓" + RESET : RED + "✗" + RESET} ${id.padEnd(32)} probes ${e.posOk}/${e.pos} paraphrases fire · ${e.negOk}/${e.neg} near-misses silent`);
+      }
+    }
+
+    const probed = probes.size - unprobed.length;
+    const probeNote = probes.size
+      ? `${probed} of ${probes.size} rules probed${unprobed.length ? `, ${YELLOW}${unprobed.length} UNPROBED${RESET}` : ""}`
+      : `${YELLOW}no probes ran${RESET}`;
     console.log(
       res.pass
-        ? `\n  ${GREEN}selftest PASS${RESET} — every fingerprint can fire; override detection fires and refuses near-misses`
+        ? `\n  ${GREEN}selftest PASS${RESET} — every fingerprint can fire; override detection fires and refuses near-misses; ${probeNote}`
         : `\n  ${RED}selftest FAIL${RESET} — ${res.failures.join("; ")}`,
     );
     process.exit(res.pass ? 0 : 1);
@@ -1429,7 +1467,12 @@ async function rulesCmd() {
   );
   for (const [id, fs] of Object.entries(byRule).sort((a, b) => b[1].length - a[1].length)) {
     console.log(`  rule:${id} — restated in ${fs.length} file(s)`);
-    for (const f of fs) console.log(`     ${f.file.replace(HOME_DIR, "~")}:${f.hits.slice(0, 3).join(",")}`);
+    for (const f of fs) {
+      const where = f.spansLines
+        ? ` ${DIM}(matched across lines — no single line carries it; read the file)${RESET}`
+        : `:${f.hits.slice(0, 3).join(",")}`;
+      console.log(`     ${f.file.replace(HOME_DIR, "~")}${where}`);
+    }
   }
   if (res.overrides.length) {
     console.log(`\n  ${DIM}declared deviations (not drift — ${res.overrides.length}):${RESET}`);

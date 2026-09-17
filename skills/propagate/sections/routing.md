@@ -64,11 +64,24 @@ per rule, because a pointer sitting beside a stale copy is what a half-finished
 conversion looks like, and it used to be invisible (19 files, measured
 2026-08-24, while the summary line read "0 restatement(s) across 0 file(s)").
 
-`selftest` proves every rule's fingerprint can fire against that rule's own
-body — **which is not the same as firing on how the claim is phrased in the
-wild**, and that gap is `docs/ISSUES.md` N35. Use `rules list` for the per-rule
-restated / referenced / status table and the unexercised count; a rule nothing
-restates and nothing references is an UNKNOWN, not a pass.
+`selftest` proves two different things, and the second one used to be missing.
+First, that every rule's fingerprint can fire against that rule's own body —
+necessary, and on its own a tautology, because a fingerprint built from a
+document's own sentences can only find copies of that document. Second, since
+2026-09-16, that it fires on the claim **as someone else would phrase it**:
+`rules/_probes.yml` carries two paraphrases per rule that must fire and four
+near-misses that must not, and all 18 active rules are covered (N76).
+
+**UNPROBED is its own state, not a pass.** A rule with no probe has not been
+shown to detect restatement at all, so `selftest` names it rather than folding
+it into the count — `18 of 18 rules probed` on a clean run, `17 of 18 rules
+probed, 1 UNPROBED` when one is missing.
+
+Use `rules list` for the per-rule restated / referenced / status table and the
+unexercised count; a rule nothing restates and nothing references is an UNKNOWN,
+not a pass. That reading is now stronger than it was: `restated 0` means the
+detector was shown to fire on paraphrase and found nothing, where before it
+meant only that nobody had copy-pasted.
 
 ## Out of scope here
 
