@@ -4297,6 +4297,45 @@ async function monitorCmd() {
   };
   if (!dryRun) await mon.logRun(stats);
 
+  // ── the doctor snapshot ──────────────────────────────────────────────────
+  //
+  // Runs AFTER logRun and after every notification decision above, so doctor's
+  // ~37s can never delay the thing this command exists to do. A snapshot is a
+  // convenience; a missed notification is the failure.
+  //
+  // Isolated for the same reason the backlog check is: edge notification is the
+  // older and more load-bearing half of this command, and a doctor that throws
+  // must not take it down. `writeSnapshot` handles its own failure by writing an
+  // error object that carries the last good timestamp, so a reader can tell
+  // "never worked" from "worked at 04:00 and has failed since".
+  //
+  // Skipped on --dry-run: a dry run that spends 37s and writes a file is not dry.
+  if (!dryRun) {
+    try {
+      const { writeSnapshot } = await import("./lib/report/doctor/snapshot.mjs");
+      const { buildDoctorJson } = await import("./lib/report/doctor/structure.mjs");
+      const snap = await writeSnapshot({
+        runDoctor: async () => {
+          const captured = [];
+          const realLog = console.log;
+          console.log = (...a) => { captured.push(a.join(" ")); };
+          try {
+            // exitProcess:false is load-bearing — the default kills the process
+            // mid-monitor and the run would never log its own completion.
+            const problems = await doctor({ exitProcess: false });
+            return buildDoctorJson(captured, { problems, generatedAt: new Date().toISOString() });
+          } finally {
+            console.log = realLog;
+          }
+        },
+      });
+      if (snap?.error) console.error(`${YELLOW}monitor: doctor snapshot failed:${RESET} ${snap.error}`);
+    } catch (e) {
+      // Even the writer failing must not end the monitor run.
+      console.error(`${YELLOW}monitor: could not write doctor snapshot:${RESET} ${String(e?.message ?? e)}`);
+    }
+  }
+
   if (json) {
     console.log(JSON.stringify({ generatedAt: new Date().toISOString(), dryRun, ...stats, would: toNotify.map((r) => ({ edge_id: r.edge_id, state: r.state, source: r.source.path, downstream: r.downstream.path })) }, null, 2));
     return;
