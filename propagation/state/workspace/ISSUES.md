@@ -2082,7 +2082,71 @@ the same way the lane already reports what doc-kind excluded and why.
 produced by the harness; a future change to it would silently re-merge the two
 populations. Assert the pattern in a test so the drift is visible.
 
-### N76 · The rule fingerprints are self-quotations, so `rules check` detects COPY-PASTE, not restatement — **S2** — **OPEN**
+### N77 · A `kind: code` edge fires on the whole file while coupling only a HEADER — 7 of 12 dispositions on one edge are `no-change-needed` — **S3** — **OPEN**
+
+Found 2026-09-16 while disposing `HANDOVERS.md -> propagate/lib/report/handovers.mjs`
+(`4e8d1c1c`) after the N76 work.
+
+**The measurement.** Every disposition ever recorded against that edge:
+
+| disposition | count |
+|---|---|
+| `no-change-needed` | **7** |
+| `baselined` | 2 |
+| `both-reconciled` | 1 |
+| `propagated` | 1 |
+| `source-corrected` | 1 |
+
+**58% of the judgements on this edge are "nothing needed to happen", and the last
+three in a row are.** Two of those three carry near-identical hand-written reasons,
+independently arrived at weeks apart — 2026-09-10 said *"This edge governs the HEADER
+… None of that was touched"*, and today's said the same thing after re-deriving it
+from scratch.
+
+**Why.** The sidecar declares the source as `HANDOVERS.md` — the whole file — while
+the `why:` it carries scopes the coupling precisely:
+
+> HANDOVERS.md's header is the prose spec of the close protocol this module parses.
+> Changing the marker spelling, the placement rule or MARKER_WINDOW here must be
+> reflected in the header, and vice versa.
+
+`HANDOVERS.md` is append-only by design: its own header says *"add dated sections,
+never edit past ones"*. So the file changes often and the header almost never does.
+The edge fires on every entry append and the answer is nearly always the same.
+
+**This is the shape `rule:delegation-criteria` §2 names** — the 60-second watcher that
+ran 4,420 times and found nothing in 4,384 of them. Same defect one level up: not a
+component polling too often, but a *declaration* whose granularity does not match the
+coupling it asserts, so a human is asked to judge something that could not have
+changed. Manufacturing dispositions is the opposite of what the ledger is for, and it
+erodes the signal: an edge whose answer is "no" seven times trains the reader to
+answer "no" the eighth time without looking — which is the time the header moves.
+
+**Not yet established, and it is the whole decision:** whether the sidecar schema can
+express a region — an anchor, a heading, a line range — or whether the only options
+are the current whole-file edge and no edge at all. I did not determine this; the
+grep for a region selector in `lib/edges/` was inconclusive and I stopped rather than
+guess. **Establish that before choosing a fix**, because the two worlds have different
+answers:
+
+- **If region scoping exists or is cheap:** scope this edge to the header. The
+  coupling is real and worth keeping; only its granularity is wrong.
+- **If it does not:** the honest options are to keep paying the disposition tax
+  deliberately (and say so in the sidecar comment, so the next person does not
+  re-derive the reasoning an eighth time), or to move the close-protocol spec out of
+  `HANDOVERS.md`'s header into a file that does not churn — which makes the whole-file
+  edge correct again rather than working around it.
+
+**Do not just delete the edge.** It was declared 2026-08-26 *"after the two ends
+disagreed for as long as both existed and nothing could see it"*, and one of its 12
+dispositions is a real `propagated` and one a real `source-corrected` — so it has
+caught genuine drift twice. The defect is the noise ratio, not the coupling.
+
+**Test it can fail:** append a dated entry to `HANDOVERS.md` that touches no header
+line, and assert the edge does NOT enter an actionable state. Today that assertion
+fails, which is the issue.
+
+### N76 · The rule fingerprints are self-quotations, so `rules check` detects COPY-PASTE, not restatement — **S2** — **RESOLVED 2026-09-16**
 
 Found 2026-09-16 while investigating whether Phase 2b was worth building. It is the
 structural reason N35 has stayed open, and it is larger than N35.
@@ -2134,3 +2198,72 @@ each independently verifiable — not a heuristic over 936 pairs.
 **Test it can fail:** for any rule, assert its fingerprint fires on a hand-written
 paraphrase held in a fixture beside the rule. `--selftest` today asserts only that a
 fingerprint matches its own body, which is the tautology this issue is about.
+
+---
+
+**RESOLVED 2026-09-16 — all 18 rules probed, and the fix found what the defect was
+hiding.**
+
+`rules/_probes.yml` now carries, for every one of the 18 active rules, two
+paraphrases that MUST fire and four near-misses that MUST NOT, and each fingerprint
+was widened until all four gates pass: positives fire, negatives stay silent, the
+rule's own body still matches, and any change in corpus hits was opened and read
+rather than counted. `selftest` runs the probes and reports UNPROBED as its own
+state — proven by removing one entry and confirming it renders `17 of 18 rules
+probed, 1 UNPROBED` rather than a silent pass.
+
+**The shape of the fix.** Every fingerprint is now `<self-quote>|<structural>`. The
+first half keeps the selftest's own-body assertion honest; the second matches the
+claim's shape in someone else's words. Splitting them is what stops a widening from
+quietly breaking the thing it was meant to preserve.
+
+**The mandatory negative earned its place immediately.** Every entry carries the line
+`See rule:<id> before doing X.` — because a rule's hyphenated id contains its own key
+words and hyphens are word boundaries, so a loose pattern matches its own citation and
+scores a reference as a restatement. It fired during construction on
+`enforcement-watches-itself`, whose id supplied `watches` to a structural alternation
+containing `watch`. Caught before shipping, in the rule about checks that do not cover
+themselves.
+
+**What it found: 2 restatements where the tool previously reported 0.**
+
+| Rule | File | Verdict |
+|---|---|---|
+| `skill-routing` | `Divyansh/AuroraV3/CLAUDE.md:70` | **Confirmed restatement.** The whole routing table, with `/` separators and `→ invoke /skill` arrows |
+| `delegation-criteria` | `ManavDaehi/CLAUDE.md` | **Borderline — needs a human.** "v2 derives state from content on demand … do not add a watcher" is mostly compliance, but the imperative is scoped reasoning from the rule's §2 |
+
+The AuroraV3 hit is the satisfying one: `rule:skill-routing`'s own body predicted this
+exact class — *"misses the other 7, which say `Product ideas`, `Ideas / brainstorming`,
+and similar"* — and could not see it. The widened fingerprint accepts either separator
+and now does.
+
+**A stale count in that rule fell out of the same work, and the instrument lied while
+establishing it.** The rule claimed 11 files used the canonical wording. Re-measured:
+**1** `CLAUDE.md` in the tree contains `Product ideas` at all, against **17** that cite
+the rule — so 17 of the 2026-08-14 census of 18 were converted, and the survivor is a
+workspace added *after* the consolidation. `grep` reported **0**, because it is the
+ugrep shim honouring the hub's `/*` `.gitignore`; a `node` walk found 1. That is
+`rule:discernment-checks` §4 firing for the third recorded time on the same shim. The
+rule now names the derivation command instead of carrying the number.
+
+**Two defects in the reporting path, both found by using the fix rather than by
+reading it:**
+
+- `selftest`'s renderer had no branch for probe checks, so all 108 fell through the
+  fingerprint/override ternary and printed as `override true  undefined` — the newest
+  half of the check was simultaneously invisible and wrong on screen, while the summary
+  line claimed only that fingerprints fire.
+- `checkRules` decides a file restates a rule by testing the WHOLE text, then locates it
+  by testing each line. A paraphrase that wraps matches the file and no single line, so
+  the report rendered `ManavDaehi/CLAUDE.md:` — a file:line reference pointing nowhere,
+  on the first real finding the widened detectors ever produced. Prose wraps; that is the
+  point of a structural fingerprint. Now reported as `spansLines`, with a test whose
+  mutation gate was re-run after the first attempt proved invalid (the fixture used
+  `name:` where `loadRules` requires `id:`, so the test was failing before the mutation
+  and its going red proved nothing).
+
+**Still open, deliberately:** N35 is NOT closed by this. `claims restate`'s corpus is
+cited-and-restated pairs; the unexercised-rule set is uncited. Disjoint by construction,
+as recorded on N35 itself. What this changes is that a rule reporting `restated 0` now
+means something — the detector has been shown to fire on paraphrase — where before it
+meant only that nobody copy-pasted.

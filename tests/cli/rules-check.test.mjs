@@ -346,3 +346,49 @@ test("a file that only references a rule is NOT counted — the tally must mean 
     f.cleanup();
   }
 });
+
+/**
+ * A restatement that wraps across a line break must still be locatable.
+ *
+ * WHY THIS EXISTS. `checkRules` decides a file restates a rule by testing the
+ * fingerprint against the WHOLE text, then computes `hits` by testing it against
+ * each line separately. Those are different questions, and N76's widening made
+ * the gap reachable: the point of a structural fingerprint is that it fires on
+ * prose rather than on a copied line, and prose wraps. The first real restatement
+ * the widened detectors caught — rule:delegation-criteria in ManavDaehi/CLAUDE.md
+ * — matched the file and no single line, so the report rendered
+ * `.../CLAUDE.md:` with nothing after the colon: a file:line reference pointing
+ * nowhere, on the one finding anybody would want to go read.
+ *
+ * `rule:discernment-checks` §2 — "matched, cannot point at one line" and
+ * "matched at line <blank>" are different facts, and only one of them is honest.
+ */
+test("a restatement split across lines is flagged spansLines, never an empty line number", async () => {
+  const { checkRules } = await import("../../lib/rules/rules-check.mjs");
+  const dir = mkdtempSync(path.join(tmpdir(), "rules-span-"));
+  const rulesDir = path.join(dir, "rules");
+  const root = path.join(dir, "ws");
+  mkdirSync(rulesDir, { recursive: true });
+  mkdirSync(root, { recursive: true });
+
+  // A fingerprint that can only match with the line break collapsed.
+  writeFileSync(
+    path.join(rulesDir, "wrapped-claim.md"),
+    `---\nid: wrapped-claim\nscope: global\nstatus: active\nfingerprint: "alpha[\\\\s\\\\S]{0,40}omega"\n---\n\nalpha and then omega.\n`,
+  );
+  writeFileSync(path.join(root, "CLAUDE.md"), "# Doc\n\nalpha is the start and\nomega is the end.\n");
+
+  const res = checkRules({ rulesDir, roots: [root] });
+  const f = res.findings.find((x) => x.rule === "wrapped-claim");
+  assert.ok(f, "the wrapped restatement must be found at all");
+  assert.deepEqual(f.hits, [], "no single line carries it — that is the precondition");
+  assert.equal(f.spansLines, true, "so the finding must say it cannot point at one line");
+
+  // ...and the ordinary case must NOT claim that, or the flag means nothing.
+  writeFileSync(path.join(root, "CLAUDE.md"), "# Doc\n\nalpha then omega on one line.\n");
+  const single = checkRules({ rulesDir, roots: [root] }).findings.find((x) => x.rule === "wrapped-claim");
+  assert.ok(single.hits.length > 0);
+  assert.equal(single.spansLines, false);
+
+  rmSync(dir, { recursive: true, force: true });
+});
