@@ -2517,7 +2517,63 @@ duplicates mean one was never cleaned up; 0.5.0 has been there since the origina
 incident. Not urgent, not deleted here — removing directories from someone's plugin cache
 is their call.
 
-### N85 · 83% of edges with any history are majority `no-change-needed` — N77 is not an outlier, it is the median behaviour — **S2** — **OPEN**
+### N86 · The DECISIONS.md gate is a CONTRACT living in two client workspaces, forked, with cutoff dates five weeks apart — **S2** — **OPEN**
+
+Found 2026-09-17 by the adversarial review of the hub↔workspace diagnosis, which had
+missed it. It is the cleanest instance of that diagnosis's own thesis, and it was invisible
+to the diagnosis because the diagnosis read files while this is a property of the **edges**.
+`rule:adversarial-review-reads-the-ledger`, doing exactly what it claims to do.
+
+**The measurement.** Two copies on disk, both inside client workspaces, none at the hub:
+
+| fork | bytes | lines | cutoff date | control flow |
+|---|---|---|---|---|
+| `Vipin Kaushik/scripts/decisions-check.sh` | 7235 | 180 | **2026-06-09** | differs |
+| `PanditPawanKaushik/scripts/decisions-check.sh` | 3856 | 107 | **2026-07-16** | differs |
+
+Different sizes, different hashes, different control flow, and **enforcement cutoffs five
+weeks apart** — so a `DECISIONS.md` entry that passes under one fork may fail under the
+other, depending purely on which workspace's copy a reader happens to invoke.
+
+**Who depends on it: 54 files across 6 workspaces** — PanditPawanKaushik (12),
+`Vipin Kaushik` (26), Rupali (6), Tushar (3), **propagate (6)**, and **`rules/` (1)**.
+
+**`propagate`'s own `DECISIONS.md` header names the PanditPawanKaushik copy explicitly:**
+
+> `**Affects:**` is machine-read — it drives cross-repo relay rows and is enforced as a
+> pre-commit gate by `PanditPawanKaushik/scripts/decisions-check.sh`.
+
+So the tool that defines the propagation standard has its own decision-record format
+enforced by a script owned by a client workspace, in the shorter of two divergent forks.
+
+**Why this is the thesis and not just duplication.** The hub owns contracts; workspaces own
+instances. A *format gate* is a contract by definition — it decides what a valid entry is,
+for six workspaces. It lives in two instances. `rule:state-and-decisions` already records
+this exact shape one level over: *"two carried a `scripts/hygiene/` stack forked between
+them — 5 of 8 shared libs diverged. Every divergence was individually reasonable. Together
+they meant no check could be written once."*
+
+**What makes it S2 rather than S3.** A forked linter is an annoyance. A forked **gate**
+with different cutoff dates means the tree has **two different definitions of a valid
+DECISIONS.md entry** and no way to tell which one any given file was validated against.
+That is not drift between a doc and its code — it is drift between two enforcers, which no
+declared edge in the tree currently watches.
+
+**Not proposing the fix here.** Moving it to the hub is the obvious move and is not free:
+54 citations across six workspaces would need repointing, and the two forks must first be
+reconciled — which requires deciding whose cutoff is right, a judgement, not a merge.
+Note also that a hub-owned gate does not automatically get invoked; `rule:enforcement-watches-itself`
+records a drift gate installed in seven repos and not in the one that authored it.
+
+**Test it can fail:** hash every `decisions-check.sh` in the tree and assert there is at
+most one distinct implementation. Today there are two.
+
+**Derive it, do not trust the table:**
+`find ~/Documents/GitHub -name decisions-check.sh -not -path '*/node_modules/*'` then
+`md5` each. Not `grep` — the ugrep shim honours the hub's `/*` `.gitignore` and this
+script lives inside workspaces it would skip.
+
+### N85 · 83% of edges with ENOUGH history to have a ratio are majority `no-change-needed` — N77 is not an outlier — **S2** — **OPEN**
 
 Measured 2026-09-17 by parsing all 2844 events over 1564 distinct edge ids, to answer
 whether N77 was one bad edge. **It is not.** This supersedes N77's framing while leaving
@@ -2531,17 +2587,40 @@ carrying **12** noisy edges.
 
 N77's own edge sits at 70%, which puts it **mid-table**, not at the extreme.
 
-**THE HYPOTHESIS IN N77 IS REFUTED, and that is the most useful part of this.** N77 said
-the cause was a high-churn source. Per-source commit counts over 60 days say otherwise:
+**MIND THE DENOMINATOR — corrected 2026-09-17 on adversarial review.** This entry's first
+title read *"83% of edges with any history"*, which is false and is the exact
+`rule:discernment-checks` §5 error the entry is about. **1564** edges have at least one
+disposition; only **125** have ≥4, which is the minimum to have a meaningful ratio at all.
+The 83% is of those 125. As a share of every edge with any history, the noisy set is
+**6.6%**. Both numbers are real and they answer different questions: *"among edges we have
+judged repeatedly, how often was the answer no?"* (83%) versus *"how much of the graph is
+noisy?"* (6.6%). The first is the one that matters for reviewer attention; say which one
+you mean.
 
-| group | sources | mean commits | median |
-|---|---|---|---|
-| noisy-edge sources | 46 | **7.3** | 4 |
-| non-noisy-edge sources | 15 | **12.7** | 6 |
+**THE HYPOTHESIS IN N77 IS REFUTED, and the strong evidence is the same-source spread —
+not the aggregate.** N77 said the cause was a high-churn source.
 
-Noisy sources churn **less**, not more. The clean disproof is a single file:
-`sanskrit-texts:docs/INVENTORY.md` (49 commits/60d) has noisy edges at 0.75 **and**
-non-noisy edges at 0.10 and 0.18 — same source, same churn, different downstreams.
+**The disproof, which holds churn constant by construction.** One file, six declared edges:
+
+```
+sanskrit-texts:docs/INVENTORY.md   (49 commits/60d)
+  e82c6e94  0.75      a9d43537  0.63      e377000b  0.18
+  fa432c23  0.75      91daecfb  0.10
+  2cb348a4  0.75
+texts:docs/INVENTORY.md            0.78, 0.78, 0.33
+```
+
+Same source, same commit history, **a 7.5× spread in noise ratio across its own
+downstreams.** Source churn cannot explain a variable it is constant across. Whatever
+drives the ratio is on the downstream side.
+
+**The aggregate comparison points the same way and is much weaker evidence — stated
+second on purpose.** Noisy-edge sources average **7.3** commits/60d against **12.7** for
+non-noisy ones, i.e. noisy sources churn *less*. But the non-noisy group is only **15**
+sources, and both groups are defined by the very outcome under test, so this is
+suggestive, not probative. **Do not cite the means without the same-source spread** — an
+earlier draft of this entry led with them, which is the shape of an argument that looks
+statistical and is not.
 
 **So the predictor is not how often the source changes. It is WHICH SLICE of the source
 the downstream actually depends on.** A downstream that tracks a *stable derived fact* —

@@ -122,6 +122,47 @@ Both the model and the defect are in this tree. **Cite, don't restate** is not a
 principle to introduce — `REFERENCE.md` §"Propagation layout" says it in those words, and
 `rules check` enforces it for rules. The gap is that nothing enforces it for *formats*.
 
+## Adversarial review of this diagnosis, 2026-09-17
+
+Run against the diagnosis immediately after writing it, per
+`rule:adversarial-review-reads-the-ledger` — which says to review the **edges**, not just
+the file. That is what found the largest miss.
+
+**It found one thing the diagnosis missed entirely: N86.** The `DECISIONS.md` format gate
+exists as **two divergent forks**, both inside client workspaces, with enforcement cutoffs
+**five weeks apart** (`Vipin Kaushik` 2026-06-09 / `PanditPawanKaushik` 2026-07-16),
+depended on by 54 files across 6 workspaces — including `propagate` itself, whose own
+`DECISIONS.md` header names the shorter fork. A contract living in two instances. It is the
+purest example of this file's thesis and the file-by-file pass could not see it, because
+"who depends on this" is a property of the graph.
+
+**It found two defects in the diagnosis's own numbers**, both corrected on N85:
+
+- The entry was titled *"83% of edges with any history"*. **1564** edges have ≥1
+  disposition; **125** have ≥4. The 83% is of the 125 — as a share of everything with
+  history it is **6.6%**. Comparing unlike populations (`rule:discernment-checks` §5) in
+  the title of an issue about measurement discipline.
+- It led with the **weak** evidence. The aggregate churn table (n=15 non-noisy sources,
+  groups defined by the outcome under test) is suggestive at best. The strong evidence is
+  the same-source spread, where churn is constant by construction:
+  `sanskrit-texts:docs/INVENTORY.md` carries six edges at **0.75, 0.75, 0.75, 0.63, 0.18,
+  0.10**. Reordered.
+
+**And it declines the remedy the rule prescribes, on the diagnosis's own evidence.**
+`rule:adversarial-review-reads-the-ledger` closes by saying a review that ends without new
+declarations *"found defects but left the mechanism intact"*. This file is undeclared, and
+the obvious fix is an edge from `REFERENCE.md` to it.
+
+**That edge would be a textbook N85 defect.** `REFERENCE.md` is 632 lines across 13
+sections; this file depends on **one** of them. Declaring at file granularity would
+re-prompt a human on every unrelated `REFERENCE.md` edit, and the answer would be
+`no-change-needed` nearly every time — which is exactly the 83% this diagnosis documents.
+So the declaration is deferred **deliberately and on record**, not forgotten. It is
+unblocked the moment N85 produces a way to declare the dependency at its real grain.
+
+Stating it here rather than silently skipping it, because an undeclared artifact with no
+explanation is indistinguishable from an oversight — the same failure N82 names.
+
 ## What this file deliberately does not decide
 
 - Whether to widen `rules check`'s corpus beyond `CLAUDE.md`. It would change what
