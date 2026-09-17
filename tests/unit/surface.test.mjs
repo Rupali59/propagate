@@ -114,7 +114,7 @@ test("gotchaCensus counts two DIFFERENT populations and names its scope", () => 
     parseEntries: () => ({ entries: [{ id: "G1" }], bad: [] }),
     readFileSync: (f) => files[f],
   };
-  return gotchaCensus({ roots: ["/w"], cwd: "/nowhere", deps }).then((c) => {
+  return gotchaCensus({ roots: ["/w"], deps }).then((c) => {
     assert.equal(c.entries, 3, "three ### headings");
     assert.equal(c.triggered, 1, "only one of them can ever fire");
     assert.equal(c.files, 1);
@@ -128,7 +128,7 @@ test("a discovered-but-unreadable gotcha file is attributed, not swallowed", () 
     parseEntries: () => ({ entries: [], bad: [] }),
     readFileSync: () => { throw new Error("EACCES"); },
   };
-  return gotchaCensus({ roots: ["/w"], cwd: "/w", deps }).then((c) => {
+  return gotchaCensus({ roots: ["/w"], deps }).then((c) => {
     assert.equal(c.unreadable, 1, "'never there' and 'there but unreadable' are different facts");
     assert.equal(c.entries, 0);
   });
@@ -274,7 +274,7 @@ test("the four registers are FIRST-CLASS rows, not one summary line", () => {
   // rendered as a word.
   const rows = buildRegisterRows(
     { totals: { hot: { issues: 86, handovers: 38, todos: 205 }, rotatable: { issues: 30, handovers: 31, todos: 89 } } },
-    { files: 11, entries: 158, triggered: 79, scope: "workspace roots + cwd" },
+    { files: 11, entries: 158, triggered: 79, scope: "workspace roots" },
   );
   assert.deepEqual(rows.map((r) => r.key), ["issues", "handovers", "todos", "gotchas"]);
   assert.equal(rows[0].value, 86);
