@@ -32,6 +32,47 @@
 # Tracked in docs/ISSUES.md.
 
 sources:
+  # The one-surface work, 2026-09-17. Declared because the review that produced it
+  # found its defects by looking at COUPLINGS, not files
+  # (rule:adversarial-review-reads-the-ledger §5: an adversarial review that ends
+  # without new declarations found defects and left the mechanism intact).
+  lib/report/surface.mjs:
+    propagates_to:
+      - path: widget/propagate-queue.jsx
+        why: >-
+          surface.mjs IS the widget's data contract — the widget derives nothing and reads
+          ~20 fields off this payload. A renamed field prints `undefined` on the desktop
+          layer, where there is no console, no error and no test run. That is exactly the
+          silent class this repo keeps paying for, so the edge is declared even though
+          tests/unit/widget-contract.test.mjs also checks it mechanically: the test proves
+          today's fields exist, the edge makes someone LOOK when either side moves.
+        kind: code
+      - path: commands/ui.mjs
+        why: >-
+          SERVED_VIEWS is a promise this file makes that ui.mjs has to keep. Every row's
+          CTA availability is stamped from it, so a view listed here and not routed there
+          puts a DEAD BUTTON on the desktop — the precise failure the list exists to
+          prevent, arriving through the list itself. A promise in one file that another
+          file cannot keep is invisible to any review scoped to one file.
+        kind: code
+      - path: commands/surface.mjs
+        why: >-
+          The text renderer reads the same payload the widget does. It is the fallback a
+          person uses when DEBUGGING the widget, which is exactly the moment a stale
+          renderer misleads worst.
+        kind: code
+
+  lib/registers/write.mjs:
+    propagates_to:
+      - path: commands/ui.mjs
+        why: >-
+          The only code in this repo that edits hand-written prose. ui.mjs is its sole
+          caller and holds the path allowlist and the re-plan check that keep a browser
+          from dictating the bytes written. A guarantee added here that ui.mjs does not
+          enforce is a safety claim nothing keeps — rule:safety-flag-needs-a-test, whose
+          three recorded instances are all one guarded path plus one unguarded path.
+        kind: code
+
   docs/REFERENCE.md:
     propagates_to:
       - path: ../.templates/NEW-PROJECT-CHECKLIST.md

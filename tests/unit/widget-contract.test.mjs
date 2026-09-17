@@ -177,6 +177,27 @@ test("no backtick survives inside the className template literal", () => {
   assert.ok(literal.length > 2000, `className literal is only ${literal.length} chars — it ended too soon`);
 });
 
+test("SERVED_VIEWS matches what the ui page can ACTUALLY render", () => {
+  // THE COUPLING THIS WORK CREATED, made mechanical rather than remembered.
+  // `SERVED_VIEWS` is a promise in lib/report/surface.mjs that commands/ui.mjs
+  // has to keep: every row's CTA availability is stamped from it, so a view
+  // listed here but not routed there puts a DEAD BUTTON on the desktop — the
+  // exact failure the list exists to prevent, arriving through the list itself.
+  //
+  // The test in this file above only checks internal consistency (rows agree
+  // with SERVED_VIEWS). That passes happily while both are wrong together.
+  // rule:adversarial-review-reads-the-ledger: a promise in one file that another
+  // file cannot keep is invisible to any review scoped to one file.
+  const ui = readFileSync(path.join(import.meta.dirname, "../../commands/ui.mjs"), "utf8");
+  const m = ui.match(/\[\s*"queue"[^\]]*\]/);
+  assert.ok(m, "could not find the view list in ui.mjs — this check has gone blind, which is worse than failing");
+  const routed = new Set(JSON.parse(m[0].replace(/'/g, '"')));
+  for (const v of SERVED_VIEWS) {
+    assert.ok(routed.has(v.replace(/^\//, "")), `SERVED_VIEWS promises ${v}, which ui.mjs does not route`);
+  }
+  assert.equal(routed.size, SERVED_VIEWS.length, "ui.mjs routes a view SERVED_VIEWS does not list — the widget will never offer it");
+});
+
 test("no RELATIVE imports — they fail silently on the desktop layer", () => {
   // G60's family. A relative specifier that does not resolve produces no
   // console, no test failure, and no render. `uebersicht` is the one import

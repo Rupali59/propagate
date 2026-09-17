@@ -3022,3 +3022,41 @@ cited-and-restated pairs; the unexercised-rule set is uncited. Disjoint by const
 as recorded on N35 itself. What this changes is that a rule reporting `restated 0` now
 means something — the detector has been shown to fire on paraphrase — where before it
 meant only that nobody copy-pasted.
+
+### N88 · Discovery counts abandoned git worktrees as workspaces, and their warnings are indistinguishable from real ones — **S3** — **OPEN**
+
+Found 2026-09-17 while building the widget's HEALTH rows, which is the point: the
+defect was invisible in doctor's own output and obvious the moment the same data was
+rendered as a list of workspaces.
+
+`doctor` reports **16** workspace sections. Two of them are not workspaces:
+
+```
+Workspace: calibration-sampler-52226   → ~/Documents/GitHub/worktrees/calibration-sampler-52226
+Workspace: ubersicht-widget-52226      → ~/Documents/GitHub/worktrees/ubersicht-widget-52226
+```
+
+Both are real git worktrees created 10 Sep on branches `spec/calibration-sampler-52226`
+and `spec/ubersicht-widget-52226`, abandoned a week ago, and still carrying a `.git`
+file that discovery treats exactly like a repository root.
+
+**What it costs.** 14 of the 350 workspace warnings come from these two, and a reader
+has no way to tell them from the other 336. The denominator is wrong in the same
+direction everywhere it is used: "0 of 16 clean" is really 0 of 14, and any future
+adoption ratio computed against 16 is quietly off by 14%. This is the
+`rule:discernment-checks` §5 shape — the population is not what the claim is about.
+
+**Why it is S3 rather than S2.** Nothing is lost and no write is affected; the count
+is merely wrong. But it is the class of wrong that gets published, because 16 is a
+plausible number and nothing about the output invites checking it.
+
+**The fix is not "filter out `worktrees/`".** That path is a convention of one
+machine's layout, not a property of a worktree. A worktree's `.git` is a FILE
+containing `gitdir: …`, where a real repository's is a directory — so discovery can
+tell them apart structurally, on any layout. Whether to then EXCLUDE them or label
+them is a separate question worth asking: a long-lived worktree with its own
+propagation state might legitimately want a section, and `scripts/worktree-new.sh`
+makes them routinely.
+
+Two abandoned worktrees are also their own small finding — `worktree-rm.sh` exists and
+was not run.
