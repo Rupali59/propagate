@@ -78,7 +78,7 @@ export function validateWrite({ edge_id, disposition, reason }, item) {
 const STATE_COLOUR = { DRIFTED: "#b45309", DIVERGED: "#b91c1c", REVERSED: "#6d28d9", UNMATCHED: "#374151" };
 
 function page(token) {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>propagate — disposition queue</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>propagate — the input surface</title>
 <style>
 :root{--bg:#0b0d10;--card:#151a21;--line:#232b36;--fg:#e6edf3;--dim:#8b98a8;--acc:#2f81f7}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -104,8 +104,23 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .msg{margin-top:8px;font-size:12.5px;white-space:pre-wrap}
 .err{color:#ff7b72}.ok{color:#3fb950}
 .empty{color:var(--dim);padding:40px 0;text-align:center}
+nav{display:flex;gap:6px}
+.tab{background:transparent;border:1px solid var(--line);color:var(--dim);font-weight:500;padding:4px 11px;font-size:12.5px}
+.tab.on{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+.loc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--dim)}
+.txt{margin:7px 0 0;font-size:13.5px}
+/* THE DIFF IS THE EVIDENCE. The design review's first finding was that the
+   system demands a judgement and gives you nothing to judge with. You approve
+   this hunk, not a promise that something reasonable will happen. */
+.diff{margin-top:9px;background:#0a0e13;border:1px solid var(--line);border-radius:6px;padding:9px 11px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;white-space:pre-wrap;word-break:break-all}
+.diff .del{color:#ff7b72}
+.diff .add{color:#3fb950}
+.diff .hdr{color:var(--dim)}
+.note{margin-top:7px;font-size:12px;color:#a1791f}
+.trunc{color:#a1791f;font-size:12.5px;margin-bottom:10px}
 </style></head><body>
-<header><h1>propagate — disposition queue</h1><div class="sum" id="sum">loading…</div></header>
+<header><h1>propagate</h1><nav id="nav"><button class="tab on" data-v="queue">queue</button><button class="tab" data-v="issues">issues</button><button class="tab" data-v="todos">todos</button></nav><div class="sum" id="sum">loading…</div></header>
 <main id="list"></main>
 <script>
 const TOKEN=${JSON.stringify(token)};
@@ -149,7 +164,106 @@ document.addEventListener("click",async e=>{
     else{msg.className="msg err";msg.textContent=res.error;e.target.disabled=false;}
   }catch(err){msg.className="msg err";msg.textContent=String(err);e.target.disabled=false;}
 });
-async function load(){try{render(await api("/api/queue"));}catch(e){document.getElementById("sum").textContent="failed to load: "+e;}}
+// ── the register views ─────────────────────────────────────────────────
+// EVERY WRITE IS PREVIEWED FIRST. The button says "preview", and only the diff
+// it returns can be confirmed. A one-click write into hand-written prose is
+// exactly the friction this should NOT remove.
+function actionControls(it){
+  const opts=[];
+  if(it.actions.includes("issue-close")) opts.push('<option value="issue-close">close</option>');
+  if(it.actions.includes("issue-severity")) opts.push('<option value="issue-severity">change severity</option>');
+  if(it.actions.includes("todo-tick")) opts.push('<option value="todo-tick">tick done</option>');
+  const sev='<select class="sev" style="display:none">'+["S0","S1","S2","S3","S4"].map(x=>'<option>'+x+'</option>').join('')+'</select>';
+  return '<div class="act">'+
+    '<select class="a">'+opts.join('')+'</select>'+sev+
+    '<input class="r" placeholder="why (required, 12+ chars) — this goes into the file">'+
+    '<button class="prev">preview</button>'+
+  '</div>';
+}
+function renderRegister(d,kind){
+  const el=document.getElementById("list");
+  if(d.error){el.innerHTML='<div class="empty err">'+esc(d.error)+'</div>';return;}
+  const items=kind==="issues"?d.issues:d.todos;
+  const c=d.counts;
+  document.getElementById("sum").innerHTML=
+    '<b>'+items.length+'</b> '+kind+' with an action on their line · <b>'+c.noAction+
+    '</b> items had none (already closed, or a status this surface does not edit)'+
+    (c.unreadable?' · <b class="warn">'+c.unreadable+'</b> unreadable':'');
+  if(!items.length){
+    // Not "nothing to do" — say which question was asked.
+    el.innerHTML='<div class="empty">No '+kind+' carry an action this surface can perform. '+
+      c.noAction+' items were read and offered none.</div>';return;
+  }
+  const trunc=(kind==="issues"?c.issues>c.shownIssues:c.todos>c.shownTodos)
+    ? '<div class="trunc">showing '+items.length+' of '+(kind==="issues"?c.issues:c.todos)+' — the rest are not hidden, just not on this page</div>' : '';
+  el.innerHTML=trunc+items.map((it,i)=>
+    '<div class="row" data-i="'+i+'">'+
+      '<div class="hd">'+(it.id?'<span class="id">'+esc(it.id)+'</span>':'')+
+        '<span class="loc">'+esc(it.short)+':'+it.line+'</span>'+
+        (it.priority!=null?'<span class="hist">P'+it.priority+'</span>':'')+'</div>'+
+      '<div class="txt">'+esc(it.text)+'</div>'+
+      actionControls(it)+
+      (it.noClose?'<div class="note">close not offered — '+esc(it.noClose)+'</div>':'')+
+      '<div class="msg"></div></div>').join('');
+  window.__items=items;
+}
+function diffHtml(diff){
+  return '<div class="diff">'+diff.split("\n").map(l=>{
+    const cls=l.startsWith("+")?"add":l.startsWith("-")?"del":"hdr";
+    return '<span class="'+cls+'">'+esc(l)+'</span>';
+  }).join("\n")+'</div>';
+}
+document.addEventListener("change",e=>{
+  if(!e.target.classList.contains("a"))return;
+  const row=e.target.closest(".row");
+  row.querySelector(".sev").style.display=e.target.value==="issue-severity"?"":"none";
+});
+document.addEventListener("click",async e=>{
+  // PREVIEW
+  if(e.target.classList.contains("prev")){
+    const row=e.target.closest(".row"), msg=row.querySelector(".msg");
+    const it=window.__items[Number(row.dataset.i)];
+    const body={action:row.querySelector(".a").value,file:it.file,line:it.line,current:it.raw,
+                reason:row.querySelector(".r").value,severity:row.querySelector(".sev").value};
+    msg.className="msg";msg.textContent="planning…";
+    try{
+      const res=await api("/api/register-preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+      if(!res.ok){msg.className="msg err";msg.textContent=res.error;return;}
+      row.__plan={...body,next:res.next};
+      msg.className="msg";
+      msg.innerHTML=diffHtml(res.diff)+'<div class="act"><button class="confirm">write this</button><button class="cancel">cancel</button></div>';
+    }catch(err){msg.className="msg err";msg.textContent=String(err);}
+    return;
+  }
+  if(e.target.classList.contains("cancel")){
+    const row=e.target.closest(".row");row.__plan=null;row.querySelector(".msg").innerHTML="";return;
+  }
+  // CONFIRM — sends back the EXACT line that was previewed.
+  if(e.target.classList.contains("confirm")){
+    const row=e.target.closest(".row"), msg=row.querySelector(".msg");
+    e.target.disabled=true;
+    try{
+      const res=await api("/api/register-write",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(row.__plan)});
+      if(res.ok){msg.className="msg ok";msg.textContent="written — "+res.file+":"+res.line;setTimeout(load,700);}
+      else{msg.className="msg err";msg.textContent=res.error;}
+    }catch(err){msg.className="msg err";msg.textContent=String(err);}
+    return;
+  }
+  // tabs
+  if(e.target.classList.contains("tab")){
+    document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t===e.target));
+    VIEW=e.target.dataset.v;location.hash=VIEW;load();
+  }
+});
+let VIEW=(location.hash||"#queue").slice(1);
+if(!["queue","issues","todos"].includes(VIEW)) VIEW="queue";
+async function load(){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.v===VIEW));
+  try{
+    if(VIEW==="queue") render(await api("/api/queue"));
+    else renderRegister(await api("/api/registers"),VIEW);
+  }catch(e){document.getElementById("sum").textContent="failed to load: "+e;}
+}
 load();
 </script></body></html>`;
 }
@@ -161,6 +275,9 @@ export async function uiCmd(argv = [], io = console) {
   const root = path.join(process.env.HOME ?? "", "Documents/GitHub/");
 
   const { appendEvent } = await import("../lib/edges/events.mjs");
+  const { registerQueue } = await import("../lib/registers/queue.mjs");
+  const { planEdit, applyEdit } = await import("../lib/registers/write.mjs");
+  const { backlog } = await import("../lib/report/backlog.mjs");
   const { divergedGuard, buildEventPayload } = await import("../lib/edges/disposition.mjs");
   const { defaultDeps } = await import("../lib/report/queue.mjs");
   const deps = await defaultDeps();
@@ -211,6 +328,62 @@ export async function uiCmd(argv = [], io = console) {
           return send(400, { ok: false, error: String(err?.message ?? err) });
         }
       }
+      if (url.pathname === "/api/registers") {
+        try { return send(200, registerQueue({ backlogFn: backlog })); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
+      // PREVIEW — plans the edit and returns the hunk. Writes nothing.
+      if (url.pathname === "/api/register-preview" && req.method === "POST") {
+        let raw = "";
+        for await (const c of req) raw += c;
+        let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
+        const plan = planEdit(body);
+        return send(plan.ok ? 200 : 400, plan);
+      }
+
+      // WRITE — the confirm step.
+      //
+      // IT RE-PLANS SERVER-SIDE AND REQUIRES THE RESULT TO MATCH what the
+      // browser sends back. `next` arriving from a client is otherwise an
+      // arbitrary line of markdown, and this endpoint would be a
+      // write-anything-anywhere primitive behind a token. Re-planning makes the
+      // browser's copy a CHECKSUM of the preview rather than its source.
+      //
+      // The planners are deterministic given (line, reason, date), so a
+      // mismatch means the preview is genuinely stale — including the one real
+      // edge case, a preview held across midnight. That refuses with a message
+      // telling you to preview again, which is correct: the date in the file
+      // would otherwise be the day you started reading, not the day you wrote.
+      if (url.pathname === "/api/register-write" && req.method === "POST") {
+        let raw = "";
+        for await (const c of req) raw += c;
+        let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
+
+        // THE PATH ALLOWLIST. Without it this endpoint writes an arbitrary line
+        // into an arbitrary file — a much broader primitive than "edit a
+        // register", and one that a token-gated loopback server should not
+        // expose just because it is convenient. The allowed set is derived from
+        // the SAME census the page was rendered from, so a file the surface
+        // never offered cannot be written through it.
+        const known = registerQueue({ backlogFn: backlog });
+        const allowed = new Set([...(known.issues ?? []), ...(known.todos ?? [])].map((i) => i.file));
+        if (!allowed.has(body.file)) {
+          return send(403, { ok: false, error: `${body.file} is not a register this surface manages` });
+        }
+
+        const replan = planEdit(body);
+        if (!replan.ok) return send(400, replan);
+        if (replan.next !== body.next) {
+          return send(409, {
+            ok: false,
+            error: "the preview no longer matches what this would write — preview again before confirming",
+          });
+        }
+        const r = await applyEdit({ file: body.file, line: body.line, expected: body.current, next: replan.next });
+        return send(r.ok ? 200 : 409, r);
+      }
+
       return send(404, { ok: false, error: "no such endpoint" });
     }
     return send(404, "not found", "text/plain");
