@@ -2517,6 +2517,117 @@ duplicates mean one was never cleaned up; 0.5.0 has been there since the origina
 incident. Not urgent, not deleted here — removing directories from someone's plugin cache
 is their call.
 
+### N87 · `doctor` reports healthy because its population excludes the failures, its checks test properties a broken thing satisfies, and 354 warnings bury the one that fires — **S1** — **OPEN**
+
+Filed 2026-09-17 in answer to a direct question: *"how are we running a system with this
+many defects, and doctor doesn't report it?"* Eight issues were filed in two days (N79-N86).
+`doctor` reports **1 problem**. This entry is why, and it is three independent mechanisms,
+each individually sufficient.
+
+---
+
+**1 · THE POPULATION EXCLUDES THE FAILURES.**
+
+`doctor` prints `✓ workspaces conform to the v3 propagation layout — 16/16 conform`.
+`rollup` writes `NON-CONFORMANT` for **2** workspaces into `ECOSYSTEM.md`. Both are in this
+repo. They disagree because they enumerate different sets:
+
+```
+in rollup, MISSING from doctor:   Motion-Graphics, propagate
+in doctor, missing from rollup:   calibration-sampler-52226, ubersicht-widget-52226
+```
+
+**The two workspaces doctor omits are exactly the two that fail.** `16/16` is not "checked
+sixteen and all passed"; it is "enumerated sixteen, and the failures were not among them".
+Doctor also counts two *worktree checkouts* as workspaces, inflating the denominator with
+copies of trees already counted.
+
+**`propagate` excluding itself is `rule:enforcement-watches-itself` at the population
+level** — not a check that fails to cover its own toolchain, but a census that does not
+list the repo it runs in. The rule's own worked examples include *"a drift gate installed
+in seven repos and not in the one that authored it"*. This is that, one layer up.
+
+---
+
+**2 · THE CHECKS TEST PROPERTIES A BROKEN THING STILL SATISFIES.**
+
+```
+✓ ledger JSONL parseable   0 rows, 0 open
+```
+
+Every one of the 17 in-tree ledgers holds **0 rows** (N84). An empty file is trivially
+parseable, so the check passes and prints the emptiness as though it were a result.
+`rule:discernment-checks` §2: *found nothing* and *looked at nothing* must not render
+alike — here they render as the same green tick, with the count right there in the detail
+text and no threshold behind it.
+
+Same shape in the conformance check itself (N82): it asserts `state/` **exists**, not that
+it holds anything, so two empty directories pass.
+
+---
+
+**3 · 354 WARNINGS ACROSS 299 DISTINCT KINDS, AND ONE FAILURE.**
+
+Counted from a live run: **515 assertion lines — 160 ✓, 354 warn, 1 ✗.** The warnings are
+not a handful of repeated problems; they are **299 distinct kinds**, mostly per-branch rows.
+
+No one reads a 515-line report where 69% of the lines are warnings. `gotchas-global.md`
+states the principle for its own admission bar — *"otherwise this file becomes the noise
+that hides the four that matter"* — and `doctor` is past that threshold by two orders of
+magnitude. Even a correct new signal would not be seen.
+
+---
+
+**AND THE CHECK SURFACE IS SMALL.** Doctor has **14 distinct check classes**. Mapped
+against the eight issues filed this week:
+
+| finding | doctor check? |
+|---|---|
+| N79 relevance corpus | none |
+| N80 trigger count dropped | none |
+| N81 colocated specs | none |
+| N82 conformance presence-only | **exists, passes** — tests presence |
+| N83 CLAUDE.md currency 4/16 | none — undeclared is invisible |
+| N84 ledgers empty | **exists, passes** — tests parseability |
+| N85 104 noisy edges | none — counts `actionable`, never the no-op ratio |
+| N86 forked gate | none — nothing compares duplicate implementations |
+
+**6 of 8 have no corresponding check. Both that do, pass.** So the honest reading of a
+green doctor is *"the fourteen things it checks, over the workspaces it enumerated, are as
+expected"* — which is a much narrower claim than the one a green report implies.
+`rule:adversarial-review-reads-the-ledger`'s corollary already says this about the family:
+*"status, check and doctor answer 'is anything declared drifting' — never 'is anything
+undeclared wrong'."* N87 is the measured version of that sentence.
+
+---
+
+**S1, and the severity is about trust, not any one defect.** Every issue above is
+individually survivable. What is not survivable is a health command that returns green
+while the tree holds a forked contract gate, 17 empty ledgers, and 104 majority-no-op
+edges — because the green is what stops anyone looking. A check that cannot fail is worse
+than no check (`rule:discernment-checks` §1); a *suite* that cannot fail is the same thing
+with a reassuring summary line.
+
+**Fix order matters and is not "add eight checks".**
+
+1. **Reconcile the two populations first.** Until `doctor` and `rollup` enumerate the same
+   workspaces, every count either produces is unfalsifiable. This is the cheapest fix and
+   it flips `16/16` to something honest by itself.
+2. **Make the existing checks assert the thing they are named for** — non-empty, not
+   parseable; contents, not presence. Expect green to go red; that is the check starting
+   to work.
+3. **Cut the warning channel down** before adding any new signal, or the new signal joins
+   299 others. A warning nobody reads is not a warning.
+4. **Only then** consider checks for N85/N86-class defects.
+
+**Test it can fail:** assert `doctor`'s workspace set equals `rollup`'s. Today they differ
+by four entries in both directions. And assert `ledger JSONL parseable` does not report ✓
+for a file with 0 rows.
+
+**Derive all of it:** `node cli.mjs doctor` and `node cli.mjs rollup --check`, then diff
+the `# Workspace:` headings against `ECOSYSTEM.md`'s `### ` headings. Do not trust the
+numbers in this entry — they are a snapshot of a report that changes daily.
+
 ### N86 · The DECISIONS.md gate is a CONTRACT living in two client workspaces, forked, with cutoff dates five weeks apart — **S2** — **OPEN**
 
 Found 2026-09-17 by the adversarial review of the hub↔workspace diagnosis, which had
