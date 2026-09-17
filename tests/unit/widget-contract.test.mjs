@@ -280,3 +280,59 @@ test("the refresh interval stays a glance budget, not a doctor run", () => {
   // The payload is ~0.7s. Anything under a minute is the 4,420-runs-for-nothing
   // shape rule:delegation-criteria §2 exists to prevent.
 });
+
+// ── the shell scripts the widget shells out to ─────────────────────────────
+
+test("every external command the widget's scripts invoke EXISTS on this machine", () => {
+  // THE BUG THIS CAUGHT. `open-ui.sh` ran `nohup setsid node …`. `setsid` is a
+  // LINUX utility and macOS does not have it, so nohup refused to exec, no
+  // server started, and a click did nothing but append one line to a log nobody
+  // opens. It was written from habit, committed, reviewed, and described in a
+  // commit message before anyone ran it.
+  //
+  // Nothing else could see it: the script is valid bash, it exits 0 on the
+  // failure path by design (a click must not crash the widget), and the widget
+  // has no way to report that the thing it launched never launched.
+  //
+  // This is deliberately a check that the commands RESOLVE, not a portability
+  // opinion. A machine without `curl` should fail here loudly rather than
+  // producing a widget whose buttons quietly do nothing.
+  const scripts = ["collect.sh", "open-ui.sh"].map((f) => path.join(import.meta.dirname, "../../widget", f));
+  const KEYWORDS = new Set([
+    "if", "then", "else", "elif", "fi", "for", "in", "do", "done", "while", "case", "esac",
+    "function", "return", "exit", "local", "set", "echo", "printf", "cd", "read", "export",
+    "break", "continue", "shift", "eval", "trap", "true", "false", "sleep", "command", "mkdir",
+    "grep", "cat", "seq", "curl", "disown", "nohup", "sed", "awk",
+  ]);
+  const missing = [];
+  for (const file of scripts) {
+    const src = readFileSync(file, "utf8");
+    // A function the script DEFINES is not an external command. Without this the
+    // check flags `alive` in open-ui.sh — a false positive, and a check that
+    // cries wolf gets deleted, which is how a working check becomes no check.
+    const defined = new Set([...src.matchAll(/^\s*([a-z][a-z0-9_-]*)\s*\(\)\s*\{/gm)].map((m) => m[1]));
+    for (const line of src.split("\n")) {
+      const t = line.trim();
+      if (!t || t.startsWith("#")) continue;
+      // TOKENISE, do not regex the whole line. The first version used
+      // `/(?:^|\bnohup\s+|\bexec\s+)(\w+)/g`, which CONSUMED `nohup` via its `^`
+      // branch — so lastIndex was already past it and the `\bnohup\s+` branch
+      // could never fire. It therefore could not see `setsid`, the one command
+      // it was written to catch.
+      //
+      // It went red during its own mutation gate anyway, for an unrelated false
+      // positive, and that red was briefly read as proof it worked. A check that
+      // fails for the wrong reason is as bad as one that cannot fail
+      // (rule:discernment-checks §4).
+      const words = t.split(/\s+/);
+      let i = 0;
+      while (i < words.length && /^(nohup|exec|env|time)$/.test(words[i])) i += 1;
+      const cmd = (words[i] ?? "").replace(/^["']|["']$/g, "");
+      if (/^[a-z][a-z0-9_-]{2,}$/.test(cmd) && !KEYWORDS.has(cmd) && !defined.has(cmd)) {
+        const r = spawnSync("/bin/sh", ["-c", `command -v ${cmd}`], { encoding: "utf8" });
+        if (r.status !== 0) missing.push(`${path.basename(file)}: ${cmd}`);
+      }
+    }
+  }
+  assert.deepEqual(missing, [], `these commands do not exist here, so the click silently does nothing:\n  ${missing.join("\n  ")}`);
+});

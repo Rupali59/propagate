@@ -51,9 +51,16 @@ alive() {
 
 if ! alive; then
   : > "$LOG"
-  # Detached, in its own session, so it outlives this script AND the widget's
-  # own process group — Übersicht reaps its command's children.
-  nohup setsid "$NODE" "$CLI" ui >>"$LOG" 2>&1 </dev/null &
+  # NO `setsid` HERE. It is a LINUX utility and does not exist on macOS, so
+  # `nohup setsid …` fails with `nohup: setsid: No such file or directory`, no
+  # server starts, and the click does nothing but write a line to a log nobody
+  # opens. Written from habit and caught only by RUNNING it — the script had
+  # been committed, reviewed and described in a commit message first.
+  #
+  # `nohup … &` plus `disown` is the macOS equivalent: nohup makes it immune to
+  # the SIGHUP it would get when this shell exits, and disown drops it from the
+  # job table. Verified: the server outlives this script.
+  nohup "$NODE" "$CLI" ui >>"$LOG" 2>&1 </dev/null &
   disown 2>/dev/null || true
 
   # Wait for the server to SAY its URL. Polling the log rather than the port,
