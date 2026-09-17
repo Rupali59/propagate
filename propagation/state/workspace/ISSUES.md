@@ -2082,6 +2082,74 @@ the same way the lane already reports what doc-kind excluded and why.
 produced by the harness; a future change to it would silently re-merge the two
 populations. Assert the pattern in a test so the drift is visible.
 
+### N78 · A code-only merge is undeliverable — both delivery mechanisms gate on VERSION, and only `doctor` reads content — **S2** — **OPEN**
+
+Found 2026-09-17, one minute after merging #21, by the `# Delivery` section that #19
+added for exactly this.
+
+**The measurement.** #21 merged four commits changing `cli.mjs`, `lib/rules/rules-check.mjs`
+and a skill doc. It did not bump VERSION, because it was a fix, not a release. On a
+clean tree immediately after:
+
+```
+$ claude plugin update propagate@tathya
+✔ propagate is already at the latest version (0.6.1).
+
+$ node cli.mjs doctor      # Delivery
+! version 0.6.1 matches but cli.mjs differs (served 52f4553a0cf2, source bdaf944fb0bd)
+```
+
+The update command **succeeded and shipped nothing.** Three commits of merged code
+stayed unserved, and the only reason anyone knew is that one check reads file content.
+
+**Both delivery paths share the same gate, and it is not code identity:**
+
+| mechanism | fires when |
+|---|---|
+| `.githooks/post-merge` | `git diff-tree ORIG_HEAD HEAD` names `VERSION` |
+| `claude plugin update` | the served version STRING differs from source |
+
+So a merge that changes code without touching VERSION is invisible to both. The hook
+does not run; the update no-ops. **Neither mechanism can observe that the code moved.**
+
+**This is not the 2026-09-16 incident repeating — it is its mirror.** That one was a
+bump nobody followed with an update (four PRs, plugin stuck at 0.5.0 for two days).
+This one is an update that *cannot* work without a bump. Same hole, approached from
+the other side, which is why fixing the first did not prevent the second: the fix
+added a trigger on VERSION-change and a detector on content, and left the gap between
+them open.
+
+**`# Delivery` is doing its job and cannot close this.** It reads the served `cli.mjs`
+hash against source, so it caught the `incoherent` state — version agrees, content does
+not — within a minute. It is a detector, not a delivery path. `rule:enforcement-watches-itself`
+in its useful direction for once: the check that watches delivery correctly reported
+that delivery had not happened.
+
+**Worked around today by bumping to 0.6.2** (`28e655a`), which delivered and was verified
+by hash, not by version string: `source=bdaf944fb0bd served=bdaf944fb0bd`.
+
+**The decision this needs.** Bumping VERSION on every code merge is one answer and it is
+not obviously the right one — it makes the version number a commit counter and pushes the
+problem onto whoever forgets. Alternatives worth weighing before building anything:
+
+- Make `post-merge` fire on **any change under the served tree**, not just VERSION, and
+  let it re-copy when the hashes differ. Moves the gate from version to content, which is
+  what `# Delivery` already proves is the correct predicate.
+- Have `doctor`'s `incoherent` row print the exact remediation for this case — today it
+  says "either uncommitted edits (normal while developing) or an update half-applied",
+  and on a CLEAN tree after a merge it is neither. The wording sent me to `git status`,
+  which was clean, which is the least informative answer available.
+- Accept the bump discipline and enforce it: a CI check that fails a PR touching
+  `cli.mjs`/`lib/**` without a VERSION change.
+
+**Test it can fail:** merge a commit that changes `cli.mjs` and not `VERSION`, then assert
+the served `cli.mjs` hash equals source. Today that assertion fails and nothing runs it.
+
+**Related:** the cache now holds 3 trees (0.5.0, 0.6.1, 0.6.2). Doctor says persistent
+duplicates mean one was never cleaned up; 0.5.0 has been there since the original
+incident. Not urgent, not deleted here — removing directories from someone's plugin cache
+is their call.
+
 ### N77 · A `kind: code` edge fires on the whole file while coupling only a HEADER — 7 of 12 dispositions on one edge are `no-change-needed` — **S3** — **OPEN**
 
 Found 2026-09-16 while disposing `HANDOVERS.md -> propagate/lib/report/handovers.mjs`
