@@ -589,7 +589,7 @@ export async function checkGraphMcpStatus(opts = {}) {
   return { ...result, fromCache: false };
 }
 
-async function doctor() {
+async function doctor({ exitProcess = true } = {}) {
   const doctorStart = Date.now();
   let problems = 0;
   // Metrics counters (docs/OBSERVABILITY.md §6 step 1) — accumulated as the
@@ -1307,11 +1307,20 @@ async function doctor() {
   console.log();
   if (problems === 0) {
     console.log(`${GREEN}${BOLD}doctor: all green${RESET}`);
-    process.exit(0);
   } else {
     console.log(`${RED}${BOLD}doctor: ${problems} problem${problems === 1 ? "" : "s"} found${RESET}`);
-    process.exit(1);
   }
+
+  // `exitProcess: false` is what makes doctor COMPOSABLE. Until 2026-09-17 this
+  // function ended in `process.exit()`, so `await doctor()` could never resolve —
+  // the process died inside it. Nothing noticed, because nothing had ever tried
+  // to use doctor's result: the text output was already on stdout by then, and a
+  // caller that awaited it simply never ran its next line. Found while building
+  // `doctor --json`, whose captured output vanished with the process.
+  //
+  // The default is unchanged, so every existing caller exits exactly as before.
+  if (!exitProcess) return problems;
+  process.exit(problems === 0 ? 0 : 1);
 }
 
 /**
@@ -4582,6 +4591,42 @@ if (_invokedDirectly) {
   if (mode === "status") {
     const { status } = await import("./commands/status.mjs");
     await status();
+  } else if (mode === "doctor" && process.argv.includes("--json")) {
+    // `--json` CAPTURES doctor's own output and classifies it, rather than
+    // instrumenting Reporter. Measured 2026-09-17 before building: doctor prints
+    // 561 marked lines and 31 headers, while the doctor region of this file holds
+    // 31 direct `console.log` calls that never touch a Reporter. A reporter-only
+    // JSON would therefore be silently INCOMPLETE — whole sections missing from a
+    // payload that looks whole, which is the defect N87 filed against doctor
+    // itself.
+    //
+    // Deriving from the rendered lines buys the property that matters: the JSON
+    // and the text CANNOT disagree, because one is a function of the other. A
+    // future section that prints without a Reporter still appears.
+    //
+    // Text mode is untouched — the capture installs only on this branch.
+    const { buildDoctorJson } = await import("./lib/report/doctor/structure.mjs");
+    const captured = [];
+    const realLog = console.log;
+    console.log = (...args) => { captured.push(args.join(" ")); };
+    let failed = null;
+    let problems = 0;
+    try {
+      // `exitProcess: false` is load-bearing — see doctor()'s own note. With the
+      // default, the process dies inside this await and nothing below ever runs.
+      problems = await doctor({ exitProcess: false });
+    } catch (err) {
+      failed = String(err?.message ?? err);
+    } finally {
+      console.log = realLog; // restore in `finally`, or a throw silences the CLI
+    }
+    // A doctor that threw must not emit a plausible-looking healthy payload
+    // (rule:discernment-checks §6). The error rides IN the expected shape so a
+    // consumer renders the reason instead of an empty, calm-looking card.
+    const payload = buildDoctorJson(captured, { problems, generatedAt: new Date().toISOString() });
+    if (failed) payload.error = failed;
+    console.log(JSON.stringify(payload));
+    process.exitCode = failed || problems > 0 ? 1 : 0;
   } else if (mode === "doctor") {
     await doctor();
   } else if (mode === "rules") {
