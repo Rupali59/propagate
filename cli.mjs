@@ -164,6 +164,7 @@ import { reconcile, STATES, groupRows, inboundRows, edgeIdFor } from "./lib/edge
 import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
 import { resolveProvenance, resolveObservedRef } from "./lib/edges/provenance.mjs";
+import { divergedGuard, buildEventPayload } from "./lib/edges/disposition.mjs";
 import { appendRun } from "./lib/core/runs.mjs";
 import { describeWhy } from "./lib/edges/why.mjs";
 import {
@@ -2898,19 +2899,7 @@ export function selectVerifyRows(rows, sel) {
  * @param {string} disposition
  * @returns {string|null} a refusal message, or null when the pairing is allowed
  */
-export function divergedGuard(state, disposition) {
-  if (state === "DIVERGED" && disposition !== "both-reconciled") {
-    return (
-      `edge is DIVERGED — both source and downstream changed independently since the last ` +
-      `verification. Only "both-reconciled" may resolve a DIVERGED edge (a human must look at ` +
-      `both sides first); nothing was verified.`
-    );
-  }
-  if (disposition === "both-reconciled" && state !== "DIVERGED") {
-    return `"both-reconciled" only applies to a DIVERGED edge; this edge is ${state}.`;
-  }
-  return null;
-}
+export { divergedGuard };
 
 /**
  * What state an edge must read after a successful write, per disposition
@@ -3166,21 +3155,6 @@ async function runDecoupled(selected, workspaces, opts) {
  * write — if these two ever built different payloads, the preview would be a
  * description of something that never happens.
  */
-function buildEventPayload(row, disposition, reason) {
-  const payload = {
-    edge_id: row.edge_id,
-    node_id: row.node_id,
-    disposition,
-    by: process.env.USER || "verify",
-    ...resolveProvenance(row, "human"),
-  };
-  if (reason !== undefined) payload.reason = reason;
-  if (disposition !== "deferred") {
-    payload.source_content = row.source.contentId;
-    payload.downstream_content = row.downstream.contentId;
-  }
-  return payload;
-}
 
 async function runDispositionBatch(selected, workspaces, opts) {
   const { disposition, reason, json, apply } = opts;
@@ -4666,6 +4640,13 @@ if (_invokedDirectly) {
   } else if (mode === "goals") {
     const { goalsCmd } = await import("./commands/goals.mjs");
     process.exitCode = await goalsCmd(process.argv.slice(3));
+  } else if (mode === "ui") {
+    // Dynamic, same reason as plans/goals/rollup: a static import would pull an
+    // http server and the queue model into every `status` invocation, which is
+    // the hottest command in this tool.
+    const { uiCmd } = await import("./commands/ui.mjs");
+    await uiCmd(process.argv.slice(3));
+    await new Promise(() => {}); // the server owns the process until Ctrl-C
   } else if (mode === "plans") {
     // Dynamic, same reason as goals/rollup/manifest/registers/docs (D5): a
     // static import would pull the plans lane — and its curate-docs graph
@@ -4697,7 +4678,7 @@ if (_invokedDirectly) {
     process.exitCode = await claimsCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|plans [--check] [--root <path> ...] [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]|claims judge <file> [--json]|claims render <file> [--apply] [--json]|claims contradict <authored-file> [--json]|claims restate [--json]|claims verdict [--apply] [--json] < verdicts.json|claims answer <file> start|end --run <id> --outcome <o> [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|plans [--check] [--root <path> ...] [--json]|ui [--port <n>]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]|claims judge <file> [--json]|claims render <file> [--apply] [--json]|claims contradict <authored-file> [--json]|claims restate [--json]|claims verdict [--apply] [--json] < verdicts.json|claims answer <file> start|end --run <id> --outcome <o> [--json]]");
     process.exit(2);
   }
 }
