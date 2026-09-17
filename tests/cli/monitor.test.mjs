@@ -251,3 +251,50 @@ test("the defect notification NAMES files — a count sends nobody anywhere", ()
   const one = formatDefectNotification([mk("a.md")], { root: "/root" });
   assert.match(one.title, /1 backlog file holds/, "singular reads as singular");
 });
+
+// ---------------------------------------------------------------------------
+// the message must DISAMBIGUATE, not merely name
+// ---------------------------------------------------------------------------
+
+/**
+ * The fixture is the point. The pre-existing test above uses `/x/CLAUDE.md` and
+ * `/y/README.md` — distinct basenames — so it passed while the real tree could
+ * not be read at all: 53 files are named `CLAUDE.md`, and among 44 actionable
+ * rows `CLAUDE.md → CLAUDE.md` was the correct rendering of SEVEN different
+ * edges. A test whose fixture lacks the colliding property cannot see the bug.
+ */
+test("two edges that differ only by workspace must render differently", () => {
+  const opts = { root: "/Users/x/GitHub/" };
+  const a = row("DRIFTED", { from: "/Users/x/GitHub/Motherboard/CLAUDE.md", to: "/Users/x/GitHub/CLAUDE.md" });
+  const b = row("DRIFTED", { from: "/Users/x/GitHub/Vipin Kaushik/VipinKaushik/CLAUDE.md", to: "/Users/x/GitHub/CLAUDE.md" });
+
+  const bodyA = formatNotification([a], opts).body;
+  const bodyB = formatNotification([b], opts).body;
+
+  assert.notEqual(bodyA, bodyB, "same basenames, different edges — the lines must differ");
+  assert.match(bodyA, /Motherboard/, "the workspace is the discriminator and must survive");
+  assert.match(bodyB, /Vipin Kaushik/);
+});
+
+test("two edges INSIDE one workspace must still render differently", () => {
+  // The case the first fix missed, caught by rendering the real actionable set:
+  // eliding to `workspace/…/file` made `VipinKaushik/CLAUDE.md` and
+  // `astroacharya/CLAUDE.md` identical, because both ends of an edge often sit in
+  // the SAME workspace and the workspace segment separates nothing there.
+  const opts = { root: "/r/" };
+  const a = row("DRIFTED", { from: "/r/W/CLAUDE.md", to: "/r/W/VipinKaushik/CLAUDE.md" });
+  const b = row("DRIFTED", { from: "/r/W/CLAUDE.md", to: "/r/W/astroacharya/CLAUDE.md" });
+  assert.notEqual(formatNotification([a], opts).body, formatNotification([b], opts).body);
+  assert.match(formatNotification([a], opts).body, /VipinKaushik/);
+  assert.match(formatNotification([b], opts).body, /astroacharya/);
+});
+
+test("a deep path is elided in the middle, never at the workspace or the filename", () => {
+  const { body } = formatNotification(
+    [row("DIVERGED", { from: "/r/Vipin Kaushik/propagation/state/sanskrit-texts/GOTCHAS.md", to: "/r/x.md" })],
+    { root: "/r/" },
+  );
+  assert.match(body, /Vipin Kaushik/, "workspace kept");
+  assert.match(body, /GOTCHAS\.md/, "filename kept");
+  assert.doesNotMatch(body, /propagation\/state/, "the middle is what gets elided");
+});
