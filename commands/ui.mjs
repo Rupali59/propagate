@@ -125,7 +125,7 @@ function render(d){
     '<b>'+s.total+'</b> actionable · '+Object.entries(s.byState).map(([k,v])=>v+' '+k).join(' · ')+
     ' · <b>'+s.neverJudged+'</b> never judged · <b>'+s.highNoise+'</b> mostly-no-op';
   const el=document.getElementById("list");
-  if(!d.items.length){el.innerHTML='<div class="empty">Nothing actionable. Not the same as nothing declared — '+d.declared+' edges exist.</div>';return;}
+  if(!d.items.length){el.innerHTML='<div class="empty">Nothing actionable. Not the same as nothing scanned — '+d.expanded+' edges from '+d.declared+' declarations.</div>';return;}
   el.innerHTML=d.items.map(it=>
     '<div class="row" data-id="'+it.edge_id+'">'+
       '<div class="hd"><span class="st" style="background:'+(COL[it.state]||"#374151")+'">'+it.state+'</span>'+

@@ -262,11 +262,11 @@ export const render = (state, dispatch) => {
   // which is what a broken config looks like. Green here would be the defect
   // filed as N87: a report whose population excluded the failures still printing
   // a pass.
-  if (d.declared === 0) {
+  if (!d.expanded) {
     return card(
       bareHead,
       <div>
-        <div className="warn">0 edges declared — nothing was scanned, not a clean tree</div>
+        <div className="warn">0 edges scanned — not a clean tree</div>
         <div className="foot">check the config: propagate doctor</div>
       </div>,
     );
@@ -280,7 +280,7 @@ export const render = (state, dispatch) => {
       bareHead,
       <div>
         <div className="ok">no actionable edges</div>
-        <div className="foot">{d.declared} declared · derived {stamp} · {hint}</div>
+        <div className="foot">{d.expanded} edges · {d.declared} declared · derived {stamp} · {hint}</div>
       </div>,
     );
   }
@@ -290,7 +290,7 @@ export const render = (state, dispatch) => {
     <div className="hd">
       <span className="ttl">propagate</span>
       <span className="big">{s.total}</span>
-      <span className="of">actionable of {d.declared} declared</span>
+      <span className="of">actionable of {d.expanded}</span>
     </div>,
     <div>
       <div className="states">
