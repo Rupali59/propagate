@@ -32,6 +32,7 @@
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import { queuePayload } from "../lib/report/queue.mjs";
 
 const TOKEN = randomBytes(24).toString("hex");
 
@@ -153,26 +154,6 @@ load();
 </script></body></html>`;
 }
 
-/** Build the queue payload. Exported so a test can drive it without a socket. */
-export async function queuePayload(opts = {}) {
-  const { loadWorkspaces, reconcile } = opts.deps ?? (await defaultDeps());
-  const { buildQueue, queueSummary, historyByEdge } = await import("../lib/report/queue.mjs");
-  const workspaces = await loadWorkspaces();
-  const { rows } = await reconcile(workspaces, {});
-  const history = await historyByEdge();
-  const items = buildQueue(rows, history, { root: opts.root });
-  return { items, summary: queueSummary(items), declared: rows.length };
-}
-
-async function defaultDeps() {
-  const { reconcile } = await import("../lib/edges/reconcile.mjs");
-  // WORKSPACES is a resolved constant, not a function — `config.mjs` runs
-  // discovery once at import. `verify` uses the same value for the same reason:
-  // a UI that discovered its own set could disagree with the CLI about what the
-  // graph even contains, which is the N86 shape (one question, two readers).
-  const { WORKSPACES } = await import("../lib/core/config.mjs");
-  return { reconcile, loadWorkspaces: async () => WORKSPACES };
-}
 
 export async function uiCmd(argv = [], io = console) {
   const portArg = argv.indexOf("--port");
@@ -181,6 +162,7 @@ export async function uiCmd(argv = [], io = console) {
 
   const { appendEvent } = await import("../lib/edges/events.mjs");
   const { divergedGuard, buildEventPayload } = await import("../lib/edges/disposition.mjs");
+  const { defaultDeps } = await import("../lib/report/queue.mjs");
   const deps = await defaultDeps();
 
   const server = createServer(async (req, res) => {
