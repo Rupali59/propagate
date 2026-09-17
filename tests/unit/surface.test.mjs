@@ -138,6 +138,9 @@ test("a gotcha file whose entries can never fire warns, rather than reading as s
   const rows = buildRegisterRows({}, { files: 2, entries: 40, triggered: 0, scope: "x" });
   const g = rows.find((r) => r.key === "gotchas");
   assert.equal(g.tone, "warn", "40 entries, none deliverable — documented and not delivered");
+  assert.equal(g.ratio, 1, "and the bar is FULL, because nothing in it can fire");
+  const allFire = buildRegisterRows({}, { files: 1, entries: 10, triggered: 10, scope: "x" });
+  assert.equal(allFire.find((r) => r.key === "gotchas").ratio, 0, "every entry deliverable is an EMPTY bar");
   assert.ok(g.extra.some((e) => /scope/.test(e)), "the scope travels with the number");
 });
 
@@ -181,9 +184,15 @@ test("EVERY bar on the card means 'how much is outstanding' — never the revers
     queue: queueOf([item(), item({ edge_id: "e2" })]),
     snapshot: snap([sec("Delivery", { warn: 3 }), sec("Workspace: A", { pass: 9, warn: 1 })]),
     registers: { totals: { hot: { issues: 5 }, rotatable: { issues: 5 } } },
+    gotchas: { files: 10, entries: 89, triggered: 63, scope: "workspace roots" },
     now: NOW,
   });
   const by = Object.fromEntries(s.groups.flatMap((g) => g.rows).map((r) => [r.key, r]));
+  // THE ROW THIS TEST USED TO MISS. It was never populated here, so the gotcha
+  // bar shipped measuring triggered/entries — a FULL bar for the GOOD result,
+  // while every other full bar meant the bad one. Caught by reading the raw
+  // payload, not by this test, which is why the row is now pinned explicitly.
+  assert.equal(by.gotchas.ratio, 26 / 89, "the bar must show what CANNOT fire, not what can");
   assert.equal(by.Delivery.ratio, 1, "3 warn of 3 checks — entirely outstanding, full bar");
   assert.equal(by.workspaces.ratio, 0.1, "1 bad of 10 checks — nearly clean, near-empty bar");
   assert.equal(by.issues.ratio, 0.5);
