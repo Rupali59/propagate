@@ -43,3 +43,32 @@ export function assertMatchesPlain(assert, output, pattern, message) {
       `  (if the two differ only by \\x1B[..m, this helper is the fix — GOTCHAS G30)`,
   );
 }
+
+/**
+ * Bring a value out of a `node:vm` context so `assert.deepEqual` can see it.
+ *
+ * WHY THIS IS NEEDED AND WHY THE FAILURE IS SO CONFUSING. An array built inside
+ * a vm context is an `Array` from THAT realm, with a different prototype. Strict
+ * deepEqual compares prototypes, so a perfectly correct result fails with:
+ *
+ *   Values have same structure but are not reference-equal:
+ *     actual:   [ [ 'S1', 1 ], [ 'S2', 2 ] ]
+ *     expected: [ [ 'S1', 1 ], [ 'S2', 2 ] ]
+ *
+ * — two identical printouts and a failing test. It reads as a deep bug in the
+ * code under test; it is the assertion that cannot see across the realm. Four
+ * tests in `ui-client.test.mjs` failed this way on their first run while the
+ * grouping they check was exactly right.
+ *
+ * Injecting the host's `Array` into the context does NOT fix it: a spread or a
+ * literal uses the realm's own intrinsics, not whatever is bound to the global.
+ *
+ * JSON round-trip is the blunt instrument that works, and it is honest about its
+ * limits — it drops functions, `undefined`, `Map`, `Set` and `Date` identity. Use
+ * it on the plain data an assertion is about, not on live objects.
+ *
+ * @template T
+ * @param {T} v
+ * @returns {T}
+ */
+export const fromRealm = (v) => JSON.parse(JSON.stringify(v));

@@ -188,9 +188,13 @@ test("SERVED_VIEWS matches what the ui page can ACTUALLY render", () => {
   // with SERVED_VIEWS). That passes happily while both are wrong together.
   // rule:adversarial-review-reads-the-ledger: a promise in one file that another
   // file cannot keep is invisible to any review scoped to one file.
-  const ui = readFileSync(path.join(import.meta.dirname, "../../commands/ui.mjs"), "utf8");
+  // THE VIEW LIST MOVED, AND THIS CHECK SAID SO. It used to read ui.mjs; the
+  // page's client was extracted to ui.client.js and the check failed with "gone
+  // blind" rather than silently matching nothing and passing. That is the
+  // behaviour it was written for, observed working.
+  const ui = readFileSync(path.join(import.meta.dirname, "../../commands/ui.client.js"), "utf8");
   const m = ui.match(/\[\s*"queue"[^\]]*\]/);
-  assert.ok(m, "could not find the view list in ui.mjs — this check has gone blind, which is worse than failing");
+  assert.ok(m, "could not find the view list in ui.client.js — this check has gone blind, which is worse than failing");
   const routed = new Set(JSON.parse(m[0].replace(/'/g, '"')));
   for (const v of SERVED_VIEWS) {
     assert.ok(routed.has(v.replace(/^\//, "")), `SERVED_VIEWS promises ${v}, which ui.mjs does not route`);

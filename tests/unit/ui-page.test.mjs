@@ -20,6 +20,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Script } from "node:vm";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 import { page } from "../../commands/ui.mjs";
 
@@ -31,14 +33,18 @@ test("the page emits exactly one inline script, and it PARSES", () => {
   assert.doesNotThrow(() => new Script(script), "the served JS does not parse; the whole page is dead");
 });
 
-test("no RAW newline survives inside a JS string literal", () => {
-  // The precise defect: a double-quoted string that spans a line break. Parsing
-  // catches it today, but this names the cause when it recurs.
-  const offenders = script.split("\n").filter((l) => {
-    const q = (l.match(/"/g) ?? []).length;
-    return q % 2 === 1 && !l.trim().startsWith("//");
-  });
-  assert.deepEqual(offenders, [], `unbalanced quotes — a string is spanning a newline:\n  ${offenders.join("\n  ")}`);
+test("the script the page emits is the client FILE, unmodified", () => {
+  // REPLACES a quote-balance heuristic that lived here. That check was a crude
+  // proxy for "a string is spanning a newline", which was the symptom of code
+  // living inside a template literal. The client is a plain file now, so
+  // `node --check` validates it directly and the vm parse above validates what
+  // is served — the heuristic added nothing and flagged multi-line block
+  // comments containing quotes. A check that cries wolf gets deleted, which is
+  // how a working check becomes no check; deleting it deliberately is better
+  // than keeping it and learning to ignore it.
+  const client = readFileSync(path.join(import.meta.dirname, "../../commands/ui.client.js"), "utf8");
+  assert.ok(script.includes(client.trim().slice(0, 200)), "the emitted script must BE the client file, not a copy that can drift");
+  assert.ok(script.length > 5000, "and the whole of it, not a fragment");
 });
 
 test("the template literal is never closed early", () => {

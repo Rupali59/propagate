@@ -30,6 +30,7 @@
  */
 
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { queuePayload } from "../lib/report/queue.mjs";
@@ -75,211 +76,38 @@ export function validateWrite({ edge_id, disposition, reason }, item) {
   return null;
 }
 
-const STATE_COLOUR = { DRIFTED: "#b45309", DIVERGED: "#b91c1c", REVERSED: "#6d28d9", UNMATCHED: "#374151" };
 
 export function page(token) {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>propagate — the input surface</title>
-<style>
-:root{--bg:#0b0d10;--card:#151a21;--line:#232b36;--fg:#e6edf3;--dim:#8b98a8;--acc:#2f81f7}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
-h1{font-size:15px;margin:0;font-weight:600}
-.sum{color:var(--dim);font-size:12.5px}
-.sum b{color:var(--fg)}
-main{padding:16px 20px;max-width:1180px}
-.row{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:10px}
-.hd{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.st{font-size:11px;font-weight:700;letter-spacing:.04em;padding:2px 7px;border-radius:4px;color:#fff}
-.id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dim)}
-.pair{margin:8px 0 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;word-break:break-all}
-.arr{color:var(--dim);margin:0 6px}
-.why{color:var(--dim);font-size:12.5px;margin-top:6px;white-space:pre-wrap}
-.hist{margin-top:6px;font-size:12px;color:var(--dim)}
-.warn{color:#f0b429}
-.act{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-select,input,button{font:inherit;background:#0e1319;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px}
-input{flex:1;min-width:260px}
-button{background:var(--acc);border-color:var(--acc);color:#fff;cursor:pointer;font-weight:600}
-button:disabled{opacity:.45;cursor:not-allowed}
-.msg{margin-top:8px;font-size:12.5px;white-space:pre-wrap}
-.err{color:#ff7b72}.ok{color:#3fb950}
-.empty{color:var(--dim);padding:40px 0;text-align:center}
-nav{display:flex;gap:6px}
-.tab{background:transparent;border:1px solid var(--line);color:var(--dim);font-weight:500;padding:4px 11px;font-size:12.5px}
-.tab.on{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
-.loc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--dim)}
-.txt{margin:7px 0 0;font-size:13.5px}
-/* THE DIFF IS THE EVIDENCE. The design review's first finding was that the
-   system demands a judgement and gives you nothing to judge with. You approve
-   this hunk, not a promise that something reasonable will happen. */
-.diff{margin-top:9px;background:#0a0e13;border:1px solid var(--line);border-radius:6px;padding:9px 11px;
-      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;white-space:pre-wrap;word-break:break-all}
-.diff .del{color:#ff7b72}
-.diff .add{color:#3fb950}
-.diff .hdr{color:var(--dim)}
-.note{margin-top:7px;font-size:12px;color:#a1791f}
-.trunc{color:#a1791f;font-size:12.5px;margin-bottom:10px}
-</style></head><body>
-<header><h1>propagate</h1><nav id="nav"><button class="tab on" data-v="queue">queue</button><button class="tab" data-v="issues">issues</button><button class="tab" data-v="todos">todos</button></nav><div class="sum" id="sum">loading…</div></header>
-<main id="list"></main>
-<script>
-const TOKEN=${JSON.stringify(token)};
-const api=(p,o={})=>fetch(p+(p.includes("?")?"&":"?")+"token="+TOKEN,o).then(r=>r.json());
-const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const COL=${JSON.stringify(STATE_COLOUR)};
-function histLine(it){
-  if(it.judgedCount===0) return '<span class="hist">never judged</span>';
-  const pct=Math.round(it.noiseRatio*100);
-  const cls=it.noiseRatio>=0.5?"hist warn":"hist";
-  const last=it.last?(" · last: "+esc(it.last.disposition)):"";
-  return '<span class="'+cls+'">judged '+it.judgedCount+'× · '+pct+'% no-change-needed'+last+'</span>';
-}
-function render(d){
-  const s=d.summary;
-  document.getElementById("sum").innerHTML=
-    '<b>'+s.total+'</b> actionable · '+Object.entries(s.byState).map(([k,v])=>v+' '+k).join(' · ')+
-    ' · <b>'+s.neverJudged+'</b> never judged · <b>'+s.highNoise+'</b> mostly-no-op';
-  const el=document.getElementById("list");
-  if(!d.items.length){el.innerHTML='<div class="empty">Nothing actionable. Not the same as nothing scanned — '+d.expanded+' edges from '+d.declared+' declarations.</div>';return;}
-  el.innerHTML=d.items.map(it=>
-    '<div class="row" data-id="'+it.edge_id+'">'+
-      '<div class="hd"><span class="st" style="background:'+(COL[it.state]||"#374151")+'">'+it.state+'</span>'+
-      '<span class="id">'+it.edge_id+'</span>'+histLine(it)+'</div>'+
-      '<div class="pair">'+esc(it.sourceShort)+'<span class="arr">→</span>'+esc(it.downstreamShort)+'</div>'+
-      (it.why?'<div class="why">'+esc(it.why)+'</div>':'')+
-      '<div class="act">'+
-        '<select class="d">'+it.allowed.map(a=>'<option>'+a+'</option>').join('')+'</select>'+
-        '<input class="r" placeholder="why this disposition is correct (required, 12+ chars)">'+
-        '<button class="go">record</button>'+
-      '</div><div class="msg"></div></div>').join('');
-}
-document.addEventListener("click",async e=>{
-  if(!e.target.classList.contains("go"))return;
-  const row=e.target.closest(".row"), msg=row.querySelector(".msg");
-  const body={edge_id:row.dataset.id,disposition:row.querySelector(".d").value,reason:row.querySelector(".r").value};
-  e.target.disabled=true;msg.className="msg";msg.textContent="writing…";
-  try{
-    const res=await api("/api/dispose",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
-    if(res.ok){msg.className="msg ok";msg.textContent="recorded — event "+res.event_id;setTimeout(load,700);}
-    else{msg.className="msg err";msg.textContent=res.error;e.target.disabled=false;}
-  }catch(err){msg.className="msg err";msg.textContent=String(err);e.target.disabled=false;}
-});
-// ── the register views ─────────────────────────────────────────────────
-// EVERY WRITE IS PREVIEWED FIRST. The button says "preview", and only the diff
-// it returns can be confirmed. A one-click write into hand-written prose is
-// exactly the friction this should NOT remove.
-function actionControls(it){
-  const opts=[];
-  if(it.actions.includes("issue-close")) opts.push('<option value="issue-close">close</option>');
-  if(it.actions.includes("issue-severity")) opts.push('<option value="issue-severity">change severity</option>');
-  if(it.actions.includes("todo-tick")) opts.push('<option value="todo-tick">tick done</option>');
-  const sev='<select class="sev" style="display:none">'+["S0","S1","S2","S3","S4"].map(x=>'<option>'+x+'</option>').join('')+'</select>';
-  return '<div class="act">'+
-    '<select class="a">'+opts.join('')+'</select>'+sev+
-    '<input class="r" placeholder="why (required, 12+ chars) — this goes into the file">'+
-    '<button class="prev">preview</button>'+
-  '</div>';
-}
-function renderRegister(d,kind){
-  const el=document.getElementById("list");
-  if(d.error){el.innerHTML='<div class="empty err">'+esc(d.error)+'</div>';return;}
-  const items=kind==="issues"?d.issues:d.todos;
-  const c=d.counts;
-  document.getElementById("sum").innerHTML=
-    '<b>'+items.length+'</b> '+kind+' with an action on their line · <b>'+c.noAction+
-    '</b> items had none (already closed, or a status this surface does not edit)'+
-    (c.unreadable?' · <b class="warn">'+c.unreadable+'</b> unreadable':'');
-  if(!items.length){
-    // Not "nothing to do" — say which question was asked.
-    el.innerHTML='<div class="empty">No '+kind+' carry an action this surface can perform. '+
-      c.noAction+' items were read and offered none.</div>';return;
-  }
-  const trunc=(kind==="issues"?c.issues>c.shownIssues:c.todos>c.shownTodos)
-    ? '<div class="trunc">showing '+items.length+' of '+(kind==="issues"?c.issues:c.todos)+' — the rest are not hidden, just not on this page</div>' : '';
-  el.innerHTML=trunc+items.map((it,i)=>
-    '<div class="row" data-i="'+i+'">'+
-      '<div class="hd">'+(it.id?'<span class="id">'+esc(it.id)+'</span>':'')+
-        '<span class="loc">'+esc(it.short)+':'+it.line+'</span>'+
-        (it.priority!=null?'<span class="hist">P'+it.priority+'</span>':'')+'</div>'+
-      '<div class="txt">'+esc(it.text)+'</div>'+
-      actionControls(it)+
-      (it.noClose?'<div class="note">close not offered — '+esc(it.noClose)+'</div>':'')+
-      '<div class="msg"></div></div>').join('');
-  window.__items=items;
-}
-function diffHtml(diff){
-  // DOUBLE-ESCAPED ON PURPOSE, and NO BACKTICKS IN THIS COMMENT. The whole page
-  // is a template literal, so a single backslash-n here is interpreted when
-  // page() RUNS: the browser receives a real newline inside a JS string
-  // literal, which is a SyntaxError that kills the ENTIRE inline script. The
-  // symptom is the header stuck on "loading..." forever, with a 200 on every
-  // request and nothing in the network tab.
+  // THE TEMPLATE LITERAL IS NOW A SHELL, not a program. The CSS and the client
+  // script live in commands/ui.css and commands/ui.client.js and are INLINED
+  // here at serve time -- still one self-contained page, no build step, no
+  // second request.
   //
-  // A backtick in a comment closes the literal the same way -- which is how the
-  // first version of THIS comment broke the file it was warning about.
-  return '<div class="diff">'+diff.split("\\n").map(l=>{
-    const cls=l.startsWith("+")?"add":l.startsWith("-")?"del":"hdr";
-    return '<span class="'+cls+'">'+esc(l)+'</span>';
-  }).join("\\n")+'</div>';
-}
-document.addEventListener("change",e=>{
-  if(!e.target.classList.contains("a"))return;
-  const row=e.target.closest(".row");
-  row.querySelector(".sev").style.display=e.target.value==="issue-severity"?"":"none";
-});
-document.addEventListener("click",async e=>{
-  // PREVIEW
-  if(e.target.classList.contains("prev")){
-    const row=e.target.closest(".row"), msg=row.querySelector(".msg");
-    const it=window.__items[Number(row.dataset.i)];
-    const body={action:row.querySelector(".a").value,file:it.file,line:it.line,current:it.raw,
-                reason:row.querySelector(".r").value,severity:row.querySelector(".sev").value};
-    msg.className="msg";msg.textContent="planning…";
-    try{
-      const res=await api("/api/register-preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
-      if(!res.ok){msg.className="msg err";msg.textContent=res.error;return;}
-      row.__plan={...body,next:res.next};
-      msg.className="msg";
-      msg.innerHTML=diffHtml(res.diff)+'<div class="act"><button class="confirm">write this</button><button class="cancel">cancel</button></div>';
-    }catch(err){msg.className="msg err";msg.textContent=String(err);}
-    return;
-  }
-  if(e.target.classList.contains("cancel")){
-    const row=e.target.closest(".row");row.__plan=null;row.querySelector(".msg").innerHTML="";return;
-  }
-  // CONFIRM — sends back the EXACT line that was previewed.
-  if(e.target.classList.contains("confirm")){
-    const row=e.target.closest(".row"), msg=row.querySelector(".msg");
-    e.target.disabled=true;
-    try{
-      const res=await api("/api/register-write",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(row.__plan)});
-      if(res.ok){msg.className="msg ok";msg.textContent="written — "+res.file+":"+res.line;setTimeout(load,700);}
-      else{msg.className="msg err";msg.textContent=res.error;}
-    }catch(err){msg.className="msg err";msg.textContent=String(err);}
-    return;
-  }
-  // tabs
-  if(e.target.classList.contains("tab")){
-    document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t===e.target));
-    VIEW=e.target.dataset.v;location.hash=VIEW;load();
-  }
-});
-// The fragment arrives as "#/todos" from open-ui.sh (which is handed a ROUTE
-// like /todos) and as "#todos" from a tab click, so the leading slash is
-// stripped rather than one of the two producers being declared wrong. Without
-// this a widget click on Todos silently lands on the queue tab -- no error, just
-// the wrong page, which is the hardest kind of wrong to notice.
-let VIEW=(location.hash||"#queue").slice(1).replace(/^[/]+/,"");
-if(!["queue","issues","todos"].includes(VIEW)) VIEW="queue";
-async function load(){
-  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.v===VIEW));
-  try{
-    if(VIEW==="queue") render(await api("/api/queue"));
-    else renderRegister(await api("/api/registers"),VIEW);
-  }catch(e){document.getElementById("sum").textContent="failed to load: "+e;}
-}
-load();
-</script></body></html>`;
+  // This is G65 fixed structurally rather than tested around. Code inside a
+  // template literal is escaped twice, and four dead-page bugs in one session
+  // came from that: a backslash-n that became a real newline, two backticks in
+  // comments, and an escaped slash that collapsed. Each was invisible -- HTTP
+  // 200 on every request, nothing in any log, the only evidence in a browser
+  // console nothing reads. A plain file has nothing to escape, and
+  // `node --check` can parse it directly.
+  //
+  // THE TOKEN IS THE ONLY INTERPOLATION, and it goes on a data attribute rather
+  // than into the script, so ui.client.js contains no substitution point at all.
+  // It is JSON-encoded, and it is 48 hex characters minted by randomBytes -- but
+  // the encoding is what makes that a property of the value rather than a thing
+  // to remember.
+  const css = readFileSync(new URL("./ui.css", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./ui.client.js", import.meta.url), "utf8");
+  return [
+    '<!doctype html><html><head><meta charset="utf-8"><title>propagate</title>',
+    "<style>", css, "</style></head>",
+    "<body data-token=", JSON.stringify(token), ">",
+    '<header><h1>propagate</h1><nav id="nav"></nav><div class="sum" id="sum">loading…</div></header>',
+    '<div class="filters"><div id="chips" style="display:flex;gap:7px;flex-wrap:wrap"></div>',
+    '<input id="q" placeholder="filter (/)" autocomplete="off"></div>',
+    '<div class="panes"><div class="list" id="list"></div><div class="detail" id="detail"></div></div>',
+    "<script>", js, "</script></body></html>",
+  ].join("");
 }
 
 
@@ -292,6 +120,7 @@ export async function uiCmd(argv = [], io = console) {
   const { registerQueue } = await import("../lib/registers/queue.mjs");
   const { planEdit, applyEdit } = await import("../lib/registers/write.mjs");
   const { backlog } = await import("../lib/report/backlog.mjs");
+  const { evidenceFor } = await import("../lib/report/evidence.mjs");
   const { divergedGuard, buildEventPayload } = await import("../lib/edges/disposition.mjs");
   const { defaultDeps } = await import("../lib/report/queue.mjs");
   const deps = await defaultDeps();
@@ -342,6 +171,38 @@ export async function uiCmd(argv = [], io = console) {
           return send(400, { ok: false, error: String(err?.message ?? err) });
         }
       }
+      // EVIDENCE — read-only, and behind the SAME path allowlist as the write
+      // route. An evidence endpoint that reads an arbitrary path is a
+      // file-disclosure primitive behind a token; read-only does not make it
+      // safe, it makes it quieter. Edges are allowed by their source path, which
+      // comes from reconcile rather than from the client.
+      if (url.pathname === "/api/evidence" && req.method === "POST") {
+        let raw = "";
+        for await (const c of req) raw += c;
+        let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
+
+        let allowed = false;
+        if (body.kind === "edge") {
+          const q = await queuePayload({ root, deps });
+          const item = q.items.find((i) => i.edge_id === body.edge_id);
+          if (!item) return send(404, { ok: false, error: "no such actionable edge — reload" });
+          // The path and the commit come from the LEDGER, never from the
+          // browser, so neither can be pointed somewhere else.
+          body.file = item.source;
+          body.sinceCommit = item.lastVerified?.commit ?? null;
+          body.dirty = !!item.lastVerified?.dirty;
+          allowed = true;
+        } else {
+          const known = registerQueue({ backlogFn: backlog });
+          const set = new Set([...(known.issues ?? []), ...(known.todos ?? [])].map((i) => i.file));
+          allowed = set.has(body.file);
+        }
+        if (!allowed) return send(403, { ok: false, error: `${body.file} is not a file this surface reads` });
+
+        const ev = await evidenceFor(body);
+        return send(200, ev);
+      }
+
       if (url.pathname === "/api/registers") {
         try { return send(200, registerQueue({ backlogFn: backlog })); }
         catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
