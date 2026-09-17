@@ -35,8 +35,20 @@ export const command = 'bash "$HOME/Documents/GitHub/propagate/widget/collect.sh
 // 30-minute cadence, so a 5-minute derive is ahead of the thing it watches.
 export const refreshFrequency = 300000;
 
+// ── POSITION ──────────────────────────────────────────────────────────────
+// Übersicht has NO drag-to-move: widget position is CSS, full stop. The app
+// does have an interaction mode (`enableInteraction` / `setIgnoresMouseEvents:`
+// in the 1.6 binary, toggled from the menu-bar icon) but that enables clicks
+// INSIDE a widget — it is what makes claude-usage.jsx's buttons work — and adds
+// no window dragging.
+//
+// So moving this widget means editing these two values. They are hoisted here
+// rather than buried in the CSS block so it is one obvious edit.
+// Anchor to a different corner by swapping `left`->`right` or `top`->`bottom`.
+const POS = { left: '20px', top: '20px' };
+
 export const className = `
-  left: 20px; top: 20px;
+  left: ${POS.left}; top: ${POS.top};
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   color: #e6edf3;
   width: 430px;
