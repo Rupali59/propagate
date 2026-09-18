@@ -121,6 +121,7 @@ export async function uiCmd(argv = [], io = console) {
   const { planEdit, applyEdit } = await import("../lib/registers/write.mjs");
   const { backlog } = await import("../lib/report/backlog.mjs");
   const { evidenceFor } = await import("../lib/report/evidence.mjs");
+  const { readSnapshot } = await import("../lib/report/doctor/snapshot.mjs");
   const { divergedGuard, buildEventPayload } = await import("../lib/edges/disposition.mjs");
   const { defaultDeps } = await import("../lib/report/queue.mjs");
   const deps = await defaultDeps();
@@ -135,6 +136,24 @@ export async function uiCmd(argv = [], io = console) {
     if (url.pathname === "/" && url.searchParams.get("token") === TOKEN) {
       return send(200, page(TOKEN), "text/html; charset=utf-8");
     }
+    // THE GRAPH IS A VIEW HERE, not a file on disk. It used to be generated to
+    // ~/.propagate/graph.html and opened directly, which made it a second
+    // destination with its own lifetime and no way back. Rupali's requirement:
+    // one page holds everything and every link lands on it.
+    if (url.pathname === "/graph") {
+      const refusal = guardRequest(req, TOKEN, port);
+      if (refusal) return send(403, refusal, "text/plain");
+      try {
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const out = path.join(process.env.PROPAGATE_STATE_DIR || path.join(process.env.HOME ?? "", ".propagate"), "graph.html");
+        await promisify(execFile)(process.execPath, [path.join(import.meta.dirname, "..", "cli.mjs"), "graph", "--html", out], { maxBuffer: 64e6 });
+        return send(200, readFileSync(out, "utf8"), "text/html; charset=utf-8");
+      } catch (err) {
+        return send(500, `could not render the graph — ${String(err?.message ?? err)}`, "text/plain");
+      }
+    }
+
     if (url.pathname.startsWith("/api/")) {
       const refusal = guardRequest(req, TOKEN, port);
       if (refusal) return send(403, { ok: false, error: refusal });
@@ -201,6 +220,51 @@ export async function uiCmd(argv = [], io = console) {
 
         const ev = await evidenceFor(body);
         return send(200, ev);
+      }
+
+      // HEALTH — doctor's own sections, from the snapshot the monitor writes.
+      // Not re-run here: doctor costs ~37s and this is a page load.
+      if (url.pathname === "/api/health") {
+        const snap = await readSnapshot();
+        if (!snap.ok) return send(200, { ok: false, reason: snap.reason, sections: null, ageMs: snap.ageMs ?? null });
+        return send(200, { ok: true, ageMs: snap.ageMs, generatedAt: snap.payload.generatedAt,
+          problems: snap.payload.problems, totals: snap.payload.totals, sections: snap.payload.sections });
+      }
+
+      // RULES — the HUB half of the model. docs/HUB-AND-WORKSPACE.md: the hub is
+      // checked by `rules check` and declared edges, workspaces by doctor. The
+      // surface carried doctor and the registers and none of this, so half the
+      // architecture was missing from the only page that claims to show it.
+      if (url.pathname === "/api/rules") {
+        try {
+          // Same arguments cli.mjs's own `rulesCmd` uses, so this page and the
+          // command cannot report different things about the hub.
+          const { checkRules } = await import("../lib/rules/rules-check.mjs");
+          const { RULES_DIR, SEARCH_ROOTS } = await import("../lib/core/config.mjs");
+          // os.homedir(), NOT a HOME_DIR import: config does not export one, and
+          // destructuring a missing named export yields undefined rather than
+          // throwing -- so the phantom would have fallen through to a fallback
+          // and worked by luck. G24's shape: a null that reads as unconfigured.
+          const { homedir } = await import("node:os");
+          const globalMd = path.join(homedir(), ".claude", "CLAUDE.md");
+          return send(200, checkRules({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS, extra: [globalMd], exclude: [globalMd] }));
+        } catch (err) {
+          return send(200, { error: String(err?.message ?? err), findings: null });
+        }
+      }
+
+      if (url.pathname === "/api/gotchas") {
+        try {
+          const { gotchaEntries } = await import("../lib/registers/queue.mjs");
+          const { sourcesFor } = await import("../lib/gotchas/parse.mjs");
+          const { WORKSPACES } = await import("../lib/core/config.mjs");
+          // Workspace roots, NOT cwd — the same scope lib/report/surface.mjs
+          // uses, so the widget's count and this list cannot disagree. Taking
+          // cwd made the number depend on where the process started (N80).
+          const set = new Set();
+          for (const w of WORKSPACES) for (const f of sourcesFor(w.root ?? w.path ?? w) ?? []) set.add(f);
+          return send(200, gotchaEntries({ files: [...set] }));
+        } catch (err) { return send(200, { error: String(err?.message ?? err), entries: null }); }
       }
 
       if (url.pathname === "/api/registers") {

@@ -85,9 +85,12 @@ const REGISTERS = {
 };
 const QUEUE = {
   items: [
-    { edge_id: "e1", state: "REVERSED", sourceShort: "a/b.md", downstreamShort: "c/d.md", judgedCount: 4, noiseRatio: 0.75, allowed: ["propagated"], lastVerified: { commit: "abcdef1234", dirty: true, ts: "2026-09-01T00:00:00Z" }, why: null },
-    { edge_id: "e2", state: "DRIFTED", sourceShort: "e/f.md", downstreamShort: "g/h.md", judgedCount: 0, noiseRatio: null, allowed: ["propagated"], lastVerified: null, why: "because" },
-    { edge_id: "e3", state: "DIVERGED", sourceShort: "i/j.md", downstreamShort: "k/l.md", judgedCount: 1, noiseRatio: 0, allowed: ["both-reconciled"], lastVerified: null, why: null },
+    { edge_id: "e1", state: "REVERSED", source: "/x/Documents/GitHub/rules/a.md", downstream: "/x/Documents/GitHub/Tathya/b.md",
+      sourceShort: "rules/a.md", downstreamShort: "Tathya/b.md", judgedCount: 4, noiseRatio: 0.75, allowed: ["propagated"], lastVerified: { commit: "abcdef1234", dirty: true, ts: "2026-09-01T00:00:00Z" }, why: null },
+    { edge_id: "e2", state: "DRIFTED", source: "/x/Documents/GitHub/Tathya/e.md", downstream: "/x/Documents/GitHub/Tathya/g.md",
+      sourceShort: "Tathya/e.md", downstreamShort: "Tathya/g.md", judgedCount: 0, noiseRatio: null, allowed: ["propagated"], lastVerified: null, why: "because" },
+    { edge_id: "e3", state: "DIVERGED", source: "/x/Documents/GitHub/rules/i.md", downstream: "/x/Documents/GitHub/scripts/k.md",
+      sourceShort: "rules/i.md", downstreamShort: "scripts/k.md", judgedCount: 1, noiseRatio: 0, allowed: ["both-reconciled"], lastVerified: null, why: null },
   ],
   summary: { total: 3, byState: { REVERSED: 1, DRIFTED: 1, DIVERGED: 1 }, neverJudged: 1, judged: 2, highNoise: 1 },
   declared: 497, expanded: 1007,
@@ -122,10 +125,19 @@ test("todos group by WORKSPACE, not by priority", async () => {
   assert.deepEqual(fromRealm(gs.map(([g]) => g).sort()), ["Motherboard", "Tathya"]);
 });
 
-test("the queue groups by state in fix order", async () => {
+test("the queue groups by the HUB/WORKSPACE line, with state on the badge", async () => {
+  // "Where is hub vs workspace?" — it was nowhere. The queue grouped by state,
+  // which the badge already says. A CROSSING edge is a contract that has not
+  // reached its instances, and that question was unanswerable from this page.
   const { ui } = await boot({ "/api/queue": QUEUE }, "#queue");
-  const gs = ui.grouped(ui.shape("queue"));
-  assert.deepEqual(fromRealm(gs.map(([g]) => g)), ["DRIFTED", "DIVERGED", "REVERSED"]);
+  const rows = ui.shape("queue");
+  assert.deepEqual(fromRealm(rows.map((r) => r.group)),
+    ["crosses the line", "Tathya", "hub-internal"], "grouped by side, not by state");
+  assert.deepEqual(fromRealm(rows.map((r) => r.badge)),
+    ["REVERSED", "DRIFTED", "DIVERGED"], "state survives on the badge");
+
+  const gs = ui.grouped(rows);
+  assert.equal(fromRealm(gs.map(([g]) => g))[0], "crosses the line", "crossers first — they are the interesting ones");
 });
 
 // ── the bug the refactor fixed ─────────────────────────────────────────────

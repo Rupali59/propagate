@@ -63,7 +63,23 @@ test("every view the page routes is reachable from both fragment spellings", () 
   // source text and broke the moment the regex was rewritten to dodge the
   // escaping problem that caused all this.
   assert.match(script, /slice\(1\)\.replace\([^)]*\)/, "the hash must be normalised before it is matched");
-  assert.ok(!/\\\//.test(script), "an escaped slash inside the template gets eaten — use a character class");
+  // NO ESCAPE GUARD HERE ANY MORE, AND THAT IS THE POINT.
+  //
+  // This used to ban `\/` because the client lived inside page()'s template
+  // literal, where escapes were consumed twice and that one collapsed a regex
+  // (G65). The client is a plain FILE now, inlined by an array join —
+  // `[..., "<script>", js, "</script>", ...].join("")` — so nothing touches its
+  // escapes and ordinary regexes are correct.
+  //
+  // Two replacements were tried and both were wrong: banning `\/` blocked
+  // correct code, and banning backticks blocked ordinary comments. A guard that
+  // outlives its hazard does not merely waste a line — it blocks correct work
+  // and teaches people to route around checks.
+  //
+  // The real guards are above: the emitted script PARSES, and it IS the client
+  // file byte for byte. The template-literal hazard is still live in
+  // widget/propagate-queue.jsx, whose className is still a literal, and
+  // widget-contract.test.mjs guards that one.
   for (const v of ["queue", "issues", "todos"]) {
     assert.ok(script.includes(`"${v}"`), `the page must know about the ${v} view`);
   }

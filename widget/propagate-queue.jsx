@@ -503,8 +503,9 @@ export const render = (state, dispatch) => {
         : null}
 
       <div className="foot">
-        <span className="lk" onClick={() => openView("graph", dispatch)}>graph &#8250;</span>
+        <span className="lk" onClick={() => openView("/graph", dispatch)}>graph &#8250;</span>
         <span className="lk" onClick={() => openView("/queue", dispatch)}>queue &#8250;</span>
+        <span className="lk" onClick={() => openView("/health", dispatch)}>doctor &#8250;</span>
         {soon ? <span>{soon} not built</span> : null}
         <span className={stale ? "sp stale" : "sp"}>
           {snap.ok ? `snapshot ${ageText(snap.ageMs)}` : (snap.reason || "no snapshot")}

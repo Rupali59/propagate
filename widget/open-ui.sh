@@ -79,22 +79,10 @@ if ! alive; then
   printf '%s' "$URL" > "$URL_FILE"
 fi
 
-# THE GRAPH IS NOT A UI VIEW -- it is a self-contained HTML file the CLI
-# generates. lib/graph/graph-html.mjs already renders it (workspace condensation,
-# layered columns, fan-out bundling, no CDN), and the plan was explicit that the
-# widget must LINK to it rather than re-implement it. Regenerated on each click
-# so it is never stale, into the state dir rather than a tmp file that a cleaner
-# removes between the write and the open.
-if [ "$VIEW" = "graph" ]; then
-  OUT="$STATE/graph.html"
-  if "$NODE" "$CLI" graph --html "$OUT" >/dev/null 2>&1 && [ -s "$OUT" ]; then
-    /usr/bin/open "$OUT"
-    exit 0
-  fi
-  echo "propagate graph --html failed, or produced nothing" >&2
-  exit 1
-fi
-
+# NO SPECIAL CASE FOR THE GRAPH ANY MORE. It used to be generated to a loose
+# file and opened directly, which made it a second destination with its own
+# lifetime and no way back to anything else. The UI serves it at /graph now, so
+# every link from the widget lands on the SAME page with the tabs still there.
 URL="$(cat "$URL_FILE")"
 # The view is a fragment, not a path: the UI is one page today, and a path that
 # 404s is worse than a fragment the page can ignore. When step 5 lands real

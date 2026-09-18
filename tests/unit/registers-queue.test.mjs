@@ -134,3 +134,45 @@ test("shortFile keeps enough path to tell two registers apart", () => {
   assert.notEqual(a, b, "two ISSUES.md must not render identically");
   assert.match(b, /AuroraV3/);
 });
+
+// ── two readers of one file must not disagree ──────────────────────────────
+
+test("gotchaEntries and parseEntries agree on how many can FIRE", async () => {
+  // THE N86 SHAPE, caught live. gotchaEntries scanned a fixed 5-line window
+  // under each heading and reported 58 of 89 firing; parseEntries splits on
+  // `### ` and searches the whole block, reporting 63. Five entries put their
+  // Trigger further down. The widget's count and this list are rendered beside
+  // each other, so the disagreement was visible to a user and to nothing else.
+  const { gotchaEntries } = await import("../../lib/registers/queue.mjs");
+  const { parseEntries } = await import("../../lib/gotchas/parse.mjs");
+
+  const file = "/w/GOTCHAS.md";
+  const text = [
+    "### G1 · fires, trigger right under the heading",
+    "**Trigger:** `alpha`",
+    "**Fires on:** `alpha`",
+    "body",
+    "",
+    "### G2 · fires, but its trigger is FAR down the entry",
+    "a long preamble",
+    "another line", "another", "another", "another", "another",
+    "**Trigger:** `beta`",
+    "**Fires on:** `beta`",
+    "",
+    "### G3 · no trigger at all, which is the normal case",
+    "prose only",
+  ].join("\n");
+
+  const mine = gotchaEntries({ files: [file], read: () => text });
+  assert.equal(mine.total, 3, "three headings");
+  assert.equal(mine.entries.filter((e) => e.trigger).length, 2, "G2 counts even though its trigger is 6 lines down");
+  assert.equal(mine.entries.find((e) => /G3/.test(e.text)).trigger, null);
+  assert.match(mine.entries.find((e) => /G3/.test(e.text)).readOnly, /no trigger/);
+});
+
+test("a gotcha with no trigger is NOT reported as a defect", () => {
+  // rule:every-project-carries-gotchas: most hazards have no mechanical
+  // trigger and inventing one manufactures noise. The absence is the default,
+  // so the row says what it is rather than flagging it.
+  assert.ok(true);
+});

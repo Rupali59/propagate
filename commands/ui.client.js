@@ -30,11 +30,11 @@ const api = (p, o) => fetch(p + (p.indexOf("?") >= 0 ? "&" : "?") + "token=" + T
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const el = (id) => document.getElementById(id);
 
-const VIEWS = ["queue", "issues", "todos"];
+const VIEWS = ["queue", "issues", "todos", "handovers", "gotchas", "health", "rules", "graph"];
 let VIEW = (location.hash || "#queue").slice(1).replace(/^[/]+/, "");
 if (VIEWS.indexOf(VIEW) < 0) VIEW = "queue";
 
-let DATA = { queue: null, issues: null, todos: null };
+let DATA = { queue: null, issues: null, todos: null, handovers: null, gotchas: null, health: null, rules: null };
 let ROWS = [];        // the filtered, flattened rows currently listed
 let SEL = 0;          // index into ROWS
 let FILTER = null;    // active chip
@@ -72,19 +72,98 @@ function ageDays(ts) {
  * by workspace yields one group; 127 of 145 todos carry no priority, so grouping
  * those by priority yields one group plus noise. A symmetric design gets both
  * wrong. */
+/* WHICH SIDE OF THE HUB/WORKSPACE LINE A PATH SITS ON. From
+ * docs/HUB-AND-WORKSPACE.md: the hub owns CONTRACTS (rules/, scripts/execution,
+ * .templates/, the schemas, propagate/docs) and workspaces own INSTANCES.
+ * Mirrors sideOf() in lib/report/surface.mjs; kept in step by a test. */
+function sideOf(abs) {
+  const rel = String(abs || "").split("/Documents/GitHub/")[1];
+  if (!rel) return null;
+  if (/^(rules|scripts|\.templates|skills-marketplace|propagate\/docs)\//.test(rel)) return "hub";
+  if (/^[^/]+\.(md|yml|yaml|json)$/.test(rel)) return "hub";
+  return rel.split("/")[0] || null;
+}
+/* THE QUEUE GROUPS BY THE LINE, not by state. State is still on the badge, but
+ * the question "is this a contract that has not reached its instances" was
+ * unanswerable from this page, and a crossing edge is exactly that. */
+function boundaryOf(i) {
+  const a = sideOf(i.source), b = sideOf(i.downstream);
+  if (a === "hub" && b === "hub") return "hub-internal";
+  if (a === "hub" || b === "hub") return "crosses the line";
+  return a || b || "elsewhere";
+}
+
 function shape(view) {
   if (view === "queue") {
     const items = (DATA.queue && DATA.queue.items) || [];
     return items.map((i) => ({
       kind: "edge",
       key: i.edge_id,
-      group: i.state,
+      group: boundaryOf(i),
       badge: i.state,
       badgeClass: i.state,
       title: i.sourceShort + "  →  " + i.downstreamShort,
-      meta: i.edge_id + (i.judgedCount ? "  ·  judged " + i.judgedCount + "×" : "  ·  never judged"),
+      meta: i.edge_id + "  ·  " + i.state + (i.judgedCount ? "  ·  judged " + i.judgedCount + "×" : "  ·  never judged"),
       noisy: i.judgedCount > 0 && i.noiseRatio >= 0.5,
       raw: i,
+    }));
+  }
+
+  /* HANDOVERS and GOTCHAS are READ-ONLY views. They belong on the page — a
+   * surface claiming to hold everything while omitting two registers is lying
+   * about its own coverage — but neither is a marker flip, so neither offers a
+   * form. Each row says why. */
+  if (view === "handovers") {
+    const h = DATA.registers && DATA.registers.handovers;
+    return (h || []).map((i) => ({
+      kind: "handover", key: i.file + ":" + i.line, group: i.date ? i.date.slice(0, 7) : "undated",
+      badge: "open", badgeClass: "none", title: i.text, meta: i.short + ":" + i.line, raw: i,
+    }));
+  }
+  if (view === "gotchas") {
+    const g = DATA.gotchas;
+    if (!g || !g.entries) return [];
+    return g.entries.map((i) => ({
+      kind: "gotcha", key: i.file + ":" + i.line,
+      // The axis that matters: can it fire, or is it documented and inert.
+      group: i.trigger ? "fires" : "no trigger",
+      badge: i.trigger ? "live" : "inert", badgeClass: i.trigger ? "S3" : "none",
+      title: i.text, meta: i.short + ":" + i.line, raw: i,
+    }));
+  }
+
+  /* HEALTH — doctor's sections, split on the same line: its per-workspace
+   * sections are instances, everything else is the machinery. */
+  if (view === "health") {
+    const h = DATA.health;
+    if (!h || !h.sections) return [];
+    return h.sections
+      .filter((x) => x.name && (x.fail || x.warn || x.pass))
+      .map((x) => ({
+        kind: "section",
+        key: x.name,
+        group: x.name.indexOf("Workspace: ") === 0 ? "workspaces" : "machinery",
+        badge: x.fail ? "FAIL" : x.warn ? String(x.warn) : "ok",
+        badgeClass: x.fail ? "DIVERGED" : x.warn ? "none" : "S3",
+        title: x.name.replace("Workspace: ", ""),
+        meta: x.pass + " pass · " + x.warn + " warn · " + x.fail + " fail",
+        raw: x,
+      }));
+  }
+
+  /* RULES — the HUB half of the model, and it was on no surface at all. */
+  if (view === "rules") {
+    const r = DATA.rules;
+    if (!r || !r.findings) return [];
+    return r.findings.map((f, n) => ({
+      kind: "finding",
+      key: (f.rule || "?") + ":" + (f.file || n),
+      group: f.rule || "unattributed",
+      badge: "restated",
+      badgeClass: "DRIFTED",
+      title: String(f.file || "").split("/Documents/GitHub/")[1] || f.file || "(no file)",
+      meta: (f.hits ? f.hits + " hit(s)" : "") + (f.lines ? "  ·  line " + f.lines.join(", ") : ""),
+      raw: f,
     }));
   }
   const src = view === "issues" ? (DATA.issues && DATA.issues.issues) : (DATA.todos && DATA.todos.todos);
@@ -103,7 +182,8 @@ function shape(view) {
   });
 }
 
-const GROUP_ORDER = { S1: 0, S2: 1, S3: 2, S4: 3, none: 9, DRIFTED: 0, DIVERGED: 1, REVERSED: 2 };
+const GROUP_ORDER = { "crosses the line": 0, "hub-internal": 1, machinery: 0, workspaces: 1,
+  fires: 0, "no trigger": 1, S1: 0, S2: 1, S3: 2, S4: 3, none: 9 };
 function grouped(rows) {
   const by = new Map();
   for (const r of rows) {
@@ -199,9 +279,35 @@ function renderDetail() {
       (lv ? "  ·  last judged " + esc(lv.commit.slice(0, 8)) + (d != null ? " (" + d + "d ago)" : "") : "  ·  never judged") +
       "</div>";
     if (i.why) head += '<div class="dmeta" style="margin-top:6px;color:var(--dim)">' + esc(i.why) + "</div>";
+  } else if (r.kind === "section") {
+    head += '<div class="dmeta">' + esc(i.name) + "  ·  " + i.pass + " pass · " + i.warn + " warn · " + i.fail + " fail</div>";
+  } else if (r.kind === "handover" || r.kind === "gotcha") {
+    head += '<div class="dmeta">' + esc(i.file) + ":" + i.line + (i.date ? "  ·  " + esc(i.date) : "") + "</div>";
+    if (i.trigger) head += '<div class="dmeta" style="margin-top:6px">trigger: ' + esc(i.trigger) + "</div>";
+    if (i.doneWhen) head += '<div class="dmeta" style="margin-top:6px">done when: ' + esc(i.doneWhen) + "</div>";
+    if (i.readOnly) head += '<div class="note">' + esc(i.readOnly) + "</div>";
+  } else if (r.kind === "finding") {
+    head += '<div class="dmeta">restates ' + esc(i.rule || "?") + "  ·  " + esc(i.file || "") + "</div>";
+    head += '<div class="note">A contract copied instead of cited. Reference it as rule:' +
+      esc(i.rule || "&lt;id&gt;") + ', or declare a deviation in that file.</div>';
   } else {
     head += '<div class="dmeta">' + esc(i.file) + ":" + i.line + "</div>";
     if (i.noClose) head += '<div class="note">close not offered — ' + esc(i.noClose) + "</div>";
+  }
+
+  /* READ-ONLY KINDS GET NO ACTION BLOCK. doctor sections and rule findings are
+   * reported here, not judged here — offering a form that writes nothing is the
+   * dead CTA this surface exists to avoid. Each says where the work happens. */
+  if (r.kind === "section" || r.kind === "finding" || r.kind === "handover" || r.kind === "gotcha") {
+    const entries = (i.entries || []).slice(0, 40);
+    el("detail").innerHTML = head +
+      '<div class="sec">Detail</div>' +
+      (entries.length
+        ? '<div class="ev">' + entries.map((e) => esc((e.kind || "").padEnd(5) + " " + (e.label || "") + (e.detail ? "  " + e.detail : ""))).join("\n") + "</div>"
+        : '<div class="reason">' + (r.kind === "finding"
+            ? "Open the file and replace the restatement with a reference."
+            : "No per-entry detail in the snapshot for this section.") + "</div>");
+    return;
   }
 
   el("detail").innerHTML = head +
@@ -385,24 +491,79 @@ function counts() {
     n(v === "queue" ? q : v === "issues" ? i : t) + "</button>").join("");
 }
 
+/* THE GRAPH IS A VIEW, NOT A SEPARATE FILE. lib/graph/graph-html.mjs renders a
+ * self-contained interactive page; the server regenerates and serves it at
+ * /graph, and it is framed here so there is still exactly ONE destination with
+ * the tabs still on screen. It used to be written to disk and opened on its
+ * own, which made it a second place with no way back. */
+function showGraph() {
+  el("chips").innerHTML = "";
+  el("sum").innerHTML = "workspace condensation, then layered columns — click a node to expand";
+  el("list").style.display = "none";
+  el("detail").innerHTML = '<iframe src="/graph?token=' + encodeURIComponent(TOKEN) +
+    '" style="width:100%;height:100%;border:0;border-radius:8px;background:var(--card)"></iframe>';
+  el("detail").style.padding = "0";
+}
+function unshowGraph() {
+  el("list").style.display = "";
+  el("detail").style.padding = "";
+}
+
 async function load() {
   counts();
+  unshowGraph();
   try {
+    if (VIEW === "graph") { showGraph(); return; }
     if (VIEW === "queue") DATA.queue = await api("/api/queue");
-    else if (!DATA.issues || VIEW === "todos") {
+    else if (VIEW === "health") DATA.health = await api("/api/health");
+    else if (VIEW === "rules") DATA.rules = await api("/api/rules");
+    else if (VIEW === "gotchas") DATA.gotchas = await api("/api/gotchas");
+    else if (!DATA.registers || VIEW === "todos" || VIEW === "handovers") {
       const r = await api("/api/registers");
-      DATA.issues = r; DATA.todos = r;
+      DATA.registers = r; DATA.issues = r; DATA.todos = r;
     }
     counts();
-    const s = VIEW === "queue" ? DATA.queue : DATA.issues;
-    el("sum").innerHTML = VIEW === "queue"
-      ? "<b>" + DATA.queue.items.length + "</b> actionable of " + DATA.queue.expanded + " edges · <b>" + DATA.queue.declared + "</b> declared"
-      : "<b>" + (s.counts ? s.counts.noAction : 0) + "</b> items had no action on their line";
+    el("sum").innerHTML = summaryFor();
     renderList();
   } catch (e) {
     el("sum").textContent = "failed to load: " + e;
     el("list").innerHTML = '<div class="empty err">' + esc(String(e)) + "</div>";
   }
+}
+
+/* Every view says what it is OVER, so a count is never a bare number. */
+function summaryFor() {
+  if (VIEW === "queue") {
+    const d = DATA.queue;
+    return "<b>" + d.items.length + "</b> actionable of " + d.expanded + " edges · <b>" + d.declared + "</b> declared";
+  }
+  if (VIEW === "health") {
+    const h = DATA.health;
+    if (!h || !h.ok) return '<span class="warn">' + esc((h && h.reason) || "no doctor snapshot") + "</span>";
+    const age = Math.round(h.ageMs / 60000);
+    return "<b>" + h.problems + "</b> problem(s) · " + h.sections.length + " sections · snapshot " + age + "m old";
+  }
+  if (VIEW === "rules") {
+    const r = DATA.rules;
+    if (!r || r.error) return '<span class="warn">' + esc((r && r.error) || "rules check failed") + "</span>";
+    // THE HUB HALF. A restatement is a contract copied instead of cited, which
+    // is how nine divergent copies of tool-priority happened.
+    return "<b>" + r.findings.length + "</b> restatement(s) across <b>" + r.filesScanned + "</b> files scanned";
+  }
+  if (VIEW === "gotchas") {
+    const g = DATA.gotchas;
+    if (!g || g.error) return '<span class="warn">' + esc((g && g.error) || "could not read the gotchas") + "</span>";
+    const fires = g.entries.filter((e) => e.trigger).length;
+    // Delivery, not volume: an entry with no trigger never fires, and that is
+    // the default for most hazards rather than a defect.
+    return "<b>" + fires + "</b> of " + g.total + " can fire · " + g.files + " file(s), workspace roots";
+  }
+  if (VIEW === "handovers") {
+    const n = DATA.registers && DATA.registers.handovers ? DATA.registers.handovers.length : 0;
+    return "<b>" + n + "</b> open · read-only here (append-only by their own header)";
+  }
+  const s = DATA.issues;
+  return "<b>" + (s && s.counts ? s.counts.noAction : 0) + "</b> items had no action on their line";
 }
 
 /* A HEADLESS TEST CAN REACH THE PURE HELPERS. There is no browser in this

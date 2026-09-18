@@ -122,7 +122,13 @@ test("a row is only clickable when its view is actually served", () => {
     assert.equal(r.cta.available, SERVED_VIEWS.includes(r.cta.route), `${r.key} claims the wrong reachability`);
   }
   assert.equal(d.groups[0].rows[0].cta.available, true, "drift routes to /queue, which IS served");
-  assert.ok(d.groups.flatMap((g) => g.rows).some((r) => !r.cta.available), "and some rows are honestly not built yet");
+
+  // EVERY ROW NOW LANDS SOMEWHERE. This assertion used to require that SOME row
+  // was unbuilt, which was true of a partial surface and is a strange thing to
+  // demand once the page holds everything. What matters is the invariant above:
+  // availability tracks SERVED_VIEWS exactly, in both directions.
+  const dead = d.groups.flatMap((g) => g.rows).filter((r) => !r.cta.available).map((r) => r.key);
+  assert.deepEqual(dead, [], `these rows route nowhere: ${dead.join(", ")}`);
 });
 
 // ── the widget's own rules, as assertions rather than comments ─────────────
