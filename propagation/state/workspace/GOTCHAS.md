@@ -1479,3 +1479,69 @@ it as "loading" — the entire page was dead, and the tooling reported perfect h
 3. **Assert on the OUTPUT, never the source.** `tests/unit/ui-page.test.mjs` calls
    `page()` and parses the script it emits with `node:vm`. That is the only check that
    sees what the browser sees.
+
+### G66 · A design review of a MOCK can only find defects visible in the mock
+**Trigger:** `(states\.html|design-review|plan-design-review)`
+**Fires on:** `open designs/propagate-widget-20260917/states.html`
+
+The 2026-09-17 widget review ran seven passes and scored Accessibility **3 → 9**. The
+widget then shipped **dark-only**, with two colour families sharing hexes, while this
+repo's own `lib/graph/graph-html.mjs` already documented the correct convention — and the
+widget's footer links to that very page.
+
+**The review reviewed a sketch, and the sketch was dark by construction.**
+`states.html` has zero `prefers-color-scheme` blocks: its `:root` is verbatim the sibling
+widget's **dark branch**, over a hardcoded `#2b2f36` background faking a dark desktop.
+There was nothing in the picture to notice as missing. A visual review finds defects that
+are visible, and an absent theme is not one of them.
+
+**The colour collision was in the sketch too**, and invisible for the same reason:
+`--drift:#e0a53a` is the same hex as `--caution`, `--diverged:#ff8f6b` the same as
+`--warn`. Rendered, amber-in-a-bar beside amber-in-a-cell looks entirely fine. The
+collision only exists in the token table, which is a code question.
+
+**Cost:** two surfaces shipped with one theme and an ambiguous palette, through a review
+that specifically scored accessibility, plus a rebuild of both palettes.
+
+**Instead:** when a spec says *inherit system X*, the review must open **X**, not a
+rendering of it. A mock is evidence about layout and hierarchy — the things you can see.
+For anything systemic (theming, token structure, semantic families, contrast mechanism)
+the artefact under review is the source, and a mock is silent rather than reassuring.
+
+Corollary, and the reason this is a separate entry from G67: **the review's own output
+named the gap.** The visual spec said "light and dark palettes" and no pass checked it.
+
+### G67 · A spec that asserts a property of a system nothing checks is decoration
+**Trigger:** `(custom propert|design system|visual spec|inherit the)`
+**Fires on:** `grep -n "custom properties" plan.md`
+
+The widget plan's visual spec read: *"carries **103 CSS custom properties**, light and
+dark palettes, a 5-step spacing scale."* One sentence, and it was the ONLY thing pointing
+at the real design system. **Both halves of it were wrong or unbound:**
+
+| claim | reality |
+|---|---|
+| 103 custom properties | **47 unique names, 87 declarations** (40 palette × 2 themes + 7 theme-independent). Never derived; restated from the review |
+| light and dark palettes | true of the system, and bound to nothing — no pass tested it, no acceptance criterion named it, and the mock did not have to satisfy it |
+
+So the sentence read as due diligence and functioned as decoration. The count made the
+system sound rich enough to inherit, which is exactly the inference it was too unverified
+to support.
+
+**Signal:** a spec sentence that describes another artefact's internals, with a number in
+it, that nothing downstream consumes.
+
+**Instead:** either derive the number in the same breath —
+
+```sh
+grep -oE -- '--[a-z0-9-]+:' widget/claude-usage.jsx | sort -u | wc -l
+```
+
+— or drop it and name the file. And a property worth asserting is worth an acceptance
+criterion: the sibling has one (`test/widget.test.mjs:324` asserts every `var()` used is
+defined in **both** theme blocks), which is precisely why its theming has not rotted and
+this one never existed.
+
+Same family as `rule:state-and-decisions` — *name the command that derives the number,
+not the number* — one level up, because here the number was evidence for a DECISION
+rather than a status line.

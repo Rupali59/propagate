@@ -145,53 +145,110 @@ export const updateState = (event, previousState) => {
 export const className = `
   left: 0; top: 0;
 
-  /* ── THE INHERITED SYSTEM, NOT A FORK ────────────────────────────────────
-     These tokens come from claude-usage-widget, which carries 103 of them with
-     light and dark palettes, a 5-step spacing scale and a documented concentric
-     bezel. The plan said to inherit it and cite it rather than re-invent, and
-     the first shipped version re-invented anyway: a cool grey-blue palette, a
-     fixed-width bar and a value floating mid-row. Side by side with the design
-     sketch the difference was obvious and entirely self-inflicted.
+  /* ── TWO COLOUR FAMILIES, DISJOINT BY CONSTRUCTION ───────────────────────
+     The first version shared hexes between them and nobody could see it:
 
-     Two surfaces sharing one desktop must share one visual language, which is
-     the same reason rule:tool-priority exists: the divergence is never one
-     decision, it is nine copies later. */
+       --caution  #e0a53a  bar fill, value, headline   ordinal "needs attention"
+       --DRIFTED  #e0a53a  grid cell                   categorical, one state
+       --warn     #ff8f6b  bar fill, value, headline   ordinal "failing"
+       --DIVERGED #ff8f6b  grid cell                   categorical, one state
 
-  --fg: rgba(255,255,255,0.92);
-  --dim: rgba(235,235,245,0.52);
-  --dimmer: rgba(235,235,245,0.38);
-  --track: rgba(235,235,245,0.16);
+     Two hexes, two meanings each, on one card. Rendered it looks fine, which is
+     why the design review passed it -- the collision exists only in the token
+     table. Recorded as G66.
 
-  --ok: #5fd07c;
-  --caution: #e0a53a;
-  --warn: #ff8f6b;
-  --accent: #e09a5c;
-  --unknown: rgba(235,235,245,0.40);
+     STATUS is ordinal: a closed enum ok | warn | fail | unknown, from
+     lib/report/surface.mjs. Unknown gets NO hue and falls back to --dim, which
+     is the sibling widget's own convention rather than a new idea.
 
-  --DRIFTED: #e0a53a;
-  --DIVERGED: #ff8f6b;
-  --REVERSED: #a276cb;
+     EDGE STATE is its own family, and the values are lifted verbatim from
+     lib/graph/graph-html.mjs -- the graph page this widget links to in its own
+     footer, which already carried a themed state palette. So the two surfaces
+     now agree on what DRIFTED looks like, and nothing was invented.
 
+     The st- and edge- prefixes exist so a future collision is visible in the
+     NAME, not only in the hex. A test asserts no hex appears in both families.
+
+     ── THEME ────────────────────────────────────────────────────────────────
+     Light is the base; one prefers-color-scheme block redefines every palette
+     token. No colour gets its only definition inside the media query. This
+     matches the sibling widget exactly (it has ONE such block and no JS), and
+     the reason the widget shipped dark-only is G66: the design sketch was that
+     sibling's dark branch over a fake dark desktop, so there was nothing in the
+     picture to notice as missing.
+
+     If both themes do not render when macOS Appearance is toggled, that is
+     WKWebView not inheriting the system appearance -- not a bug in this
+     stylesheet. The sibling's README names the same failure mode. */
+
+  /* Theme-independent: geometry, never colour. */
   --s1: 3px; --s2: 6px; --s3: 9px; --s4: 12px; --s5: 15px;
   --r-shell: 20px; --r-core: 15px;
 
-  --shell: rgba(255,255,255,0.07);
-  --core: linear-gradient(180deg, rgba(44,44,46,0.82) 0%, rgba(28,28,30,0.76) 100%);
-  --edge: rgba(255,255,255,0.13);
-  --edge-core: rgba(255,255,255,0.09);
-  --specular: rgba(255,255,255,0.16);
-  --cast-near: rgba(0,0,0,0.34);
-  --cast-far: rgba(0,0,0,0.52);
+  /* LIGHT — macOS window material over a bright desktop. --shell is the OUTER
+     bezel only; text sits on --core, so it can be thin without costing
+     legibility. The cast shadow is tinted to the ground rather than black,
+     which is what separates the card from a pale wallpaper. */
+  --fg: #1c1c1e;
+  --dim: rgba(60, 60, 67, 0.58);
+  --dimmer: rgba(60, 60, 67, 0.42);
+  --track: rgba(60, 60, 67, 0.13);
+
+  --st-ok: #2f7d4e;
+  --st-caution: #a8700f;
+  --st-warn: #b3401a;
+  --st-accent: #b4652c;
+
+  --edge-drift: #c26a1e;
+  --edge-reverse: #8a6bb8;
+  --edge-diverge: #c0392b;
+  --edge-stale: rgba(168, 112, 15, 0.7);
+
+  --shell: rgba(255, 255, 255, 0.16);
+  --core: linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(252,250,249,0.78) 100%);
+  --edge: rgba(0, 0, 0, 0.10);
+  --edge-core: rgba(255, 255, 255, 0.85);
+  --specular: rgba(255, 255, 255, 0.85);
+  --cast-near: rgba(60, 50, 42, 0.10);
+  --cast-far: rgba(60, 50, 42, 0.24);
+  --hair: rgba(0, 0, 0, 0.09);
 
   font: 11px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   letter-spacing: -.005em;
   -webkit-font-smoothing: antialiased;
   color: var(--fg);
 
-  /* THE CONCENTRIC DOUBLE BEZEL. The shell is a 5px translucent frame; the core
-     sits inside it at the smaller radius. Both carry an inset specular highlight
-     along the top edge, which is what makes it read as a physical object on a
-     photographic wallpaper rather than a flat rectangle pasted onto one. */
+  @media (prefers-color-scheme: dark) {
+    --fg: rgba(255, 255, 255, 0.92);
+    --dim: rgba(235, 235, 245, 0.52);
+    --dimmer: rgba(235, 235, 245, 0.38);
+    --track: rgba(235, 235, 245, 0.16);
+
+    --st-ok: #5fd07c;
+    --st-caution: #e0a53a;
+    --st-warn: #ff8f6b;
+    --st-accent: #e09a5c;
+
+    --edge-drift: #e0913f;
+    --edge-reverse: #a98cd4;
+    --edge-diverge: #e06c5c;
+    --edge-stale: rgba(224, 165, 58, 0.55);
+
+    --shell: rgba(255, 255, 255, 0.07);
+    --core: linear-gradient(180deg, rgba(44,44,46,0.82) 0%, rgba(28,28,30,0.76) 100%);
+    --edge: rgba(255, 255, 255, 0.13);
+    --edge-core: rgba(255, 255, 255, 0.09);
+    --specular: rgba(255, 255, 255, 0.16);
+    --cast-near: rgba(0, 0, 0, 0.34);
+    --cast-far: rgba(0, 0, 0, 0.52);
+    --hair: rgba(255, 255, 255, 0.07);
+  }
+
+  /* The concentric double bezel: a 5px translucent frame, the core inside it at
+     the smaller radius, both with an inset specular along the lit top edge.
+     backdrop-filter cannot help here -- the wallpaper is behind the WINDOW, not
+     behind an element in the document -- so the material is built from a
+     layered base, a hairline and a ground-tinted shadow instead. */
   .shell {
     position: fixed;
     width: max-content;
@@ -202,7 +259,7 @@ export const className = `
     border: .5px solid var(--edge);
     box-shadow: 0 1px 1px var(--cast-near), 0 12px 32px -8px var(--cast-far), inset 0 1px 0 0 var(--specular);
   }
-  .shell.dragging { border-color: rgba(224,154,92,0.55); }
+  .shell.dragging { border-color: var(--st-accent); }
   .core {
     border-radius: var(--r-core);
     background: var(--core);
@@ -211,70 +268,63 @@ export const className = `
     padding: 13px 16px 15px;
   }
 
-  /* The grip is the header strip, not a small handle: a 12px target is
-     unhittable on a layer where the cursor is already doing something else. */
   .grip { cursor: grab; padding-bottom: var(--s1); }
   .shell.dragging .grip { cursor: grabbing; }
 
   .hd { display: flex; align-items: baseline; gap: var(--s3); }
   .ttl { font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); }
   .big { font-size: 20px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
-  .big.warn { color: var(--caution); }
-  .big.fail { color: var(--warn); }
-  .big.ok { color: var(--ok); }
-  .big.unknown { color: var(--unknown); }
+  .big.warn { color: var(--st-caution); }
+  .big.fail { color: var(--st-warn); }
+  .big.ok { color: var(--st-ok); }
+  .big.unknown { color: var(--dim); }
   .of { color: var(--dim); }
 
   .grp { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
          color: var(--dimmer); margin: var(--s4) 0 var(--s1); }
 
-  /* ROW RHYTHM: 60px label, 9px gap, a bar that FLEXES to fill, then a 74px
-     right-aligned value column. The value column is what makes four rows
-     comparable at a glance; a value floating mid-row has to be hunted for. */
+  /* 60px label, 9px gap, a bar that FLEXES, then a 74px right-aligned value
+     column -- which is what makes nine rows comparable at a glance. */
   .row { display: flex; align-items: center; gap: var(--s3); height: 16px; margin-top: var(--s1); }
   .row.act { cursor: pointer; }
   .lbl { width: 60px; flex: 0 0 60px; color: var(--dim); white-space: nowrap; }
   .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--track); position: relative; overflow: hidden; min-width: 90px; }
-  .fil { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--unknown); }
-  .fil.ok { background: var(--ok); }
-  .fil.warn { background: var(--caution); }
-  .fil.fail { background: var(--warn); }
+  .fil { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--dim); }
+  .fil.ok { background: var(--st-ok); }
+  .fil.warn { background: var(--st-caution); }
+  .fil.fail { background: var(--st-warn); }
   .fil.unknown { background: repeating-linear-gradient(90deg, var(--track) 0 3px, transparent 3px 6px); }
   .val { width: 74px; flex: 0 0 74px; text-align: right; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
   .val .u { color: var(--dim); }
-  .val.warn { color: var(--caution); }
-  .val.fail { color: var(--warn); }
-  .val.unknown { color: var(--unknown); }
+  .val.warn { color: var(--st-caution); }
+  .val.fail { color: var(--st-warn); }
+  .val.unknown { color: var(--dim); }
 
-  /* Aligned to the bar, not the label: the sub-line is about the bar above it. */
   .sub { margin-left: 69px; color: var(--dimmer); font-size: 10px; margin-top: 1px; }
 
-  /* NOT-YET-BUILT IS A DIMMED ROW, NOT FOUR REPETITIONS OF A SENTENCE. The
-     first version printed "not built yet" on every unbuilt row -- four times,
-     in a card with nine rows, which is more words about what is missing than
-     about what is there. The dimming carries it, and the footer states the
-     count once. */
+  /* Not-yet-built is a dimmed row plus one footer count, never four copies of
+     the same sentence in a nine-row card. */
   .row.soon .lbl, .row.soon .val { opacity: .55; }
   .row.soon .bar { opacity: .5; }
 
   .grid { display: flex; gap: var(--s4); margin-top: var(--s4); flex-wrap: wrap; }
   .runhd { font-size: 9px; color: var(--dimmer); letter-spacing: .05em; margin-bottom: var(--s1); }
   .cells { display: flex; flex-wrap: wrap; max-width: 340px; gap: 2px; align-content: flex-start; }
-  .cell { width: 7px; height: 7px; border-radius: 1.5px; background: var(--unknown); }
-  .cell.DRIFTED { background: var(--DRIFTED); }
-  .cell.DIVERGED { background: var(--DIVERGED); }
-  .cell.REVERSED { background: var(--REVERSED); }
-  .cell.stale { outline: 1px solid rgba(224,165,58,0.55); }
+  .cell { width: 7px; height: 7px; border-radius: 1.5px; background: var(--dim); }
+  .cell.DRIFTED { background: var(--edge-drift); }
+  .cell.DIVERGED { background: var(--edge-diverge); }
+  .cell.REVERSED { background: var(--edge-reverse); }
+  .cell.stale { outline: 1px solid var(--edge-stale); }
 
   .foot { display: flex; gap: var(--s4); margin-top: var(--s4); color: var(--dim); font-size: 10px;
-          border-top: .5px solid rgba(255,255,255,.07); padding-top: var(--s2); align-items: baseline; }
-  .foot .lk { cursor: pointer; color: var(--accent); }
+          border-top: .5px solid var(--hair); padding-top: var(--s2); align-items: baseline; }
+  .foot .lk { cursor: pointer; color: var(--st-accent); }
   .foot .sp { margin-left: auto; }
-  .foot .stale { color: var(--caution); }
-  .warn { color: var(--warn); }
-  .ok { color: var(--ok); }
+  .foot .stale { color: var(--st-caution); }
+  .warn { color: var(--st-warn); }
+  .ok { color: var(--st-ok); }
   .gate { font-size: 10px; color: var(--dim); margin-top: var(--s2); }
-  .gate b { color: var(--caution); font-weight: 600; }
+  .gate b { color: var(--st-caution); font-weight: 600; }
 `;
 
 // Open a control. `run` is the documented shell-out; open-ui.sh starts the
