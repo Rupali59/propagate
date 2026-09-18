@@ -18,6 +18,8 @@ import assert from "node:assert/strict";
 import {
   ratio,
   toneFor,
+  sideOf,
+  boundarySplit,
   ageBucket,
   buildEdgeRows,
   buildRegisterRows,
@@ -61,6 +63,116 @@ test("toneFor CANNOT return ok without a real denominator", () => {
   assert.equal(toneFor(0, { denominator: 0 }), "unknown", "0 of 0 is not health");
   assert.equal(toneFor(0, { denominator: null }), "unknown");
   assert.equal(toneFor(0, {}), "unknown", "an omitted denominator is not an implicit pass");
+});
+
+test("COLOUR MUST BE EARNED — a non-zero count is neutral unless a threshold is named", () => {
+  // It used to default to warnAt:1, so ANY non-zero count went amber. Measured
+  // on the live tree that painted 6 of 9 rows amber, which means the colour was
+  // answering "is this greater than zero" — the question the number beside it
+  // already answers. The design's own read order asked for ONE coloured value.
+  assert.equal(toneFor(87, { denominator: 117 }), "none", "a backlog is not an alarm");
+  assert.equal(toneFor(350, { denominator: 487 }), "none");
+  assert.equal(toneFor(1, { denominator: 10 }), "none", "even one");
+
+  // A caller that NAMES a threshold still gets its colour.
+  assert.equal(toneFor(10, { denominator: 48, warnAt: 1 }), "warn");
+  assert.equal(toneFor(1, { denominator: 12, failAt: 1 }), "fail");
+
+  // And zero is still worth seeing, because on this card it is rare.
+  assert.equal(toneFor(0, { denominator: 10 }), "ok");
+});
+
+test("drift goes amber on OVERDUE work, not on having any", () => {
+  const fresh = buildEdgeRows(queueOf([item({ lastDays: 1 }), item({ edge_id: "b", lastDays: 2 })]), { now: NOW })[0];
+  assert.equal(fresh.tone, "none", "48 actionable with nothing stale is not an alarm");
+
+  const stale = buildEdgeRows(queueOf([item({ lastDays: 40 }), item({ edge_id: "b", lastDays: 1 })]), { now: NOW })[0];
+  assert.equal(stale.tone, "warn", "one edge unjudged for 40 days IS");
+});
+
+test("a register row is never coloured for merely having entries", () => {
+  const rows = buildRegisterRows({ totals: { hot: { issues: 999 }, rotatable: { issues: 1 } } }, null);
+  assert.equal(rows.find((r) => r.key === "issues").tone, "none");
+});
+
+test("gotchas are neutral, and amber ONLY when nothing in them can fire", () => {
+  // Green asserted "this is good" because one entry had a trigger, which is not
+  // an achievement. rule:every-project-carries-gotchas says most gotchas have no
+  // mechanical trigger by design.
+  const some = buildRegisterRows({}, { files: 10, entries: 89, triggered: 63, scope: "x" });
+  assert.equal(some.find((r) => r.key === "gotchas").tone, "none");
+  const none = buildRegisterRows({}, { files: 2, entries: 40, triggered: 0, scope: "x" });
+  assert.equal(none.find((r) => r.key === "gotchas").tone, "warn", "a corpus that can never fire is documented and not delivered");
+});
+
+test("doctor's warns are COUNTED but not coloured; only a fail is", () => {
+  // doctor grades 355 things `warn` tree-wide. Mirroring that onto this card
+  // paints most of it amber and says nothing, so the count is printed and the
+  // hue is withheld.
+  const warnOnly = buildHealthRows(snap([sec("Delivery", { warn: 3 })])).find((r) => r.key === "Delivery");
+  assert.equal(warnOnly.tone, "none");
+  assert.equal(warnOnly.value, 3, "the number is still there");
+
+  const failing = buildHealthRows(snap([sec("Discovery integrity", { fail: 1, pass: 11 })])).find((r) => r.key === "Discovery integrity");
+  assert.equal(failing.tone, "fail");
+});
+
+test("exactly ONE thing is coloured red on a card with one failing check", () => {
+  // The read order the design asked for and the implementation did not deliver.
+  const s = buildSurface({
+    queue: queueOf([item({ lastDays: 1 })]),
+    snapshot: snap([sec("Delivery", { warn: 3 }), sec("Discovery integrity", { fail: 1, pass: 11 }), sec("Workspace: A", { warn: 40, pass: 5 })]),
+    registers: { totals: { hot: { issues: 87, todos: 205 }, rotatable: { issues: 30, todos: 89 } } },
+    gotchas: { files: 10, entries: 89, triggered: 63, scope: "x" },
+    now: NOW,
+  });
+  const rows = s.groups.flatMap((g) => g.rows);
+  assert.equal(rows.filter((r) => r.tone === "fail").length, 1, "one red");
+  assert.ok(rows.filter((r) => r.tone === "warn").length <= 1, "at most one amber");
+  assert.ok(rows.filter((r) => r.tone === "none").length >= 4, "and the rest quiet");
+});
+
+// ── the hub / workspace line ───────────────────────────────────────────────
+
+test("sideOf puts contracts in the hub and everything else in its workspace", () => {
+  // docs/HUB-AND-WORKSPACE.md: the hub owns contracts, workspaces own instances.
+  const R = "/h/";
+  assert.equal(sideOf("/h/rules/tool-priority.md", R), "hub");
+  assert.equal(sideOf("/h/scripts/execution/ports.yml", R), "hub");
+  assert.equal(sideOf("/h/.templates/PLAN.md", R), "hub");
+  assert.equal(sideOf("/h/propagate/docs/REFERENCE.md", R), "hub", "propagate's docs are contracts, per the architecture note");
+  assert.equal(sideOf("/h/CLAUDE.md", R), "hub", "a loose root file is found by walking up — that is the contract");
+  assert.equal(sideOf("/h/Tathya/WorkTracker/STATE.md", R), "Tathya");
+  assert.equal(sideOf("/h/propagate/lib/report/surface.mjs", R), "propagate", "code is an instance");
+});
+
+test("boundarySplit separates the edges that CROSS the line", () => {
+  // A crossing edge is a contract that has not reached its instances — the
+  // failure the two-way flow exists to catch, and previously indistinguishable
+  // from a typo in one workspace's README.
+  const R = "/h/";
+  const e = (s, d) => ({ source: s, downstream: d });
+  const b = boundarySplit([
+    e("/h/rules/a.md", "/h/rules/b.md"),
+    e("/h/rules/a.md", "/h/Tathya/CLAUDE.md"),
+    e("/h/Tathya/x.md", "/h/Tathya/y.md"),
+    e("/h/Keerti/x.md", "/h/Keerti/y.md"),
+    e("/h/Tathya/p.md", "/h/Tathya/q.md"),
+  ], R);
+  assert.equal(b.hubInternal, 1);
+  assert.equal(b.crossing, 1);
+  assert.equal(b.workspaceLocal, 3);
+  assert.deepEqual(b.byWorkspace, { Tathya: 2, Keerti: 1 });
+});
+
+test("the crossing count reaches the card", () => {
+  const row = buildEdgeRows(
+    { items: [{ edge_id: "a", state: "DRIFTED", source: "/h/rules/a.md", downstream: "/h/Tathya/b.md", last: null }],
+      summary: { total: 1, byState: { DRIFTED: 1 } }, declared: 1, expanded: 1 },
+    { now: NOW, root: "/h/" },
+  )[0];
+  assert.equal(row.boundary.crossing, 1);
+  assert.ok(row.extra.some((e) => /cross hub/.test(e)), "and it is visible, not merely carried");
 });
 
 test("an empty queue over a real population is ok; over nothing it is unknown", () => {
