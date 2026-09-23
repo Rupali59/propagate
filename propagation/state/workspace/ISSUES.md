@@ -2142,10 +2142,35 @@ the same way the lane already reports what doc-kind excluded and why.
 produced by the harness; a future change to it would silently re-merge the two
 populations. Assert the pattern in a test so the drift is visible.
 
-### N82 · The workspace census cannot tell "looked and found nothing" from "looked at nothing" — two empty directories pass, one real repo is invisible — **S2** — **OPEN**
+### N82 · The workspace census cannot tell "looked and found nothing" from "looked at nothing" — two empty directories pass, one real repo is invisible — **S1** — **OPEN**
 
 Found 2026-09-17. Two symptoms, one root: the layout report tests for **presence of a
 path**, never for contents, and enumerates only what it already knows about.
+
+**RAISED S2 -> S1 on 2026-09-23, on a third symptom that is worse than the two it was
+filed on.** `doctor`'s conformance check over an EMPTY POPULATION renders as a pass:
+
+```
+{"kind":"pass","label":"workspaces conform to the v3 propagation layout","detail":"0/0 conform"}
+```
+
+The predicate is `rep.offenders.length === 0`, which is **vacuously true over an empty
+set**. So it is not only that an empty directory passes — the whole check passes having
+examined nothing, and prints the emptiness as though it were the result. Reproduced
+directly while building slice 1, by constructing a `Reporter` and running
+`checkDiscovery` in an environment where `SEARCH_ROOTS` is `[]`.
+
+**Why S1 rather than S2.** This repo's scale: S1 is "silently wrong (you cannot tell it
+happened)". A green tick reading `0/0 conform` is indistinguishable from a green tick
+reading `22/22 conform` to anyone scanning the report, and `GOALS.md` goal 1 names
+`propagate doctor` as its derivation — so an unmeasurable tree currently satisfies a goal
+by returning nothing. Nothing about the output says which happened.
+
+**Symptom 2 is now addressed** (`b164a9f`, N87 slice 1): the census is owner-based and
+`propagate` appears in it as a half-migrated offender. Symptom 1 and this third one
+remain, and both belong to the doctor slice-2 work in
+`docs/plans/2026-09-23-doctor-slices-2-3.md` — a check whose predicate can be satisfied by
+an empty input becomes `inconclusive`, never `pass`.
 
 **Symptom 1 — an empty directory is reported conformant.** Measured:
 

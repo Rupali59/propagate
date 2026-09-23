@@ -1545,3 +1545,37 @@ this one never existed.
 Same family as `rule:state-and-decisions` — *name the command that derives the number,
 not the number* — one level up, because here the number was evidence for a DECISION
 rather than a status line.
+
+### G68 · A pass condition that is vacuously true over an empty input reports success for having looked at nothing
+**No trigger, deliberately.** The guard is handed only file paths and shell commands,
+never file CONTENT, so a regex written against code shape cannot fire — `--selftest`
+refused an earlier draft of this entry for exactly that. A path trigger on the doctor
+modules would fire on every edit to them, which is noise. This is an ordinary entry.
+
+`doctor`'s v3 conformance check is `rep.offenders.length === 0`. Over an empty
+population that is **true**, so the check passes and prints the emptiness as though it
+were the result:
+
+```
+{"kind":"pass","label":"workspaces conform to the v3 propagation layout","detail":"0/0 conform"}
+```
+
+`0/0 conform` and `22/22 conform` are the same green tick to anyone scanning the report.
+Nothing in the output says which happened, and `GOALS.md` goal 1 names `propagate doctor`
+as its derivation — so a tree nobody could measure currently satisfies a goal by
+returning nothing.
+
+**The shape, stated generally:** any predicate of the form "no bad items were found" is
+satisfied both by *there were none* and by *there were no items at all*. `every()` has the
+same defect (`[].every(f)` is `true`); `some()` does not. Before using one as a verdict,
+ask what it returns over an empty input, and whether that is the answer you want.
+
+**Instead:** make the count a precondition, not a footnote — an empty population is
+`inconclusive`, never `pass`. Reproduced 2026-09-23 by constructing a `Reporter` and
+running `checkDiscovery` where `SEARCH_ROOTS` is `[]`.
+
+**Cost:** not yet paid in full, which is why it is here. N82 was raised S2 -> S1 on this
+evidence. The related instance that HAS been paid for is the `ssjk-mongo-backup` row in
+`docs/SYSTEMS.md` — a daily agent, exit 0, `SKIP: motherboard-mongodb not running`, and
+**zero backups ever written**, where that row records the rule: *"Probe the OUTPUT, never
+the exit code"* and *"skipping is spelled as success."*
