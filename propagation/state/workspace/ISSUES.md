@@ -3060,3 +3060,164 @@ makes them routinely.
 
 Two abandoned worktrees are also their own small finding — `worktree-rm.sh` exists and
 was not run.
+
+### N89 · `fixOrder`'s within-layer sort orders by name, and it already disagrees with `STATE_SEVERITY` today — not only as a future risk — **S2** — **RESOLVED 2026-09-21 — STATE_SEVERITY moved to lib/graph/graph.mjs and fixOrder sorts by severityRank; graph-html.mjs now imports the one ranking instead of holding the only copy. Mutation-gated in tests/unit/queue-order.test.mjs.**
+
+Filed from the follow-ups list in `~/.claude/plans/okay-to-make-propagation-resilient-rivest.md`,
+which framed this as "DIVERGED / DRIFTED / REVERSED happen to sort the same way alphabetically
+as by severity — a coincidence, not a design." Verified, and the claim is wrong in the
+direction that matters: **they do not currently sort the same way.**
+
+`fixOrder` (`lib/graph/graph.mjs:490`) breaks ties within a layer with
+`a.state.localeCompare(b.state)`. The severity ranking lives 90 lines away in a different
+file, `lib/graph/graph-html.mjs:40-47`:
+
+```js
+const STATE_SEVERITY = [
+  "DIVERGED", "REVERSED", "DRIFTED", "UNMATCHED",
+  "UNRESOLVABLE", "NOT_PRESENT_ON_REF", "NEVER_VERIFIED", "CLEAN",
+];
+```
+
+The four states `fixOrder` actually emits are `ACTIONABLE` (`lib/graph/graph.mjs:56`):
+`DRIFTED`, `REVERSED`, `DIVERGED`, `UNMATCHED`. Sorted alphabetically that is `DIVERGED,
+DRIFTED, REVERSED, UNMATCHED` — verified with `Array.prototype.sort` directly, not by eye.
+Sorted by `STATE_SEVERITY` (worst first) it is `DIVERGED, REVERSED, DRIFTED, UNMATCHED`.
+**DRIFTED and REVERSED are swapped between the two orderings, right now, with no new state
+needing to be added.** Alphabetical sort puts the less-severe DRIFTED ahead of the
+more-severe REVERSED; the severity table says the opposite.
+
+This is not hypothetical. `node cli.mjs graph --json` against this tree today
+(2026-09-21) reports both states populated: `DRIFTED: 15, REVERSED: 22` in `stats.byState`
+— plenty of live edges of each kind, so the misordering condition (both states present in
+the same topological layer) is a real, not theoretical, possibility on every run.
+
+**The signal.** The new UI's READY division (per the plan, Phase D) presents `fixOrder`'s
+output as "the top row is always the next action" — a worklist a person is meant to work
+strictly top-down. Nothing on screen indicates that within a layer the ordering is
+alphabetical rather than severity-ranked; it reads exactly like a correctly-ordered list.
+Per `rule:discernment-checks` §6, "no result" and "the wrong result" must be
+distinguishable — here they are not: a REVERSED edge sorted below a DRIFTED one in the same
+layer looks identical to a REVERSED edge that is genuinely lower priority.
+
+**The cost.** Someone working the list in good faith, at every layer boundary where the two
+co-occur, fixes the less-severe DRIFTED edge first and the more-severe REVERSED edge
+second — the reverse of what the project's own severity table says should happen — for as
+long as this goes unnoticed, which by construction it cannot be noticed from the UI alone.
+
+**Severity — argued, not asserted.** This repo's own scale: S1 "silently wrong (you cannot
+tell it happened)", S2 "noisy or misleading". A case can be made for S1 — a human trusting
+"top of the list is next" has no way to detect the swap without independently deriving
+`STATE_SEVERITY` order and comparing, which is exactly what a worklist exists to save
+someone from doing. Filed at S2 because the underlying data (`state`, `edge_id`, `layer`)
+is correct and inspectable — nothing is lost or misreported, only the presentation order —
+and because the fix is small: import `STATE_SEVERITY` (or a copy of it) into `graph.mjs`
+and sort on `STATE_SEVERITY.indexOf(a.state) - STATE_SEVERITY.indexOf(b.state)` instead of
+`localeCompare`. Note `graph.mjs` does not currently import from `graph-html.mjs` (only the
+reverse), so the array likely needs to move to `graph.mjs` and be imported by
+`graph-html.mjs`, not the other way around, to avoid inverting that dependency.
+
+### N90 · `duplicatePairs` has no disposition path — a finding the tool can name but never let a human close — **S3** — **OPEN**
+
+Filed from the same follow-ups list. `lib/graph/graph.mjs:329-350` builds `duplicatePairs`
+from the edge index — two declarations of the same `(from, to)` with different `why`
+strings — and says plainly in its own comment: *"which of the two `why` strings is right is
+a human's call."* It is reported through `status` (`cli.mjs:1222-1224`), the graph JSON
+(`cli.mjs:4460`), and `doctor`'s summary count (`cli.mjs:4488-4490`), but nowhere does the
+tool offer a verb to resolve one — no `verify --disposition`, no `drain --close`, nothing.
+
+**Verified live count today: 0.** `node cli.mjs graph --json` reports `stats.duplicatePairs:
+0` and an empty `duplicatePairs` array — so this is **latent, not active**, exactly as
+flagged going in. Nothing is currently sitting unresolved.
+
+**Why it is a real gap even at zero.** Every other actionable graph state (DIVERGED,
+DRIFTED, REVERSED, UNMATCHED) flows through one lifecycle: `fixOrder` surfaces it, `verify
+--disposition` records a decision, the event store closes it. A duplicate pair has no
+state at all in that model — `fixOrder` never emits it, because it isn't an edge state, so
+it cannot reach the new UI's READY worklist even in principle. The only way to make the
+`doctor`/`status` count change is to find the sidecar declaring the second `(from, to)` pair
+and hand-edit it out — with no record anywhere that doing so was a resolution to this
+specific finding, as opposed to an unrelated edit that happened to remove a row.
+
+**The signal, if it recurs.** The code comment cites a real historical instance, measured
+2026-08-17: 711 edge records over 710 distinct pairs — one genuine duplicate. At that
+count it would have sat in every subsequent `doctor`/`status` run as an unchanging "1
+duplicate declaration(s)" line until someone stumbled on it by hand; there is no mechanism
+by which the count would ever self-correct or by which a person could mark it seen-and-
+accepted.
+
+**Cost, stated honestly since it's zero today:** currently nothing, because nothing is
+duplicated. If it recurs, the cost is a permanently-open, permanently-unactionable finding
+sitting in every health check indefinitely — the same shape as this register's own `E2`
+(declare-ahead warnings that never expire) and `C1` (nothing reports what is not declared):
+a real finding with no closing mechanism eventually gets read as noise and stops being
+checked at all.
+
+**Fix direction, not built:** either fold a duplicate pair into `verify` as a pseudo-edge
+state that a disposition can target (closest to the existing lifecycle), or give `drain`/
+`doctor` a narrower "acknowledge duplicate — kept `<edge_id>`, discarded `<edge_id>`" verb
+that edits the sidecar and records why. Not attempted here — this entry only establishes
+that the gap is real and currently harmless.
+
+### N91 · `doctor.duration_ms` spikes recur at 18-24 minutes, most recently in the last 24 hours — **S2** — **OPEN**
+
+Filed from the same follow-ups list, which flagged the metric's all-time max
+(1,446,450 ms / 24m6s) as "unexplained." Re-measured against `~/.propagate/metrics.jsonl`
+directly (841 rows, `metrics["doctor.duration_ms"]` is a dotted key nested one level under
+`metrics`, not a top-level field — worth noting since a shallow read of the JSON looks like
+the field doesn't exist). **The plan's numbers check out exactly:** max 1,446,450 ms at
+`2026-09-17T15:23:32.496Z` (run `b2e7a71b…`), min 280 ms (`2026-08-13T19:44:32.487Z`).
+
+**What the plan did not have yet: this is not a one-off, and it is not four days old.**
+17 of 841 runs (2%) exceed 100 seconds, clustered in bursts rather than spread evenly:
+
+| when | runs >100s | range |
+|---|---|---|
+| 2026-08-20, ~90 min window | 4 | 109,753 – 143,527 ms |
+| 2026-09-01, ~2 hr window | 5 | 104,661 – 223,998 ms |
+| 2026-08-29 / 2026-08-31 | 1 each | 114,801 / 219,535 ms |
+| **2026-09-17T15:23** | 1 | **1,446,450 ms** (the plan's outlier) |
+| 2026-09-20T09:23 | 1 | 109,601 ms |
+| **2026-09-20T15:27** | 1 | **1,082,398 ms** (18m) |
+| **2026-09-21T00:53** | 1 | **1,155,574 ms** (19.3m) |
+| 2026-09-21T03:14 | 1 | 130,256 ms |
+
+The three worst runs — 24.1m, 19.3m, 18.0m — are the three most recent minutes-long spikes
+in the file, landing 2026-09-17, 2026-09-20, and **last night (2026-09-21, today)**. This is
+a live, recurring hazard, not a historical curiosity from four days ago.
+
+**A shared trait across the three worst runs:** all three post-date the workspace census
+growing to 16-18 discovered workspaces / 43-44 loaded sidecars, roughly double the 7
+workspaces / 21 sidecars in place when this metric was first captured (2026-08-13) — so the
+absolute amount of per-workspace work `doctor` does today is larger than when the metric
+baseline was established.
+
+**A candidate mechanism, offered as a lead and not confirmed by reproduction.** `doctor`
+still shells out to at least two external processes with no timeout:
+`execSync("launchctl list", { encoding: "utf8" })` (`lib/report/doctor/environment.mjs:129`)
+and, once per discovered workspace, `execFileSync("git", ["-C", ws.root, "remote"], ...)`
+(`lib/report/doctor/workspaces.mjs:79`) — 18 calls on today's tree. This is the identical
+shape this register's own **N16** found and fixed for a different call (`claude mcp list`,
+measured at 17,793 ms / 94% of a run, bounded to a 2s timeout with a 1hr cache): *"an
+unbounded subprocess inside a health check is a liveness risk... a hung binary would hang
+`doctor` itself, indefinitely, with no distinguishing signal."* Neither of these two call
+sites has that protection. Separately, **N50** measured this exact machine under concurrent
+`node --test` load producing "load average: 33.6, mostly I/O wait" and real `git` calls
+taking 27.4s where they normally take under 1s — the same failure mode (slow `git` under
+load), recurring inside `doctor`'s unbounded call across an 18-workspace fan-out, would
+produce spikes of exactly this shape and size. Per `rule:discernment-checks` §4, this is
+correlation, not a confirmed cause — nobody has caught a spike live with a subprocess
+timer attached.
+
+**Cost.** `doctor` is the health check both a human and the new UI/widget lean on for "is
+the system fine" (per STATE.md: "the 37s cache, on the monitor's existing tick"). An
+18-24 minute run is long enough to exceed any reasonable caller's patience; invoked from
+anything with its own timeout — a hook, a pre-push gate, CI — it would read as a failure
+indistinguishable from a real one. It also means the widget's "last checked" data can be
+stale by tens of minutes with no visible explanation, which is exactly the kind of silent
+staleness `rule:discernment-checks` §2 says a check must never produce.
+
+**Fix direction, not built:** bound both call sites the way N16 bounds `claude mcp list` —
+an explicit `timeout` plus a distinct `status: "timeout"` outcome that is never read as a
+pass — and instrument `doctor`'s own phases so the next spike names which subprocess it was
+waiting on, rather than only a total.

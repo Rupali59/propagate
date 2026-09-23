@@ -42,7 +42,14 @@ node ${CLAUDE_PLUGIN_ROOT}/cli.mjs rules check
 `graph` derives the DAG from `reconcile` and leads with the **fix order**:
 every actionable edge sorted by its source's layer (longest path from root),
 so working top to bottom never pins a downstream against a source that is
-itself unsettled. `NEVER_VERIFIED` edges are excluded from the worklist by
+itself unsettled. **Within a layer, ties break by SEVERITY, worst first** —
+the order in `STATE_SEVERITY` (`lib/graph/graph.mjs`), which `graph-html`
+imports rather than copies. So `DIVERGED, REVERSED, DRIFTED, UNMATCHED`, not
+the alphabetical `DIVERGED, DRIFTED, REVERSED, UNMATCHED` — the two disagree
+on REVERSED vs DRIFTED, and both states are routinely live at once. This is
+stated because the worklist is meant to be worked strictly top-down and
+nothing on screen reveals how a tie was broken: a mis-ranked row is
+indistinguishable from a correctly-ranked one (N89). `NEVER_VERIFIED` edges are excluded from the worklist by
 default (`--include-unverified` to show them) — they're a baseline gap, not
 movement — but they still count as unsettled when deciding what blocks what,
 and the excluded count is always printed. `graph` also names structural

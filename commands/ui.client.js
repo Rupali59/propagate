@@ -1,580 +1,732 @@
-/* ui.client.js — the input surface's browser half.
+/* ui.client.js — the browser half.
  *
- * WHY THIS IS A FILE. It used to live inside page()'s template literal, where
- * every escape is consumed twice and one backtick kills the entire script. Four
- * dead-page bugs in a single session came from that (G65), and each was
- * invisible: HTTP 200 on every request, nothing in any log, the only evidence in
- * a console nothing reads.
+ * WHY THIS IS A FILE. It lived inside page()'s template literal, where every
+ * escape is consumed twice and one backtick kills the script. Four dead-page
+ * bugs in a single session came from that (G65), each invisible: HTTP 200,
+ * nothing in any log. A plain file has nothing to escape, `node --check` parses
+ * it, and tests/unit/ui-client.test.mjs runs it in node:vm against a stub DOM.
  *
- * As a plain file there is nothing to escape, `node --check` can parse it
- * directly, and the page still inlines it at serve time — self-contained, no
- * build step, no second request.
+ * PREACT AND HTM ARRIVE AS GLOBALS, from commands/vendor/*.js. UMD, not ESM,
+ * because `new Script()` cannot resolve `import` and the headless suite depends
+ * on this staying a plain script. Verified: the three UMD builds attach
+ * preact / preactHooks / htm to globalThis under node:vm.
  *
- * THE TOKEN IS NOT INTERPOLATED. It arrives on `<body data-token>`, so this file
- * contains no substitution point at all. A file with nothing interpolated into
- * it cannot be broken by interpolation.
+ * -- THE DESIGN ------------------------------------------------------------
  *
- * ── THE DESIGN ─────────────────────────────────────────────────────────────
+ * Five divisions, split by the item's relationship to a HUMAN rather than by
+ * which file the data came from. The eight tabs this replaces were a taxonomy
+ * of sources: nobody opens this thinking "I will do some handovers", they think
+ * "what is blocked on me", and no tab answered that.
  *
- * Two panes. The admin reads many and acts on few — 248 judgements are waiting —
- * so the list optimises for SCANNING and the detail carries the evidence and the
- * one form. The previous version rendered 200 rows each with its own
- * select+input+button, which optimises for acting on all of them.
+ * READY is the only division with a write form, because cli.mjs refuses an
+ * out-of-order edge with exit 3 -- offering every actionable edge the same form
+ * walks a person into a refusal the page could have predicted.
  *
- * Evidence before judgement is the whole point: the review's #1 finding was that
- * the system demands a justification and offers nothing to justify from.
+ * 47% of every judgement ever recorded was "nothing needed doing", and that was
+ * the one step with no keyboard shortcut. It is now `n`.
  */
 
+const { h, render } = preact;
+const { useState, useEffect, useRef, useCallback, useMemo } = preactHooks;
+const html = htm.bind(h);
+
 const TOKEN = document.body.dataset.token;
-const api = (p, o) => fetch(p + (p.indexOf("?") >= 0 ? "&" : "?") + "token=" + TOKEN, o).then((r) => r.json());
-const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const el = (id) => document.getElementById(id);
+const api = (p, o) =>
+  fetch(p + (p.indexOf("?") >= 0 ? "&" : "?") + "token=" + TOKEN, o).then((r) => r.json());
 
-const VIEWS = ["queue", "issues", "todos", "handovers", "gotchas", "health", "rules", "graph"];
-let VIEW = (location.hash || "#queue").slice(1).replace(/^[/]+/, "");
-if (VIEWS.indexOf(VIEW) < 0) VIEW = "queue";
+/* -- divisions ------------------------------------------------------------ */
 
-let DATA = { queue: null, issues: null, todos: null, handovers: null, gotchas: null, health: null, rules: null };
-let ROWS = [];        // the filtered, flattened rows currently listed
-let SEL = 0;          // index into ROWS
-let FILTER = null;    // active chip
-let Q = "";           // search text
-let PLAN = null;      // the previewed edit awaiting confirmation
+const DIVISIONS = [
+  { key: "ready", label: "READY", act: true },
+  { key: "blocked", label: "BLOCKED", act: true },
+  { key: "parked", label: "PARKED", act: true },
+  { key: "gap", label: "BASELINE GAP", act: true },
+  { key: "analytics", label: "ANALYTICS" },
+  { key: "reference", label: "REFERENCE" },
+  // Framed rather than dropped: lib/graph/graph-html.mjs renders a whole
+  // interactive page at /graph, and open-ui.sh turns a widget route into a
+  // hash — so a link to it only resolves if the client routes it. It used to
+  // be written to disk and opened standalone, which made it a second place
+  // with no way back.
+  { key: "graph", label: "GRAPH" },
+];
+const VALID = new Set(DIVISIONS.map((d) => d.key));
 
-/* ── shaping ─────────────────────────────────────────────────────────────── */
+/* Keys are offered from item.allowed so the UI can never propose a disposition
+ * the write path will refuse. A control that always errors is worse than none. */
+const KEYS = { n: "no-change-needed", p: "propagated", d: "deferred", r: "both-reconciled" };
+const keyFor = (disp) => Object.keys(KEYS).find((k) => KEYS[k] === disp) || null;
 
-/* Severity is a first-class fact, so it comes OUT of the text and becomes a
- * badge. Left inline it renders as literal asterisks -- `N10 ... - **S1**` --
- * which is how it has been shipping. */
-function severityOf(raw) {
-  const m = String(raw || "").match(/\*\*(S[0-4])\*\*/);
-  return m ? m[1] : "none";
-}
-function cleanTitle(text) {
-  return String(text || "")
-    .replace(/\*\*(S[0-4])\*\*/g, "")
-    .replace(/\*\*(OPEN|RESOLVED[^*]*|WITHDRAWN[^*]*|MOOT[^*]*)\*\*/g, "")
-    .replace(/\*\*/g, "")
-    .replace(/\s+[-—·]\s*$/, "")
-    .trim();
-}
-function workspaceOf(file) {
-  const m = String(file || "").split("/Documents/GitHub/")[1];
-  return m ? m.split("/")[0] : "elsewhere";
-}
-function ageDays(ts) {
-  if (!ts) return null;
-  return Math.floor((Date.now() - Date.parse(ts)) / 86400000);
-}
+const UNDO_MS = 5000;
+const short = (p) => String(p || "").split("/Documents/GitHub/")[1] || p || "";
+const pct = (x) => (x == null ? "unknown" : Math.round(x * 100) + "%");
 
-/* Each view groups on the axis its DATA actually varies along, which is not the
- * same axis for each. Measured: all 55 issues are propagate's, so grouping them
- * by workspace yields one group; 127 of 145 todos carry no priority, so grouping
- * those by priority yields one group plus noise. A symmetric design gets both
- * wrong. */
-/* WHICH SIDE OF THE HUB/WORKSPACE LINE A PATH SITS ON. From
- * docs/HUB-AND-WORKSPACE.md: the hub owns CONTRACTS (rules/, scripts/execution,
- * .templates/, the schemas, propagate/docs) and workspaces own INSTANCES.
- * Mirrors sideOf() in lib/report/surface.mjs; kept in step by a test. */
-function sideOf(abs) {
-  const rel = String(abs || "").split("/Documents/GitHub/")[1];
-  if (!rel) return null;
-  if (/^(rules|scripts|\.templates|skills-marketplace|propagate\/docs)\//.test(rel)) return "hub";
-  if (/^[^/]+\.(md|yml|yaml|json)$/.test(rel)) return "hub";
-  return rel.split("/")[0] || null;
-}
-/* THE QUEUE GROUPS BY THE LINE, not by state. State is still on the badge, but
- * the question "is this a contract that has not reached its instances" was
- * unanswerable from this page, and a crossing edge is exactly that. */
-function boundaryOf(i) {
-  const a = sideOf(i.source), b = sideOf(i.downstream);
-  if (a === "hub" && b === "hub") return "hub-internal";
-  if (a === "hub" || b === "hub") return "crosses the line";
-  return a || b || "elsewhere";
-}
+/* -- shaping: pure, reachable from the headless tests --------------------- */
 
-function shape(view) {
-  if (view === "queue") {
-    const items = (DATA.queue && DATA.queue.items) || [];
-    return items.map((i) => ({
-      kind: "edge",
-      key: i.edge_id,
-      group: boundaryOf(i),
-      badge: i.state,
-      badgeClass: i.state,
-      title: i.sourceShort + "  →  " + i.downstreamShort,
-      meta: i.edge_id + "  ·  " + i.state + (i.judgedCount ? "  ·  judged " + i.judgedCount + "×" : "  ·  never judged"),
-      noisy: i.judgedCount > 0 && i.noiseRatio >= 0.5,
-      raw: i,
-    }));
+/**
+ * READY collapses runs sharing a node_id AND a state into one expandable row.
+ * Measured live: 57 edges produce 38 groups but only 6 hold more than one
+ * member, so this puts SIX controls on screen rather than 38.
+ *
+ * Both keys matter. `verify --node --state` is the unit the write path accepts;
+ * a node with mixed states cannot take one disposition, and offering it as a
+ * batch would make a partial application expressible.
+ */
+function batched(rows) {
+  const groups = new Map();
+  for (const r of rows || []) {
+    const k = r.node_id + " " + r.state;
+    if (!groups.has(k)) groups.set(k, { key: k, node_id: r.node_id, state: r.state, members: [] });
+    groups.get(k).members.push(r);
   }
-
-  /* HANDOVERS and GOTCHAS are READ-ONLY views. They belong on the page — a
-   * surface claiming to hold everything while omitting two registers is lying
-   * about its own coverage — but neither is a marker flip, so neither offers a
-   * form. Each row says why. */
-  if (view === "handovers") {
-    const h = DATA.registers && DATA.registers.handovers;
-    return (h || []).map((i) => ({
-      kind: "handover", key: i.file + ":" + i.line, group: i.date ? i.date.slice(0, 7) : "undated",
-      badge: "open", badgeClass: "none", title: i.text, meta: i.short + ":" + i.line, raw: i,
-    }));
+  const out = [];
+  for (const g of groups.values()) {
+    if (g.members.length > 1) out.push({ kind: "batch", ...g, sort: g.members[0].orderIndex });
+    else out.push({ kind: "edge", key: g.members[0].edge_id, row: g.members[0], sort: g.members[0].orderIndex });
   }
-  if (view === "gotchas") {
-    const g = DATA.gotchas;
-    if (!g || !g.entries) return [];
-    return g.entries.map((i) => ({
-      kind: "gotcha", key: i.file + ":" + i.line,
-      // The axis that matters: can it fire, or is it documented and inert.
-      group: i.trigger ? "fires" : "no trigger",
-      badge: i.trigger ? "live" : "inert", badgeClass: i.trigger ? "S3" : "none",
-      title: i.text, meta: i.short + ":" + i.line, raw: i,
-    }));
-  }
-
-  /* HEALTH — doctor's sections, split on the same line: its per-workspace
-   * sections are instances, everything else is the machinery. */
-  if (view === "health") {
-    const h = DATA.health;
-    if (!h || !h.sections) return [];
-    return h.sections
-      .filter((x) => x.name && (x.fail || x.warn || x.pass))
-      .map((x) => ({
-        kind: "section",
-        key: x.name,
-        group: x.name.indexOf("Workspace: ") === 0 ? "workspaces" : "machinery",
-        badge: x.fail ? "FAIL" : x.warn ? String(x.warn) : "ok",
-        badgeClass: x.fail ? "DIVERGED" : x.warn ? "none" : "S3",
-        title: x.name.replace("Workspace: ", ""),
-        meta: x.pass + " pass · " + x.warn + " warn · " + x.fail + " fail",
-        raw: x,
-      }));
-  }
-
-  /* RULES — the HUB half of the model, and it was on no surface at all. */
-  if (view === "rules") {
-    const r = DATA.rules;
-    if (!r || !r.findings) return [];
-    return r.findings.map((f, n) => ({
-      kind: "finding",
-      key: (f.rule || "?") + ":" + (f.file || n),
-      group: f.rule || "unattributed",
-      badge: "restated",
-      badgeClass: "DRIFTED",
-      title: String(f.file || "").split("/Documents/GitHub/")[1] || f.file || "(no file)",
-      meta: (f.hits ? f.hits + " hit(s)" : "") + (f.lines ? "  ·  line " + f.lines.join(", ") : ""),
-      raw: f,
-    }));
-  }
-  const src = view === "issues" ? (DATA.issues && DATA.issues.issues) : (DATA.todos && DATA.todos.todos);
-  return (src || []).map((i) => {
-    const sev = severityOf(i.raw);
-    return {
-      kind: view === "issues" ? "issue" : "todo",
-      key: i.file + ":" + i.line,
-      group: view === "issues" ? sev : workspaceOf(i.file),
-      badge: view === "issues" ? sev : (i.priority != null ? "P" + i.priority : "–"),
-      badgeClass: view === "issues" ? sev : "none",
-      title: cleanTitle(i.text),
-      meta: i.short + ":" + i.line,
-      raw: i,
-    };
-  });
+  // fixOrder's sequence, preserved. That ordering is the whole promise of
+  // "start at the top"; re-sorting here would quietly break it.
+  out.sort((a, b) => (a.sort == null ? Infinity : a.sort) - (b.sort == null ? Infinity : b.sort));
+  return out;
 }
 
-const GROUP_ORDER = { "crosses the line": 0, "hub-internal": 1, machinery: 0, workspaces: 1,
-  fires: 0, "no trigger": 1, S1: 0, S2: 1, S3: 2, S4: 3, none: 9 };
-function grouped(rows) {
-  const by = new Map();
-  for (const r of rows) {
-    if (!by.has(r.group)) by.set(r.group, []);
-    by.get(r.group).push(r);
-  }
-  return [...by.entries()].sort((a, b) => {
-    const ao = GROUP_ORDER[a[0]], bo = GROUP_ORDER[b[0]];
-    if (ao != null || bo != null) return (ao == null ? 8 : ao) - (bo == null ? 8 : bo);
-    return b[1].length - a[1].length;   // biggest group first when unranked
-  });
-}
-
-function filtered(all) {
-  let rows = all;
-  if (FILTER) rows = rows.filter((r) => r.group === FILTER);
-  if (Q) {
-    const q = Q.toLowerCase();
-    rows = rows.filter((r) => (r.title + " " + r.meta).toLowerCase().indexOf(q) >= 0);
-  }
-  return rows;
-}
-
-/* ── rendering ───────────────────────────────────────────────────────────── */
-
-function renderChips(all) {
-  const counts = new Map();
-  for (const r of all) counts.set(r.group, (counts.get(r.group) || 0) + 1);
-  const chips = grouped(all).map(([g]) =>
-    '<button class="chip' + (FILTER === g ? " on" : "") + '" data-g="' + esc(g) + '">' +
-    esc(g === "none" ? "unrated" : g) + '<span class="n">' + counts.get(g) + "</span></button>");
-  el("chips").innerHTML = chips.join("");
-}
-
-function renderList() {
-  const all = shape(VIEW);
-  renderChips(all);
-  ROWS = filtered(all);
-  if (SEL >= ROWS.length) SEL = Math.max(0, ROWS.length - 1);
-
-  const src = VIEW === "queue" ? DATA.queue : (VIEW === "issues" ? DATA.issues : DATA.todos);
-  if (src && src.error) {
-    el("list").innerHTML = '<div class="empty err">' + esc(src.error) + "</div>";
-    el("detail").innerHTML = "";
-    return;
-  }
-  if (!ROWS.length) {
-    /* Say which question was asked. "Nothing here" and "nothing matched your
-     * filter" are different facts and only one means there is no work. */
-    el("list").innerHTML = '<div class="empty">' +
-      (FILTER || Q ? "Nothing matches this filter." : "Nothing in this view.") + "</div>";
-    el("detail").innerHTML = "";
-    return;
-  }
-
-  /* ROWS IS REBUILT IN DISPLAY ORDER FIRST, then rendered from. Grouping
-   * reorders rows relative to the filtered array, so an index into one is not an
-   * index into the other -- and j/k, the click handler and SEL all index the
-   * same list. The first version rendered first and then re-queried the DOM to
-   * recover the order, which made the display the source of truth for its own
-   * contents and could not be tested without a browser. */
-  const groups = grouped(ROWS);
-  ROWS = [];
-  for (const [, rows] of groups) for (const r of rows) ROWS.push(r);
-  if (SEL >= ROWS.length) SEL = Math.max(0, ROWS.length - 1);
-
-  let html = "";
-  let i = 0;
-  for (const [g, rows] of groups) {
-    html += '<div class="grp">' + esc(g === "none" ? "unrated" : g) + '<span class="n">' + rows.length + "</span></div>";
-    for (const r of rows) {
-      html += '<div class="item' + (i === SEL ? " sel" : "") + '" data-i="' + i + '">' +
-        '<span class="badge ' + esc(r.badgeClass) + '">' + esc(r.badge) + "</span>" +
-        '<span class="itxt"><span class="ttl">' + esc(r.title) + "</span>" +
-        '<span class="meta">' + esc(r.meta) + (r.noisy ? ' <span class="warn">mostly no-op</span>' : "") + "</span></span></div>";
-      i += 1;
-    }
-  }
-  el("list").innerHTML = html;
-  renderDetail();
-}
-
-function renderDetail() {
-  const r = ROWS[SEL];
-  if (!r) { el("detail").innerHTML = ""; return; }
-  const i = r.raw;
-
-  let head = '<h2 class="dtitle">' + esc(r.title) + "</h2>";
-  if (r.kind === "edge") {
-    const lv = i.lastVerified;
-    const d = lv ? ageDays(lv.ts) : null;
-    head += '<div class="dmeta">' + esc(i.edge_id) + "  ·  " + esc(i.state) +
-      (lv ? "  ·  last judged " + esc(lv.commit.slice(0, 8)) + (d != null ? " (" + d + "d ago)" : "") : "  ·  never judged") +
-      "</div>";
-    if (i.why) head += '<div class="dmeta" style="margin-top:6px;color:var(--dim)">' + esc(i.why) + "</div>";
-  } else if (r.kind === "section") {
-    head += '<div class="dmeta">' + esc(i.name) + "  ·  " + i.pass + " pass · " + i.warn + " warn · " + i.fail + " fail</div>";
-  } else if (r.kind === "handover" || r.kind === "gotcha") {
-    head += '<div class="dmeta">' + esc(i.file) + ":" + i.line + (i.date ? "  ·  " + esc(i.date) : "") + "</div>";
-    if (i.trigger) head += '<div class="dmeta" style="margin-top:6px">trigger: ' + esc(i.trigger) + "</div>";
-    if (i.doneWhen) head += '<div class="dmeta" style="margin-top:6px">done when: ' + esc(i.doneWhen) + "</div>";
-    if (i.readOnly) head += '<div class="note">' + esc(i.readOnly) + "</div>";
-  } else if (r.kind === "finding") {
-    head += '<div class="dmeta">restates ' + esc(i.rule || "?") + "  ·  " + esc(i.file || "") + "</div>";
-    head += '<div class="note">A contract copied instead of cited. Reference it as rule:' +
-      esc(i.rule || "&lt;id&gt;") + ', or declare a deviation in that file.</div>';
-  } else {
-    head += '<div class="dmeta">' + esc(i.file) + ":" + i.line + "</div>";
-    if (i.noClose) head += '<div class="note">close not offered — ' + esc(i.noClose) + "</div>";
-  }
-
-  /* READ-ONLY KINDS GET NO ACTION BLOCK. doctor sections and rule findings are
-   * reported here, not judged here — offering a form that writes nothing is the
-   * dead CTA this surface exists to avoid. Each says where the work happens. */
-  if (r.kind === "section" || r.kind === "finding" || r.kind === "handover" || r.kind === "gotcha") {
-    const entries = (i.entries || []).slice(0, 40);
-    el("detail").innerHTML = head +
-      '<div class="sec">Detail</div>' +
-      (entries.length
-        ? '<div class="ev">' + entries.map((e) => esc((e.kind || "").padEnd(5) + " " + (e.label || "") + (e.detail ? "  " + e.detail : ""))).join("\n") + "</div>"
-        : '<div class="reason">' + (r.kind === "finding"
-            ? "Open the file and replace the restatement with a reference."
-            : "No per-entry detail in the snapshot for this section.") + "</div>");
-    return;
-  }
-
-  el("detail").innerHTML = head +
-    '<div class="sec">Evidence</div><div id="ev"><div class="reason">loading…</div></div>' +
-    '<div class="sec">Action</div><div id="action"></div>';
-
-  loadEvidence(r);
-  renderAction(r);
-}
-
-function diffHtml(text) {
-  return '<div class="diff">' + text.split("\n").map((l) => {
-    const c = l.charAt(0) === "+" ? "add" : l.charAt(0) === "-" ? "del" : l.slice(0, 2) === "@@" ? "at" : "hdr";
-    return '<span class="' + c + '">' + esc(l) + "</span>";
-  }).join("\n") + "</div>";
-}
-
-async function loadEvidence(r) {
-  const body = r.kind === "edge"
-    ? { kind: "edge", edge_id: r.raw.edge_id }
-    : { kind: r.kind, file: r.raw.file, line: r.raw.line };
-  let ev;
-  try { ev = await api("/api/evidence", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); }
-  catch (e) { ev = { ok: false, reason: String(e) }; }
-  if (ROWS[SEL] !== r) return;   // the selection moved while this was in flight
-
-  const box = el("ev");
-  if (!box) return;
-  /* A named reason and an empty panel must never look the same. An empty panel
-   * asserts "nothing changed", which is exactly one of the five outcomes. */
-  if (!ev.ok) { box.innerHTML = '<div class="reason">' + esc(ev.reason || "no evidence available") + "</div>"; return; }
-  if (ev.empty) { box.innerHTML = '<div class="reason">' + esc(ev.reason) + "</div>"; return; }
-
-  box.innerHTML = (ev.kind === "diff" ? diffHtml(ev.text) : '<div class="ev">' + esc(ev.text) + "</div>") +
-    (ev.caveat ? '<div class="caveat">' + esc(ev.caveat) + "</div>" : "") +
-    (ev.truncated ? '<div class="trunc">' + esc(ev.truncated) + "</div>" : "");
-}
-
-function renderAction(r) {
-  const box = el("action");
-  if (r.kind === "edge") {
-    box.innerHTML = '<div class="act"><select id="disp">' +
-      r.raw.allowed.map((a) => "<option>" + esc(a) + "</option>").join("") + "</select></div>" +
-      '<textarea id="reason" placeholder="why this disposition is correct (required, 12+ characters)"></textarea>' +
-      '<div class="act" style="margin-top:9px"><button id="go">record</button>' +
-      '<span class="hint"><kbd>⌘</kbd><kbd>↵</kbd> record</span></div><div class="msg" id="msg"></div>';
-    return;
-  }
-  const a = r.raw.actions || [];
-  const opts = [];
-  if (a.indexOf("issue-close") >= 0) opts.push('<option value="issue-close">close</option>');
-  if (a.indexOf("issue-severity") >= 0) opts.push('<option value="issue-severity">change severity</option>');
-  if (a.indexOf("todo-tick") >= 0) opts.push('<option value="todo-tick">tick done</option>');
-  box.innerHTML = '<div class="act"><select id="disp">' + opts.join("") + "</select>" +
-    '<select id="sev" style="display:none">' + ["S0", "S1", "S2", "S3", "S4"].map((s) => "<option>" + s + "</option>").join("") + "</select></div>" +
-    '<textarea id="reason" placeholder="why (required, 12+ characters) — this text goes into the file"></textarea>' +
-    '<div class="act" style="margin-top:9px"><button id="go">preview</button>' +
-    '<span class="hint"><kbd>⌘</kbd><kbd>↵</kbd> preview</span></div><div class="msg" id="msg"></div>';
-  syncSev();
-}
-function syncSev() {
-  const d = el("disp"), s = el("sev");
-  if (d && s) s.style.display = d.value === "issue-severity" ? "" : "none";
-}
-
-/* ── acting ──────────────────────────────────────────────────────────────── */
-
-function planFor(r) {
+/** Rail counts. Null means not loaded, which is not the same as zero. */
+function counts(inbox) {
+  if (!inbox || !inbox.divisions) return {};
+  const d = inbox.divisions;
   return {
-    action: el("disp").value,
-    file: r.raw.file,
-    line: r.raw.line,
-    current: r.raw.raw,
-    reason: el("reason").value,
-    severity: el("sev") ? el("sev").value : undefined,
+    ready: d.worklist.ready ? d.worklist.ready.length : null,
+    blocked: d.worklist.blocked ? d.worklist.blocked.length : null,
+    parked: d.parked.items ? d.parked.items.length : null,
+    gap: d.gap.total,
   };
 }
 
-async function act() {
-  const r = ROWS[SEL];
-  if (!r) return;
-  const msg = el("msg");
-  const btn = el("go");
+/**
+ * A path that BREAKS on null.
+ *
+ * A gap in the timeline is a day nobody measured. Drawing a line across it
+ * asserts a reading that was never taken -- the same defect as an empty result
+ * rendering identically to a failed one, one plane over.
+ */
+function linePath(points, x, y) {
+  let d = "";
+  let pen = false;
+  (points || []).forEach((p, i) => {
+    if (p.value == null) { pen = false; return; }
+    d += (pen ? "L" : "M") + x(i).toFixed(1) + " " + y(p.value).toFixed(1) + " ";
+    pen = true;
+  });
+  return d.trim();
+}
 
-  if (r.kind === "edge") {
-    btn.disabled = true; msg.className = "msg"; msg.textContent = "writing…";
-    try {
-      const res = await api("/api/dispose", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ edge_id: r.raw.edge_id, disposition: el("disp").value, reason: el("reason").value }) });
-      if (res.ok) { msg.className = "msg ok"; msg.textContent = "recorded — event " + res.event_id; setTimeout(load, 650); }
-      else { msg.className = "msg err"; msg.textContent = res.error; btn.disabled = false; }
-    } catch (e) { msg.className = "msg err"; msg.textContent = String(e); btn.disabled = false; }
-    return;
+/* -- charts: inline SVG, no library --------------------------------------- */
+
+function Spark({ points, stroke, label }) {
+  const ref = useRef(null);
+  const pts = points || [];
+  const vals = pts.filter((p) => p.value != null).map((p) => p.value);
+  const max = vals.length ? Math.max(...vals) : 1;
+  const W = 300;
+  const H = 110;
+  const PAD = 6;
+  const x = (i) => PAD + (i / Math.max(1, pts.length - 1)) * (W - PAD * 2);
+  const y = (v) => H - PAD - (v / (max || 1)) * (H - PAD * 2);
+  const d = linePath(pts, x, y);
+
+  // --len is each path's measured length; only the browser knows it. The CSS
+  // draw-in reads it as a dash offset, and falls back to 0 without it.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof el.getTotalLength !== "function") return;
+    const len = el.getTotalLength();
+    el.style.setProperty("--len", String(len));
+    el.style.strokeDasharray = String(len);
+  }, [d]);
+
+  if (!vals.length) return html`<div class="reason">no readings in this series</div>`;
+  const gaps = pts.filter((p) => p.value == null).length;
+  return html`
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label=${label || "series"}>
+      <line class="axis" x1=${PAD} y1=${H - PAD} x2=${W - PAD} y2=${H - PAD} />
+      <line class="gridline" x1=${PAD} y1=${y(max)} x2=${W - PAD} y2=${y(max)} />
+      <path ref=${ref} class="series" d=${d} style=${{ stroke: stroke }} />
+      <text class="lbl" x=${PAD} y=${y(max) - 4}>${max}</text>
+      ${gaps ? html`<text class="lbl" x=${W - PAD} y=${12} text-anchor="end">${gaps} day(s) with no run</text>` : null}
+    </svg>`;
+}
+
+function Bars({ rows, colorOf }) {
+  const total = rows.reduce((n, r) => n + r.value, 0) || 1;
+  return html`<div>
+    ${rows.map((r) => html`
+      <div key=${r.label} class="bar">
+        <span class="bar-l">${r.label}</span>
+        <span class="bar-t"><span class="bar-f" style=${{ width: (100 * r.value / total).toFixed(1) + "%", background: colorOf(r) }} /></span>
+        <span class="bar-v">${r.value}</span>
+      </div>`)}
+  </div>`;
+}
+
+function Chart({ title, coverage, children }) {
+  return html`<div class="chart">
+    <h3>${title}</h3>
+    ${coverage ? html`<div class="cov">${coverage}</div>` : null}
+    ${children}
+  </div>`;
+}
+
+function Analytics({ data }) {
+  if (!data) {
+    return html`<div class="charts">${[0, 1, 2, 3].map((i) => html`
+      <div class="chart" key=${i}><div class="skel"><i /><i /></div></div>`)}</div>`;
   }
+  if (data.error) return html`<div class="banner">analytics failed to load — ${data.error}</div>`;
+  const c = data.charts || {};
+  const cov = data.coverage || {};
+  const noop = c.dispositions && !c.dispositions.error
+    ? c.dispositions.weeks.reduce((n, w) => n + (w.counts["no-change-needed"] || 0), 0)
+    : 0;
+  const ws = Object.entries((c.boundary && c.boundary.byWorkspace) || {})
+    .sort((a, b) => b[1] - a[1]).slice(0, 8)
+    .map((e) => ({ label: e[0], value: e[1] }));
 
-  /* PREVIEW FIRST, ALWAYS. A one-click write into hand-written prose is exactly
-   * the friction that should not be removed; you approve a hunk, not a promise. */
-  if (!PLAN) {
-    msg.className = "msg"; msg.textContent = "planning…";
-    try {
-      const body = planFor(r);
-      const res = await api("/api/register-preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      if (!res.ok) { msg.className = "msg err"; msg.textContent = res.error; return; }
-      PLAN = Object.assign({}, body, { next: res.next });
-      msg.className = "msg";
-      msg.innerHTML = diffHtml(res.diff) +
-        '<div class="act" style="margin-top:9px"><button id="confirm">write this</button>' +
-        '<button class="ghost" id="cancel">cancel</button>' +
-        '<span class="hint"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>↵</kbd> write</span></div>';
-    } catch (e) { msg.className = "msg err"; msg.textContent = String(e); }
-    return;
-  }
-  confirmWrite();
+  return html`<div class="charts">
+    ${c.backlog && !c.backlog.error ? html`
+      <${Chart} title="Open rows over time"
+        coverage=${c.backlog.coverage ? c.backlog.coverage.days + " days measured across a " + c.backlog.coverage.span + "-day span" : null}>
+        <${Spark} points=${c.backlog.points} stroke="var(--st-accent)" label="open rows" />
+      <//>` : null}
+
+    ${c.scale && !c.scale.error && c.scale.series ? html`
+      <${Chart} title="One hub, many projects" coverage="workspaces discovered against sidecars declared">
+        ${c.scale.series.map((s, i) => html`
+          <div key=${s.name}>
+            <div class="cov">${s.name}</div>
+            <${Spark} points=${s.points} stroke=${i ? "var(--edge-drift)" : "var(--st-ok)"} label=${s.name} />
+          </div>`)}
+      <//>` : null}
+
+    ${c.boundary && !c.boundary.error ? html`
+      <${Chart} title="Hub or workspace"
+        coverage="a crossing edge is a contract that has not reached its instances">
+        <${Bars} rows=${[
+          { label: "touched the hub", value: c.boundary.hub },
+          { label: "workspace-local", value: c.boundary.workspace },
+        ]} colorOf=${(r) => (r.label === "touched the hub" ? "var(--st-accent)" : "var(--edge-drift)")} />
+        ${c.boundary.note ? html`<div class="caveat">${c.boundary.note}</div>` : null}
+      <//>` : null}
+
+    ${ws.length ? html`
+      <${Chart} title="Where the work is" coverage="judgements per workspace, top 8">
+        <${Bars} rows=${ws} colorOf=${() => "var(--edge-reverse)"} />
+      <//>` : null}
+
+    ${c.dispositions && !c.dispositions.error ? html`
+      <${Chart} title="What the answer was"
+        coverage=${c.dispositions.total + " judgements across " + c.dispositions.weeks.length + " weeks"}>
+        <${Bars} rows=${c.dispositions.kinds
+          .map((k) => ({ label: k, value: c.dispositions.weeks.reduce((n, w) => n + w.counts[k], 0) }))
+          .sort((a, b) => b.value - a.value)}
+          colorOf=${(r) => (r.label === "no-change-needed" ? "var(--dim)" : "var(--st-ok)")} />
+        <div class="caveat">${pct(noop / c.dispositions.total)} of every judgement recorded that nothing needed doing</div>
+      <//>` : null}
+
+    ${c.problems && !c.problems.error ? html`
+      <${Chart} title="Doctor problems" coverage="lower is better">
+        <${Spark} points=${c.problems.points} stroke="var(--st-warn)" label="doctor problems" />
+      <//>` : null}
+
+    <${Chart} title="What these events can support"
+      coverage="stated, because a chart that hides its coverage claims a completeness it does not have">
+      <${Bars} rows=${[
+        { label: "carry a reason", value: cov.reason ? cov.reason.have : 0 },
+        { label: "carry a commit", value: cov.observedAtCommit ? cov.observedAtCommit.have : 0 },
+        { label: "events in total", value: cov.events || 0 },
+      ]} colorOf=${() => "var(--st-accent)"} />
+      <div class="caveat">
+        observed_at_commit is present on ${pct(cov.observedAtCommit && cov.observedAtCommit.pct)} of events,
+        so anything commit-derived is that far from complete.
+      </div>
+    <//>
+  </div>`;
 }
 
-async function confirmWrite() {
-  if (!PLAN) return;
-  const msg = el("msg");
-  try {
-    const res = await api("/api/register-write", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(PLAN) });
-    if (res.ok) { msg.className = "msg ok"; msg.textContent = "written — " + res.file + ":" + res.line; PLAN = null; setTimeout(load, 650); }
-    else { msg.className = "msg err"; msg.textContent = res.error; }
-  } catch (e) { msg.className = "msg err"; msg.textContent = String(e); }
+/* -- the undo window ------------------------------------------------------ */
+
+/**
+ * The write is DELAYED, not compensated.
+ *
+ * The event store is append-only and DISPOSITIONS is frozen at eight, so there
+ * is no "undone" event to write. Holding the write for five seconds buys a real
+ * undo without either having to move. At most one is outstanding: a second
+ * judgement flushes the first.
+ */
+function Undo({ pending, onUndo, reduced }) {
+  const [left, setLeft] = useState(Math.ceil(UNDO_MS / 1000));
+  useEffect(() => {
+    setLeft(Math.ceil(UNDO_MS / 1000));
+    const iv = setInterval(() => setLeft((n) => (n > 1 ? n - 1 : 1)), 1000);
+    return () => clearInterval(iv);
+  }, [pending.id]);
+  return html`<div class="undo">
+    <svg class="ring" viewBox="0 0 22 22" aria-hidden="true">
+      <circle class="bed" cx="11" cy="11" r="9" /><circle class="arc" cx="11" cy="11" r="9" />
+    </svg>
+    <span>${pending.disposition} — <b>${short(pending.label)}</b></span>
+    ${/* The ring IS the clock, so when motion is off the number has to carry it. */ ""}
+    <span class="secs">${reduced ? left + "s" : ""}</span>
+    <button class="ghost" onClick=${onUndo}>undo <kbd>u</kbd></button>
+  </div>`;
 }
 
-/* ── events ──────────────────────────────────────────────────────────────── */
-
-document.addEventListener("click", (e) => {
-  const t = e.target;
-  if (t.classList.contains("tab")) { setView(t.dataset.v); return; }
-  if (t.classList.contains("chip")) { FILTER = FILTER === t.dataset.g ? null : t.dataset.g; SEL = 0; PLAN = null; renderList(); return; }
-  if (t.id === "go") { act(); return; }
-  if (t.id === "confirm") { confirmWrite(); return; }
-  if (t.id === "cancel") { PLAN = null; el("msg").innerHTML = ""; return; }
-  const item = t.closest && t.closest(".item");
-  if (item) { SEL = Number(item.dataset.i); PLAN = null; renderList(); }
-});
-document.addEventListener("change", (e) => { if (e.target.id === "disp") { PLAN = null; syncSev(); } });
-el("q").addEventListener("input", (e) => { Q = e.target.value; SEL = 0; PLAN = null; renderList(); });
-
-/* KEYBOARD, because the task is repetitive -- 248 judgements are waiting. Every
- * shortcut also has a visible control; nothing is reachable ONLY by keyboard. */
-document.addEventListener("keydown", (e) => {
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); e.shiftKey ? confirmWrite() : act(); return; }
-  if (typing) {
-    if (e.key === "Escape") document.activeElement.blur();
-    return;
-  }
-  if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); move(1); }
-  else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-  else if (e.key === "Enter") { e.preventDefault(); const t = el("reason"); if (t) t.focus(); }
-  else if (e.key === "/") { e.preventDefault(); el("q").focus(); }
-  else if (e.key === "Escape") { if (FILTER || Q) { FILTER = null; Q = ""; el("q").value = ""; SEL = 0; renderList(); } }
-});
-function move(d) {
-  if (!ROWS.length) return;
-  SEL = Math.max(0, Math.min(ROWS.length - 1, SEL + d));
-  PLAN = null;
-  renderList();
-  const n = el("list").querySelector(".item.sel");
-  if (n) n.scrollIntoView({ block: "nearest" });
+/**
+ * The POST body for a pending judgement -- pulled out as its own pure
+ * function so the two shapes /api/dispose accepts (batch vs single edge) are
+ * directly testable without simulating a real click through the mini DOM.
+ */
+function disposeBody(p) {
+  return p.kind === "batch"
+    ? { node_id: p.node_id, state: p.state, disposition: p.disposition, reason: p.reason }
+    : { edge_id: p.edge_id, disposition: p.disposition, reason: p.reason };
 }
 
-function setView(v) {
-  VIEW = v; FILTER = null; Q = ""; SEL = 0; PLAN = null;
-  el("q").value = "";
-  location.hash = v;
-  load();
+/* -- rows ----------------------------------------------------------------- */
+
+const EdgeRow = ({ r, sel, onClick }) => html`
+  <div class=${"item" + (sel ? " sel" : "")} onClick=${onClick} tabIndex="0">
+    <span class=${"badge " + r.state}>${r.state.slice(0, 3)}</span>
+    <span class="itxt">
+      <span class="ttl">${r.sourceShort} → ${r.downstreamShort}</span>
+      <span class="meta">${r.boundary} · ${r.judgedCount ? "judged " + r.judgedCount + "x" : "never judged"}${
+        r.noiseRatio != null && r.noiseRatio >= 0.5 ? html` <span class="warn">mostly no-op</span>` : null}</span>
+      ${r.blocked && r.blockedBy && r.blockedBy.length ? html`
+        <span class="blockers">waiting on ${r.blockedBy.length}</span>` : null}
+    </span>
+  </div>`;
+
+/* -- the app -------------------------------------------------------------- */
+
+function readHash() {
+  const v = (location.hash || "#ready").slice(1).replace(/^[/]+/, "");
+  return VALID.has(v) ? v : "ready";
 }
 
-/* ── loading ─────────────────────────────────────────────────────────────── */
+function App() {
+  const [div, setDiv] = useState(readHash());
+  const [inbox, setInbox] = useState(null);
+  const [fatal, setFatal] = useState(null);
+  const [lazy, setLazy] = useState({});
+  const [sel, setSel] = useState(0);
+  const [pending, setPending] = useState(null);
+  const [judged, setJudged] = useState(0);
+  const [msg, setMsg] = useState(null);
+  const [reason, setReason] = useState("");
+  const [open, setOpen] = useState({});
+  const [bumped, setBumped] = useState(null);
+  const flushRef = useRef(null);
 
-function counts() {
-  const q = DATA.queue && DATA.queue.items ? DATA.queue.items.length : null;
-  const i = DATA.issues && DATA.issues.issues ? DATA.issues.issues.length : null;
-  const t = DATA.todos && DATA.todos.todos ? DATA.todos.todos.length : null;
-  const n = (x) => (x == null ? "" : '<span class="n">' + x + "</span>");
-  el("nav").innerHTML = VIEWS.map((v) =>
-    '<button class="tab' + (v === VIEW ? " on" : "") + '" data-v="' + v + '">' + v +
-    n(v === "queue" ? q : v === "issues" ? i : t) + "</button>").join("");
-}
+  const reduced = typeof matchMedia === "function"
+    && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/* THE GRAPH IS A VIEW, NOT A SEPARATE FILE. lib/graph/graph-html.mjs renders a
- * self-contained interactive page; the server regenerates and serves it at
- * /graph, and it is framed here so there is still exactly ONE destination with
- * the tabs still on screen. It used to be written to disk and opened on its
- * own, which made it a second place with no way back. */
-function showGraph() {
-  el("chips").innerHTML = "";
-  el("sum").innerHTML = "workspace condensation, then layered columns — click a node to expand";
-  el("list").style.display = "none";
-  el("detail").innerHTML = '<iframe src="/graph?token=' + encodeURIComponent(TOKEN) +
-    '" style="width:100%;height:100%;border:0;border-radius:8px;background:var(--card)"></iframe>';
-  el("detail").style.padding = "0";
-}
-function unshowGraph() {
-  el("list").style.display = "";
-  el("detail").style.padding = "";
-}
+  const load = useCallback(async () => {
+    const j = await api("/api/inbox");
+    if (j.fatal) { setFatal(j.fatal); return; }
+    setFatal(null);
+    setInbox((prev) => {
+      const before = counts(prev);
+      const after = counts(j);
+      const changed = Object.keys(after).find((k) => before[k] != null && before[k] !== after[k]);
+      if (changed) { setBumped(changed); setTimeout(() => setBumped(null), 400); }
+      return j;
+    });
+  }, []);
 
-async function load() {
-  counts();
-  unshowGraph();
-  try {
-    if (VIEW === "graph") { showGraph(); return; }
-    if (VIEW === "queue") DATA.queue = await api("/api/queue");
-    else if (VIEW === "health") DATA.health = await api("/api/health");
-    else if (VIEW === "rules") DATA.rules = await api("/api/rules");
-    else if (VIEW === "gotchas") DATA.gotchas = await api("/api/gotchas");
-    else if (!DATA.registers || VIEW === "todos" || VIEW === "handovers") {
-      const r = await api("/api/registers");
-      DATA.registers = r; DATA.issues = r; DATA.todos = r;
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const onHash = () => { setDiv(readHash()); setSel(0); };
+    addEventListener("hashchange", onHash);
+    return () => removeEventListener("hashchange", onHash);
+  }, []);
+
+  // Lazy divisions: measured 300 ms, 1704 ms and 28 ms. Fetched when opened,
+  // never on first paint -- that is what keeps the page near 340 ms.
+  useEffect(() => {
+    const ep = { reference: "/api/reference", gap: "/api/baseline", analytics: "/api/analytics" }[div];
+    if (!ep || lazy[div]) return;
+    api(ep).then((j) => setLazy((L) => Object.assign({}, L, { [div]: j })));
+  }, [div, lazy]);
+
+  const flush = useCallback(async (p) => {
+    if (!p) return;
+    clearTimeout(p.timer);
+    flushRef.current = null;
+    setPending(null);
+    const res = await api("/api/dispose", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(disposeBody(p)),
+    }).catch((e) => ({ ok: false, error: String(e) }));
+    if (res.ok) {
+      setJudged((n) => n + (res.results ? res.results.length : 1));
+      setMsg({ ok: true, text: res.results
+        ? "recorded — " + res.results.length + " event(s)"
+        : "recorded — event " + res.event_id });
+      load();
+    } else if (res.results) {
+      // A batch can fail PARTIALLY even after the group passed the uniform-
+      // state gate (the two reconciles are seconds apart) -- name which
+      // members failed rather than one opaque error, so the failure is
+      // legible by edge_id the same way the server's response already is.
+      const failed = res.results.filter((r) => !r.ok);
+      setMsg({ ok: false, text: failed.length + " of " + res.results.length + " refused — " +
+        failed.map((r) => r.edge_id + ": " + r.error).join("; ") });
+      load();
+    } else {
+      setMsg({ ok: false, text: res.error });
     }
-    counts();
-    el("sum").innerHTML = summaryFor();
-    renderList();
-  } catch (e) {
-    el("sum").textContent = "failed to load: " + e;
-    el("list").innerHTML = '<div class="empty err">' + esc(String(e)) + "</div>";
-  }
+  }, [load]);
+
+  const judge = useCallback((row, disposition) => {
+    if (String(reason).trim().length < 12) {
+      setMsg({ ok: false, text: "a reason of 12 or more characters is required — it lands in the ledger" });
+      return;
+    }
+    if (flushRef.current) flush(flushRef.current);   // at most one outstanding
+    const p = {
+      id: String(Date.now()) + row.edge_id,
+      kind: "edge",
+      edge_id: row.edge_id,
+      disposition: disposition,
+      reason: String(reason).trim(),
+      label: row.source,
+    };
+    p.timer = setTimeout(() => flush(p), UNDO_MS);
+    flushRef.current = p;
+    setPending(p);
+    setReason("");
+    setMsg(null);
+  }, [reason, flush]);
+
+  /** Same shape as `judge`, for a batch row: one disposition applied to
+   * every member sharing (node_id, state) -- see the DIVISIONS/batched()
+   * header comment for why that pair, not just node_id, is the unit. */
+  const judgeBatch = useCallback((group, disposition) => {
+    if (String(reason).trim().length < 12) {
+      setMsg({ ok: false, text: "a reason of 12 or more characters is required — it lands in the ledger" });
+      return;
+    }
+    if (flushRef.current) flush(flushRef.current);
+    const p = {
+      id: String(Date.now()) + group.key,
+      kind: "batch",
+      node_id: group.node_id,
+      state: group.state,
+      disposition: disposition,
+      reason: String(reason).trim(),
+      label: group.node_id,
+    };
+    p.timer = setTimeout(() => flush(p), UNDO_MS);
+    flushRef.current = p;
+    setPending(p);
+    setReason("");
+    setMsg(null);
+  }, [reason, flush]);
+
+  const undo = useCallback(() => {
+    const p = flushRef.current;
+    if (!p) return;
+    clearTimeout(p.timer);
+    flushRef.current = null;
+    setPending(null);
+    setMsg({ ok: true, text: "undone — nothing was written" });
+  }, []);
+
+  // Leaving with a write pending must not lose it. A lost write and a silent
+  // write are both worse than an early one.
+  useEffect(() => {
+    const go = () => { if (flushRef.current) flush(flushRef.current); };
+    addEventListener("beforeunload", go);
+    return () => removeEventListener("beforeunload", go);
+  }, [flush]);
+
+  const d = inbox && inbox.divisions;
+  const rows = useMemo(() => {
+    if (!d) return [];
+    if (div === "ready") return batched(d.worklist.ready || []);
+    if (div === "blocked") return (d.worklist.blocked || []).map((r) => ({ kind: "edge", key: r.edge_id, row: r }));
+    if (div === "parked") return (d.parked.items || []).map((r) => ({ kind: "parked", key: r.edge_id, row: r }));
+    return [];
+  }, [d, div]);
+
+  const flat = useMemo(
+    () => rows.flatMap((g) => (g.kind === "batch" && open[g.key]
+      ? [g].concat(g.members.map((m) => ({ kind: "edge", key: m.edge_id, row: m })))
+      : [g])),
+    [rows, open],
+  );
+  const current = flat[sel];
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+      if (typing) { if (e.key === "Escape") document.activeElement.blur(); return; }
+      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setSel((s) => Math.min(flat.length - 1, s + 1)); }
+      else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(0, s - 1)); }
+      else if (e.key === "u") { e.preventDefault(); undo(); }
+      else if (KEYS[e.key] && div === "ready" && current && current.kind === "edge") {
+        const allowed = current.row.allowed || [];
+        if (allowed.indexOf(KEYS[e.key]) < 0) {
+          setMsg({ ok: false, text: KEYS[e.key] + " is not allowed for a " + current.row.state + " edge" });
+          return;
+        }
+        e.preventDefault();
+        judge(current.row, KEYS[e.key]);
+      }
+      // Same control, for the collapsed batch row -- members share `allowed`
+      // because they share a state, so member[0]'s is representative of all.
+      else if (KEYS[e.key] && div === "ready" && current && current.kind === "batch") {
+        const allowed = (current.members[0] && current.members[0].allowed) || [];
+        if (allowed.indexOf(KEYS[e.key]) < 0) {
+          setMsg({ ok: false, text: KEYS[e.key] + " is not allowed for a " + current.state + " batch" });
+          return;
+        }
+        e.preventDefault();
+        judgeBatch(current, KEYS[e.key]);
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, [flat, div, current, judge, judgeBatch, undo]);
+
+  const go = (k) => { location.hash = k; setDiv(k); setSel(0); };
+  const n = counts(inbox);
+
+  return html`
+    <header>
+      <h1>propagate</h1>
+      <div class="sum">${inbox
+        ? html`<b>${inbox.declared}</b> declared · <b>${inbox.expanded}</b> expanded`
+        : "loading…"}</div>
+      <div class="session">${judged ? html`<b>${judged}</b> judged this session` : ""}</div>
+    </header>
+
+    <div class="shell">
+      <nav class="rail" aria-label="divisions">
+        ${DIVISIONS.map((x, i) => html`
+          ${i === 4 ? html`<hr /><div class="lbl">reference</div>` : null}
+          <button key=${x.key} class=${"div" + (div === x.key ? " on" : "") + (x.act ? " act" : "")}
+                  onClick=${() => go(x.key)}>
+            ${x.label}
+            <span class=${"n" + (bumped === x.key ? " bump" : "")}>${n[x.key] == null ? "" : n[x.key]}</span>
+          </button>`)}
+      </nav>
+
+      <div class="list">
+        ${fatal ? html`<div class="banner">${fatal}</div>`
+          : !inbox ? [0, 1, 2].map((i) => html`<div class="skel" key=${i}><i /><i /></div>`)
+          : html`<${ListPane} div=${div} flat=${flat} sel=${sel} setSel=${setSel} d=${d}
+                    open=${open} setOpen=${setOpen} />`}
+      </div>
+
+      <div class="detail" key=${div}>
+        <${DetailPane} div=${div} current=${current} d=${d} lazy=${lazy}
+          reason=${reason} setReason=${setReason} judge=${judge} judgeBatch=${judgeBatch} msg=${msg}
+          pending=${pending} reduced=${reduced} onUndo=${undo} />
+      </div>
+    </div>`;
 }
 
-/* Every view says what it is OVER, so a count is never a bare number. */
-function summaryFor() {
-  if (VIEW === "queue") {
-    const d = DATA.queue;
-    return "<b>" + d.items.length + "</b> actionable of " + d.expanded + " edges · <b>" + d.declared + "</b> declared";
+function ListPane({ div, flat, sel, setSel, d, open, setOpen }) {
+  if (div === "analytics" || div === "reference" || div === "gap" || div === "graph") {
+    const label = DIVISIONS.find((x) => x.key === div).label;
+    return html`<div class="empty">${label} is read-only.<br />Its content is on the right.</div>`;
   }
-  if (VIEW === "health") {
-    const h = DATA.health;
-    if (!h || !h.ok) return '<span class="warn">' + esc((h && h.reason) || "no doctor snapshot") + "</span>";
-    const age = Math.round(h.ageMs / 60000);
-    return "<b>" + h.problems + "</b> problem(s) · " + h.sections.length + " sections · snapshot " + age + "m old";
+  const err = div === "parked" ? d.parked.error : d.worklist.error;
+  if (err) return html`<div class="banner">${div} could not be computed — ${err}</div>`;
+
+  if (!flat.length) {
+    // An empty division is not an empty system, so each names what remains.
+    const blockedN = (d.worklist.blocked || []).length;
+    const parkedN = (d.parked.items || []).length;
+    const gone = {
+      ready: html`<b>READY — nothing to judge.</b><br />
+        ${blockedN} in BLOCKED are waiting on edges you just settled; re-check them.<br />
+        ${parkedN} parked, ${d.gap.total} never verified.
+        <br /><button onClick=${() => { location.hash = "blocked"; }}>re-check BLOCKED</button>`,
+      blocked: html`<b>Nothing blocked.</b><br />Every actionable edge is in READY.`,
+      parked: html`<b>Nothing parked.</b><br />A deferred edge lands here with its reason.`,
+    }[div];
+    return html`<div class="empty">${gone}</div>`;
   }
-  if (VIEW === "rules") {
-    const r = DATA.rules;
-    if (!r || r.error) return '<span class="warn">' + esc((r && r.error) || "rules check failed") + "</span>";
-    // THE HUB HALF. A restatement is a contract copied instead of cited, which
-    // is how nine divergent copies of tool-priority happened.
-    return "<b>" + r.findings.length + "</b> restatement(s) across <b>" + r.filesScanned + "</b> files scanned";
-  }
-  if (VIEW === "gotchas") {
-    const g = DATA.gotchas;
-    if (!g || g.error) return '<span class="warn">' + esc((g && g.error) || "could not read the gotchas") + "</span>";
-    const fires = g.entries.filter((e) => e.trigger).length;
-    // Delivery, not volume: an entry with no trigger never fires, and that is
-    // the default for most hazards rather than a defect.
-    return "<b>" + fires + "</b> of " + g.total + " can fire · " + g.files + " file(s), workspace roots";
-  }
-  if (VIEW === "handovers") {
-    const n = DATA.registers && DATA.registers.handovers ? DATA.registers.handovers.length : 0;
-    return "<b>" + n + "</b> open · read-only here (append-only by their own header)";
-  }
-  const s = DATA.issues;
-  return "<b>" + (s && s.counts ? s.counts.noAction : 0) + "</b> items had no action on their line";
+
+  return html`${flat.map((g, i) => {
+    if (g.kind === "batch") {
+      return html`<div key=${g.key}
+              class=${"item grp" + (open[g.key] ? " open" : "") + (i === sel ? " sel" : "")}
+              onClick=${() => { setSel(i); setOpen((o) => Object.assign({}, o, { [g.key]: !o[g.key] })); }}>
+        <span class=${"badge " + g.state}>${g.state.slice(0, 3)}</span>
+        <span class="itxt">
+          <span class="ttl"><span class="caret">&#9656;</span> ${g.node_id} → ${g.members.length} files</span>
+          <span class="meta">one node, one state — writable as a single batch</span>
+        </span>
+      </div>`;
+    }
+    if (g.kind === "parked") {
+      const r = g.row;
+      return html`<div key=${g.key} class=${"item" + (i === sel ? " sel" : "")} onClick=${() => setSel(i)}>
+        <span class="badge none">park</span>
+        <span class="itxt">
+          <span class="ttl">${r.sourceShort} → ${r.downstreamShort}</span>
+          <span class="meta">${r.ageDays == null ? "age unknown" : r.ageDays + "d ago"} · ${r.boundary}</span>
+        </span>
+      </div>`;
+    }
+    return html`<${EdgeRow} key=${g.key} r=${g.row} sel=${i === sel} onClick=${() => setSel(i)} />`;
+  })}`;
 }
 
-/* A HEADLESS TEST CAN REACH THE PURE HELPERS. There is no browser in this
- * repo's test suite and no bundler, so without this the shaping logic --
- * severity extraction, grouping, filtering, title cleaning -- has no check at
- * all. It is a plain assignment on a global that a browser simply ignores. */
+function DetailPane({ div, current, d, lazy, reason, setReason, judge, judgeBatch, msg, pending, onUndo, reduced }) {
+  if (div === "analytics") return html`<${Analytics} data=${lazy.analytics} />`;
+
+  if (div === "graph") {
+    return html`<iframe class="frame" src=${"/graph?token=" + encodeURIComponent(TOKEN)}
+      title="dependency graph" />`;
+  }
+
+  if (div === "gap") {
+    const b = lazy.gap;
+    if (!b) return html`<div class="reason">measuring — a git walk per repo, about a second…</div>`;
+    if (b.error) return html`<div class="banner">${b.error}</div>`;
+    const k = b.buckets;
+    return html`<div>
+      <h2 class="dtitle">${b.total} never verified</h2>
+      <div class="sec">Four outcomes, and one can never clear</div>
+      <${Bars} rows=${[
+        { label: "baselineable now", value: k.baselineable },
+        { label: "no co-commit found", value: k.noCoCommit },
+        { label: "walk bound reached", value: k.boundReached },
+        { label: "cross-repo, PERMANENT", value: k.ineligibleCrossRepo },
+        { label: "examined and parked", value: k.examinedAndDeferred },
+      ]} colorOf=${(r) => (/PERMANENT/.test(r.label) ? "var(--dim)" : "var(--st-accent)")} />
+      <div class="caveat">
+        ${k.ineligibleCrossRepo} are cross-repo. Two independent histories cannot share a commit,
+        so that slice is structural and will never clear. It is not a backlog.
+      </div>
+      ${b.accountedFor ? null
+        : html`<div class="banner">the buckets do not sum to the total — ${b.unaccounted} unaccounted</div>`}
+    </div>`;
+  }
+
+  if (div === "reference") {
+    const r = lazy.reference;
+    if (!r) return html`<div class="reason">walking the registers…</div>`;
+    if (r.error) return html`<div class="banner">${r.error}</div>`;
+    const reg = r.registers || {};
+    return html`<div>
+      <h2 class="dtitle">Registers</h2>
+      <div class="sec">Read-only here</div>
+      <${Bars} rows=${[
+        { label: "open issues", value: (reg.issues || []).length },
+        { label: "open todos", value: (reg.todos || []).length },
+        { label: "handovers", value: (reg.handovers || []).length },
+      ]} colorOf=${() => "var(--edge-reverse)"} />
+      ${reg.counts ? html`<div class="caveat">${reg.counts.noAction} items had no action available on their line</div>` : null}
+    </div>`;
+  }
+
+  if (!current) return html`<div class="empty">Nothing selected.</div>`;
+  const r = current.row;
+
+  if (current.kind === "batch") {
+    // Members share a state, so member[0]'s `allowed` is representative of
+    // every member -- the writer refuses the whole group otherwise (the
+    // server-side validateBatchWrite gate), so offering more here would be a
+    // control that always errors.
+    const allowed = (current.members[0] && current.members[0].allowed) || [];
+    return html`<div>
+      <h2 class="dtitle">${current.node_id}</h2>
+      <div class="dmeta">${current.members.length} edges, all ${current.state}</div>
+      <div class="sec">Batch — one disposition, all ${current.members.length} members</div>
+      <div class="reason">
+        Every member shares a node and a state, so one disposition applies to all of them —
+        which is exactly what <b>verify --node --state</b> accepts. Click the row to expand and
+        judge them individually instead.
+      </div>
+      <div class="act disp">
+        ${allowed.map((a) => html`
+          <button key=${a} onClick=${() => judgeBatch(current, a)}>
+            ${a}${keyFor(a) ? html` <kbd>${keyFor(a)}</kbd>` : null}
+          </button>`)}
+      </div>
+      <textarea value=${reason} onInput=${(e) => setReason(e.target.value)}
+        placeholder=${"why this disposition is correct for all " + current.members.length + " members (required, 12+ characters) — this text lands in the ledger"}></textarea>
+      ${pending ? html`<${Undo} pending=${pending} onUndo=${onUndo} reduced=${reduced} />` : null}
+      ${msg ? html`<div class=${"msg " + (msg.ok ? "ok" : "err")}>${msg.text}</div>` : null}
+      <div class="hint">
+        <kbd>j</kbd><kbd>k</kbd> move · <kbd>n</kbd><kbd>p</kbd><kbd>d</kbd><kbd>r</kbd> judge all · <kbd>u</kbd> undo
+      </div>
+    </div>`;
+  }
+
+  if (current.kind === "parked") {
+    return html`<div>
+      <h2 class="dtitle">${r.sourceShort} → ${r.downstreamShort}</h2>
+      <div class="dmeta">${r.edge_id} · parked ${r.ageDays == null ? "at an unknown time" : r.ageDays + " days ago"}${r.by ? " by " + r.by : ""}</div>
+      <div class="sec">Why it was parked</div>
+      ${r.reason
+        ? html`<div class="ev">${r.reason}</div>`
+        : html`<div class="reason">deferred with no reason recorded — that is a finding, not an absence</div>`}
+    </div>`;
+  }
+
+  if (div === "blocked") {
+    return html`<div>
+      <h2 class="dtitle">${r.sourceShort} → ${r.downstreamShort}</h2>
+      <div class="dmeta">${r.edge_id} · ${r.state} · layer ${r.layer} · ${r.boundary}</div>
+      <div class="sec">Why you cannot judge this yet</div>
+      <div class="reason">
+        ${r.blockedBy.length} unsettled edge(s) upstream. Settling a downstream first pins it
+        against a source that is still moving, and the write path refuses that with exit 3.
+        <ul>${r.blockedBy.slice(0, 8).map((b) => html`
+          <li key=${b.edge_id}>${b.edge_id} — ${short(b.from)} → ${short(b.to)} [${b.state}]</li>`)}</ul>
+      </div>
+      <div class="caveat">
+        This list is not final. Never-verified edges also block but are excluded from the printed
+        worklist, so a further blocker can surface once these clear. Re-check after each settlement.
+      </div>
+    </div>`;
+  }
+
+  return html`<div>
+    <h2 class="dtitle">${r.sourceShort} → ${r.downstreamShort}</h2>
+    <div class="dmeta">${r.edge_id} · ${r.state} · layer ${r.layer} · ${r.boundary}</div>
+    ${r.why ? html`<div class="dmeta" style=${{ marginTop: "6px" }}>${r.why}</div>` : null}
+    <div class="sec">Action</div>
+    <div class="act disp">
+      ${(r.allowed || []).map((a) => html`
+        <button key=${a} onClick=${() => judge(r, a)}>
+          ${a}${keyFor(a) ? html` <kbd>${keyFor(a)}</kbd>` : null}
+        </button>`)}
+    </div>
+    <textarea value=${reason} onInput=${(e) => setReason(e.target.value)}
+      placeholder="why this disposition is correct (required, 12+ characters) — this text lands in the ledger"></textarea>
+    ${pending ? html`<${Undo} pending=${pending} onUndo=${onUndo} reduced=${reduced} />` : null}
+    ${msg ? html`<div class=${"msg " + (msg.ok ? "ok" : "err")}>${msg.text}</div>` : null}
+    <div class="hint">
+      <kbd>j</kbd><kbd>k</kbd> move · <kbd>n</kbd><kbd>p</kbd><kbd>d</kbd><kbd>r</kbd> judge · <kbd>u</kbd> undo
+    </div>
+  </div>`;
+}
+
+/* A headless test can reach the pure helpers. There is no browser and no
+ * bundler in this repo's suite, so without this the shaping logic -- batching,
+ * the gap-breaking path builder, the rail counts -- has no check at all. */
 if (typeof globalThis !== "undefined") {
-  globalThis.__ui = { shape, grouped, filtered, cleanTitle, severityOf, workspaceOf,
-    setData: (d) => { DATA = d; }, setView: (v) => { VIEW = v; },
-    setFilter: (f) => { FILTER = f; }, setQ: (q) => { Q = q; },
-    rows: () => ROWS, sel: () => SEL };
+  globalThis.__ui = { batched, counts, linePath, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody };
 }
 
-load();
+if (typeof document !== "undefined" && document.getElementById("app")) {
+  render(html`<${App} />`, document.getElementById("app"));
+}

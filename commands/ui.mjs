@@ -27,6 +27,15 @@
  * templated reasoning across 15 edges in one batch. A disposition whose reason
  * is "ok" is not cheaper to produce than one with a real sentence, but it is
  * worth much less to the next reader.
+ *
+ * /api/dispose ALSO ACCEPTS A BATCH: {node_id, state, disposition, reason}.
+ * The unit is (node_id, state) TOGETHER — `verify --node --state` is the CLI's
+ * own batch primitive, and a node with mixed states cannot take one
+ * disposition. `validateBatchWrite` refuses the WHOLE group rather than
+ * silently narrowing to the members that happen to match, so a partial
+ * application is never expressible through this endpoint; `applyBatchDispose`
+ * then re-checks each member against freshly reconciled rows and writes one
+ * event per member, all carrying the one reason supplied.
  */
 
 import { createServer } from "node:http";
@@ -76,6 +85,114 @@ export function validateWrite({ edge_id, disposition, reason }, item) {
   return null;
 }
 
+/**
+ * Validate a BATCH disposition request BEFORE anything is written.
+ *
+ * The batch unit is (node_id, state) TOGETHER — `verify --node --state` is
+ * the CLI's own batch primitive, and a node with mixed states cannot take
+ * one disposition. So unlike `validateWrite` above (which is handed the ONE
+ * already-matched item), this is handed EVERY actionable edge currently
+ * sharing `node_id`, at WHATEVER state each one presently reads — never
+ * pre-filtered to `state`, or a mismatch would be silently dropped instead
+ * of refused, which is the one thing a batch write must never do (a partial
+ * application would then be expressible through the filtering itself, not
+ * even through a bug in the write loop).
+ *
+ * Refusal codes split by CATEGORY, not by severity:
+ *   400 — wrong regardless of current state (a missing field, a disposition
+ *         the state doesn't accept, too short a reason). Same category
+ *         `validateWrite` above already uses 400 for.
+ *   409 — wrong BECAUSE current state disagrees with the request (no
+ *         members, or the members aren't uniform). Same category the
+ *         write path below uses 409 for ("edge vanished between render and
+ *         write") — both are the server's fresher read overruling the
+ *         browser's.
+ *
+ * @param {{node_id?: string, state?: string, disposition?: string, reason?: string}} body
+ * @param {Array<{edge_id: string, state: string, allowed: string[]}>} members
+ * @returns {{code: number, error: string}|null}
+ */
+export function validateBatchWrite({ node_id, state, disposition, reason }, members) {
+  if (!node_id) return { code: 400, error: "node_id is required" };
+  if (!state) return { code: 400, error: "state is required" };
+  if (!disposition) return { code: 400, error: "disposition is required" };
+  if (!members.length) {
+    return {
+      code: 409,
+      error: `no actionable edges for node ${node_id} — they may have been disposed in another window; reload`,
+    };
+  }
+  const off = members.filter((m) => m.state !== state);
+  if (off.length) {
+    const seen = [...new Set(off.map((m) => m.state))].join(", ");
+    return {
+      code: 409,
+      error: `${node_id} is not uniformly ${state} — ${off.length} of ${members.length} member(s) are ` +
+        `${seen}; a mixed-state node cannot take one disposition. reload`,
+    };
+  }
+  if (!members[0].allowed.includes(disposition)) {
+    return { code: 400, error: `${state} edges do not accept "${disposition}" — allowed: ${members[0].allowed.join(", ")}` };
+  }
+  const r = String(reason ?? "").trim();
+  if (r.length < 12) {
+    return {
+      code: 400,
+      error: "a reason of at least 12 characters is required — this UI is stricter than the CLI on purpose; a one-click write with no reason is how an append-only store fills with judgements nobody can audit",
+    };
+  }
+  return null;
+}
+
+/**
+ * Write a batch: one event per member of an already-validated (node_id,
+ * state) group, all carrying the SAME reason. Every member is re-checked
+ * against `rows` — freshly reconciled, NOT `members` (which came from the
+ * snapshot `validateBatchWrite` was run against) — because the two reads are
+ * seconds apart and a member can move between them even after the group
+ * passed the uniform-state gate.
+ *
+ * `appendEvent` / `buildEventPayload` / `divergedGuard` arrive as
+ * parameters rather than module-level imports so this is directly
+ * unit-testable against a fake writer — the same reason cli.mjs's
+ * `computeVerifyAfterWrite` takes `afterRows` as an argument instead of
+ * calling `reconcile()` itself.
+ *
+ * @returns {Promise<{ok: boolean, results: Array<{edge_id: string, ok: boolean, event_id?: string, error?: string}>}>}
+ *   `ok` is the AND of every member's own `ok` — NEVER true when one member
+ *   failed, so a partial failure cannot read as a bare success. `results` is
+ *   always the full per-`edge_id` array, never collapsed to a count, so a
+ *   partial failure is legible by which edge it was.
+ */
+export async function applyBatchDispose({ body, members, rows, appendEvent, buildEventPayload, divergedGuard, by }) {
+  const byEdgeId = new Map((rows ?? []).map((r) => [r.edge_id, r]));
+  const reason = String(body.reason).trim();
+  const results = [];
+  for (const m of members) {
+    const row = byEdgeId.get(m.edge_id);
+    if (!row) {
+      results.push({ edge_id: m.edge_id, ok: false, error: "edge vanished between render and write — reload" });
+      continue;
+    }
+    if (row.state !== body.state) {
+      results.push({ edge_id: m.edge_id, ok: false, error: `edge moved to ${row.state} since selection — reload` });
+      continue;
+    }
+    const guard = divergedGuard(row.state, body.disposition);
+    if (guard) {
+      results.push({ edge_id: m.edge_id, ok: false, error: guard });
+      continue;
+    }
+    try {
+      const stamped = await appendEvent(buildEventPayload(row, body.disposition, reason, by));
+      results.push({ edge_id: m.edge_id, ok: true, event_id: stamped.event_id });
+    } catch (err) {
+      results.push({ edge_id: m.edge_id, ok: false, error: String(err?.message ?? err) });
+    }
+  }
+  return { ok: results.every((r) => r.ok), results };
+}
+
 
 export function page(token) {
   // THE TEMPLATE LITERAL IS NOW A SHELL, not a program. The CSS and the client
@@ -96,17 +213,20 @@ export function page(token) {
   // It is JSON-encoded, and it is 48 hex characters minted by randomBytes -- but
   // the encoding is what makes that a property of the value rather than a thing
   // to remember.
-  const css = readFileSync(new URL("./ui.css", import.meta.url), "utf8");
-  const js = readFileSync(new URL("./ui.client.js", import.meta.url), "utf8");
+  const read = (f) => readFileSync(new URL("./" + f, import.meta.url), "utf8");
+  // Three vendored globals BEFORE the client, in their own script tags. Separate
+  // tags rather than one concatenation so a syntax error in one cannot silently
+  // take the others with it -- and so the browser attributes the error to a file.
+  const vendor = ["vendor/preact.js", "vendor/hooks.js", "vendor/htm.js"].map(read);
   return [
-    '<!doctype html><html><head><meta charset="utf-8"><title>propagate</title>',
-    "<style>", css, "</style></head>",
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    "<title>propagate</title>",
+    "<style>", read("ui.css"), "</style></head>",
     "<body data-token=", JSON.stringify(token), ">",
-    '<header><h1>propagate</h1><nav id="nav"></nav><div class="sum" id="sum">loading…</div></header>',
-    '<div class="filters"><div id="chips" style="display:flex;gap:7px;flex-wrap:wrap"></div>',
-    '<input id="q" placeholder="filter (/)" autocomplete="off"></div>',
-    '<div class="panes"><div class="list" id="list"></div><div class="detail" id="detail"></div></div>',
-    "<script>", js, "</script></body></html>",
+    '<div id="app"></div>',
+    ...vendor.flatMap((v) => ["<script>", v, "</script>"]),
+    "<script>", read("ui.client.js"), "</script></body></html>",
   ].join("");
 }
 
@@ -124,6 +244,15 @@ export async function uiCmd(argv = [], io = console) {
   const { readSnapshot } = await import("../lib/report/doctor/snapshot.mjs");
   const { divergedGuard, buildEventPayload } = await import("../lib/edges/disposition.mjs");
   const { defaultDeps } = await import("../lib/report/queue.mjs");
+  // TWO MODULES EXPORT defaultDeps AND THEY ARE NOT INTERCHANGEABLE.
+  // queue.mjs's has {reconcile, loadWorkspaces}; inbox.mjs's adds
+  // historyByEdge, planBaseline and registerQueue. Passing the first to
+  // inboxPayload returns a 500 that no unit test can see, because every test
+  // injects its own deps and therefore never exercises either default.
+  const inbox = await import("../lib/report/inbox.mjs");
+  const { inboxPayload, referencePayload, baselineBuckets } = inbox;
+  const inboxDeps = await inbox.defaultDeps();
+  const { analyticsPayload } = await import("../lib/report/analytics.mjs");
   const deps = await defaultDeps();
 
   const server = createServer(async (req, res) => {
@@ -158,6 +287,33 @@ export async function uiCmd(argv = [], io = console) {
       const refusal = guardRequest(req, TOKEN, port);
       if (refusal) return send(403, { ok: false, error: refusal });
 
+      /* ── THE FIVE DIVISIONS ────────────────────────────────────────────
+         Three endpoints, split by COST rather than by topic. Measured:
+
+           inbox      343 ms   READY / BLOCKED / PARKED / GAP total
+           reference  188 ms   the register walk — nobody acts in it
+           baseline  1052 ms   a git walk per repo, for the four buckets
+           analytics   55 ms   33 days of metrics already on disk
+
+         Putting all of it on first paint would cost more than the 1452 ms this
+         work set out to fix. What loads immediately is what you act on. */
+      if (url.pathname === "/api/inbox") {
+        try { return send(200, await inboxPayload({ root, deps: inboxDeps })); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+      if (url.pathname === "/api/reference") {
+        try { return send(200, await referencePayload({ deps: inboxDeps })); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+      if (url.pathname === "/api/baseline") {
+        try { return send(200, await baselineBuckets({ deps: inboxDeps })); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+      if (url.pathname === "/api/analytics") {
+        try { return send(200, await analyticsPayload({ root })); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
       if (url.pathname === "/api/queue") {
         try { return send(200, await queuePayload({ root, deps })); }
         catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
@@ -167,6 +323,41 @@ export async function uiCmd(argv = [], io = console) {
         let raw = "";
         for await (const c of req) raw += c;
         let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
+
+        // BATCH: {node_id, state, disposition, reason}. Checked on node_id's
+        // presence, BEFORE the single-edge path, so a batch body (which has
+        // no edge_id of its own) is never misread as an incomplete
+        // single-edge request.
+        if (body.node_id !== undefined) {
+          const payloadNow = await queuePayload({ root, deps });
+          // EVERY actionable edge currently sharing node_id, at WHATEVER
+          // state each one reads — never pre-filtered to body.state, or a
+          // mixed-state group would be silently narrowed instead of refused.
+          const members = payloadNow.items.filter((i) => i.node_id === body.node_id);
+          const invalid = validateBatchWrite(body, members);
+          if (invalid) return send(invalid.code, { ok: false, error: invalid.error });
+
+          // Re-derive AGAIN right before writing, same discipline as the
+          // single-edge path below: payloadNow is itself fresh, but a human
+          // reading a batch row and clicking is seconds behind even that.
+          const workspaces = await deps.loadWorkspaces();
+          const { rows } = await deps.reconcile(workspaces, {});
+          const result = await applyBatchDispose({
+            body,
+            members,
+            rows,
+            appendEvent,
+            buildEventPayload,
+            divergedGuard,
+            by: `${process.env.USER || "ui"} (ui)`,
+          });
+          // 200 only when every member landed. A partial failure still
+          // returns 200-shaped JSON with ok:false plus the per-edge_id
+          // array — never a bare {ok:true} that hides which member failed —
+          // so 207 (Multi-Status) marks the mixed case at the transport
+          // level too, for a client that only checks the status code.
+          return send(result.ok ? 200 : 207, result);
+        }
 
         const payloadNow = await queuePayload({ root, deps });
         const item = payloadNow.items.find((i) => i.edge_id === body.edge_id);

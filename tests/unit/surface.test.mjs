@@ -436,3 +436,42 @@ test("every row declares whether it is live or from the snapshot", () => {
   assert.equal(rows.find((r) => r.key === "drift").source, "live");
   assert.equal(rows.find((r) => r.key === "Delivery").source, "snapshot");
 });
+
+// ── the headline counts READY, not actionable ──────────────────────────────
+
+test("the headline reports READY once the fix-order join is present", () => {
+  // 18 of 49 actionable edges have an unsettled ancestor and cli.mjs refuses
+  // them with exit 3. "49 actionable" overstates the available work by 37% and
+  // walks a person into a refusal the page could have predicted.
+  const q = queueOf([
+    { ...item({ edge_id: "r1" }), blocked: false },
+    { ...item({ edge_id: "r2" }), blocked: false },
+    { ...item({ edge_id: "b1" }), blocked: true },
+  ]);
+  const row = buildEdgeRows(q)[0];
+  assert.equal(row.value, 2, "two unblocked, not three actionable");
+  assert.equal(row.unit, "ready");
+  assert.match(row.detail, /1 blocked/, "the other half is named, never dropped");
+});
+
+test("without the join it reports the actionable total and SAYS so", () => {
+  // The fallback is deliberate. A payload predating the join cannot tell READY
+  // from BLOCKED, and relabelling an unsplit number as "ready" would be the
+  // count lying about what it counted (rule:discernment-checks §5). Every
+  // fixture above this line exercises exactly this path, which is why none of
+  // them changed when the headline did.
+  const row = buildEdgeRows(queueOf([item({ edge_id: "a" }), item({ edge_id: "b" })]))[0];
+  assert.equal(row.value, 2);
+  assert.equal(row.unit, "actionable", "not 'ready' — it does not know which are ready");
+  assert.doesNotMatch(row.detail ?? "", /blocked/, "and it claims nothing about blocking");
+});
+
+test("a partially-joined payload takes the honest fallback, not a wrong split", () => {
+  // One row joined and one not is a join failure, not a 1-ready result.
+  const row = buildEdgeRows(queueOf([
+    { ...item({ edge_id: "a" }), blocked: false },
+    item({ edge_id: "b" }),
+  ]))[0];
+  assert.equal(row.unit, "actionable");
+  assert.equal(row.value, 2);
+});

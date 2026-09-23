@@ -1,5 +1,85 @@
 # propagate — State
 
+## Five divisions, a design system, and a page that runs — 2026-09-21, uncommitted
+
+The 2026-09-17 surface showed what propagate collects. This changes what it shows it AS:
+eight tabs were a taxonomy of data SOURCES, and nobody opens the page thinking "I will do
+some handovers" — they think "what is blocked on me", and no tab answered that.
+
+**Derive every number below; none of them is written here** (`rule:state-and-decisions`):
+
+```sh
+node cli.mjs ui                      # then open the printed URL
+curl -s "$URL/api/inbox" | jq '.divisions.worklist | {ready:(.ready|length),blocked:(.blocked|length),actionable}'
+curl -s "$URL/api/analytics" | jq '.coverage'
+npm test                             # never `node --test` bare — G56
+```
+
+| piece | where |
+|---|---|
+| the five divisions, from ONE reconcile pass | `lib/report/inbox.mjs` |
+| OKLCH, contrast, deuteranopia — one implementation | `lib/report/color.mjs` |
+| charts from `metrics.jsonl` + the event store | `lib/report/analytics.mjs` |
+| the design system, and what is NOT in it | `DESIGN.md` (repo root) |
+| the page: Preact + htm, vendored as UMD globals | `commands/ui.client.js`, `commands/vendor/` |
+| judging from the desktop, guarded | `widget/judge.sh` + the widget's arm-then-confirm |
+| a DOM small enough to render Preact headlessly | `tests/helpers/minidom.mjs` |
+
+**READY is the only division with a write form**, because `cli.mjs` refuses an
+out-of-order edge with exit 3 — offering every actionable edge the same form walks a
+person into a refusal the page could have predicted. BLOCKED lists its blockers and says
+the list is not final: never-verified edges also block but are excluded from the printed
+worklist, so a further one can surface once these clear.
+
+**Three endpoints are lazy on purpose**, measured: `/api/reference` ~300 ms,
+`/api/baseline` ~1700 ms (a git walk per repo), `/api/analytics` ~30 ms. Only
+`/api/inbox` is on first paint.
+
+### What this cost, and the shape it kept finding
+
+One defect recurred **four times in one day**: a value the code can emit that the
+stylesheet or the client has no rule for. None of them errors — the element renders with
+no background, or the animation silently does not run.
+
+| where | what |
+|---|---|
+| widget bars | `toneFor` emits five tones; the widget styled four. Six of ten bars drew in the same grey as their own empty track |
+| chart draw-in | the CSS read a `--len` that nothing set |
+| `ui.css` badges | `ACTIONABLE` holds four states; three had rules. UNMATCHED rendered white-on-white |
+| `headline.label` | hardcoded "actionable" while its own row had become "ready" |
+
+All four now have mutation-gated tests. The widget also gained a real syntax check —
+Übersicht ships `@babel/parser`, so the test parses the widget with **the exact parser
+that compiles it**, and skips with a stated reason on a machine without Übersicht.
+
+### Filed 2026-09-21 — derive the dispositions, do not read them here
+
+**`propagation/state/workspace/ISSUES.md` is the record; this is a summary of it.** Check
+there before acting on anything below — this paragraph has already been wrong once:
+
+```sh
+grep -nE "^### N(89|90|91)" propagation/state/workspace/ISSUES.md   # the disposition is in the heading
+```
+
+**N89 (S2) — RESOLVED 2026-09-21, in this same uncommitted change.** `STATE_SEVERITY` and
+`severityRank()` moved to `lib/graph/graph.mjs`; `fixOrder` sorts by rank before name, and
+`graph-html.mjs` now imports that one ranking instead of holding the only copy. Gated by
+`tests/unit/queue-order.test.mjs` — "within a layer, REVERSED outranks DRIFTED" plus "the
+renderer and the model share ONE ranking".
+
+**N90 (S3)** and **N91 (S2)** remain open: `duplicatePairs` has no disposition path (live
+count 0), and `doctor.duration_ms` spikes of 18–24 min recur.
+
+> **Why this section now names a command instead of a status.** It said N89 was "the one
+> that matters" while ISSUES.md had marked it RESOLVED the same day. On 2026-09-23 a
+> session read that, believed a fixed S2 defect was live, and started re-fixing code that
+> already carried its own regression test. Nothing caught it — `check --changed` named
+> four coupled files and STATE.md was not among them, because the coupling was never
+> declared. It is now (`.propagates.yml`, `ISSUES.md -> STATE.md`), verified firing.
+
+Not built: the two remaining lazy divisions have no write paths by design, and
+`rules promote` is still N64.
+
 ## The one surface — 2026-09-17, shipped
 
 Eight steps, `15f6ca3f` … `aa71350`. What propagate SHOWS now matches what it collects,

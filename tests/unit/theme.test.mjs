@@ -1,95 +1,101 @@
 /**
- * Both themes, and two colour families that never share a hex.
+ * One wheel, three surfaces, two themes — asserted on RESOLVED colour.
  *
- * WHY THIS FILE EXISTS. Both surfaces shipped dark-only, through a design review
- * that specifically scored accessibility 3 → 9. The review looked at a sketch,
- * and the sketch was the sibling widget's DARK branch over a fake dark desktop —
- * so a missing light theme was not visible in the artefact under review (G66).
+ * WHY THIS FILE KEEPS GROWING, IN ORDER. Each block below was added after a
+ * defect shipped through the blocks above it:
  *
- * Meanwhile this repo's own `lib/graph/graph-html.mjs` already stated the rule —
- * *"No colour gets its only definition inside a media query"* — and the widget's
- * footer links to that page.
+ *   structure   every token defined in both themes, no hex shared across the
+ *               two families. Shipped: SIX unreadable light values, because
+ *               structure is not legibility.
+ *   contrast    every token >= 4.5:1 on its declared ground. Shipped: DRIFTED
+ *               and DIVERGED indistinguishable to a deuteranope at separation
+ *               17, because contrast is between a colour and its BACKGROUND
+ *               and this failure is between two FOREGROUNDS.
+ *   cvd + hue   the current floor. Five of seven tokens had sat inside a
+ *               43-degree arc with two of them 2 degrees apart.
  *
- * The sibling widget enforces its palette with a test, and that is precisely why
- * its theming has not rotted while this one never existed (G67). This is that
- * test, ported, plus the family check for the defect that prompted it:
- *
- *   --caution  #e0a53a  bar fill      ordinal "needs attention"
- *   --DRIFTED  #e0a53a  grid cell     one edge state
- *
- * Two hexes each carrying two meanings on one card. Invisible in a rendering,
- * obvious in the token table — which is why it needs a test and not an eye.
+ * The palette is now authored in OKLCH with relative derivation, so a token's
+ * value is no longer a hex a regex can read. Everything here resolves through
+ * lib/report/color.mjs — which is itself pinned, in tests/unit/color.test.mjs,
+ * to numbers measured before it existed. That matters: a resolver returning
+ * plausible-but-wrong colours would make every assertion below pass over a
+ * palette nobody checked.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-const read = (rel) => readFileSync(path.join(import.meta.dirname, "../..", rel), "utf8");
+import {
+  contrast, deuteranope, rgbDistance, resolveColor, rgbToOklch,
+  declarations, alphaOf, MIN_CVD_SEPARATION,
+} from "../../lib/report/color.mjs";
 
-/** Geometry, never colour. These are declared ONCE and must not be themed. */
-const THEME_INDEPENDENT = new Set(["--s1", "--s2", "--s3", "--s4", "--s5", "--r-shell", "--r-core"]);
+const read = (rel) => readFileSync(path.join(import.meta.dirname, "../..", rel), "utf8");
+const used = (css) => new Set([...css.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m) => m[1]));
 
 /**
- * COMMENTS ARE STRIPPED FIRST, and that is not tidiness.
+ * Set per-element by the CLIENT, never declared in CSS.
  *
- * The first version parsed raw text, and a comment reading "S3 takes --dim:
- * least severe gets no hue" matched as a DECLARATION named --dim whose value ran
- * to the next semicolon — swallowing the real `--on-fill: #ffffff;` that
- * followed it. The checker then reported --on-fill as undefined in light, which
- * was a defect in the checker and looked exactly like a defect in the CSS.
+ * A third category, distinct from "declared once and not themed": these have
+ * no declaration to find, so the both-themes check would report them missing
+ * forever. --len is each chart path's measured length, which only the browser
+ * can know; the draw-in animation reads it as its dash offset.
  *
- * Prose about tokens is the normal way to document a palette, so a parser that
- * cannot tell prose from code will keep being wrong here.
+ * THE OBLIGATION THIS CREATES: a token in here that the client does not
+ * actually set is a reference to nothing, and the animation silently does not
+ * run. commands/ui.client.js is asserted to supply every one of these, below.
  */
-const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+const RUNTIME_SET = new Set(["--len"]);
 
-/** `--name: value;` pairs inside a chunk of CSS. */
-function decls(css) {
-  const out = new Map();
-  for (const m of strip(css).matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) out.set(m[1], m[2].trim());
-  return out;
-}
-const used = (css) => new Set([...strip(css).matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m) => m[1]));
+/** Geometry and timing, declared once and never themed. */
+const NOT_THEMED = new Set([
+  "--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--r1", "--r2", "--r3",
+  "--r-shell", "--r-core", "--ease",
+  "--t-fast", "--t-base", "--t-row", "--t-slow", "--t-draw", "--t-undo",
+  "--h-ok", "--h-caution", "--h-warn", "--h-accent", "--h-drift", "--h-reverse", "--h-diverge",
+]);
 
 /**
  * Split a source into its light base and EVERY dark block.
  *
- * ui.css has TWO dark blocks on purpose — the media query for automatic dark,
- * and `[data-theme="dark"]` so an explicit toggle can win. A token present in
- * only one of them is broken in exactly one of those two paths, silently.
- *
- * The first version of this helper lumped everything after the media query into
- * one "dark" map, so deleting a token from the media block still passed because
- * the attribute block below it still had one. The mutation gate caught that:
- * gates 2 and 3 went red and gate 1 did not, which is the only reason anyone
- * looked. A gate that only fires for some mutations is reporting on the
- * mutations it fires for, not on the check.
+ * ui.css has TWO on purpose — the media query for automatic dark, and
+ * [data-theme="dark"] so an explicit toggle wins. A token in only one is broken
+ * in exactly one path, silently. An earlier version lumped them together, so
+ * deleting a token from the media block still passed; the mutation gate caught
+ * it because gates 2 and 3 went red and gate 1 did not.
  */
-function themes(css, { darkStarts }) {
+function themes(css, darkStarts) {
   const first = Math.min(...darkStarts.map((d) => {
     const i = css.indexOf(d);
     assert.notEqual(i, -1, `no dark block matching ${JSON.stringify(d)} — this check has gone blind`);
     return i;
   }));
+  const light = declarations(css.slice(0, first));
   const darks = darkStarts.map((d) => {
     const i = css.indexOf(d);
-    // To the end of THIS block: the attribute form is one rule, the media form
-    // wraps one, so a brace scan from the selector is the honest boundary.
-    let depth = 0, j = css.indexOf("{", i), k = j;
+    let depth = 0, k = css.indexOf("{", i);
     for (; k < css.length; k += 1) {
       if (css[k] === "{") depth += 1;
       else if (css[k] === "}") { depth -= 1; if (depth === 0) break; }
     }
-    return { name: d, map: decls(css.slice(i, k + 1)) };
+    // A dark block redefines only what changes; the rest cascades from light,
+    // which is how a browser resolves it.
+    return { name: d, map: new Map([...light, ...declarations(css.slice(i, k + 1))]), own: declarations(css.slice(i, k + 1)) };
   });
-  return { light: decls(css.slice(0, first)), darks, dark: darks[0].map };
+  return { light, darks };
 }
 
 const SURFACES = [
   {
+    name: "commands/ui.css",
+    css: read("commands/ui.css"),
+    darkStarts: ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]'],
+    ground: { light: "--bg", dark: "--bg" },
+    onFill: "--on-fill",
+  },
+  {
     name: "widget/propagate-queue.jsx",
-    // Only the className template literal is CSS.
     css: (() => {
       const s = read("widget/propagate-queue.jsx");
       const i = s.indexOf("export const className = `") + "export const className = `".length;
@@ -98,109 +104,243 @@ const SURFACES = [
       return s.slice(i, j);
     })(),
     darkStarts: ["@media (prefers-color-scheme: dark)"],
-  },
-  {
-    name: "commands/ui.css",
-    css: read("commands/ui.css"),
-    // BOTH, and both must be complete.
-    darkStarts: ["@media (prefers-color-scheme: dark)", ":root[data-theme=\"dark\"]"],
+    // Ubersicht window material: a translucent gradient over the wallpaper, so
+    // there is no --bg token to read. These are that composite at its least
+    // opaque stop over an appearance-matched desktop — the realistic worst
+    // case, not the flattering one. An earlier version read --bg, found
+    // nothing, and said so rather than passing; that is how the widget's own
+    // --st-accent failure was found.
+    ground: { light: "#fdfbfa", dark: "#151517" },
+    // The widget's state indicators are 7x7px swatches, never text on a fill.
+    // A claim, asserted below, not an omission.
+    onFill: null,
   },
 ];
 
+const SEMANTIC = ["--st-ok", "--st-caution", "--st-warn", "--st-accent",
+  "--edge-drift", "--edge-reverse", "--edge-diverge"];
+
+/** Resolve, or report WHY not. Never returns a plausible default. */
+function tryResolve(value, vars) {
+  try { return { hex: resolveColor(value, vars), alpha: alphaOf(value) }; }
+  catch (err) { return { hex: null, why: String(err.message) }; }
+}
+
 for (const s of SURFACES) {
-  test(`${s.name}: every token actually used is defined in BOTH themes`, () => {
-    // The rule from graph-html.mjs, asserted: no colour gets its only definition
-    // inside a media query. A token defined only in dark renders as nothing in
-    // light — an invisible bar, an unstyled badge — with no error anywhere.
-    const { light, darks } = themes(s.css, s);
+  const view = () => themes(s.css, s.darkStarts);
+
+  test(`${s.name}: every token used is defined in BOTH themes`, () => {
+    const { light, darks } = view();
     const missing = [];
     for (const tok of used(s.css)) {
-      if (THEME_INDEPENDENT.has(tok)) continue;
+      if (NOT_THEMED.has(tok) || RUNTIME_SET.has(tok)) continue;
       if (!light.has(tok)) { missing.push(`${tok} — used but NOT defined in light`); continue; }
-
-      // AN ALIAS IS THEMED THROUGH ITS TARGET. `--sev-1: var(--st-warn)` needs
-      // no dark redefinition: the var() resolves at use time, so it already
-      // follows whatever --st-warn is under the active theme. Requiring a
-      // second declaration would be asking for a copy that can then disagree.
-      // The target must itself be themed, which is checked rather than assumed.
-      const alias = /^var\((--[a-z0-9-]+)\)$/.exec(light.get(tok));
-      if (alias) {
-        const target = alias[1];
-        const themedTarget = light.has(target) && darks.every((d) => d.map.has(target));
-        if (!THEME_INDEPENDENT.has(target) && !themedTarget) {
-          missing.push(`${tok} aliases ${target}, which is NOT themed — the alias inherits a light-only value`);
-        }
-        continue;
-      }
+      // Inheritance is legitimate: a dark block that does not redefine a token
+      // gets the light one, and requiring a copy would invite the two to
+      // disagree. What must hold is that it RESOLVES under every theme.
       for (const d of darks) {
-        if (!d.map.has(tok)) missing.push(`${tok} — defined in light but missing from ${d.name}`);
+        if (!d.map.has(tok)) missing.push(`${tok} — unresolvable under ${d.name}`);
       }
     }
     assert.deepEqual(missing, [], `${s.name}\n  ${missing.join("\n  ")}`);
   });
 
-  test(`${s.name}: geometry is declared once and never themed`, () => {
-    const { darks } = themes(s.css, s);
-    const themed = [...THEME_INDEPENDENT].filter((t) => darks.some((d) => d.map.has(t)));
-    assert.deepEqual(themed, [], `these are geometry, not colour, and must not be redefined per theme: ${themed.join(", ")}`);
+  test(`${s.name}: geometry and timing are declared once, never themed`, () => {
+    const { darks } = view();
+    const themed = [...NOT_THEMED].filter((t) => darks.some((d) => d.own.has(t)));
+    assert.deepEqual(themed, [], `these are not colour and must not be redefined per theme: ${themed.join(", ")}`);
   });
 
-  test(`${s.name}: no hex is shared between the STATUS and EDGE-STATE families`, () => {
-    // THE DEFECT THIS WHOLE FILE IS FOR. Status is ordinal (how bad); edge state
-    // says which side moved. Sharing a hex makes amber mean both, and a reader
-    // cannot tell which question the colour is answering.
-    const { light, dark } = themes(s.css, s);
-    for (const [theme, d] of [["light", light], ["dark", dark]]) {
-      const status = new Map();
-      const edge = new Map();
-      for (const [k, v] of d) {
-        if (/^--st-/.test(k)) status.set(k, v.toLowerCase());
-        if (/^--edge-(drift|reverse|diverge)$/.test(k)) edge.set(k, v.toLowerCase());
+  test(`${s.name}: every semantic token clears 4.5:1 on its declared ground`, () => {
+    const { light, darks } = view();
+    const fails = [];
+    for (const [key, theme, map] of [["light", "light", light], ...darks.map((d) => ["dark", d.name, d.map])]) {
+      const decl = s.ground[key];
+      const bg = decl.startsWith("--") ? tryResolve(map.get(decl), map).hex : decl;
+      assert.ok(bg, `${theme}: ground ${decl} did not resolve — this check has gone blind`);
+      for (const tok of SEMANTIC) {
+        const r = tryResolve(map.get(tok), map);
+        assert.ok(r.hex, `${theme}: ${tok} did not resolve — ${r.why}`);
+        // A translucent colour has no contrast of its own; the answer depends
+        // on the backdrop. Excluded rather than measured wrongly.
+        if (r.alpha < 1) continue;
+        const v = contrast(r.hex, bg);
+        if (v < 4.5) fails.push(`${theme}: ${tok} ${r.hex} on ${bg} is ${v.toFixed(2)}`);
       }
-      assert.ok(status.size >= 3, `${theme}: expected a status family, found ${status.size}`);
-      assert.ok(edge.size >= 3, `${theme}: expected an edge-state family, found ${edge.size}`);
-      const clashes = [];
-      for (const [ek, ev] of edge) {
-        for (const [sk, sv] of status) if (ev === sv) clashes.push(`${ek} and ${sk} are both ${ev} (${theme})`);
-      }
-      assert.deepEqual(clashes, [], `one hex, two meanings:\n  ${clashes.join("\n  ")}`);
     }
+    assert.deepEqual(fails, [], `unreadable:\n  ${fails.join("\n  ")}`);
   });
 
-  test(`${s.name}: no colour is hardcoded outside the palette blocks`, () => {
-    // A literal in a rule cannot respond to the theme. Every one of these was a
-    // real light-mode bug: `color: #06080b` on a badge is near-black ink on the
-    // light palette's dark rust fill.
-    const last = Math.max(...s.darkStarts.map((d) => s.css.lastIndexOf(d)));
-    const afterPalette = s.css.slice(last);
-    const body = afterPalette.slice(afterPalette.indexOf("}") + 1);
-    const hard = [...body.matchAll(/(?:color|background(?:-color)?)\s*:\s*(#[0-9a-fA-F]{3,8})/g)].map((m) => m[1]);
-    assert.deepEqual(hard, [], `hardcoded and therefore theme-blind: ${hard.join(", ")}`);
+  test(`${s.name}: ink on a saturated fill clears 4.5:1, or the surface declares it has none`, () => {
+    if (s.onFill === null) {
+      assert.doesNotMatch(s.css, /\.badge\b/,
+        "the widget grew a filled text badge — it now needs an --on-fill and a ratio");
+      return;
+    }
+    const { light, darks } = view();
+    const fails = [];
+    for (const [theme, map] of [["light", light], ...darks.map((d) => [d.name, d.map])]) {
+      const ink = tryResolve(map.get(s.onFill), map).hex;
+      assert.ok(ink, `${theme}: ${s.onFill} did not resolve — this check has gone blind`);
+      for (const tok of SEMANTIC) {
+        const r = tryResolve(map.get(tok), map);
+        if (!r.hex || r.alpha < 1) continue;
+        const v = contrast(ink, r.hex);
+        if (v < 4.5) fails.push(`${theme}: ${s.onFill} ${ink} on ${tok} ${r.hex} is ${v.toFixed(2)}`);
+      }
+    }
+    assert.deepEqual(fails, [], `unreadable badges:\n  ${fails.join("\n  ")}`);
+  });
+
+  test(`${s.name}: the three edge states stay distinct under deuteranopia`, () => {
+    // They render as small swatches with no text, so colour is the ONLY channel
+    // carrying the distinction. The pair that shipped scored 17.
+    const { light, darks } = view();
+    const toks = ["--edge-drift", "--edge-reverse", "--edge-diverge"];
+    const fails = [];
+    for (const [theme, map] of [["light", light], ...darks.map((d) => [d.name, d.map])]) {
+      for (let i = 0; i < toks.length; i += 1) {
+        for (let j = i + 1; j < toks.length; j += 1) {
+          const a = tryResolve(map.get(toks[i]), map).hex;
+          const b = tryResolve(map.get(toks[j]), map).hex;
+          if (!a || !b) continue;
+          const d = rgbDistance(deuteranope(a), deuteranope(b));
+          if (d < MIN_CVD_SEPARATION) {
+            fails.push(`${theme}: ${toks[i]} ${a} and ${toks[j]} ${b} are ${d.toFixed(0)} apart, need ${MIN_CVD_SEPARATION}`);
+          }
+        }
+      }
+    }
+    assert.deepEqual(fails, [], `a deuteranope cannot tell these apart:\n  ${fails.join("\n  ")}`);
+  });
+
+  test(`${s.name}: no two semantic hues collide`, () => {
+    // --st-accent and --edge-drift were 2 degrees apart while the structural
+    // tests asserted the two families never share a hex. Sharing a HUE is the
+    // same defect one step out, and nothing was watching for it.
+    const { light } = view();
+    const hues = SEMANTIC
+      .map((t) => [t, rgbToOklch(tryResolve(light.get(t), light).hex).H])
+      .filter(([, h]) => h !== null)
+      .sort((a, b) => a[1] - b[1]);
+    assert.equal(hues.length, SEMANTIC.length, "every semantic token must carry a real hue");
+    const tight = [];
+    for (let i = 0; i < hues.length; i += 1) {
+      const next = hues[(i + 1) % hues.length];
+      let gap = next[1] - hues[i][1];
+      if (gap < 0) gap += 360;
+      if (gap < 25) tight.push(`${hues[i][0]} (${hues[i][1].toFixed(0)}deg) and ${next[0]} (${next[1].toFixed(0)}deg) are ${gap.toFixed(0)}deg apart`);
+    }
+    assert.deepEqual(tight, [], `hues too close to tell apart:\n  ${tight.join("\n  ")}`);
   });
 }
 
-test("the widget and the web UI agree on what each edge state looks like", () => {
-  // They render the same data side by side, and the widget's footer links to the
-  // graph page these values came from. Three surfaces, one meaning per colour.
-  const w = themes(SURFACES[0].css, SURFACES[0]);
-  const u = themes(SURFACES[1].css, SURFACES[1]);
-  for (const theme of ["light", "dark"]) {
-    for (const tok of ["--edge-drift", "--edge-reverse", "--edge-diverge"]) {
-      assert.equal(w[theme].get(tok), u[theme].get(tok), `${tok} differs between the widget and the web UI in ${theme}`);
+// ── one wheel, not three ───────────────────────────────────────────────────
+
+test("all three surfaces resolve the wheel to the SAME colours", () => {
+  // They render the same data side by side and the widget links to the graph
+  // page. Two near-identical palettes generated against two slightly different
+  // grounds is exactly the bug this caught once already.
+  const ui = themes(read("commands/ui.css"), ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);
+  const wi = themes(SURFACES[1].css, ["@media (prefers-color-scheme: dark)"]);
+  const graph = read("lib/graph/graph-html.mjs");
+  const graphName = { "--edge-drift": "--drift", "--edge-reverse": "--reverse", "--edge-diverge": "--diverge" };
+
+  for (const [theme, a, b, idx] of [["light", ui.light, wi.light, 0], ["dark", ui.darks[0].map, wi.darks[0].map, 1]]) {
+    for (const tok of SEMANTIC) {
+      const x = resolveColor(a.get(tok), a);
+      const y = resolveColor(b.get(tok), b);
+      assert.equal(x, y, `${tok} differs between the web UI and the widget in ${theme}`);
+      const g = graphName[tok];
+      if (!g) continue;
+      const hits = [...graph.matchAll(new RegExp(`\\${g}:\\s*(#[0-9a-f]{6})`, "g"))].map((m) => m[1]);
+      assert.ok(hits.length >= 2, `graph-html.mjs should define ${g} in both themes, found ${hits.length}`);
+      assert.equal(hits[idx], x, `${tok} differs between the web UI and graph-html.mjs in ${theme}`);
     }
   }
 });
 
-test("the edge values are the ones graph-html.mjs already shipped", () => {
-  // "Inherit, do not invent" — applied to the palette that was already here. If
-  // graph-html.mjs changes its state colours, this fails and the other two
-  // surfaces get updated rather than silently diverging.
-  const g = read("lib/graph/graph-html.mjs");
-  const w = themes(SURFACES[0].css, SURFACES[0]);
-  for (const [ours, theirs] of [["--edge-drift", "--drift"], ["--edge-reverse", "--reverse"], ["--edge-diverge", "--diverge"]]) {
-    const hexes = [...g.matchAll(new RegExp(`\\${theirs}:\\s*(#[0-9a-f]{6})`, "g"))].map((m) => m[1]);
-    assert.ok(hexes.length >= 2, `graph-html.mjs should define ${theirs} in both themes, found ${hexes.length}`);
-    assert.equal(w.light.get(ours), hexes[0], `${ours} light must match graph-html's ${theirs}`);
-    assert.equal(w.dark.get(ours), hexes[1], `${ours} dark must match graph-html's ${theirs}`);
+// ── motion ─────────────────────────────────────────────────────────────────
+
+test("ui.css honours prefers-reduced-motion, and the rule is not toothless", () => {
+  const css = read("commands/ui.css");
+  const i = css.indexOf("@media (prefers-reduced-motion: reduce)");
+  assert.notEqual(i, -1, "no reduced-motion block — animation without one is an accessibility defect");
+  const block = css.slice(i, css.indexOf("}", css.indexOf("}", i) + 1) + 1);
+  assert.match(block, /animation-duration:\s*\.01ms\s*!important/);
+  assert.match(block, /transition-duration:\s*\.01ms\s*!important/);
+  assert.match(block, /\*,\s*\*::before,\s*\*::after/, "must apply to everything, not a hand-listed set that rots");
+});
+
+test("every animation and transition uses a declared duration token", () => {
+  // A hardcoded 300ms cannot be turned off by the reduced-motion block's
+  // override of a token, and it is invisible in the system.
+  const css = read("commands/ui.css");
+  const body = css.slice(css.indexOf("* { box-sizing"));
+  const hard = [...body.matchAll(/(?:animation|transition)(?:-duration)?:\s*[^;]*?(\d+m?s)/g)]
+    .map((m) => m[0].trim())
+    .filter((d) => !/var\(--t-/.test(d) && !/\b1200ms\b/.test(d));
+  assert.deepEqual(hard, [], `hardcoded durations outside the token set:\n  ${hard.join("\n  ")}`);
+});
+
+test("the undo ring degrades to something that still tells the time", () => {
+  // The ring IS the clock. Hiding it under reduced motion without a fallback
+  // removes the information, not just the animation — the client renders a
+  // numeric countdown, and .secs is where it lands.
+  const css = read("commands/ui.css");
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.ring \{ display: none/);
+  assert.match(css, /\.undo \.secs/, "a numeric fallback must exist for the ring to degrade to");
+});
+
+test("a runtime-set token is supplied by whatever uses it, or has a fallback", () => {
+  // A CSS token nothing sets resolves to nothing and the animation reading it
+  // silently does not run — no error, no warning, and it looks deliberate.
+  // Same class of failure as G65's dead page.
+  //
+  // TWO WAYS TO SATISFY THIS, and the distinction is the point. Either the
+  // client sets the token, or the CSS declares a fallback so the rule still
+  // means something without it. What is forbidden is a bare var(--x) that
+  // nothing supplies.
+  const client = read("commands/ui.client.js");
+  const css = read("commands/ui.css");
+  const bare = [];
+  for (const tok of RUNTIME_SET) {
+    if (client.includes(tok)) continue;                       // supplied
+    const uses = [...css.matchAll(new RegExp(`var\\(${tok}([^)]*)\\)`, "g"))];
+    for (const u of uses) {
+      if (!u[1].includes(",")) bare.push(`${tok} in "${u[0]}" — no setter and no fallback`);
+    }
   }
+  assert.deepEqual(bare, [], bare.join("\n  "));
+});
+
+test("if the client draws chart series, it MUST measure and set --len", () => {
+  // The fallback above keeps the CSS honest while no charts exist. Once they
+  // do, a series drawn without a measured length has no draw-in at all, which
+  // is the animation silently not happening rather than being turned off.
+  const client = read("commands/ui.client.js");
+  if (!/class="series"|className="series"|\bseries\b.*<path/.test(client)) return;   // no charts yet
+  assert.match(client, /getTotalLength\(\)/, "a series path must measure itself");
+  assert.match(client, /--len/, "and hand that length to the CSS");
+});
+
+test("ui.css styles every edge state the graph can emit", () => {
+  // THE THIRD INSTANCE OF ONE SHAPE, all found on 2026-09-21: a value the code
+  // can produce that the stylesheet has no rule for. The widget's toneFor
+  // emitted five tones and it styled four; the chart CSS read a --len nothing
+  // set; and ACTIONABLE holds four states while ui.css styled three.
+  //
+  // None of them errors. The element renders with no background, or the
+  // animation silently does not run. That is what makes this class worth a
+  // test rather than a careful eye.
+  const graph = read("lib/graph/graph.mjs");
+  const m = /const ACTIONABLE = new Set\(\[([^\]]*)\]\)/.exec(graph);
+  assert.ok(m, "could not find ACTIONABLE in graph.mjs — this check has gone blind");
+  const states = [...m[1].matchAll(/"([A-Z_]+)"/g)].map((x) => x[1]);
+  assert.ok(states.length >= 4, `expected the actionable states, found ${states.length}`);
+
+  const css = read("commands/ui.css");
+  const unstyled = states.filter((st) => !new RegExp(`\\.badge\\.${st}\\s*\\{`).test(css));
+  assert.deepEqual(unstyled, [],
+    `the graph can emit these states and ui.css gives their badge no background: ${unstyled.join(", ")}`);
 });

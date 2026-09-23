@@ -105,6 +105,13 @@ export const initialState = {
   // Set the first time any click handler fires. This is the ONLY reliable
   // evidence that Übersicht interaction is configured — there is no API to ask.
   interactive: false,
+  // Judging from the desktop. `arm` is the disposition awaiting a SECOND
+  // click: this card has no evidence pane, so the confirm IS the review.
+  sel: null,
+  reason: '',
+  arm: null,
+  note: null,
+  busy: false,
 };
 
 // A custom updateState REPLACES the default, so the command's own events are
@@ -126,6 +133,21 @@ export const updateState = (event, previousState) => {
     return { ...prev, pos: DEFAULT_POS };
   }
   if (event.type === 'CLICKED') return { ...prev, interactive: true };
+
+  // Every branch spreads ...prev (G11). Übersicht REPLACES widget state on each
+  // command run, so a branch returning a fresh object silently drops the
+  // position, the interactive flag, and a half-typed reason.
+  if (event.type === 'SELECT') {
+    return { ...prev, interactive: true, sel: event.cell, reason: '', arm: null, note: null };
+  }
+  if (event.type === 'REASON') return { ...prev, reason: event.value };
+  if (event.type === 'ARM') return { ...prev, arm: event.disp, note: null };
+  if (event.type === 'CLOSE') return { ...prev, sel: null, arm: null, reason: '', note: null, busy: false };
+  if (event.type === 'BUSY') return { ...prev, busy: true, arm: null };
+  if (event.type === 'NOTE') return { ...prev, busy: false, arm: null, note: event.text };
+  // A forced refresh replaces the command's output in place. `error: null`
+  // because a successful manual run is evidence the previous failure is over.
+  if (event.type === 'REFRESHED') return { ...prev, output: event.output, error: null, busy: false };
 
   // The documented default command event shape.
   if (event.error) return { ...prev, error: String(event.error) };
@@ -194,15 +216,24 @@ export const className = `
   --dimmer: rgba(60, 60, 67, 0.42);
   --track: rgba(60, 60, 67, 0.13);
 
-  --st-ok: #2f7d4e;
-  --st-caution: #a8700f;
-  --st-warn: #b3401a;
-  --st-accent: #b4652c;
+  /* THE WHEEL, and it is the SAME wheel commands/ui.css and
+     lib/graph/graph-html.mjs use -- one number per role, asserted identical by
+     tests/unit/theme.test.mjs. Authored in OKLCH so lightness and chroma stay
+     separable: the previous fix scaled hex toward black for contrast and
+     dragged chroma down with it, which is what made this card brown.
+     Ubersicht is WebKit, and Safari 16.4+ has relative colour. */
+  --h-warn: 28; --h-caution: 80; --h-ok: 145;
+  --h-drift: 195; --h-accent: 250; --h-reverse: 285; --h-diverge: 340;
 
-  --edge-drift: #c26a1e;
-  --edge-reverse: #8a6bb8;
-  --edge-diverge: #c0392b;
-  --edge-stale: rgba(168, 112, 15, 0.7);
+  --st-ok:        oklch(.535 .129 var(--h-ok));
+  --st-caution:   oklch(.555 .115 var(--h-caution));
+  --st-warn:      oklch(.567 .150 var(--h-warn));
+  --st-accent:    oklch(.551 .130 var(--h-accent));
+
+  --edge-drift:   oklch(.541 .090 var(--h-drift));
+  --edge-reverse: oklch(.564 .160 var(--h-reverse));
+  --edge-diverge: oklch(.573 .170 var(--h-diverge));
+  --edge-stale: oklch(from var(--st-caution) l c h / .7);
 
   --shell: rgba(255, 255, 255, 0.16);
   --core: linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(252,250,249,0.78) 100%);
@@ -224,15 +255,15 @@ export const className = `
     --dimmer: rgba(235, 235, 245, 0.38);
     --track: rgba(235, 235, 245, 0.16);
 
-    --st-ok: #5fd07c;
-    --st-caution: #e0a53a;
-    --st-warn: #ff8f6b;
-    --st-accent: #e09a5c;
+    --st-ok:        oklch(.779 .130 var(--h-ok));
+    --st-caution:   oklch(.780 .130 var(--h-caution));
+    --st-warn:      oklch(.779 .125 var(--h-warn));
+    --st-accent:    oklch(.781 .114 var(--h-accent));
 
-    --edge-drift: #e0913f;
-    --edge-reverse: #a98cd4;
-    --edge-diverge: #e06c5c;
-    --edge-stale: rgba(224, 165, 58, 0.55);
+    --edge-drift:   oklch(.779 .110 var(--h-drift));
+    --edge-reverse: oklch(.781 .114 var(--h-reverse));
+    --edge-diverge: oklch(.780 .170 var(--h-diverge));
+    --edge-stale: oklch(from var(--st-caution) l c h / .55);
 
     --shell: rgba(255, 255, 255, 0.07);
     --core: linear-gradient(180deg, rgba(44,44,46,0.82) 0%, rgba(28,28,30,0.76) 100%);
@@ -290,6 +321,16 @@ export const className = `
   .lbl { width: 60px; flex: 0 0 60px; color: var(--dim); white-space: nowrap; }
   .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--track); position: relative; overflow: hidden; min-width: 90px; }
   .fil { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--dim); }
+  /* NEUTRAL IS NOT COLOURLESS, and that distinction is the whole point.
+     A row with tone "none" carries a REAL proportion -- Issues is 87 of 117
+     still open -- it just is not a condition anyone should act on today. The
+     previous rule gave those rows no fill colour at all, so six of ten bars
+     drew in the same grey as their own empty track and the card read as
+     monochrome. That is not restraint, it is an unreadable bar.
+     So: the ACCENT hue means "this is a measurement", the STATUS ramp means
+     "this is a condition". Same split the two colour families already draw,
+     applied one level down. */
+  .fil.none { background: var(--st-accent); opacity: .85; }
   .fil.ok { background: var(--st-ok); }
   .fil.warn { background: var(--st-caution); }
   .fil.fail { background: var(--st-warn); }
@@ -325,6 +366,50 @@ export const className = `
   .ok { color: var(--st-ok); }
   .gate { font-size: 10px; color: var(--dim); margin-top: var(--s2); }
   .gate b { color: var(--st-caution); font-weight: 600; }
+
+  /* MOTION. Seven moments in the web UI; three here, because a desktop card is
+     glanced at rather than worked in. Each still answers something a static
+     frame cannot: that a cell is selected, that a write is armed, that a
+     refresh is running. Durations are tokens so the reduced-motion block can
+     reach all of them. */
+  --t-fast: 120ms; --t-base: 160ms; --ease: cubic-bezier(.22,.61,.36,1);
+
+  .cell { transition: transform var(--t-fast) var(--ease), outline-color var(--t-fast) var(--ease); cursor: pointer; }
+  .cell:hover { transform: scale(1.35); }
+  .cell.on { outline: 2px solid var(--fg); outline-offset: 1px; transform: scale(1.35); }
+
+  .rf { margin-left: auto; font-size: 12px; opacity: .7; }
+  .rf:hover { opacity: 1; }
+
+  /* The judge panel: the one place this card writes. */
+  .judge { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--hair); }
+  .jlabel { font-size: 10.5px; color: var(--fg); line-height: 1.35; }
+  .jmeta { font-size: 9.5px; color: var(--dim); margin: 2px 0 var(--s2); font-family: ui-monospace, Menlo, monospace; }
+  .jreason {
+    width: 100%; box-sizing: border-box; font: inherit; font-size: 10.5px;
+    padding: 4px 6px; border-radius: 5px; border: 1px solid var(--hair);
+    background: rgba(127,127,127,.10); color: var(--fg); outline: none;
+  }
+  .jreason:focus { border-color: var(--st-accent); }
+  .jrow { display: flex; gap: 5px; flex-wrap: wrap; margin-top: var(--s2); }
+  .jbtn {
+    font-size: 9.5px; padding: 3px 7px; border-radius: 5px; cursor: pointer;
+    background: rgba(127,127,127,.12); color: var(--fg);
+    transition: background var(--t-base) var(--ease), color var(--t-base) var(--ease);
+  }
+  .jbtn:hover { background: rgba(127,127,127,.22); }
+  /* ARMED IS LOUD ON PURPOSE. The next click writes to an append-only ledger
+     and there is no diff on this card to review first. */
+  .jbtn.armed { background: var(--st-warn); color: var(--core-ink, #fff); font-weight: 600; }
+  .jbtn.off { opacity: .4; cursor: default; }
+  .jbtn.ghost { background: transparent; color: var(--dim); }
+  .jnote { font-size: 9.5px; color: var(--dim); margin-top: var(--s2); line-height: 1.4; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cell, .jbtn { transition-duration: .01ms; }
+    .cell:hover, .cell.on { transform: none; }
+    .cell.on { outline-width: 3px; }
+  }
 `;
 
 // Open a control. `run` is the documented shell-out; open-ui.sh starts the
@@ -334,6 +419,46 @@ function openView(route, dispatch) {
   dispatch({ type: 'CLICKED' });
   run(`bash "$HOME/Documents/GitHub/propagate/widget/open-ui.sh" ${JSON.stringify(route).replace(/"/g, "'")}`);
 }
+
+// FORCED REFRESH. refreshFrequency is five minutes, which is right for a
+// desktop card and wrong the moment you have just judged something and want to
+// see it go. run() resolves with stdout, so the same collector the schedule
+// uses can be driven by hand.
+function forceRefresh(dispatch) {
+  dispatch({ type: 'BUSY' });
+  run('bash "$HOME/Documents/GitHub/propagate/widget/collect.sh"')
+    .then((out) => dispatch({ type: 'REFRESHED', output: out }))
+    .catch((e) => dispatch({ type: 'NOTE', text: String(e) }));
+}
+
+// JUDGE, from the desktop.
+//
+// ARM THEN CONFIRM, and that is not ceremony. The web UI shows a diff before
+// you judge; this card has no room for one, so the second click is the entire
+// review step. widget/judge.sh carries the other half of the guard: --apply is
+// spelled out there rather than defaulted, and a reason under 12 characters is
+// refused before the CLI is reached.
+//
+// Arguments go through as ARGV, never concatenated into the command string —
+// the reason is free text somebody just typed.
+function confirmJudge(sel, disp, reason, dispatch) {
+  dispatch({ type: 'BUSY' });
+  const q = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
+  run('bash "$HOME/Documents/GitHub/propagate/widget/judge.sh" '
+    + q(sel.edge_id) + ' ' + q(disp) + ' ' + q(reason))
+    .then((out) => {
+      dispatch({ type: 'NOTE', text: String(out).trim().split('\n').pop() });
+      forceRefresh(dispatch);
+    })
+    .catch((e) => dispatch({ type: 'NOTE', text: String(e) }));
+}
+
+// Which dispositions a state may legally take. Mirrors lib/report/queue.mjs's
+// ALLOWED_NON_DIVERGED: a DIVERGED edge takes exactly one, and offering the
+// others would be offering refusals.
+const DISPS = (state) => (state === 'DIVERGED'
+  ? ['both-reconciled']
+  : ['no-change-needed', 'propagated', 'deferred']);
 
 // Flat components. claude-usage.jsx records "Can't find variable: React" as the
 // failure mode when a helper nests JSX in a way the transform cannot resolve.
@@ -368,17 +493,54 @@ const Row = ({ r, dispatch }) => {
   );
 };
 
-const Run = ({ g }) => (
+const Run = ({ g, sel, dispatch }) => (
   <div className="run">
     <div className="runhd">{g.state.toLowerCase()} {g.count}</div>
     <div className="cells">
       {g.cells.map((c) => (
         <span
           key={c.edge_id}
-          className={`cell ${c.state}${c.age === 'stale' ? ' stale' : ''}`}
+          title={c.label}
+          className={`cell ${c.state}${c.age === 'stale' ? ' stale' : ''}${sel && sel.edge_id === c.edge_id ? ' on' : ''}`}
+          onClick={() => dispatch({ type: 'SELECT', cell: c })}
         />
       ))}
     </div>
+  </div>
+);
+
+// The judge panel. One flat component: nesting JSX in a helper is what produces
+// "Can't find variable: React" under Übersicht's hyperscript pragma (G8).
+const Judge = ({ sel, reason, arm, busy, note, dispatch }) => (
+  <div className="judge">
+    <div className="jlabel">{sel.label}</div>
+    <div className="jmeta">{sel.edge_id} · {sel.state}{sel.noiseRatio >= 0.5 ? ' · mostly no-op' : ''}</div>
+    <input
+      className="jreason"
+      type="text"
+      value={reason}
+      placeholder="why (12+ chars) — lands in the ledger"
+      onInput={(e) => dispatch({ type: 'REASON', value: e.target.value })}
+    />
+    <div className="jrow">
+      {DISPS(sel.state).map((dp) => (
+        <span
+          key={dp}
+          className={`jbtn${arm === dp ? ' armed' : ''}${reason.trim().length < 12 ? ' off' : ''}`}
+          onClick={() => {
+            if (reason.trim().length < 12) return;
+            if (arm === dp) confirmJudge(sel, dp, reason.trim(), dispatch);
+            else dispatch({ type: 'ARM', disp: dp });
+          }}
+        >
+          {arm === dp ? 'confirm ' + dp : dp}
+        </span>
+      ))}
+      <span className="jbtn ghost" onClick={() => dispatch({ type: 'CLOSE' })}>close</span>
+    </div>
+    {busy ? <div className="jnote">writing…</div> : null}
+    {note ? <div className="jnote">{note}</div> : null}
+    {arm ? <div className="jnote">click again to confirm — this writes to the ledger</div> : null}
   </div>
 );
 
@@ -422,7 +584,7 @@ function ageText(ms) {
 }
 
 export const render = (state, dispatch) => {
-  const { output, error, pos, dragging, moved, interactive } = state;
+  const { output, error, pos, dragging, moved, interactive, sel, reason, arm, busy, note } = state;
   const at = pos || DEFAULT_POS;
 
   const card = (head, body) => (
@@ -471,7 +633,9 @@ export const render = (state, dispatch) => {
     ? null
     : (
       <div className="gate">
-        <b>rows are inert</b> — Übersicht needs an interaction shortcut + Accessibility access
+        <b>clicks do nothing yet</b> — turn on Übersicht&#8217;s Interaction toggle
+        (menu bar icon &#8250; Interaction), or run
+        <b> defaults write tracesOf.Uebersicht enableInteraction -bool true</b> and restart it
       </div>
     );
 
@@ -499,14 +663,19 @@ export const render = (state, dispatch) => {
       ))}
 
       {d.grid && d.grid.length
-        ? <div className="grid">{d.grid.map((g) => <Run key={g.state} g={g} />)}</div>
+        ? <div className="grid">{d.grid.map((g) => <Run key={g.state} g={g} sel={sel} dispatch={dispatch} />)}</div>
+        : null}
+
+      {sel
+        ? <Judge sel={sel} reason={reason} arm={arm} busy={busy} note={note} dispatch={dispatch} />
         : null}
 
       <div className="foot">
+        <span className="lk" onClick={() => openView("/ready", dispatch)}>ready &#8250;</span>
+        <span className="lk" onClick={() => openView("/analytics", dispatch)}>charts &#8250;</span>
         <span className="lk" onClick={() => openView("/graph", dispatch)}>graph &#8250;</span>
-        <span className="lk" onClick={() => openView("/queue", dispatch)}>queue &#8250;</span>
-        <span className="lk" onClick={() => openView("/health", dispatch)}>doctor &#8250;</span>
         {soon ? <span>{soon} not built</span> : null}
+        <span className="lk rf" onClick={() => forceRefresh(dispatch)}>{busy ? "…" : "\u21bb"}</span>
         <span className={stale ? "sp stale" : "sp"}>
           {snap.ok ? `snapshot ${ageText(snap.ageMs)}` : (snap.reason || "no snapshot")}
         </span>

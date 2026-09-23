@@ -26,11 +26,26 @@ import path from "node:path";
 import { page } from "../../commands/ui.mjs";
 
 const html = page("deadbeef");
-const script = (html.match(/<script>([\s\S]*?)<\/script>/) ?? [])[1];
+/**
+ * FOUR SCRIPTS NOW, not one: preact, its hooks, htm, then the client.
+ *
+ * This used to take the FIRST match, which quietly became the vendored preact
+ * bundle the moment the page grew a vendor stage — so every assertion below
+ * would have been checking a third-party file instead of ours. It passed for
+ * exactly one run before the count assertion caught it.
+ */
+const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+const script = scripts[scripts.length - 1];
 
-test("the page emits exactly one inline script, and it PARSES", () => {
+test("the page emits its four inline scripts, and EVERY one parses", () => {
   assert.ok(script, "no inline script found — this check has gone blind");
-  assert.doesNotThrow(() => new Script(script), "the served JS does not parse; the whole page is dead");
+  // Pinned: three vendored globals plus the client. A missing vendor file
+  // leaves the client referencing an undefined `preact` and the page renders
+  // nothing, with HTTP 200 and a silent console.
+  assert.equal(scripts.length, 4, "expected preact + hooks + htm + client");
+  scripts.forEach((src, i) => {
+    assert.doesNotThrow(() => new Script(src), `inline script ${i} does not parse; the page is dead`);
+  });
 });
 
 test("the script the page emits is the client FILE, unmodified", () => {
@@ -80,7 +95,10 @@ test("every view the page routes is reachable from both fragment spellings", () 
   // file byte for byte. The template-literal hazard is still live in
   // widget/propagate-queue.jsx, whose className is still a literal, and
   // widget-contract.test.mjs guards that one.
-  for (const v of ["queue", "issues", "todos"]) {
-    assert.ok(script.includes(`"${v}"`), `the page must know about the ${v} view`);
+  // Named against the DIVISIONS, not the tabs they replaced. This listed
+  // queue/issues/todos and went red the moment the page stopped having them —
+  // which is the check working, not the check being brittle.
+  for (const v of ["ready", "blocked", "parked", "gap", "analytics", "reference"]) {
+    assert.ok(script.includes(`"${v}"`), `the page must route the ${v} division`);
   }
 });

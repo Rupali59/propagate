@@ -18,8 +18,12 @@
  * before it fired anyway.
  */
 import { test } from "node:test";
+
+/** Skip with a STATED reason. "not run" and "passed" must never look alike. */
+const t_skip = (why) => { console.log("  SKIPPED: " + why); };
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
@@ -198,10 +202,15 @@ test("SERVED_VIEWS matches what the ui page can ACTUALLY render", () => {
   // page's client was extracted to ui.client.js and the check failed with "gone
   // blind" rather than silently matching nothing and passing. That is the
   // behaviour it was written for, observed working.
+  // THE VIEW LIST CHANGED SHAPE on 2026-09-21: a flat array of tab names
+  // became an array of division objects. This check read the old literal and
+  // would have matched nothing — so it asserts it FOUND something first, which
+  // is the behaviour that caught the last move too.
   const ui = readFileSync(path.join(import.meta.dirname, "../../commands/ui.client.js"), "utf8");
-  const m = ui.match(/\[\s*"queue"[^\]]*\]/);
-  assert.ok(m, "could not find the view list in ui.client.js — this check has gone blind, which is worse than failing");
-  const routed = new Set(JSON.parse(m[0].replace(/'/g, '"')));
+  const keys = [...ui.matchAll(/\{\s*key:\s*"([a-z]+)"\s*,\s*label:/g)].map((m) => m[1]);
+  assert.ok(keys.length >= 5,
+    "could not find the division list in ui.client.js — this check has gone blind, which is worse than failing");
+  const routed = new Set(keys);
   for (const v of SERVED_VIEWS) {
     assert.ok(routed.has(v.replace(/^\//, "")), `SERVED_VIEWS promises ${v}, which ui.mjs does not route`);
   }
@@ -354,4 +363,125 @@ test("every external command the widget's scripts invoke EXISTS on this machine"
     }
   }
   assert.deepEqual(missing, [], `these commands do not exist here, so the click silently does nothing:\n  ${missing.join("\n  ")}`);
+});
+
+/* ── the JSX actually compiles ─────────────────────────────────────────────
+ *
+ * THIS FILE'S HEADER SAYS "the obvious test — render it — is not available".
+ * Half of that is no longer true. Übersicht ships its own @babel/parser, so
+ * the widget can be parsed by the EXACT parser that will compile it on the
+ * desktop — not an approximation, the same one.
+ *
+ * Why it matters more here than anywhere else in this repo: a JSX syntax error
+ * produces a BLANK CARD. No error dialog, no log anyone reads, nothing in the
+ * test suite. Identical in shape to G65's dead page, and until now identically
+ * uncaught.
+ *
+ * Rendering is still unavailable — that needs the transform plus Übersicht's
+ * hyperscript runtime — so this proves the file is syntactically sound and
+ * exports what the runtime looks for. It does not prove it draws correctly.
+ */
+test("the widget parses with Übersicht's OWN babel, and exports what it must", () => {
+  const PARSER = "/Applications/Übersicht.app/Contents/Resources/node_modules/@babel/parser";
+  let parse;
+  try {
+    ({ parse } = createRequire(import.meta.url)(PARSER));
+  } catch {
+    // SKIPPED, ATTRIBUTABLY. A machine without Übersicht cannot run this, and
+    // that is a different fact from the widget being fine. Never a silent pass.
+    t_skip("Übersicht is not installed at /Applications — the widget's syntax is UNVERIFIED here");
+    return;
+  }
+  const src = readFileSync(WIDGET, "utf8");
+  let ast;
+  try {
+    ast = parse(src, { sourceType: "module", plugins: ["jsx"] });
+  } catch (err) {
+    assert.fail(`the widget does not parse — Übersicht would render a BLANK CARD.\n  line ${err.loc?.line}: ${err.message}`);
+  }
+
+  // Übersicht looks these up by name on the module. A missing one is not a
+  // syntax error; it is a widget that loads and does nothing.
+  const exported = new Set(
+    ast.program.body
+      .filter((n) => n.type === "ExportNamedDeclaration" && n.declaration?.declarations)
+      .flatMap((n) => n.declaration.declarations.map((d) => d.id.name)),
+  );
+  for (const k of ["command", "refreshFrequency", "initialState", "updateState", "className", "render"]) {
+    assert.ok(exported.has(k), `the widget must export ${k}; Übersicht reads it by name`);
+  }
+});
+
+test("every updateState branch spreads ...prev (G11)", () => {
+  // Übersicht REPLACES widget state on each command run. A branch returning a
+  // fresh object silently drops the saved position, the interactive flag, and
+  // a half-typed reason — and only on the next scheduled refresh, minutes
+  // later, which is what makes it hard to attribute.
+  const src = readFileSync(WIDGET, "utf8");
+  const body = src.slice(src.indexOf("export const updateState"), src.indexOf("export const className"));
+  const returns = [...body.matchAll(/return\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  assert.ok(returns.length >= 6, `expected several branches, found ${returns.length} — this check has gone blind`);
+  const bare = returns.filter((r) => !r.includes("...prev"));
+  assert.deepEqual(bare, [], `these branches drop previous state:\n  ${bare.join("\n  ")}`);
+});
+
+test("the widget's judge path goes through judge.sh, never a built command string", () => {
+  // The reason is free text somebody just typed. Concatenating it into a shell
+  // string puts it one quote away from the shell; judge.sh takes argv.
+  const src = readFileSync(WIDGET, "utf8");
+  assert.match(src, /judge\.sh/, "the write path must be the script");
+  assert.doesNotMatch(src, /run\([^)]*cli\.mjs/, "the widget must not invoke the CLI directly");
+
+  // THE GATE, asserted as a BEHAVIOUR rather than a spelling. An earlier
+  // version of this line pinned `arm === dp ? confirmJudge` and failed
+  // because the code uses an if-statement — the check was testing how the
+  // guard was written, not that it exists. This repo has the same lesson
+  // recorded for the hash-normalising regex in ui-page.test.mjs.
+  const click = src.slice(src.indexOf("onClick={() => {"), src.indexOf("close</span>"));
+  assert.ok(/arm === dp/.test(click), "the confirm step must compare against the armed disposition");
+  assert.ok(click.indexOf("dispatch({ type: 'ARM'") > click.indexOf("confirmJudge"),
+    "the FIRST click must arm and only a second may write");
+  assert.ok(/reason\.trim\(\)\.length < 12/.test(click), "a short reason must not even arm");
+});
+
+test("every tone toneFor can emit has a fill rule in the widget", () => {
+  // HOW SIX OF TEN BARS WENT GREY. toneFor emits five values; the widget
+  // styled four. Rows with tone "none" -- which is the MAJORITY, because most
+  // registers are a normal proportion rather than a condition -- fell through
+  // to the bare track colour, so their fill and their empty space were the
+  // same grey and the bar stopped reading as a bar.
+  //
+  // Nothing caught it because a missing CSS rule is not an error: the element
+  // renders, it is just invisible. Same family as a var() nothing defines.
+  const src = readFileSync(WIDGET, "utf8");
+  const surface = readFileSync(
+    path.join(import.meta.dirname, "../../lib/report/surface.mjs"), "utf8");
+
+  // Derive the tone vocabulary from toneFor itself rather than restating it,
+  // so a new tone cannot be added without this going red (G67).
+  const body = surface.slice(surface.indexOf("export function toneFor"));
+  // EVERY quoted string in the function body, not just `return "x"`. The
+  // first version missed the last line — `return value === 0 ? "ok" : "none"`
+  // — and reported three tones instead of five. The blindness guard below is
+  // what caught it, which is the only reason this comment exists.
+  const tones = new Set(
+    [...body.slice(0, body.indexOf("\n}")).matchAll(/"([a-z]+)"/g)].map((m) => m[1]),
+  );
+  assert.ok(tones.size >= 5,
+    `toneFor emits five tones; this extractor found ${tones.size} (${[...tones].join(", ")}) — it has gone blind`);
+
+  const unstyled = [...tones].filter((t) => !new RegExp(`\\.fil\\.${t}\\s*\\{`).test(src));
+  assert.deepEqual(unstyled, [],
+    `toneFor can emit these and the widget gives them no fill: ${unstyled.join(", ")}`);
+});
+
+test("a neutral fill is NOT the same colour as the empty track it sits in", () => {
+  // The distinction the previous test's fix rests on: neutral means "this is a
+  // measurement, not a condition", which still has to be visible. If the fill
+  // resolves to the track colour the bar conveys nothing at any value.
+  const src = readFileSync(WIDGET, "utf8");
+  const fill = /\.fil\.none\s*\{[^}]*background:\s*var\((--[a-z-]+)\)/.exec(src);
+  assert.ok(fill, ".fil.none must set a background from a token");
+  assert.notEqual(fill[1], "--track", "a neutral fill must not be the track colour");
+  assert.notEqual(fill[1], "--dim", "nor the same grey as secondary text");
 });

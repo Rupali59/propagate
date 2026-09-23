@@ -29,7 +29,9 @@
 # The god-file IS the coverage problem. Once commands move into lib modules (reviewed
 # plan, D7), `lib/core/setup.mjs -> docs/REFERENCE.md` becomes precise and cheap, which is
 # exactly why the three edges below could be declared today and cli.mjs could not.
-# Tracked in docs/ISSUES.md.
+# Tracked in propagation/state/workspace/ISSUES.md. (Said `docs/ISSUES.md` until
+# 2026-09-23; that file has never existed at that path. A comment that hands someone a
+# dead path is a referrer too — rule:adversarial-review-reads-the-ledger.)
 
 sources:
   # The one-surface work, 2026-09-17. Declared because the review that produced it
@@ -282,6 +284,23 @@ sources:
           reaped at 14d). Those are PROMOTE_MIN_USES and REAP_AFTER_DAYS; the doc
           quotes them and they are exactly the kind of constant that gets tuned.
         kind: code
+
+  propagation/state/workspace/ISSUES.md:
+    propagates_to:
+      - path: propagation/state/workspace/STATE.md
+        why: >-
+          STATE.md summarises which issues are OPEN; ISSUES.md is where they are actually
+          dispositioned. The two drifted within ONE DAY and in the direction that wastes
+          work: N89 was marked RESOLVED here on 2026-09-21 while STATE.md still called it
+          "the one that matters" under "Open, and filed today". A session opening STATE.md
+          on 2026-09-23 read the stale half, believed a fixed S2 defect was live, and began
+          re-fixing code that already carried its own mutation-gated regression test.
+          Nothing could have caught it: ISSUES.md was modified in that very change and
+          `check --changed` named four coupled files, none of them STATE.md. This is the
+          half-machine-refreshed / half-hand-written failure rule:state-and-decisions names
+          as the second of its two, one level up — not one file going stale, but a SUMMARY
+          outliving the record it summarises.
+        kind: prose
 
   docs/AUDIT-2026-08.md:
     propagates_to:
