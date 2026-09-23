@@ -100,10 +100,21 @@ test("a malformed config yields a reason, never a throw", async (t) => {
 test("the REAL Vipin Kaushik config yields the 7 projects its snapshot flags", () => {
   // The live case this exists for. If this drifts, the regenerated snapshot
   // silently loses flags and nothing else notices.
+  //
+  // THE COUNT IS A TRIPWIRE, NOT AN INCIDENTAL. It is hardcoded on purpose, so
+  // that onboarding a project to the workspace fails here and someone looks. It
+  // has fired once and worked: `obsidian-vk-publish` joined on 2026-09-22
+  // (`b809bae`) and this test was the only thing that said so. When it goes red
+  // again, confirm the new key is genuinely declared in that workspace's
+  // `[active_lines]` block, then bump the number and NAME the newcomer below —
+  // do not derive the count, or the next silent arrival goes unnoticed.
+  //
+  // 8 keys = 7 projects + the `workspace` key, which is not a project.
   const vk = "/Users/rupali.b/Documents/GitHub/Vipin Kaushik";
   const r = readActiveLines(vk);
   if (r.reason) return; // not this machine
-  assert.equal(Object.keys(r.lines).length, 7, `expected 7 declared active lines, got ${JSON.stringify(r.lines)}`);
+  assert.equal(Object.keys(r.lines).length, 8, `expected 8 declared active lines (7 projects + workspace), got ${JSON.stringify(r.lines)}`);
   assert.equal(r.lines.VipinKaushik, "production", "VK deploys from production, not main — the case a probe gets wrong");
   assert.equal(r.lines.workspace, "main");
+  assert.equal(r.lines["obsidian-vk-publish"], "main", "the 7th project, onboarded 2026-09-22 — named so its removal is also caught");
 });
