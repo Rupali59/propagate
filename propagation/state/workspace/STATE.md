@@ -1,6 +1,39 @@
 # propagate — State
 
-## Five divisions, a design system, and a page that runs — 2026-09-21, uncommitted
+## doctor stops lying about its own population — 2026-09-23
+
+**N87 is being worked in slices**, plan at `docs/plans/2026-09-23-doctor-tells-the-truth.md`
+and `docs/plans/2026-09-23-doctor-slices-2-3.md`. Derive what is open rather than reading
+it here:
+
+```sh
+grep -nE "^### N(82|87)" propagation/state/workspace/ISSUES.md   # disposition is in the heading
+npm test 2>&1 | grep -E '^ℹ (tests|pass|fail)'                  # sum across sub-suites, never one tail
+```
+
+**Slice 1 landed (`b164a9f`).** `doctor` and `rollup` already called the same
+`conformanceReport`; only the ARGUMENT differed. `doctor` passed `WORKSPACES`, which is
+marker-based — and a marker is something a workspace carries only once it has adopted the
+layout, so the check for "did you adopt the layout" was gated on having adopted it.
+`ownerCandidates` now lives in `lib/core/discovery.mjs` and both read it; the predicate is
+version control, not a marker. propagate appears in its own census as a half-migrated
+offender.
+
+**Slice 2a landed.** `inconclusive` is an entry kind: mandatory reason, votes on the exit
+code, its own glyph. Two defects surfaced while building it — `info` had been the
+RENDERER'S SILENT DEFAULT, sharing a branch with every unrecognised kind, and a gotcha
+trigger written against code shape could never fire because the guard is handed only paths
+and commands.
+
+**N82 raised S2 -> S1.** `✓ 0/0 conform` is a green tick: `offenders.length === 0` is
+vacuously true over an empty population, so the check reports success for having examined
+nothing. GOTCHAS G68. Slice 2c is where it becomes `inconclusive`.
+
+**Open and blocking nothing but itself:** PR-001 — should a workspace that never began the
+migration fail the gate? Three do today and produce one `info` line between them. It is a
+judgement about what the gate is for.
+
+## Five divisions, a design system, and a page that runs — 2026-09-21, shipped `bd7d98c`
 
 The 2026-09-17 surface showed what propagate collects. This changes what it shows it AS:
 eight tabs were a taxonomy of data SOURCES, and nobody opens the page thinking "I will do
