@@ -179,3 +179,57 @@ test("entriesOfKind filters without mutating", () => {
   assert.equal(r.entriesOfKind("nonexistent").length, 0, "an unknown kind is empty, not a throw");
   assert.equal(r.entries.length, 4, "filtering must not consume the buffer");
 });
+
+// ── inconclusive (N87 slice 2a, N82) ──────────────────────────────────────
+//
+// "Could not look" is a third outcome and must not render as either of the
+// other two. G68: `offenders.length === 0` is vacuously true over an empty
+// population, so `doctor` printed `✓ 0/0 conform` — a green tick for having
+// examined nothing. The fix is a state, not a better message.
+
+test("inconclusive is a declared entry kind", () => {
+  assert.ok(ENTRY_KINDS.includes("inconclusive"), `ENTRY_KINDS is ${ENTRY_KINDS.join(",")}`);
+});
+
+test("inconclusive FAILS the run — a skipped check is not a passed check", () => {
+  const r = new Reporter();
+  r.inconclusive("ledger rows", "no ledger file at the expected path");
+  assert.equal(r.entries.at(-1).kind, "inconclusive");
+  assert.equal(r.problems, 1, "inconclusive must vote, or an unmeasurable run exits 0");
+});
+
+test("inconclusive REQUIRES a reason — an unexplained one is the silent zero again", () => {
+  const r = new Reporter();
+  assert.throws(() => r.inconclusive("ledger rows"), /reason/i,
+    "a reasonless inconclusive is indistinguishable from the absence it is meant to explain");
+  assert.throws(() => r.inconclusive("ledger rows", "   "), /reason/i,
+    "whitespace is not a reason");
+  assert.equal(r.problems, 0, "a refused inconclusive must not have voted");
+});
+
+test("inconclusive survives drain, like every other problem", () => {
+  const r = new Reporter();
+  r.inconclusive("remote sync", "no git remote configured");
+  r.drain();
+  assert.equal(r.problems, 1, "drain resets entries, never the run-global tally");
+});
+
+test("warn and info still do NOT vote — inconclusive must not have widened the door", () => {
+  const r = new Reporter();
+  r.warn("a", "b");
+  r.info("c", "d");
+  r.note("e");
+  assert.equal(r.problems, 0, "G20: a summary that restates failures must not count them twice");
+});
+
+test("EVERY entry kind has an explicit branch in the renderer — no kind falls to the default", async () => {
+  // The recurring defect in this repo, four times in one day per STATE.md: a
+  // value the code can emit that the renderer has no rule for. It does not
+  // error — `renderDoctorEntries`'s trailing `else` prints a dim `·`, so a new
+  // kind silently renders as `info`. For `inconclusive` that is the whole bug
+  // arriving through the fix: "could not look" would look like a tally.
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../../cli.mjs", import.meta.url), "utf8");
+  const missing = ENTRY_KINDS.filter((k) => !src.includes(`e.kind === "${k}"`));
+  assert.deepEqual(missing, [], `renderDoctorEntries has no explicit branch for: ${missing.join(", ")}`);
+});

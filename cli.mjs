@@ -238,6 +238,14 @@ function renderDoctorEntries(entries) {
       console.log(`  ${GREEN}\u2713${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
     } else if (e.kind === "fail") {
       console.log(`  ${RED}\u2717${RESET} ${e.label}${d ? "  " + RED + d + RESET : ""}`);
+    } else if (e.kind === "inconclusive") {
+      // A THIRD marker, deliberately its own glyph. This votes like a failure
+      // (the run cannot exit 0 unmeasured) but reads differently, because
+      // nothing is broken — the check could not run and says why. Sharing the
+      // dim "·" default with `info` is the exact defect this entry kind exists
+      // to fix: GOTCHAS G68, where a check that examined nothing rendered as a
+      // green tick.
+      console.log(`  ${YELLOW}?${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
     } else if (e.kind === "warn") {
       console.log(`  ${YELLOW}!${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
     } else if (e.kind === "header") {
@@ -245,8 +253,20 @@ function renderDoctorEntries(entries) {
     } else if (e.kind === "note") {
       // Marker-less dim line — context about a check that could NOT run.
       console.log(`  ${DIM}${e.label}${RESET}`);
-    } else {
+    } else if (e.kind === "info") {
       console.log(`  ${DIM}\u00b7${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+    } else {
+      // AN UNKNOWN KIND, rendered LOUDLY. This branch used to be where `info`
+      // landed, so it was doing two jobs: rendering a known kind, and silently
+      // absorbing any kind nobody had written a rule for. That is the defect
+      // STATE.md records hitting four times in one day — a value the code can
+      // emit that the renderer has no rule for, which does not error and does
+      // not look wrong. Adding `inconclusive` would have fallen straight into
+      // it and read as a neutral tally.
+      console.log(
+        `  ${RED}?!${RESET} ${e.label}  ${RED}(unrendered entry kind "${e.kind}")${RESET}` +
+          (d ? "  " + DIM + d + RESET : ""),
+      );
     }
   }
 }
