@@ -121,6 +121,24 @@ npm test 2>&1 | grep -E '^ℹ (tests|pass|fail)' | awk '{s[$2]+=$3} END {for(k i
 Worth pairing with N91, which tracks `doctor.duration_ms` spikes of 18-24 minutes — an
 intermittent slowdown and an intermittently truncated suite may be the same cause.
 
+**REPRODUCED 2026-09-24, and it named a test.** Second occurrence, same signature to the
+number: `fail=1` with the total short by **exactly 91** (1904 of 1995; the first was 1860 of
+1951). Two consecutive re-runs came back 1995 / 1990 pass / 0 fail, so it is intermittent,
+not a regression.
+
+This time the failing test was named: `tests/unit/ui-client.test.mjs:252` — *"a chart path
+measures itself and hands the length to the CSS"*. It is `async` and measures a rendered
+path, so a timing dependency is the obvious suspect.
+
+**But 91 is bigger than that file**, which holds 25 tests. So the runner is dropping a SHARD
+rather than a file, and the named failure is a symptom of whatever aborts it. That is the
+thread to pull: find what `npm test` groups into a shard with `ui-client`, and what a
+failure there does to the rest of it.
+
+The load-bearing point is unchanged: a run that reports `fail=1` while losing 91 tests cannot
+be trusted to say a run was COMPLETE, and the aggregate line renders it identically to an
+ordinary failure.
+
 ### PR-010 · gbrain writes a heartbeat nothing reads, so "alive but silent" has no name
 
 Measured 2026-09-24: `gbrain serve` (PID 22608) stayed alive **50.8 hours** while its last
