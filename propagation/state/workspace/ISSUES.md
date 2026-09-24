@@ -2474,7 +2474,7 @@ walk counting `rule:<id>` per file, split by whether the basename is `CLAUDE.md`
 use `grep` — the ugrep shim honours the hub's `/*` `.gitignore` and returns false zeros;
 that flaw has now fired four times in this tree.
 
-### N78 · A code-only merge is undeliverable — both delivery mechanisms gate on VERSION, and only `doctor` reads content — **S2** — **OPEN**
+### N78 · A code-only merge is undeliverable — both delivery mechanisms gate on VERSION, and only `doctor` reads content — **S2** — **RESOLVED 2026-09-24**
 
 Found 2026-09-17, one minute after merging #21, by the `# Delivery` section that #19
 added for exactly this.
@@ -2541,6 +2541,44 @@ the served `cli.mjs` hash equals source. Today that assertion fails and nothing 
 duplicates mean one was never cleaned up; 0.5.0 has been there since the original
 incident. Not urgent, not deleted here — removing directories from someone's plugin cache
 is their call.
+
+**Decided.** Both delivery mechanisms (`.githooks/post-merge`'s `VERSION`-diff trigger and
+`claude plugin update`'s version-string comparison) key on the VERSION string, and neither
+can observe that code moved without it. The fix, settled by the plugin-delivery review
+(`docs-plans-2026-09-23-reminders-todo-bri-playful-dawn.md`, decisions D3-D8/D12):
+
+- **State-branched remediation text** (D3) — `doctor`'s `# Delivery` section now branches by
+  verdict state instead of pointing at `git status`, which is clean in exactly the state that
+  misled this entry's own author. `stale` keeps `claude plugin update <plugin>@<mkt>`;
+  `incoherent` names both verified paths (bump `VERSION` for a release, or
+  `claude plugin marketplace update` + uninstall/install otherwise).
+- **A digest over the shipped file set, read from committed content** (D4, D6) — replaces the
+  single `cli.mjs` hash with `treeDigest` over all shipped paths, sourced from `git ls-tree -r
+  HEAD` / `git hash-object --stdin-paths` rather than the working tree, so an in-progress edit
+  can't move the verdict and a `missing` file fails at any distance.
+- **Shipped-path-only commit/day bounds** (D5) — `deliveryLag` counts only commits touching the
+  shipped pathspec, so doc-only and test-only churn (this repo's 2026-08-27 decision explicitly
+  allows both without a version bump) never reddens the gate.
+- **A CI bump-gate on shipped paths** (D7) — a job in `.github/workflows/test.yml` fails a PR
+  that touches the shipped pathspec without changing `VERSION`; `post-merge`'s existing trigger
+  then delivers automatically. The pathspec is exported once from `delivery.mjs` and CI derives
+  it rather than restating it (D12), so the two cannot drift the way `.githooks/post-merge`'s
+  own hardcoded completeness list already had (see N78's sibling gap, resolved by widening that
+  list rather than sharing a definition — D8).
+
+**Of N78's own three candidate remedies, two were taken and one was not.** Taken: "have
+`doctor`'s `incoherent` row print the exact remediation" (the state-branched text above) and
+"accept the bump discipline and enforce it" (the CI bump-gate above). **Not taken:** "make
+`post-merge` fire on any change under the served tree … and let it re-copy when the hashes
+differ." Rejected at D7 in favor of the CI bump-gate because it would silently mutate the
+installed plugin on every qualifying merge, from a hook whose exit code git already discards —
+so a failed re-install would be visible only to someone reading scrollback, which is the same
+silent-failure shape this whole register exists to catch.
+
+**Deferred, not built:** sharing one completeness definition between `post-merge`'s file list
+and `delivery.mjs`'s digest (D8 — widened the hardcoded list instead) and the fifth
+version-manifest location, `skills-marketplace/.claude-plugin/marketplace.json` (D1). Both
+filed as TODOs.
 
 ### N87 · `doctor` reports healthy because its population excludes the failures, its checks test properties a broken thing satisfies, and 354 warnings bury the one that fires — **S1** — **OPEN**
 
@@ -3246,3 +3284,83 @@ staleness `rule:discernment-checks` §2 says a check must never produce.
 an explicit `timeout` plus a distinct `status: "timeout"` outcome that is never read as a
 pass — and instrument `doctor`'s own phases so the next spike names which subprocess it was
 waiting on, rather than only a total.
+
+### N92 · The plugin-file pathspec answers two different questions with one list, so a docs-only commit counts toward the release bound — **S3** — **OPEN**
+
+Filed 2026-09-24 from the plugin-delivery work, immediately after landing it. `shippedPathspec()`
+(`lib/report/doctor/delivery.mjs`) excludes exactly `tests/**`, `docs/**` and `propagation/**`, which
+means every repo-root markdown file is inside the shipped set:
+
+```sh
+node --input-type=module -e 'import("./lib/report/doctor/delivery.mjs").then(m=>console.log(m.shippedPathspec()))'
+git ls-files | grep -E '^[^/]+\.md$'      # DESIGN.md  README.md  SKILL.md
+```
+
+`SKILL.md` belongs there — it is the plugin's skill entry and a change to it genuinely changes what
+the plugin does. `README.md` and `DESIGN.md` do not.
+
+**Why that is a defect and not a quibble.** The same list is used for two different questions:
+
+| question | consumer | is `README.md` a correct member? |
+|---|---|---|
+| what does the plugin SHIP, so a served copy can be compared? | `treeDigest`, and the `missing` set | **yes** — it is copied into the served tree, so its absence is a real difference |
+| what counts as a RELEASE-worthy change, for the staleness bound? | `deliveryLag`'s `git rev-list … -- <pathspec>` | **no** — the 2026-08-27 decision is that a doc-only addition is not a release |
+
+So eleven commits touching only `README.md` would push `commitsBehind` past `deliveryMaxCommits` and
+fail `doctor`, for a reason the bound was explicitly designed to exclude. That is a false positive in
+a gate, and `lib/report/doctor/delivery.mjs`'s own header names the consequence: *"A health check
+that goes red during ordinary development trains people to ignore it."*
+
+**S3 rather than S2 because reaching it takes a run of 11+ commits touching only those two files**,
+which has not happened; the day this was filed the count was 37 and every contributing commit touched
+real code. It is a latent false positive, not a live one.
+
+**A hazard met while filing this, worth recording next to it.** This entry's own heading originally
+read "The shipped pathspec …" and the backlog reader counted it CLOSED — because `shipped` is in
+`CLOSING_WORDS` (`lib/docs/tokens.mjs`), and the incidental word beat the explicit `**OPEN**` marker
+in the same heading. Measured after rewording: 0 of the 30 currently-`**OPEN**` headings carry a
+closing word, so this is latent rather than live, but the word collides badly with the vocabulary of
+a repo about shipping. Check a new heading with `hasClosingWord()` before filing, not after the count
+looks wrong.
+
+**Not fixed on filing, deliberately.** D12 of the delivery review made this ONE exported definition
+precisely so CI and `doctor` could not disagree, and splitting it into "ships" and "release-worthy"
+partly revisits that. Whoever takes this should decide whether the second question deserves its own
+derived list (`shippedPathspec()` minus non-functional root docs) or whether the bound should simply
+not count `.md` outside `SKILL.md`. Do not solve it by adding a second hand-maintained list — that is
+N78's and [[PR-012]]'s shape.
+
+### N93 · `docs/SYSTEMS.md`'s `gotcha-guard` probe cannot run, and its row makes three false claims about a component that is alive — **S2** — **OPEN**
+
+Found 2026-09-24 while exploring for the plugin-delivery review. `docs/SYSTEMS.md:51` registers
+`gotcha-guard` with an artifacts field naming `~/.claude/hooks/gotcha-guard.mjs` and a
+`liveness_probe` of three commands it says are **all** needed. Measured:
+
+| the row claims | actually |
+|---|---|
+| artifact `~/.claude/hooks/gotcha-guard.mjs` | **absent.** `~/.claude/hooks/` exists but holds only `obsidian-commit-log.py` and `stop-context-check.sh` |
+| "registered in `~/.claude/settings.json`" | **not there.** No `gotcha-guard` string in that file; it is registered by the plugin's own `hooks/hooks.json` |
+| probe 1 `node --test ~/.claude/hooks/` | **throws** a module-loader error — there is nothing there to test |
+| probe 2 `node ~/.claude/hooks/gotcha-guard.mjs --selftest` | cannot run — that path does not exist |
+| probe 3 `tail ~/.claude/gotcha-guard.log` | **works**, and shows the component is fine |
+
+**The component is alive.** `~/.claude/gotcha-guard.log` is 4.5 MB and its last line the day this was
+filed reads `2026-09-24T11:29:15.786Z tool=Bash sources=4 entries=34 bad=0 hits=0`. So this is not a
+dead hook — it is a live hook whose registered way of proving it is alive is itself dead. An auditor
+running the documented probe concludes the opposite of the truth.
+
+**This is the twelfth referrer of the 2026-08-22 plugin cutover**, and [[N43]] is the eleven. The file
+moved into the plugin that day, is served from
+`~/.claude/plugins/cache/tathya/propagate/<version>/hooks/gotcha-guard.mjs`, and this row still names
+the pre-cutover path. N43's own text says `docs/SYSTEMS.md` is *where a liveness probe per background
+component is supposed to live*, and asks whether "these entries have no probe, or the probe has never
+run." For this row the answer is now measured: the probe exists and has never run, because it cannot.
+
+**The fix is not simply repointing the path.** G63 is explicit that a `--selftest` run from the source
+repo proves nothing about production, because Claude Code serves a COPY — so the probe must target the
+served tree, which is version-keyed and therefore not a fixed path. That makes this a real design
+question rather than a typo: derive the served path (the delivery work added `activeInstallPath()` in
+`lib/report/doctor/delivery.mjs`, which answers exactly this) or accept that the probe can only ever
+check the log. `rule:enforcement-watches-itself` — the register built to make components verifiable
+contains an unverifiable entry for the component its own text calls "the one most likely to become
+decorative."

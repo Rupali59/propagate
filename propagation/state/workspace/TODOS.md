@@ -112,6 +112,46 @@ an unrelated one indefinitely. And N91's `doctor.duration_ms` spikes of 18-24 mi
 share a cause with an async test that is sensitive to load — that pairing survives the reframe,
 because it was never about the count.
 
+### PR-011 · A fifth version-manifest location the delivery gate does not check: hub `marketplace.json` pinned at 0.5.0
+
+Filed 2026-09-24, deferred by D1 of the plugin-delivery review
+(`docs-plans-2026-09-23-reminders-todo-bri-playful-dawn.md`) rather than folded into that
+review's 7-file scope.
+
+`skills-marketplace/.claude-plugin/marketplace.json` (the `tathya` marketplace) pins
+propagate at `0.5.0`, last touched 2026-09-01, while the repo's `VERSION` is `0.6.2`.
+`gateVersionManifests` (`lib/core/release.mjs:48-55`) checks only the four in-repo version
+strings (`VERSION`, `package.json`, `.claude-plugin/plugin.json`,
+`.claude-plugin/marketplace.json`) and never reads this fifth, cross-repo one.
+
+**`propagation/state/workspace/DECISIONS.md:1169-1171` overstates what this gap does** —
+it claims the gap can "leave the served plugin behind." N78's own transcript refutes that:
+the updater reported *"already at the latest version (0.6.1)"* while the hub manifest
+still said `0.5.0`, so the marketplace `version` field is stale listing metadata, not
+something `claude plugin update` consults to decide whether to re-copy. Correcting
+`DECISIONS.md:1169-1171` is part of this work, alongside adding the fifth path to
+`gateVersionManifests` and the cross-repo `VERSION` edge that would keep it in step.
+
+### PR-012 · `post-merge`'s completeness list is hand-maintained at 5 of 141 plugin files
+
+Filed 2026-09-24, residual from D8/D9 of the plugin-delivery review
+(`docs-plans-2026-09-23-reminders-todo-bri-playful-dawn.md`) — see that review's N78
+disposition for the full decision record.
+
+`.githooks/post-merge`'s `for f in …` loop now names 5 files (widened from 3, this
+session) against 141 shipped `.mjs` files. A module added later is unchecked by
+construction, and that is exactly the shape of the 2026-09-16 incident the hook was
+written to catch. D8 chose the 2-line widening over sharing one definition with
+`lib/report/doctor/delivery.mjs`'s `treeDigest`, on the grounds that the hook must stay
+pure shell with no node dependency and that thirty net new lines was a real cost.
+
+**The fix is a narrow entry point, not a full `doctor` run** — N91 records `doctor` taking
+18 to 24 minutes on a bad day, and a git hook that blocks that long (even though git
+ignores its exit code, the wait is still real) is not an option. Expose one small node
+call that answers only "is the served tree missing any shipped file", built on `treeDigest`,
+and have `post-merge` call that instead of its own list. **Depends on `treeDigest` landing
+first** — it does not exist standalone yet outside `delivery.mjs`'s internal use.
+
 ## Finished
 
 The reader treats this section as closed wholesale, so entries move here rather than

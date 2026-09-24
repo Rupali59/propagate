@@ -1,5 +1,44 @@
 # propagate — State
 
+## the plugin gate: code was authored and never delivered — 2026-09-24
+
+**N78 is RESOLVED**, eng-reviewed before implementation (12 decisions, D1-D12; the review report
+is the last section of the plan file). Derive the live verdict rather than reading one here:
+
+```sh
+node cli.mjs doctor 2>&1 | sed -n '/^# Delivery/,/^# /p'      # slice the section; sections share wording
+npm run test:propagate 2>&1 | grep -E '^ℹ (tests|pass|fail)'  # and test:curate-docs SEPARATELY
+```
+
+**The defect.** Both delivery mechanisms key on the VERSION string — `.githooks/post-merge` fires
+only when a merge changes it, and `claude plugin update` compares version strings — so a code-only
+merge is undeliverable by construction. Claude Code's cache is keyed by version and `update` keeps
+same-version files. Measured that day: the served tree was 37 shipped-path commits and 7 days
+behind on a CLEAN tree, with 27 shipped paths missing from it, while every check in the repo was
+green because every check reads SOURCE.
+
+**What landed.** `lib/report/doctor/delivery.mjs` now compares a digest over the whole shipped file
+set (not `cli.mjs` alone) read from COMMITTED content at HEAD, so a dirty working tree cannot move
+the verdict — that was the false positive which got this check's first failing version reverted.
+Staleness is counted only over commits touching shipped paths, bounded by `deliveryMaxCommits` (10)
+and `deliveryMaxDays` (7) in `lib/core/config.mjs`. Remediation branches by state, and the
+`incoherent` branch no longer points at `git status`, which is clean in exactly that case. A CI
+bump-gate in `.github/workflows/test.yml` derives the shipped pathspec from the module rather than
+restating it in YAML.
+
+**Three things the review caught that the plan had wrong, kept because the near-misses are the
+useful part.** The gate was about to print `claude plugin update` as the fix for the one state that
+command cannot fix. The remedy for the CI gate reintroduced the duplicated-list defect the review
+had just found in `post-merge`. And `post-merge` verifies delivery against a hardcoded list that
+omitted both files the 2026-09-16 incident actually lost — widened, with sharing deferred as
+[[PR-012]].
+
+**Open, and deliberately not fixed here:** the served tree on this machine is still behind — the
+remedy is Rupali's to run, since it mutates her plugin install. `docs/SYSTEMS.md`'s `gotcha-guard`
+row names an artifact path that does not exist. And the shipped pathspec answers two questions with
+one list: `README.md` and `DESIGN.md` genuinely ship, so a docs-only commit to either counts toward
+the release bound, which partly defeats the doc-only-is-not-a-release rule it was built to honour.
+
 ## doctor stops lying about its own population — 2026-09-23
 
 **N87 is being worked in slices**, plan at `docs/plans/2026-09-23-doctor-tells-the-truth.md`

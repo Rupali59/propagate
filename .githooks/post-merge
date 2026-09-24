@@ -83,7 +83,7 @@ if [ -z "$SERVED" ]; then
 fi
 
 MISSING=""
-for f in cli.mjs commands/claims.mjs lib/claims/store.mjs; do
+for f in cli.mjs commands/claims.mjs lib/claims/store.mjs commands/goals.mjs lib/claims/restate.mjs; do
   [ -f "$SERVED$f" ] || MISSING="$MISSING $f"
 done
 if [ -n "$MISSING" ]; then

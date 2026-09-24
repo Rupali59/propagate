@@ -501,6 +501,38 @@ you lose proactive notification and nothing else.
 Distinct from two neighbouring verbs, deliberately: `init <dir>` scaffolds **one**
 sidecar, `bootstrap` baselines **edges**, `setup` configures **the machine**.
 
+### `deliveryMaxCommits` / `deliveryMaxDays` — when an undelivered plugin FAILS doctor
+
+`doctor`'s `# Delivery` section compares the served plugin under
+`~/.claude/plugins/cache/<marketplace>/propagate/<version>/` against this repo, and fails the run
+once the served tree is too far behind. Two bounds decide "too far":
+
+| key | env override | built-in default | meaning |
+|---|---|---|---|
+| `deliveryMaxCommits` | `PROPAGATE_DELIVERY_MAX_COMMITS` | `10` | commits touching **shipped** paths between the served commit and `HEAD` |
+| `deliveryMaxDays` | `PROPAGATE_DELIVERY_MAX_DAYS` | `7` | age of the served commit |
+
+Both carry a **built-in default on purpose** — per `docs/GOTCHAS.md` G24, a config key added without
+one resolves to `null` and silently switches off everything derived from it while `status` stays
+green. Precedence is the usual env > `config.yml` > built-in default.
+
+**Three things about the bounds are load-bearing, and each was a decision:**
+
+- **Only commits touching shipped paths count.** A doc-only or test-only commit must not move the
+  number, because a doc-only addition is not a release (decision of 2026-08-27). The shipped set is
+  `shippedPathspec()` in `lib/report/doctor/delivery.mjs` — **one definition**, which
+  `.github/workflows/test.yml`'s bump-gate derives rather than restating.
+- **A shipped path MISSING from the served tree fails at any distance**, below either bound. That is
+  the literal shape of the 2026-09-16 incident, where two modules were absent from the served tree
+  while every version string agreed.
+- **The comparison reads COMMITTED content at `HEAD`, never the working tree.** An earlier failing
+  version of this check was reverted because it went red on its first run over ordinary uncommitted
+  edits. A dirty tree at zero shipped-path commits behind still passes.
+
+A **leftover** cache tree — a version-keyed directory that is not the `installPath` recorded in
+`installed_plugins.json` — warns rather than fails. It is stale by definition, and gating on it
+turned one real problem into three failing rows.
+
 ### `PROPAGATE_ACCEPTANCE_EXPECT` — the real-tree acceptance corpus, held outside the repo
 
 `tests/cli/claims-check-known-positives.test.mjs` runs `claims check --json` against a

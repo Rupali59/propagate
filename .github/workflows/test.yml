@@ -185,3 +185,79 @@ jobs:
 
       - name: suite
         run: npm test --prefix skills/curate-docs
+
+  # bump-gate — the PREVENTION half of doctor's `# Delivery` check
+  # (lib/report/doctor/delivery.mjs), decided at D7 in
+  # ~/.claude/plans/docs-plans-2026-09-23-reminders-todo-bri-playful-dawn.md.
+  #
+  # WHY THIS EXISTS. `.githooks/post-merge` only delivers the plugin when a merge
+  # changes VERSION, and `claude plugin update` only re-copies when the version
+  # string differs — so a code-only merge is UNDELIVERABLE by construction (N78).
+  # 48 shipped-path commits landed between 2026-09-17 and 2026-09-24 with no
+  # VERSION bump, and `claude plugin update` reported "already at the latest
+  # version" while the served `cli.mjs` differed from source. This job fails a
+  # PR before that can happen again: any PR touching a shipped path must also
+  # bump VERSION, which is exactly `post-merge`'s existing delivery trigger.
+  #
+  # ONE DEFINITION, NOT TWO (D12/T10). `.githooks/post-merge` already carries a
+  # hand-maintained "what does this plugin ship" list — 3 of 141 shipped files,
+  # missing the two the 2026-09-16 incident actually lost (F8). Writing a SECOND
+  # hardcoded list here, in YAML, untestable, would be that exact defect
+  # reproduced in the fix for the defect it is about
+  # (`rule:adversarial-review-reads-the-ledger`). So this derives the pathspec
+  # from `lib/report/doctor/delivery.mjs`'s own exported `shippedPathspec()`
+  # with a one-line node invocation — it CANNOT drift from what `doctor`
+  # compares, because there is only one place the list is written.
+  # `tests/unit/doctor-delivery.test.mjs` asserts this file holds no literal
+  # exclude-pathspec magic token, so a hardcoded list cannot be reintroduced
+  # silently.
+  #
+  # Docs and tests are exempt by the SAME filter `shippedPathspec()` uses for
+  # R2's digest and R3's staleness count — the 2026-08-27 decision that a
+  # doc-only addition is not a release.
+  bump-gate:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A full history is required: this diffs the PR's base against its
+          # head, and the default checkout is a 1-commit shallow clone that
+          # cannot see the base at all.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: npm ci
+
+      - name: shipped-path change requires a VERSION bump
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # The single definition (D12/T10) — never restated as a literal list
+          # here. One node spawn, same as doctor's own.
+          mapfile -t PATHSPEC < <(
+            node -e "import('./lib/report/doctor/delivery.mjs').then(m => console.log(m.shippedPathspec().join('\n')))"
+          )
+
+          CHANGED_SHIPPED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- "${PATHSPEC[@]}")"
+          if [ -z "$CHANGED_SHIPPED" ]; then
+            echo "no shipped-path changes in this PR — nothing to gate"
+            exit 0
+          fi
+
+          CHANGED_VERSION="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- VERSION)"
+          if [ -n "$CHANGED_VERSION" ]; then
+            echo "VERSION changed alongside shipped paths — post-merge will deliver this"
+            exit 0
+          fi
+
+          echo "::error::shipped paths changed with no VERSION bump — post-merge will never fire and claude plugin update will report false agreement (N78). Bump VERSION, or confirm nothing here is actually shipped."
+          echo "changed shipped paths:"
+          echo "$CHANGED_SHIPPED"
+          exit 1

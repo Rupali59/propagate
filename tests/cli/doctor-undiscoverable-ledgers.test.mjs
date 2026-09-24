@@ -113,11 +113,23 @@ async function plantDotDirLedger(root, openRows = 1) {
   return jsonlPath;
 }
 
+// HOME IS ISOLATED ON PURPOSE, and without it these assertions are about this
+// machine rather than about the fixture. `# Delivery` resolves the plugin cache
+// from HOME, not from PROPAGATE_SEARCH_ROOTS, so a real install that is behind
+// made `doctor` exit non-zero here and both `status === 0` assertions below went
+// red — for a reason that has nothing to do with undiscoverable ledgers.
+// Measured 2026-09-24, when the delivery check gained a failing branch.
+//
+// Same pattern as `doctor.test.mjs`'s runDoctorWithHome and
+// `portability/fresh-machine.test.mjs`: pointing HOME at the fixture leaves no
+// served tree, so delivery reports not-installed (an `info`) and this file tests
+// what it claims to. Narrowing the assertions to the ledger section instead
+// would have kept a global claim the fixture cannot support.
 function runDoctor(root, stateDir = root) {
   return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir },
+    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, HOME: root },
   });
 }
 
