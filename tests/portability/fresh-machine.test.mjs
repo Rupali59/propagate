@@ -377,8 +377,11 @@ test("a ref pruned CARRYING WORK is surfaced, and a safe prune is not", () => {
     },
   });
   const out = `${r.stdout}${r.stderr}`;
-  assert.match(out, /gone-risky.*PRUNED CARRYING WORK/, `lost work must be surfaced:\n${out}`);
-  assert.match(out, /gone-unclear.*work status UNKNOWN/, "unmeasured is not reassurance");
+  // ORDER INVERTED 2026-09-24 (N87 slice 3): the warning label is now the KIND and
+  // the ref is the instance, so the phrase precedes the ref. Both tokens are still
+  // required on the same line — the guarantee is unchanged, only the column order.
+  assert.match(out, /PRUNED CARRYING WORK.*gone-risky/, `lost work must be surfaced:\n${out}`);
+  assert.match(out, /work status UNKNOWN.*gone-unclear/, "unmeasured is not reassurance");
   assert.doesNotMatch(out, /gone-safe/, "a merged prune is not an alarm");
   assert.doesNotMatch(out, /gone-pushed/, "a recoverable prune is not an alarm");
 });
