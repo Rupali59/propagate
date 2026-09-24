@@ -15,8 +15,14 @@ by the tool:
   checks both, so an open item that merely mentions one reads as finished. Say it in the
   second paragraph instead.
 
-Finished entries move to a `## Finished` heading at the bottom, which the reader treats as a
-closed section wholesale.
+Entries that are done move to the level-2 heading named Finished at the bottom of this
+file, which the reader treats as a closed section wholesale — ID-keyed headings inside it
+included, since 2026-09-24.
+
+**Never write that heading in this prose as literal markdown.** An earlier version did,
+the line wrapped, a line therefore BEGAN with the hashes, and the parser read the
+explanation as a real heading — closing every entry below it. The reader said 8 total,
+0 open. N51 exactly: prose about the format is not the format, until it accidentally is.
 
 Derive the open count rather than reading one here:
 
@@ -25,16 +31,6 @@ node cli.mjs backlog --json | node -e 'let s="";process.stdin.on("data",d=>s+=d)
 ```
 
 ---
-
-### PR-002 · Write the slices 2-3 plan for `doctor`, after slice 1 lands
-
-`docs/plans/2026-09-23-doctor-tells-the-truth.md` covers the census and the migration.
-Slices 2 and 3 — the `inconclusive` entry kind, per-check-class severity, content-assertions
-in place of presence-assertions, and the terse gate with `--full` — have no task breakdown.
-
-They were deliberately left out: they change the `Reporter` vocabulary across nine section
-modules and roughly nineteen test files, and slice 2's checks run over the census that slice 1
-changes, so specifying them earlier would be guessing at their input.
 
 ### PR-003 · Brainstorm whether propagation state wants a schema rather than files
 
@@ -125,6 +121,26 @@ npm test 2>&1 | grep -E '^ℹ (tests|pass|fail)' | awk '{s[$2]+=$3} END {for(k i
 Worth pairing with N91, which tracks `doctor.duration_ms` spikes of 18-24 minutes — an
 intermittent slowdown and an intermittently truncated suite may be the same cause.
 
+### PR-009 · Decide whether an in-tree ledger holding 0 rows is a defect
+
+This blocks the last content assertion in doctor slice 2c.
+`lib/report/doctor/workspaces.mjs:110` reads
+`reporter.check("ledger JSONL parseable", true, \`${rows.length} rows\`)` — a hardcoded
+pass with the count relegated to the detail, so an empty ledger satisfies it. That is the
+N87 mechanism-2 shape, and the obvious move is to make 0 rows `inconclusive`.
+
+**I did not make it, on purpose.** N84's own title says *undecided, undocumented*: every
+in-tree ledger holds 0 rows and all real events live in `PROPAGATE_STATE_DIR`, outside
+every git remote. If that is the intended design, an empty in-tree ledger is CORRECT and
+asserting on it would manufacture a failure. If it is not, the ledgers are broken and the
+assertion is the least of it. The check cannot be written until someone says which.
+
+Note the second-order problem either way: this check runs PER WORKSPACE, so a naive
+conversion emits one vote per empty ledger — 17 of them for one condition. The file
+already solved that shape once (G20: *"one bad row prints one ✗, not one per workspace"*)
+by accumulating into `counts`/`details` and asserting once in `EXPECTATIONS`
+(`lib/report/metrics.mjs`). Follow that, not a per-workspace entry.
+
 ## Finished
 
 The reader treats this section as closed wholesale, so entries move here rather than
@@ -144,3 +160,11 @@ The decision lives in `migrationVerdict` (`lib/core/v3-layout.mjs`), pure and un
 in `tests/unit/v3-migration-verdict.test.mjs`, because as three inline branches in
 `discovery.mjs` the repo's own coverage audit correctly reported the check as never
 having been seen to fail.
+
+### PR-002 · Write the slices 2-3 plan for `doctor`
+
+Written 2026-09-23 as `docs/plans/2026-09-23-doctor-slices-2-3.md` (`87ef7f4`), after
+slice 1 landed. It corrected N87 twice while being written: "14 distinct check classes" is
+60 `reporter.check` call sites across 8 modules, and the 354 warnings come from NINE static
+warn sites, five inside loops that interpolate their LABEL from the row — which is why
+"299 distinct kinds" is one row per kind by construction and cannot fold.

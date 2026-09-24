@@ -1579,3 +1579,43 @@ evidence. The related instance that HAS been paid for is the `ssjk-mongo-backup`
 `docs/SYSTEMS.md` — a daily agent, exit 0, `SKIP: motherboard-mongodb not running`, and
 **zero backups ever written**, where that row records the rule: *"Probe the OUTPUT, never
 the exit code"* and *"skipping is spelled as success."*
+
+### G69 · A heading written as literal markdown in prose BECOMES a heading when the line wraps
+
+Both failures below happened in one edit, on 2026-09-24, in the file that documents the
+convention they broke.
+
+**1 · The prose became structure.** `propagation/state/workspace/TODOS.md`'s header
+explained the convention with the heading spelled out — `Finished entries move to a
+`## Finished` heading at the bottom, which the reader treats as a closed section
+wholesale.` Wrapped at 96 columns, that put the literal at the START of a line. Markdown
+does not care that it is inside a sentence: a line beginning with the hashes IS a heading.
+`closedSectionLines` matched it, and every entry below became closed. The reader went from
+`8 total, 8 open` to `8 total, 0 open`.
+
+It was harmless until the same session taught the parser that nested headings inside a
+closed section are closed items too — a correct fix that turned a dormant phantom into a
+total one. **A latent format bug is a live one the moment the parser gets better.**
+
+**2 · `indexOf` matched the documentation, not the thing.** Inserting a new entry "before
+the Finished heading" used `s.indexOf("## Finished")`, which found the PROSE occurrence
+first and spliced a full entry into the middle of the header sentence. The anchor and its
+own explanation are byte-identical, so the search could not tell them apart.
+
+**Instead:**
+
+- **Never write a structural marker as literal markdown in prose the same tool parses.**
+  Name it ("the level-2 heading named Finished"), or fence it. The TODOS header now says so
+  about itself.
+- **Anchor on the LAST occurrence when a document explains its own format** — `lastIndexOf`,
+  or a regex anchored to line start with the exact expected form. An anchor a file's own
+  documentation can satisfy is not an anchor.
+- **Check the heading census after editing a machine-parsed document**:
+  `grep -n "^#\{1,6\} " <file>` — one unexpected row is the whole bug, and it is invisible
+  in rendered markdown because it renders as a heading and looks deliberate.
+
+**Cost:** contained, and only because the count was re-read after the edit rather than
+assumed. `0 open` on a file with seven open items is loud; the same defect in a file with
+one open item would have read as plausible. N51 is the same family one step less literal —
+there a fenced example minted a phantom SECTION in HANDOVERS.md and reported it **closed**,
+which that entry calls the one state that must never be wrong.
