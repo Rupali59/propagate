@@ -43,3 +43,8 @@ metrics.jsonl
 # while being invisible to any text search. The watcher itself was retired
 # 2026-08-14 and deleted 2026-08-22; its logs had no readers.
 docs/archive/*watcher*.log*
+
+# gbrain worktree pin — machine-local, names a source id in THIS Mac's brain.
+# Not portable: a clone elsewhere has no such source, and a worktree-scoped id
+# would be wrong for a sibling worktree. Added 2026-09-24 with the pin itself.
+.gbrain-source

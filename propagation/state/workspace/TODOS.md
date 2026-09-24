@@ -121,6 +121,34 @@ npm test 2>&1 | grep -E '^ℹ (tests|pass|fail)' | awk '{s[$2]+=$3} END {for(k i
 Worth pairing with N91, which tracks `doctor.duration_ms` spikes of 18-24 minutes — an
 intermittent slowdown and an intermittently truncated suite may be the same cause.
 
+### PR-010 · gbrain writes a heartbeat nothing reads, so "alive but silent" has no name
+
+Measured 2026-09-24: `gbrain serve` (PID 22608) stayed alive **50.8 hours** while its last
+heartbeat was **45.3 hours** old. It heartbeat for roughly its first 5.5 hours, stopped, and
+then held the PGLite single-writer lock for another 45 — blocking four `gbrain-check` probes
+and closing gbrain's MCP for every session in between.
+
+**`gbrain-check.sh` already has the number.** It printed `heartbeat 163089s ago` in the very
+message explaining why it could not run. It has the age and no rule that turns it into a
+finding, so a 45-hour silence rendered as "this is normal, not a fault".
+
+**The pattern to copy is in this tree, for a different component.** `docs/SYSTEMS.md`'s
+`claude-usage-sample` row specifies four exit codes — `0` fresh · `3` stale · `4` never ran ·
+`5` unreadable — *"because 'never ran' and 'ran and went quiet' are different facts and only one
+is a launchd problem"*. Code `3` is exactly the state gbrain has no name for. That row also
+warns the probe reads the OUTPUT and so cannot tell you the process is loaded: pair it with a
+process check.
+
+**Root cause worth keeping:** gbrain is an stdio MCP server
+(`mcpServers.gbrain` = `gbrain serve`), spawned per session and spoken to over pipes. When its
+client goes away it can sit alive holding the lock with nobody reading. So the fix is a
+stale-heartbeat verdict, NOT a manual restart — hand-starting a standalone `gbrain serve`
+recreates this exact state.
+
+Also surfaced the moment the lock cleared, and hidden by it: the memory corpus is **32 days
+old** (newest 2026-08-23, threshold 14d). `/sync-gbrain` is the fix.
+
+
 ## Finished
 
 The reader treats this section as closed wholesale, so entries move here rather than
