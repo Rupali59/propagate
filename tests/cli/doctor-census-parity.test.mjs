@@ -115,3 +115,25 @@ test("LIVE TREE: doctor's conformance accounts for propagate itself", async (t) 
     `propagate holds state/ and lacks the other four, so it must be a half-migrated offender; offenders=${offenders.join(",")} notStarted=${rep.notStarted.map((o) => o.name).join(",")}`,
   );
 });
+
+test("an EMPTY census is inconclusive, never a pass — the N82/G68 case", async (t) => {
+  // This runs in the ordinary scoped test environment, where SEARCH_ROOTS is []
+  // and the census is therefore empty. That is not a contrived fixture: it is
+  // the exact condition under which doctor printed `✓ 0/0 conform`, because
+  // `offenders.length === 0` is vacuously true over an empty set.
+  const { SEARCH_ROOTS } = await import("../../lib/core/config.mjs");
+  if (SEARCH_ROOTS.length > 0) {
+    t.skip("this environment has search roots, so the empty-census path is not exercised here");
+    return;
+  }
+  const { Reporter } = await import("../../lib/report/doctor/reporter.mjs");
+  const { checkDiscovery } = await import("../../lib/report/doctor/discovery.mjs");
+  const r = new Reporter();
+  await checkDiscovery({ reporter: r });
+
+  const e = r.entries.find((x) => x.label === "workspaces conform to the v3 propagation layout");
+  assert.ok(e, "the conformance check must emit an entry");
+  assert.notEqual(e.kind, "pass", `an empty census must not pass; detail was ${JSON.stringify(e.detail)}`);
+  assert.equal(e.kind, "inconclusive", `expected inconclusive, got ${e.kind}`);
+  assert.match(e.detail, /\b0\b|empt|no workspace/i, "the reason must say WHY it could not look");
+});
