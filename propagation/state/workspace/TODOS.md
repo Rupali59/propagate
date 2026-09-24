@@ -121,26 +121,6 @@ npm test 2>&1 | grep -E '^ℹ (tests|pass|fail)' | awk '{s[$2]+=$3} END {for(k i
 Worth pairing with N91, which tracks `doctor.duration_ms` spikes of 18-24 minutes — an
 intermittent slowdown and an intermittently truncated suite may be the same cause.
 
-### PR-009 · Decide whether an in-tree ledger holding 0 rows is a defect
-
-This blocks the last content assertion in doctor slice 2c.
-`lib/report/doctor/workspaces.mjs:110` reads
-`reporter.check("ledger JSONL parseable", true, \`${rows.length} rows\`)` — a hardcoded
-pass with the count relegated to the detail, so an empty ledger satisfies it. That is the
-N87 mechanism-2 shape, and the obvious move is to make 0 rows `inconclusive`.
-
-**I did not make it, on purpose.** N84's own title says *undecided, undocumented*: every
-in-tree ledger holds 0 rows and all real events live in `PROPAGATE_STATE_DIR`, outside
-every git remote. If that is the intended design, an empty in-tree ledger is CORRECT and
-asserting on it would manufacture a failure. If it is not, the ledgers are broken and the
-assertion is the least of it. The check cannot be written until someone says which.
-
-Note the second-order problem either way: this check runs PER WORKSPACE, so a naive
-conversion emits one vote per empty ledger — 17 of them for one condition. The file
-already solved that shape once (G20: *"one bad row prints one ✗, not one per workspace"*)
-by accumulating into `counts`/`details` and asserting once in `EXPECTATIONS`
-(`lib/report/metrics.mjs`). Follow that, not a per-workspace entry.
-
 ## Finished
 
 The reader treats this section as closed wholesale, so entries move here rather than
@@ -168,3 +148,22 @@ slice 1 landed. It corrected N87 twice while being written: "14 distinct check c
 60 `reporter.check` call sites across 8 modules, and the 354 warnings come from NINE static
 warn sites, five inside loops that interpolate their LABEL from the row — which is why
 "299 distinct kinds" is one row per kind by construction and cannot fold.
+
+### PR-009 · Decide whether an in-tree ledger holding 0 rows is a defect
+
+Answered 2026-09-24: it is not. `ensureLedgerPair` does `writeFileSync(ledgerJsonl, "")` and
+NOTHING in this repo appends a row to any ledger file, so an empty in-tree ledger is the only
+state the code can produce. Making it fail or go inconclusive would have reddened `doctor`
+permanently over a correct condition — the inverse of the G68 fix, not an instance of it.
+
+Rupali chose retirement. The vacuous half is gone (it passed `true` unconditionally); the
+catch-branch check stays, because a genuine read throw IS a defect. The row count is now an
+`info` naming where the events actually live.
+
+It was already redundant twice over: `discovery.mjs`'s malformed-JSONL counter exists
+because *"readLedger silently continues past unparseable lines, so the existing `ledger JSONL
+parseable` check above is vacuous"*. Two readers reached that conclusion before this one, and
+neither removed the check.
+
+This also settles the open half of N84: in-tree ledgers are v1 scaffolding superseded by the
+event store, with the `.md` half already frozen and unrendered.

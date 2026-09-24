@@ -86,6 +86,12 @@ const KNOWN_UNCOVERED = [
   "discovery not degraded",
   "event store lines all parseable",
   "ledger JSONL exists",
+  // RETIRED-IN-HALF 2026-09-24 (PR-009). The vacuous occurrence is gone: it passed
+  // `true` unconditionally, so it reported success for a file `ensureLedgerPair`
+  // creates EMPTY and nothing ever appends to. Only the catch-branch check remains,
+  // and that one is honest — it fires when readLedgerWithStats genuinely throws.
+  // Still uncovered because nothing constructs a ledger that throws on read; the
+  // label now means strictly less than it did, which is the point.
   "ledger JSONL parseable",
   "ledger MD exists",
   "no source open in more than one ledger",
