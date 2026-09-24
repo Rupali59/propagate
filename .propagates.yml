@@ -302,6 +302,27 @@ sources:
           outliving the record it summarises.
         kind: prose
 
+  # Added 2026-09-24, and the divergence was ALREADY STANDING when it was declared.
+  # The sibling ISSUES.md -> STATE.md edge above records N89: a defect marked RESOLVED
+  # in the register while STATE.md still called it live, costing a session's re-fix.
+  # This is the same failure in the same pair of files one register over, so declaring
+  # only ISSUES.md fixed the instance and left the mechanism (§5).
+  propagation/state/workspace/TODOS.md:
+    propagates_to:
+      - path: propagation/state/workspace/STATE.md
+        why: >-
+          STATE.md narrates which PR items are open; TODOS.md is where they are actually
+          dispositioned. Measured the day this was declared, STATE.md was wrong about all
+          THREE things it said in three lines: PR-001 was "open and blocking nothing but
+          itself" after Rupali answered it on 2026-09-24, "three" never-begun workspaces
+          were four, and "produce one `info` line between them" described the mechanism
+          PR-001's implementation REPLACED -- `migrationVerdict` makes never-begun a FAIL.
+          The mechanism claim is the expensive one: a reader trusting it concludes the gate
+          was never wired and rebuilds it, which is exactly the wasted work N89 caused.
+          A count rots fastest (rule:state-and-decisions) but a superseded MECHANISM reads
+          as current indefinitely, because nothing about it looks like a number.
+        kind: prose
+
   docs/AUDIT-2026-08.md:
     propagates_to:
       - path: propagation/state/workspace/GOTCHAS.md

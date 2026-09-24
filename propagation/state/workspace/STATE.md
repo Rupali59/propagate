@@ -29,9 +29,21 @@ and commands.
 vacuously true over an empty population, so the check reports success for having examined
 nothing. GOTCHAS G68. Slice 2c is where it becomes `inconclusive`.
 
-**Open and blocking nothing but itself:** PR-001 — should a workspace that never began the
-migration fail the gate? Three do today and produce one `info` line between them. It is a
-judgement about what the gate is for.
+**Answered by Rupali 2026-09-24: it fails — and the answer is a carve-out, not a plain yes.**
+PR-001 asked whether a workspace that never began the migration should fail the v3 conformance
+gate. It does, but the predicate is adoption ASYMMETRY rather than absence: some workspaces
+conforming while others never began is a gap someone chose not to close, and it fails. NOTHING
+having begun anywhere is a fresh install, and failing that would fail every stranger by
+definition — `tests/cli/stranger-install.test.mjs` asserts a stranger reaches doctor-clean.
+The decision lives in `migrationVerdict` (`lib/core/v3-layout.mjs`), pure and unit-tested,
+because as three inline branches in `discovery.mjs` this repo's own coverage audit correctly
+reported the check as never having been seen to fail.
+
+**This paragraph said "three do today and produce one `info` line between them" until 2026-09-24,
+and both halves were wrong.** The `info` line is what PR-001's implementation REPLACED, so a
+reader trusting it would conclude the gate was never wired and rebuild it. The count is derived,
+never written here (`rule:state-and-decisions`): `node cli.mjs doctor`. Caught by the
+`TODOS.md -> STATE.md` edge declared the same day, which fired on its first change.
 
 ## Five divisions, a design system, and a page that runs — 2026-09-21, shipped `bd7d98c`
 

@@ -32,35 +32,6 @@ node cli.mjs backlog --json | node -e 'let s="";process.stdin.on("data",d=>s+=d)
 
 ---
 
-### PR-003 · Brainstorm whether propagation state wants a schema rather than files
-
-Raised by Rupali 2026-09-23. The question is whether ledgers, issues, goals and refs should
-live in a queryable store instead of markdown and JSONL parsed by convention. Five independent
-pieces of evidence already sit in this tree:
-
-| source | what it shows |
-|---|---|
-| N84 | every in-tree ledger holds 0 rows; 2892 events live outside every git remote |
-| N19 / N20 | 39 event rows carry a terminal status with no transition; 87% of the Vipin Kaushik ledger is hand-authored, outside any schema |
-| N81 | five more files colocate a machine-parsed grammar with append-only churn |
-| G26 | two incompatible `refs/snapshot.json` shapes both declare `schema_version: 1`, costing 4 spurious records in an append-only file |
-| 2026-09-23 | the backlog reader counted 87 prose `N\d+` tokens as 68 issues, because the schema is markdown headings |
-
-G26 is the sharpest: a version field that cannot distinguish two live formats is what a schema
-looks like when it is a convention. This is architectural and partly upstream of N87 — it wants
-its own brainstorm, not a fold-in.
-
-### PR-004 · Clear the `gbrain serve` process holding the PGLite lock
-
-Measured 2026-09-23: PID 22608 (`bun gbrain serve`), alive 31.6 h, last heartbeat 26.1 h prior,
-parented by a `claude` session at PID 22249 that is also 31.6 h old. PGLite is single-writer, so
-that process blocks four of `gbrain-check.sh`'s probes (STALE, CODEPAGES, EMBED, CLAIM) and is
-why gbrain's MCP reported `CONNECTION_CLOSED` this session.
-
-Needs a human: killing another session's process is Rupali's call, and that terminal may be in
-use. Re-run `bash ~/Documents/GitHub/scripts/gbrain-check.sh` afterwards for the four real
-answers.
-
 ### PR-005 · Give the 18 undispositioned `ISSUES.md` entries a marker
 
 Measured 2026-09-23: `ISSUES.md` holds 55 `###` headings — 29 marked `**OPEN**`, 8 marked with a
@@ -99,73 +70,47 @@ Three hazards are verified against the live list rather than predicted: exit cod
 so a `\n`-anchored parser misses them, and `completion date` is the clock while
 `modification date` is not — a tag edit bumps the latter.
 
-### PR-008 · Find the suite run that loses 91 tests instead of failing one
+### PR-008 · Chase the intermittent `ui-client` failure — the 91 "missing" tests were the ruler
 
-Observed once, 2026-09-23, during N87 slice 1: `npm test` reported `tests=1860 pass=1855
-fail=1` where three runs either side of it reported `tests=1951 pass=1947 fail=0`, exit 0.
-Re-running never reproduced it, and no `✖` line named a test.
+Reframed 2026-09-24 by measuring the two npm sub-suites separately, which is the one thing three
+sessions of looking at aggregate lines could not do. **No tests were ever lost.**
 
-**The signature is the interesting part: 91 tests went MISSING, rather than one failing.**
-That is a sub-suite ending early — a timeout, an unhandled rejection, or a process exiting
-before its file finished — and the aggregate line renders it as an ordinary failure count.
-A suite that can lose 91 tests while reporting `fail=1` cannot be trusted to say a run was
-complete, which is the same shape as N87 mechanism 2 one level out: the number is about a
-population nobody checked was whole.
+`npm test` is `npm run test:propagate && npm run test:curate-docs` — an `&&` chain. Measured that
+day: `test:propagate` holds **1911** tests, `test:curate-docs` holds **91**. So one real failure
+in the first package makes it exit non-zero, the `&&` short-circuits, and the second package never
+runs at all. The arithmetic closes on both recorded occurrences to the unit:
 
-Derive the expected total before trusting any single run:
+| occurrence | reported | propagate-side | + curate-docs |
+|---|---|---|---|
+| 2026-09-23 | 1860 of 1951 | 1860 | 1860 + 91 = 1951 |
+| 2026-09-24 | 1904 of 1995 | 1904 | 1904 + 91 = 1995 |
+
+**The instrument was the defect, and this register was handing it to the next reader.** The derive
+command recommended here summed `^ℹ (tests|pass|fail)` lines with `awk {s[$2]+=$3}` across BOTH
+sub-suites. When the second one does not execute there are no lines to sum, so "package B did not
+run" rendered as "91 tests disappeared" — `rule:discernment-checks` §6, a reader that cannot
+report failure inventing an answer, and the invented answer (a dropped shard) was far more
+alarming than the truth. §4 says suspect the ruler when a number is surprising; the ruler here was
+written down as the thing to trust, which is why it survived two occurrences.
+
+Derive the two totals SEPARATELY. A single number over an `&&` chain cannot tell you which half
+ran:
 
 ```sh
-npm test 2>&1 | grep -E '^ℹ (tests|pass|fail)' | awk '{s[$2]+=$3} END {for(k in s) print k, s[k]}'
+npm run test:propagate  2>&1 | grep -E '^ℹ (tests|pass|fail)'
+npm run test:curate-docs 2>&1 | grep -E '^ℹ (tests|pass|fail)'
 ```
 
-Worth pairing with N91, which tracks `doctor.duration_ms` spikes of 18-24 minutes — an
-intermittent slowdown and an intermittently truncated suite may be the same cause.
+**What is still open is the original single failure**, and it is smaller than it looked:
+`tests/unit/ui-client.test.mjs:252` — *"a chart path measures itself and hands the length to the
+CSS"*. It is `async` and measures a rendered path, so a timing dependency is the suspect. It has
+appeared twice and not reproduced on demand; four consecutive full runs since have been green.
 
-**REPRODUCED 2026-09-24, and it named a test.** Second occurrence, same signature to the
-number: `fail=1` with the total short by **exactly 91** (1904 of 1995; the first was 1860 of
-1951). Two consecutive re-runs came back 1995 / 1990 pass / 0 fail, so it is intermittent,
-not a regression.
-
-This time the failing test was named: `tests/unit/ui-client.test.mjs:252` — *"a chart path
-measures itself and hands the length to the CSS"*. It is `async` and measures a rendered
-path, so a timing dependency is the obvious suspect.
-
-**But 91 is bigger than that file**, which holds 25 tests. So the runner is dropping a SHARD
-rather than a file, and the named failure is a symptom of whatever aborts it. That is the
-thread to pull: find what `npm test` groups into a shard with `ui-client`, and what a
-failure there does to the rest of it.
-
-The load-bearing point is unchanged: a run that reports `fail=1` while losing 91 tests cannot
-be trusted to say a run was COMPLETE, and the aggregate line renders it identically to an
-ordinary failure.
-
-### PR-010 · gbrain writes a heartbeat nothing reads, so "alive but silent" has no name
-
-Measured 2026-09-24: `gbrain serve` (PID 22608) stayed alive **50.8 hours** while its last
-heartbeat was **45.3 hours** old. It heartbeat for roughly its first 5.5 hours, stopped, and
-then held the PGLite single-writer lock for another 45 — blocking four `gbrain-check` probes
-and closing gbrain's MCP for every session in between.
-
-**`gbrain-check.sh` already has the number.** It printed `heartbeat 163089s ago` in the very
-message explaining why it could not run. It has the age and no rule that turns it into a
-finding, so a 45-hour silence rendered as "this is normal, not a fault".
-
-**The pattern to copy is in this tree, for a different component.** `docs/SYSTEMS.md`'s
-`claude-usage-sample` row specifies four exit codes — `0` fresh · `3` stale · `4` never ran ·
-`5` unreadable — *"because 'never ran' and 'ran and went quiet' are different facts and only one
-is a launchd problem"*. Code `3` is exactly the state gbrain has no name for. That row also
-warns the probe reads the OUTPUT and so cannot tell you the process is loaded: pair it with a
-process check.
-
-**Root cause worth keeping:** gbrain is an stdio MCP server
-(`mcpServers.gbrain` = `gbrain serve`), spawned per session and spoken to over pipes. When its
-client goes away it can sit alive holding the lock with nobody reading. So the fix is a
-stale-heartbeat verdict, NOT a manual restart — hand-starting a standalone `gbrain serve`
-recreates this exact state.
-
-Also surfaced the moment the lock cleared, and hidden by it: the memory corpus is **32 days
-old** (newest 2026-08-23, threshold 14d). `/sync-gbrain` is the fix.
-
+Two things worth doing alongside it. **`&&` hides the second package's verdict:** whenever the
+propagate suite fails, nobody learns whether curate-docs passes, so a failure there can sit behind
+an unrelated one indefinitely. And N91's `doctor.duration_ms` spikes of 18-24 minutes may still
+share a cause with an async test that is sensitive to load — that pairing survives the reframe,
+because it was never about the count.
 
 ## Finished
 
@@ -213,3 +158,100 @@ neither removed the check.
 
 This also settles the open half of N84: in-tree ledgers are v1 scaffolding superseded by the
 event store, with the `.md` half already frozen and unrendered.
+
+### PR-003 · Brainstorm whether propagation state wants a schema rather than files
+
+Answered 2026-09-24: **no, not yet** — and it ships with a falsification contract rather than a
+preference. Rupali set the condition that decided the shape: *"make sure we measure this, because
+otherwise we wont know whether the db is required or not."* So the answer carries six tripwires
+with baselines taken before any change, in `docs/plans/2026-09-24-parser-collapse.md`.
+
+The measurement that settled it, re-derived the day this closed: **23 owners, 17 conform to the
+v3 layout, 2 half-migrated (Sindhu and propagate itself), 4 never begun.** Starting a storage
+migration while a layout migration is unfinished across ~20 repos means two partial migrations at
+once, and a partial migration is the state that loses data. That is a number, not a taste:
+
+```sh
+node --input-type=module -e 'import {SEARCH_ROOTS,WORKSPACES} from "./lib/core/config.mjs";
+import {ownerCandidates} from "./lib/core/discovery.mjs";
+import {conformanceReport} from "./lib/core/v3-layout.mjs";
+const r=conformanceReport(ownerCandidates(SEARCH_ROOTS,WORKSPACES));
+console.log(r.total, r.offenders.length, r.notStarted.length)'
+```
+
+What landed instead of a schema:
+
+| slice | what it does |
+|---|---|
+| 3a | `lib/docs/tokens.mjs` — one fence-aware heading scanner, extracted from the most-hardened parser (`handovers.mjs`) rather than designed fresh |
+| 3b | `caps.mjs`, `registers.mjs` and `handovers.mjs` routed through it. Two real bugs fell out: `~~~` fences and unterminated fences were both invisible to `countEntries` |
+| 3d | `lib/report/index-view.mjs` — the cross-workspace view, pure, importing nothing, provably cacheless |
+
+**Two parts of the plan were withdrawn after measurement rather than after debate**, which is the
+part worth keeping. §3c would have made `kindOf` authoritative — but it gives `HANDOVERS.md` a
+null kind, so making it authoritative would have silenced a whole register. T6 counted
+line-anchored regexes in `lib/`, which rewards deleting legitimate marker patterns; a metric that
+pays you for removing checks is worse than no metric. And `goals.mjs` turned out to be collapsed
+already, which invalidated the plan's own parser ordering before it was executed.
+
+**T2 is the decisive tripwire.** If the index ever acquires a cache, a state file or a staleness
+check, the derive-on-demand premise failed and a database was the right answer after all.
+
+### PR-010 · gbrain writes a heartbeat nothing reads, so "alive but silent" has no name
+
+Investigated 2026-09-24 and **retired: the premise was wrong, and the prescription had already
+been tried upstream and withdrawn for corrupting data.** Recorded rather than deleted, because
+the reasoning that produced it was sound and the next person will have the same idea.
+
+The observation was real: PID 22608 lived 50.8 h with a 45.3 h-old heartbeat, held the PGLite
+single-writer lock, and closed gbrain's MCP for every session in between. What was wrong was
+"so it has no name".
+
+`~/Documents/GitHub/scripts/gbrain-check.sh` carries a section headed *"THERE IS DELIBERATELY NO
+'STALE LOCK' CHECK"*, naming the two theories an earlier draft held and refuting both from
+gbrain's own lock code:
+
+| the theory | why it is wrong |
+|---|---|
+| a stale heartbeat means a dead holder | gbrain **#2348 removed** steal-on-stale-heartbeat: the heartbeat runs on the JS event loop, which is BLOCKED during long synchronous imports, so a WORKING holder looks stale. Reaping one corrupted the catalog and pgvector state |
+| an abandoned lock file blocks the CLI | `acquireLock` classifies by PID liveness and reaps a dead holder itself (`pglite-lock.ts:239-249`). A dead lock is self-healing; reporting it would be noise |
+
+So the verdict PR-010 asked for is the one that destroys data, and **both verdicts that are
+sound already exist**: the heartbeat age is used for ATTRIBUTION — the skip reason reads
+`held by a live gbrain serve (PID N, heartbeat Ns ago)` rather than "could not connect", which
+is exactly the `rule:discernment-checks` §2 job PR-010 claimed was missing — and an orphaned
+serve (`PPID=1`, its session gone) is check **#2 ORPHANS**, already a finding.
+
+**PID 22608 was neither.** Its parent was a live `claude` session at PID 22249, so it was not an
+orphan; and it was alive, so no liveness probe could fault it. From outside the process, a
+session holding the lock for 50 hours and a session that stopped reading its pipes 45 hours ago
+are indistinguishable — which is why the script calls it normal operation and says so
+attributably. That is the correct behaviour, not a gap.
+
+**What is left is not gbrain's.** The residual symptom is that a Claude Code MCP server which
+fails to spawn stays `CONNECTION_CLOSED` for the whole session and never retries, so clearing
+the lock mid-session does not revive it. Verified 2026-09-24: with PID 22608 gone,
+`gbrain-check.sh` returns `rc=0, no findings` and no process holds the lock, while this session's
+gbrain MCP stayed dead from the spawn that failed before the kill. That is an MCP lifecycle fact,
+not a propagate or gbrain defect, and it is the reason this looked like a recurrence.
+
+### PR-004 · Clear the `gbrain serve` process holding the PGLite lock
+
+Cleared 2026-09-24. PID 22608 was sent SIGTERM after Rupali's go-ahead — it had been alive 50.8 h
+with a 45.3 h-old heartbeat, holding the PGLite single-writer lock and blocking four
+`gbrain-check.sh` probes (STALE, CODEPAGES, EMBED, CLAIM).
+
+Killing it unblocked all four and immediately surfaced two things the lock had been hiding: the
+memory corpus was **32 days stale** (newest page 2026-08-23 against a 14-day threshold) and embed
+coverage sat at 90%. Both were repaired in the same pass — 943 pages, 6431 chunks — and the
+worktree was pinned via `.gbrain-source` -> `gstack-code-propagate` (gitignored) so the next sync
+indexes the intended tree. gstack went 1.87.4.0 -> 1.89.0.0 and gbrain 0.50.5.0 -> 0.54.1.1,
+15 migrations, verified.
+
+Confirmed on close: `bash ~/Documents/GitHub/scripts/gbrain-check.sh` returns `rc=0, no findings`
+and no process matches `gbrain serve`. The one NOT CHECKED line is QUEUE, which has no queue file
+— a skipped check named as skipped, which is the correct output rather than a pass.
+
+**This was a symptom, not the disease, and [[PR-010]] is where the disease was investigated and
+the obvious fix was refuted.** A manual kill cannot be the answer: gbrain is an stdio MCP server
+spawned per session, so hand-starting a standalone `gbrain serve` recreates this exact state.
