@@ -137,3 +137,37 @@ test("an EMPTY census is inconclusive, never a pass — the N82/G68 case", async
   assert.equal(e.kind, "inconclusive", `expected inconclusive, got ${e.kind}`);
   assert.match(e.detail, /\b0\b|empt|no workspace/i, "the reason must say WHY it could not look");
 });
+
+test("LIVE TREE: never-begun workspaces FAIL the gate when others have adopted (PR-001)", async (t) => {
+  // Rupali's decision, 2026-09-24: a workspace that never began the migration
+  // should fail the gate, not sit in an `info` line.
+  //
+  // THE CARVE-OUT, and why it is not a hedge. `tests/cli/doctor.test.mjs`'s
+  // negative control records that requiring the full v3 tree UNCONDITIONALLY
+  // "makes every fresh install fail by definition until the migration
+  // completes", and `tests/cli/stranger-install.test.mjs` asserts a stranger
+  // reaches doctor-clean. So the distinction is adoption ASYMMETRY: if some
+  // workspaces conform and others never began, that is a gap someone chose not
+  // to close and it fails. If NOTHING has begun anywhere, nothing was promised.
+  const { SEARCH_ROOTS, WORKSPACES } = await import("../../lib/core/config.mjs");
+  if (SEARCH_ROOTS.length === 0) {
+    t.skip("no SEARCH_ROOTS in this environment — the live tree was not examined");
+    return;
+  }
+  const { conformanceReport } = await import("../../lib/core/v3-layout.mjs");
+  const rep = conformanceReport(ownerCandidates(SEARCH_ROOTS, WORKSPACES));
+  if (rep.notStarted.length === 0 || rep.notStarted.length === rep.total) {
+    t.skip(`this tree is not asymmetric (notStarted=${rep.notStarted.length} total=${rep.total})`);
+    return;
+  }
+
+  const { Reporter } = await import("../../lib/report/doctor/reporter.mjs");
+  const { checkDiscovery } = await import("../../lib/report/doctor/discovery.mjs");
+  const r = new Reporter();
+  await checkDiscovery({ reporter: r });
+
+  const e = r.entries.find((x) => /migration begun/i.test(x.label));
+  assert.ok(e, `a never-begun verdict must be emitted; labels seen: ${r.entries.map((x) => x.label).join(" | ").slice(0, 300)}`);
+  assert.equal(e.kind, "fail", `never-begun must fail when adoption is asymmetric; got ${e.kind}`);
+  assert.match(e.detail, /not begun/i, "the detail must name the condition");
+});

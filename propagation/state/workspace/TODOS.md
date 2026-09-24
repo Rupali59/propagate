@@ -26,18 +26,6 @@ node cli.mjs backlog --json | node -e 'let s="";process.stdin.on("data",d=>s+=d)
 
 ---
 
-### PR-001 · Decide whether `notStarted` fails the v3 conformance gate
-
-`lib/report/doctor/discovery.mjs:444` passes the check on `rep.offenders.length === 0`, so a
-workspace that never began the migration produces one `info` line and never reddens the gate.
-That is a documented decision — the comment at `:454` cites `rule:discernment-checks` §2 for
-keeping three states rather than two — not a defect.
-
-Measured 2026-09-23: `Grid` and `obsidian-vk-publish` are `notStarted` today, and
-`Motion-Graphics` joins them once the census is widened. The answer decides whether the
-migration slice of `docs/plans/2026-09-23-doctor-tells-the-truth.md` closes anything at all.
-Needs Rupali; it is a judgement about what the gate is for, not a measurement.
-
 ### PR-002 · Write the slices 2-3 plan for `doctor`, after slice 1 lands
 
 `docs/plans/2026-09-23-doctor-tells-the-truth.md` covers the census and the migration.
@@ -136,3 +124,23 @@ npm test 2>&1 | grep -E '^ℹ (tests|pass|fail)' | awk '{s[$2]+=$3} END {for(k i
 
 Worth pairing with N91, which tracks `doctor.duration_ms` spikes of 18-24 minutes — an
 intermittent slowdown and an intermittently truncated suite may be the same cause.
+
+## Finished
+
+The reader treats this section as closed wholesale, so entries move here rather than
+being edited in place.
+
+### PR-001 · Decide whether `notStarted` fails the v3 conformance gate
+
+Answered by Rupali 2026-09-24: it fails. Implemented with one carve-out, which is the
+part worth remembering — the predicate is adoption ASYMMETRY, not absence. Some
+workspaces conforming while others never began is a gap someone chose not to close, and
+it fails. Nothing having begun anywhere is a starting point, and failing it would fail
+every fresh install by definition; `tests/cli/stranger-install.test.mjs` asserts a
+stranger reaches doctor-clean, and the `|| true` that once hid that was deliberately
+removed.
+
+The decision lives in `migrationVerdict` (`lib/core/v3-layout.mjs`), pure and unit-tested
+in `tests/unit/v3-migration-verdict.test.mjs`, because as three inline branches in
+`discovery.mjs` the repo's own coverage audit correctly reported the check as never
+having been seen to fail.

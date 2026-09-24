@@ -955,3 +955,27 @@ test("an explicit `| target |` row beats prose in the same stub", () => {
   );
   assert.equal(r.stubReason, "pointer stub — state lives at propagation/state/workspace/TODOS.md");
 });
+
+test("a `## Finished` heading closes its section — the word two TODOS headers already promise", () => {
+  // Found 2026-09-24. Both propagate's and Keerti's TODOS.md headers tell the
+  // reader "Finished entries move to a `## Finished` heading at the bottom, which
+  // the reader treats as a closed section wholesale." CLOSED_SECTION_RE matched
+  // archiv|resolved|done|cancelled|closed|complete|shipped|superseded|landed —
+  // and NOT "finished". So the documented convention was not implemented, and
+  // moving an entry there left it counted as open.
+  //
+  // N51's family: PROSE ABOUT THE FORMAT IS NOT THE FORMAT. It surfaced only
+  // because propagate's file became the first to actually use the section.
+  const lines = [
+    "# TODOS",
+    "",
+    "### PR-009 · still open",
+    "",
+    "## Finished",
+    "",
+    "### PR-001 · answered and shipped",
+  ];
+  const closed = closedSectionLines(lines);
+  assert.ok(!closed.has(3), "an entry above the heading stays open");
+  assert.ok(closed.has(7), "an entry under `## Finished` must read as closed");
+});
