@@ -79,6 +79,35 @@ and `goals.mjs`. The hierarchy exists by accident; this makes it deliberate.
 4. **`propagate index`** — derived, writing no cache and keeping no state. Not an
    optimisation: it is the property that makes it correct.
 
+## Corrected 2026-09-24 while executing 3b — two of this plan’s own numbers were proxies
+
+**`goals.mjs` was already collapsed.** The plan ordered it first of five parsers to route.
+It does not parse structure at all: line 44 imports `parseHandovers` and line 145 calls it,
+and its only local regexes (`DERIVED_BY_RE`, `WAIVED_RE`, `PROVENANCE_RE`) are CONTENT
+markers. Nothing to route.
+
+**So "24 parsers with 97 anchored regexes" was the wrong denominator.** A content marker
+like `/^\s*\*{0,2}Derived by:?\*{0,2}\s*:?\s*(.*)$/im` is line-anchored and is exactly what
+a tokenizer should be HANDED, not what it replaces. Counting it as duplication inflated the
+target and mis-ordered the work. Re-measured by what each module actually implements:
+
+| duplicated logic | modules |
+|---|---|
+| heading scan | **12** |
+| fence handling | 4 -> **3** (handovers routed) |
+| closing words | 3 — `backlog`, `registers`, `rollup` |
+| marker window | 2 -> **1** (the logic; the VALUE stays per document kind) |
+
+**The revised order follows the duplication, not the guess.** The window was the smallest
+and most complete collapse (two copies to one) and is done. Heading scan across 12 modules
+is the bulk and should go next, smallest consumer first. Closing words is 3 modules and is
+where the `## Finished` divergence lived.
+
+**T6 is therefore retired and replaced.** "Anchored regexes under 40" measured the wrong
+population; it would have been satisfied by deleting legitimate marker patterns. The
+replacement counts STRUCTURE carriers — modules implementing their own heading scan, fence
+rule, window or closing-word list — and the target is 1 each. Baseline at this commit:
+heading 12, fence 3, closing 3, window 1. Derive with the walk in Verification below.
 ## Feature: which commands are used, and how often they fail
 
 Requested by Rupali 2026-09-24. **The substrate exists, is live, and records the wrong
