@@ -23,7 +23,6 @@
  */
 
 import path from "node:path";
-import os from "node:os";
 import { RESET, DIM, RED, YELLOW, GREEN, BOLD } from "./ansi.mjs";
 import { claimsCheck } from "../lib/claims/check.mjs";
 import { judgeStatus, asQuestions } from "../lib/claims/judge.mjs";
@@ -35,6 +34,7 @@ import { appendRunStart, appendRunEnd, RUN_OUTCOMES } from "../lib/claims/runs.m
 import { rollup } from "../lib/report/rollup.mjs";
 import { checkRules } from "../lib/rules/rules-check.mjs";
 import { WORKSPACES, SEARCH_ROOTS, RULES_DIR, shortPath } from "../lib/core/config.mjs";
+import { CLAUDE_GLOBAL_CLAUDE_MD } from "../lib/core/paths.mjs";
 
 const CHECK_LABELS = {
   "expired-date": "expired date",
@@ -549,7 +549,7 @@ async function restateSub(rest, json) {
   // Same carve-out `rulesCmd` (cli.mjs) makes: the global CLAUDE.md is the
   // rules' former home and legitimately contains every fingerprint, so it is
   // scanned for overrides but excluded from findings.
-  const globalMd = path.join(os.homedir(), ".claude", "CLAUDE.md");
+  const globalMd = CLAUDE_GLOBAL_CLAUDE_MD;
   let res;
   try {
     res = checkRules({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS, extra: [globalMd], exclude: [globalMd] });

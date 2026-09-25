@@ -59,12 +59,15 @@
 
 import { readFileSync, existsSync, readdirSync, appendFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
-
-const HOME = os.homedir();
-const RULES_DIR = path.join(HOME, ".claude", "rules");
-const LOG = path.join(HOME, ".claude", "rule-guard.log");
+// Registry read, not a recomputed literal — see lib/core/paths.mjs's header and
+// the plan this hook implements (~/.claude/plans/i-saw-it-what-starry-sparkle.md
+// §1-2, N96): this hook, load-rules.mjs and doctor's discovery.mjs each computed
+// ~/.claude/rules independently and agreed only by coincidence. CLAUDE_RULES /
+// CLAUDE_RULE_GUARD_LOG are the pure defaults (no env/config.yml layering, which
+// this file never had either) — importing paths.mjs costs ~what "node:path" costs,
+// not the 100-470ms lib/core/config.mjs pays for its unconditional workspace scan.
+import { HOME, CLAUDE_RULES as RULES_DIR, CLAUDE_RULE_GUARD_LOG as LOG } from "../lib/core/paths.mjs";
 
 /** Cap on rules shown at once. Noise is a hiding place (propagate GOTCHAS G23). */
 const MAX_SHOWN = 2;

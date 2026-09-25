@@ -131,6 +131,7 @@ import {
   STATE_DIR as CONFIG_ROOT_DIR,
   MAX_DEPTH,
 } from "./lib/core/config.mjs";
+import { CLAUDE_GLOBAL_CLAUDE_MD, CLAUDE_USER_CONFIG, stateDir } from "./lib/core/paths.mjs";
 import YAML from "yaml";
 
 // Five helpers moved out of cli.mjs 2026-08-25 (#31 T2) so doctor's extracted
@@ -527,7 +528,7 @@ function readGraphRegistration() {
     dir = up;
   }
   try {
-    const home = path.join(homedir(), ".claude.json");
+    const home = CLAUDE_USER_CONFIG;
     if (existsSync(home)) names.push(...Object.keys(JSON.parse(readFileSync(home, "utf8")).mcpServers || {}));
   } catch {
     /* same */
@@ -1366,7 +1367,7 @@ async function rulesCmd() {
       process.exit(2);
     }
     const { ruleCoverage } = await import("./lib/rules/rules-check.mjs");
-    const globalMd = path.join(HOME_DIR, ".claude", "CLAUDE.md");
+    const globalMd = CLAUDE_GLOBAL_CLAUDE_MD;
     const cov = Object.fromEntries(
       ruleCoverage({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS, extra: [globalMd] }).map((c) => [c.id, c]),
     );
@@ -1462,7 +1463,7 @@ async function rulesCmd() {
   // The global CLAUDE.md is the rules' former home, so it legitimately contains every
   // fingerprint. Scanned for overrides, excluded from findings — same carve-out the
   // original made, kept because removing it would report 16 false restatements.
-  const globalMd = path.join(HOME_DIR, ".claude", "CLAUDE.md");
+  const globalMd = CLAUDE_GLOBAL_CLAUDE_MD;
   const res = checkRules({
     rulesDir: RULES_DIR,
     roots: SEARCH_ROOTS,
@@ -4582,7 +4583,7 @@ async function graphIndexCmd() {
   const outFlag = args.includes("--out") ? args[args.indexOf("--out") + 1] : null;
   const asJson = args.includes("--json");
   // Same root lib/events.mjs uses; deliberately not the plugin dir (N13/N14).
-  const root = process.env.PROPAGATE_STATE_DIR || path.join(process.env.HOME || ".", ".propagate");
+  const root = stateDir();
 
   const gi = await import("./lib/graph/graph-index.mjs");
   const t0 = Date.now();

@@ -43,6 +43,7 @@ import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { queuePayload } from "../lib/report/queue.mjs";
+import { CLAUDE_GLOBAL_CLAUDE_MD, stateDir } from "../lib/core/paths.mjs";
 
 const TOKEN = randomBytes(24).toString("hex");
 
@@ -275,7 +276,7 @@ export async function uiCmd(argv = [], io = console) {
       try {
         const { execFile } = await import("node:child_process");
         const { promisify } = await import("node:util");
-        const out = path.join(process.env.PROPAGATE_STATE_DIR || path.join(process.env.HOME ?? "", ".propagate"), "graph.html");
+        const out = path.join(stateDir(), "graph.html");
         await promisify(execFile)(process.execPath, [path.join(import.meta.dirname, "..", "cli.mjs"), "graph", "--html", out], { maxBuffer: 64e6 });
         return send(200, readFileSync(out, "utf8"), "text/html; charset=utf-8");
       } catch (err) {
@@ -432,12 +433,13 @@ export async function uiCmd(argv = [], io = console) {
           // command cannot report different things about the hub.
           const { checkRules } = await import("../lib/rules/rules-check.mjs");
           const { RULES_DIR, SEARCH_ROOTS } = await import("../lib/core/config.mjs");
-          // os.homedir(), NOT a HOME_DIR import: config does not export one, and
-          // destructuring a missing named export yields undefined rather than
-          // throwing -- so the phantom would have fallen through to a fallback
-          // and worked by luck. G24's shape: a null that reads as unconfigured.
-          const { homedir } = await import("node:os");
-          const globalMd = path.join(homedir(), ".claude", "CLAUDE.md");
+          // CLAUDE_GLOBAL_CLAUDE_MD (lib/core/paths.mjs, imported at the top of
+          // this file) replaces the old os.homedir() join here -- that module is
+          // a pure HOME join with zero filesystem I/O, so importing it costs
+          // nothing, and it is a real named export (unlike the G24 "destructuring
+          // a missing export yields undefined" trap this comment used to warn
+          // about for config.mjs, which never exported this path at all).
+          const globalMd = CLAUDE_GLOBAL_CLAUDE_MD;
           return send(200, checkRules({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS, extra: [globalMd], exclude: [globalMd] }));
         } catch (err) {
           return send(200, { error: String(err?.message ?? err), findings: null });

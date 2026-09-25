@@ -50,9 +50,12 @@
  */
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
-
-const RULES_DIR = path.join(os.homedir(), ".claude", "rules");
+// Registry read, not a recomputed literal — this file used to hand-roll RULES_DIR
+// here and then import lib/core/config.mjs anyway at the SEARCH_ROOTS line below,
+// paying for config.mjs's discovery walk while still not sharing the constant with
+// hooks/rule-guard.mjs or doctor's discovery.mjs (N96). See lib/core/paths.mjs's
+// header and ~/.claude/plans/i-saw-it-what-starry-sparkle.md §1-2.
+import { CLAUDE_RULES as RULES_DIR } from "../lib/core/paths.mjs";
 
 /** Minimal frontmatter reader. Returns null when there is no `id:` — not a rule file. */
 function parse(file) {
