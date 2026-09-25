@@ -35,6 +35,31 @@ function age(ms) {
   return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 }
 
+/**
+ * The CHANGED line (PR-024). `--json` has carried `changed` since
+ * `surfacePayload()` grew it; this renderer was never updated, so the number
+ * was invisible to anyone not passing `--json`.
+ *
+ * `changed.value` can be `null` — {value: null, label: "no stream"|"stream
+ * error", tone: "unknown"} — when `streamPayload()` could not run at all.
+ * That is a DIFFERENT fact from "it ran and found nothing changed" (`value:
+ * 0`, `tone: "ok"`), and rule:discernment-checks §2 is explicit that the two
+ * must not collapse into the same rendered output. So a null value never
+ * prints as `0` or as a blank line — it prints its own label with an explicit
+ * "could not derive", exactly the same distinction `buildChangedSummary`
+ * already encodes in the payload; this only has to not throw it away.
+ *
+ * One line, matching the tone-mark convention every other summary value on
+ * this card already uses (`headline`, each row) — proportionate to a text
+ * form this module's own docstring calls "a fallback, not the point."
+ */
+export function changedLine(changed) {
+  if (!changed) return null;
+  return changed.value == null
+    ? `${TONE_MARK[changed.tone] ?? "?"} ${changed.label} — could not derive what changed since last look`
+    : `${TONE_MARK[changed.tone] ?? "·"} ${changed.value} ${changed.label} since last look`;
+}
+
 export async function surfaceCmd(argv = [], io = console) {
   const asJson = argv.includes("--json");
   const root = path.join(process.env.HOME ?? "", "Documents/GitHub/");
@@ -60,6 +85,12 @@ export async function surfaceCmd(argv = [], io = console) {
       ? `? ${h.label} — that is not a clean tree; check the config with \`propagate doctor\``
       : `${TONE_MARK[h.tone] ?? "·"} ${h.value} ${h.label} of ${s.edges.expanded} edges (from ${s.edges.declared} declared)`,
   );
+
+  // Rides beside the headline, not inside a group — see the module doc on
+  // `changed` in lib/report/surface.mjs: it is one number, closer in kind to
+  // "here is THE number" than to a row in a backlog group.
+  const changed = changedLine(s.changed);
+  if (changed) io.log(changed);
 
   for (const g of s.groups) {
     io.log(`\n${g.label}`);

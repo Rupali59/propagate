@@ -16,7 +16,7 @@ import {
   parseTodoLikeFile,
   extractPriority,
   dedupeItems,
-  backlog, closedSectionLines, backlogDefects } from "../../lib/report/backlog.mjs";
+  backlog, closedSectionLines, proposedSectionLines, backlogDefects } from "../../lib/report/backlog.mjs";
 
 function tmp(prefix) {
   return mkdtempSync(path.join(tmpdir(), prefix));
@@ -978,4 +978,118 @@ test("a `## Finished` heading closes its section — the word two TODOS headers 
   const closed = closedSectionLines(lines);
   assert.ok(!closed.has(3), "an entry above the heading stays open");
   assert.ok(closed.has(7), "an entry under `## Finished` must read as closed");
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// The reader's THIRD state — `proposed` (plan "i-saw-it-what-starry-sparkle",
+// Part 1 / R1, approved 2026-09-25 as D3 "Third state as planned", against the
+// scoped-C recommendation). An entry staged under an unreviewed heading —
+// the register inserter's staging area, a separate lane — is `proposed`:
+// excluded from BOTH `open` and `closed`. rule:discernment-checks §2: three
+// different facts, never conflated. The corpus-wide regression proof for
+// files that do NOT carry this heading (R4, CRITICAL) lives in its own file:
+// tests/unit/backlog-proposed-corpus.test.mjs.
+// ─────────────────────────────────────────────────────────────────────────
+
+test("proposedSectionLines mirrors closedSectionLines: a heading matching PROPOSED_SECTION_RE marks its body, including a nested heading, and ends at the next same-or-shallower heading", () => {
+  const lines = [
+    "# T",
+    "## From Reminders (unreviewed)",
+    "- item under proposed",
+    "### Sub of proposed",
+    "- another item under proposed",
+    "## Live",
+    "- **B-1** — not proposed",
+  ];
+  const proposed = proposedSectionLines(lines);
+  assert.ok(
+    proposed.has(3) && proposed.has(4) && proposed.has(5),
+    "everything under the unreviewed heading, including a nested heading (the closedSectionLines " +
+      "2026-09-24 branch this mirrors), is proposed",
+  );
+  assert.ok(!proposed.has(7), "an item under ## Live must NOT be proposed");
+});
+
+test("checkbox items under a proposed heading are proposed, not open and not closed -- even when checked", () => {
+  const text = [
+    "# TODOS",
+    "## From Reminders (unreviewed)",
+    "- [ ] staged from a reminder",
+    "- [x] also staged, checked -- still not reviewed",
+    "## Now",
+    "- [ ] real open work",
+  ].join("\n");
+  const r = parseTodoLikeFile(text, "/fake/TODOS.md");
+  assert.equal(r.format, "checkbox");
+  assert.equal(r.parsed, 3);
+  assert.equal(r.proposed, 2, "both staged lines count as proposed, whatever their checkbox mark");
+  assert.equal(r.open, 1, "only the item under ## Now is open");
+  assert.equal(r.closed, 0, "a CHECKED box under a proposed heading is NOT closed -- proposed excludes closed too, not just open");
+  assert.deepEqual(r.items.map((i) => i.text), ["real open work"], "proposed items never appear in the open items list");
+});
+
+test("id-keyed items under a proposed heading are proposed, not open and not closed -- even with a closed-marker word in their own text", () => {
+  // The precedence this pins: an entry text containing "done" would normally
+  // trip CLOSED_MARKERS_RE. Under a proposed heading it must not -- the heading
+  // is stronger than the item's own wording, same as closedSectionLines already
+  // overrides item-level text (N51's family).
+  const text = [
+    "# TODOS",
+    "## From Reminders (unreviewed)",
+    "### RM-001 · Add purnima dates (done in draft, not reviewed)",
+    "## Now",
+    "### PR-009 · still open",
+  ].join("\n");
+  const r = parseTodoLikeFile(text, "/fake/TODOS.md");
+  assert.equal(r.format, "id-keyed");
+  assert.equal(r.parsed, 2);
+  assert.equal(r.proposed, 1, "RM-001 is proposed despite the word 'done' in its own heading text");
+  assert.equal(r.open, 1);
+  assert.equal(r.closed, 0);
+  assert.deepEqual(r.items.map((i) => i.id), ["PR-009"]);
+});
+
+test("proposed, open and closed partition every parsed item -- they sum to parsed and never overlap", () => {
+  const text = [
+    "# TODOS",
+    "## From Reminders (unreviewed)",
+    "- [ ] staged one",
+    "- [ ] staged two",
+    "## Done",
+    "- [ ] shipped thing",
+    "## Now",
+    "- [ ] real thing",
+  ].join("\n");
+  const r = parseTodoLikeFile(text, "/fake/TODOS.md");
+  assert.equal(r.parsed, 4);
+  assert.equal(r.proposed, 2);
+  assert.equal(r.closed, 1);
+  assert.equal(r.open, 1);
+  assert.equal(r.proposed + r.open + r.closed, r.parsed, "the three states must partition every item");
+});
+
+test("a file with no proposed heading reports proposed: 0 -- the additive field never changes existing open/closed behaviour", () => {
+  const text = ["# TODOS", "- [ ] open one", "- [x] done one"].join("\n");
+  const r = parseTodoLikeFile(text, "/fake/TODOS.md");
+  assert.equal(r.proposed, 0);
+  assert.equal(r.open, 1);
+  assert.equal(r.closed, 1);
+});
+
+test("pointer-stub and stub carry proposed: 0; unrecognised carries proposed: null -- G2, no claim is not a zero claim", () => {
+  const ptr = parseTodoLikeFile("# TODOS.md — moved\n\nnow lives at `x/TODOS.md`\n", "/tmp/b.md");
+  assert.equal(ptr.format, "pointer-stub");
+  assert.equal(ptr.proposed, 0);
+
+  const stub = parseTodoLikeFile("# TODOS\n\nnone open\n", "/tmp/a.md");
+  assert.equal(stub.format, "stub");
+  assert.equal(stub.proposed, 0);
+
+  const unrecognised = parseTodoLikeFile("x".repeat(500), "/tmp/c.md");
+  assert.equal(unrecognised.format, "unrecognised");
+  assert.equal(
+    unrecognised.proposed,
+    null,
+    "an unrecognised file makes no claim about proposed/open/closed -- 0 would read as a claim",
+  );
 });

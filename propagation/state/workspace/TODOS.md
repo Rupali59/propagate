@@ -247,7 +247,31 @@ nothing in 4,384 (99.2%), replaced by a command deriving the same answer in 1.2s
 same shape at 89%. The question the rule asks is what breaks if it is computed on demand
 instead — and with `actionable` static at 67, plausibly nothing.
 
-### PR-021 · The Reminders bridge cannot reach its stated goal condition — nothing in this repo can INSERT a register line
+### PR-021 · The Reminders bridge cannot reach its stated goal condition — nothing in this repo can INSERT a register line — **RESOLVED 2026-09-25**
+
+**The capability exists.** `lib/registers/insert.mjs` composes `write.mjs`'s atomic mechanics with
+`backlog.mjs`'s *exported* parsers — no forked traversal — behind three assertions, each with a
+negative control AND a positive control so none is vacuous:
+
+- **A1** rejects an embedded newline. For an insert that corrupts the file's shape, not one line's text.
+- **A2** requires a *legal* boundary, not merely an unmoved anchor: mid-entry and under a closed
+  heading both refuse.
+- **A3** is the one that matters: simulate, reclassify, and assert the format election and every
+  pre-existing `{id, closed}` are unchanged. One checkbox-shaped line flips the whole-file election
+  and every id-keyed entry vanishes from `items` with **zero bytes changed** — so the guarantee is
+  over the PARSE, not the bytes. Both negative controls reproduce it; making the check return true
+  unconditionally turns three tests red.
+
+`lib/reminders/sync.mjs` orchestrates it **without modifying `reconcile.mjs`**, whose
+`writesToRegister: false` invariant and dry-run tests still stand. Write order is register-first
+(R3/D4), so the silent-loss path is unreachable by construction — injecting a failing identity-map
+save leaves the register line present and `insertedAt` absent, and swallowing that failure turns the
+test red.
+
+**The goal condition is reachable; it is not yet reached for either live tag**, and that is correct
+behaviour rather than a gap: `#ccusage` has no register anywhere and `#vipinkaushik`'s canonical
+path is absent while a legacy one exists. Both are refused attributably. Which register is canonical
+remains a decision about the tree, not a coding call.
 
 **This is the finding of the 2026-09-25 build, and it is a planning defect, not an execution one.**
 
@@ -309,7 +333,13 @@ append a junk row — it destroys a sentence somebody meant."* An inserter is sa
 one respect (it destroys nothing) and worse in another (it multiplies, and nobody reviews an entry
 that arrived on its own).
 
-### PR-022 · `reconcileReminders()` is built, tested and mutation-proven, and no CLI verb reaches it
+### PR-022 · `reconcileReminders()` is built, tested and mutation-proven, and no CLI verb reaches it — **RESOLVED 2026-09-25**
+
+`propagate reminders sync` now reaches the orchestrator, copying `claims.mjs`'s subverb shape.
+Dry-run by default; `--apply` required. The naming problem that blocked this is gone: the verb
+reaches `sync.mjs`, which *can* touch a register, so it no longer promises something it cannot do.
+Guard proven by snapshotting the whole state directory across every disposition — byte-identical
+without `--apply`.
 
 `lib/reminders/reconcile.mjs` exists, is dry-run by default, and its F2 guard is proven across all
 six dispositions plus the inconclusive path — mutating the guard turned 8 of 11 tests red. But
@@ -340,7 +370,15 @@ cursor when the panel is viewed — has a real failure mode. Glance at the panel
 advances, and the thing you did not read is now "already seen". An explicit "mark as seen" is
 safer and needs an affordance nobody specified.
 
-### PR-024 · `propagate surface` text mode omits `changed`; only `--json` carries it
+### PR-024 · `propagate surface` text mode omits `changed`; only `--json` carries it — **RESOLVED 2026-09-25**
+
+**This entry's own text said the asymmetry was "arguably correct as-is" and filed it as a decision
+on the record. The plan superseded that and asked for it fixed**, which is what happened — noting it
+so the entry does not read as still open for debate.
+
+`changedLine()` prints one line beside the headline. The distinction that mattered is preserved:
+`0` renders as `0 changed since last look`, while a null renders `could not derive what changed`,
+and "no stream" stays distinguishable from "stream error". Zero and unknown are different facts.
 
 `lib/report/surface.mjs` now derives a compact `changed` summary and `--json` carries it via
 `JSON.stringify`. `commands/surface.mjs` — the text renderer — was not updated, so the number is
@@ -350,7 +388,13 @@ Arguably correct as-is: that file's own docstring calls the text form *"a fallba
 the surface is the widget."* Filed so the asymmetry is a decision on the record rather than an
 oversight.
 
-### PR-025 · `ui.client.js`'s division separator is a positional index, one insertion from mislabelling
+### PR-025 · `ui.client.js`'s division separator is a positional index, one insertion from mislabelling — **RESOLVED 2026-09-25**
+
+`const FIRST_REFERENCE = DIVISIONS.findIndex((d) => !d.act)` replaces `i === 4`. The rule the line
+always meant is "before the first non-actionable division"; it resolves to 4 today, so rendering is
+unchanged. Its test lives in its own file rather than `ui-client.test.mjs`, which PR-008 records as
+flaky, and includes a case that inserts a division above the boundary and proves the index **moves**
+— which a literal 4 could not. Restoring the literal turns it red.
 
 `commands/ui.client.js:576` renders the group separator on the condition `i === 4`, emitting an
 `<hr />` plus a label that reads "reference". Index 4 is `analytics`.
@@ -392,7 +436,17 @@ never read is a backfill that has never backfilled.
 that a non-interactive session cannot dismiss. Until then `doctor` will not attempt it at all — the
 PR-007 deployment gate short-circuits before any read while the bridge is uninstalled.
 
-### PR-027 · `PROPAGATE_REMINDERS_FIXTURE` is documented in one file and implemented in another
+### PR-027 · `PROPAGATE_REMINDERS_FIXTURE` is documented in one file and implemented in another — **RESOLVED 2026-09-25**
+
+`read.mjs` now resolves the env var itself, with an explicit `fixturePath` option taking precedence
+— an argument is a stronger statement of intent than an ambient variable, and that precedence is
+asserted. `commands/reminders.mjs:35` is now redundant but harmless and was left alone.
+
+**The mutation proving it went further than intended and is worth recording:** reverting the fix left
+a test with no `exec` and no `fixturePath` with no seam at all, so it fell through to a real
+`osascript` call against the live list — 8 seconds, 5 real items, nothing written. That is the
+sharpest possible evidence the seam was genuinely missing. The payoff: `doctor` now returns a real
+`pass` from a fixture where this morning it made a live 15-second call.
 
 `lib/reminders/read.mjs:13` documents the env var as an injection seam. Nothing in that file reads
 it; the only implementation is `commands/reminders.mjs:35`. So `readReminders()` called directly —

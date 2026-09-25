@@ -15,7 +15,7 @@ import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { loadIdentityMap, saveIdentityMap, assignId, recordObservation, identityMapPath } from "../../lib/reminders/identity-map.mjs";
+import { loadIdentityMap, saveIdentityMap, assignId, recordObservation, recordInsertion, identityMapPath } from "../../lib/reminders/identity-map.mjs";
 
 async function freshDir() {
   return mkdtemp(path.join(tmpdir(), "identity-map-"));
@@ -106,6 +106,49 @@ test("a well-formed-JSON but wrong-shaped identity-map.json throws rather than b
     await mkdir(path.dirname(identityMapPath(d)), { recursive: true });
     await writeFile(identityMapPath(d), JSON.stringify({ oops: true }), "utf8");
     await assert.rejects(() => loadIdentityMap(d), /expected \{version, nextSeq, entries\} shape/);
+  } finally {
+    await cleanup(d);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// recordInsertion — the idempotency field the register inserter needs
+// (docs/plans/2026-09-23-reminders-todo-bridge.md "Part 1 — the inserter").
+// ---------------------------------------------------------------------------
+
+test("recordInsertion throws for an id with no identity yet -- same discipline as recordObservation", () => {
+  const map = { version: 1, nextSeq: 1, entries: {} };
+  assert.throws(
+    () => recordInsertion(map, "unknown", { insertedAt: "2026-09-25T00:00:00.000Z", insertedInto: "/x/TODOS.md" }),
+    /no identity yet/,
+  );
+});
+
+test("recordInsertion is pure and sets insertedAt/insertedInto without disturbing lastObserved", () => {
+  let map = { version: 1, nextSeq: 1, entries: {} };
+  ({ map } = assignId(map, "uuid-a", "2026-09-25T00:00:00.000Z"));
+  map = recordObservation(map, "uuid-a", { completed: false, completedAt: null });
+
+  const before = JSON.parse(JSON.stringify(map));
+  const after = recordInsertion(map, "uuid-a", { insertedAt: "2026-09-25T01:00:00.000Z", insertedInto: "/x/TODOS.md" });
+
+  assert.deepEqual(map, before, "recordInsertion must not mutate its input");
+  assert.equal(after.entries["uuid-a"].insertedAt, "2026-09-25T01:00:00.000Z");
+  assert.equal(after.entries["uuid-a"].insertedInto, "/x/TODOS.md");
+  assert.deepEqual(after.entries["uuid-a"].lastObserved, { completed: false, completedAt: null }, "unrelated fields survive");
+  assert.equal("insertedAt" in map.entries["uuid-a"], false, "the ORIGINAL entry must not have gained the field");
+});
+
+test("saveIdentityMap persists insertedAt/insertedInto -- the on-disk shape a crash-recovery read depends on", async () => {
+  const d = await freshDir();
+  try {
+    let map = { version: 1, nextSeq: 1, entries: {} };
+    ({ map } = assignId(map, "uuid-a", "2026-09-25T00:00:00.000Z"));
+    map = recordInsertion(map, "uuid-a", { insertedAt: "2026-09-25T01:00:00.000Z", insertedInto: "/x/TODOS.md" });
+    await saveIdentityMap(map, d);
+    const reloaded = await loadIdentityMap(d);
+    assert.equal(reloaded.entries["uuid-a"].insertedAt, "2026-09-25T01:00:00.000Z");
+    assert.equal(reloaded.entries["uuid-a"].insertedInto, "/x/TODOS.md");
   } finally {
     await cleanup(d);
   }

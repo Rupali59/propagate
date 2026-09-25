@@ -1,5 +1,38 @@
 # propagate — State
 
+## The register inserter exists, and PR-021 is answered — 2026-09-25, `v0.10.0`
+
+Four lanes, three on Sonnet against the approved and design-reviewed plan.
+
+**`lib/registers/insert.mjs`** composes `write.mjs`'s atomic mechanics with `backlog.mjs`'s
+**exported** parsers — no forked traversal — behind three assertions, each with a negative *and* a
+positive control. **A3 is the one that matters:** simulate, reclassify, and assert the format
+election and every pre-existing `{id, closed}` are unchanged, because one checkbox-shaped line flips
+the whole-file election and every id-keyed entry vanishes from `items` **with zero bytes changed**.
+The guarantee is over the PARSE, not the bytes — which is why the `+1` line-count assertion the
+decision originally named would have been as unreachable as `write.mjs:183-186` already is.
+
+**`lib/reminders/sync.mjs`** orchestrates without touching `reconcile.mjs`, whose
+`writesToRegister: false` invariant still holds. Write order is register-first, so the silent-loss
+path is unreachable: a failing identity-map save leaves the line present and `insertedAt` absent.
+
+**`backlog.mjs` gained `proposed`** as a genuine third state — an item under a staging heading is
+neither open nor closed, even carrying a checked box or a closing word.
+
+**Two couplings were found rather than assumed.** Lane 2's reader regex and Lane 1's writer heading
+agreed *by coincidence of wording*, and Lane 1 said so instead of claiming it worked; that is now
+bound by a behavioural test asserting the reader classifies what the writer writes. And the R4
+corpus test could not catch its own risk — an over-broad regex reclassified **17 real files** while
+the test exited 0 — so the expected set is now asserted empty.
+
+**Verified against the live list, dry-run:** 5 items, 1 held-untagged, 1 held-ambiguous-register,
+3 held-no-register. Exactly the plan's prediction. Neither live tag resolves to a register, and
+refusing attributably is the correct behaviour, not a gap.
+
+Suite **2164 / 2159 pass**. PR-021, PR-022, PR-024, PR-025, PR-027 closed; PR-023 stays deferred;
+T4 (the CONFLICTS panel) is designed and not yet built.
+
+
 ## The UX did not meet its own contrast floor in seven places — 2026-09-25, `934d183`
 
 Found while auditing the CONFLICTS panel design against `DESIGN.md`. **Seven declared

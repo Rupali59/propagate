@@ -10,6 +10,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { classify, buildScript } from "../../lib/reminders/osascript.mjs";
 import { extractTags, splitLines } from "../../lib/reminders/parse.mjs";
@@ -94,6 +97,79 @@ test("F1: rc=0 but unparseable stdout is INCONCLUSIVE, not an invented empty lis
   const result = await readReminders({ exec });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "unparseable-output");
+});
+
+// ---------------------------------------------------------------------------
+// PR-027 — the PROPAGATE_REMINDERS_FIXTURE env var is read HERE, by
+// readReminders() itself, not only by the command layer that calls it.
+// ---------------------------------------------------------------------------
+
+test("PR-027: a direct readReminders() call with no fixturePath option honours PROPAGATE_REMINDERS_FIXTURE", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "reminders-fixture-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const fixturePath = path.join(dir, "fixture.json");
+  await writeFile(fixturePath, JSON.stringify({ status: 0, stdout: "[]", stderr: "" }));
+
+  const prev = process.env.PROPAGATE_REMINDERS_FIXTURE;
+  process.env.PROPAGATE_REMINDERS_FIXTURE = fixturePath;
+  try {
+    // FAILING INPUT, stated as a mutation: passing no `exec` and no
+    // `fixturePath` option means the ONLY path to a non-throwing, non-hanging
+    // result is this env var being read inside read.mjs. Before this fix, this
+    // call fell through to a real `osascript` invocation — a live TCC call on
+    // whatever machine ran the suite. If the env-var fallback line is removed,
+    // this test either hangs on a real subprocess or throws, never returning
+    // ok:true with zero items.
+    const result = await readReminders({});
+    assert.equal(result.ok, true);
+    assert.equal(result.summary.total, 0);
+  } finally {
+    if (prev === undefined) delete process.env.PROPAGATE_REMINDERS_FIXTURE;
+    else process.env.PROPAGATE_REMINDERS_FIXTURE = prev;
+  }
+});
+
+test("PR-027: an explicit fixturePath option wins over PROPAGATE_REMINDERS_FIXTURE when both are set", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "reminders-fixture-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const envFixture = path.join(dir, "env-fixture.json");
+  await writeFile(envFixture, JSON.stringify({ status: 0, stdout: "[]", stderr: "" }));
+
+  const explicitRecords = [
+    { id: "x1", name: "from explicit fixturePath", body: "#ccusage", completed: false, completionDate: null, modificationDate: null },
+  ];
+  const explicitFixture = path.join(dir, "explicit-fixture.json");
+  await writeFile(explicitFixture, JSON.stringify({ status: 0, stdout: JSON.stringify(explicitRecords), stderr: "" }));
+
+  const prev = process.env.PROPAGATE_REMINDERS_FIXTURE;
+  process.env.PROPAGATE_REMINDERS_FIXTURE = envFixture;
+  try {
+    const result = await readReminders({ fixturePath: explicitFixture });
+    // If the env var won instead, this would be 0 (envFixture is an empty
+    // list) — asserting 1 proves precedence, not just that a fixture loaded.
+    assert.equal(result.summary.total, 1, "the explicit fixturePath option must win over the ambient env var");
+    assert.equal(result.items[0].title, "from explicit fixturePath");
+  } finally {
+    if (prev === undefined) delete process.env.PROPAGATE_REMINDERS_FIXTURE;
+    else process.env.PROPAGATE_REMINDERS_FIXTURE = prev;
+  }
+});
+
+test("PR-027: with the env var unset, a direct call with no fixturePath falls through to exec/osascript as before", async () => {
+  // Precondition: this repo's own test run must not itself have the var set,
+  // or this test would be vacuous.
+  const prev = process.env.PROPAGATE_REMINDERS_FIXTURE;
+  delete process.env.PROPAGATE_REMINDERS_FIXTURE;
+  try {
+    const exec = () => ({ status: 0, stdout: "[]", stderr: "" });
+    const result = await readReminders({ exec });
+    assert.equal(result.ok, true, "unset env var must not break the exec seam");
+    assert.equal(result.summary.total, 0);
+  } finally {
+    if (prev === undefined) delete process.env.PROPAGATE_REMINDERS_FIXTURE;
+    else process.env.PROPAGATE_REMINDERS_FIXTURE = prev;
+  }
 });
 
 test("buildScript embeds the list name as a JSON string literal, safe against quotes", () => {

@@ -2,13 +2,13 @@
  * `propagate reminders` — a read-only report over the `Claude TODO` Reminders
  * list, routed by body hashtag. Implements the read path of
  * `docs/plans/2026-09-23-reminders-todo-bridge.md`; the mutable stores (the
- * UUID<->PR-0NN identity map, the reconciliation log, `--apply`) are L5's,
- * not this command's — see the plan's "The L4/L5 boundary".
+ * UUID<->PR-0NN identity map, the reconciliation log, register inserts) live
+ * behind the `sync` subverb below — see the plan's "The L4/L5 boundary".
  *
- * WRITES NOTHING. No file under this command's control changes as a result
- * of running it, with or without `--json`, tested by
- * `tests/cli/reminders.test.mjs` snapshotting the whole state directory
- * byte-for-byte before and after.
+ * DEFAULT MODE (no subverb) WRITES NOTHING. No file under this command's
+ * control changes as a result of running it, with or without `--json`,
+ * tested by `tests/cli/reminders.test.mjs` snapshotting the whole state
+ * directory byte-for-byte before and after.
  *
  * EXIT CODES, per F1 — the split this whole lane exists to make:
  *   0  ok — including a genuinely empty list. Zero reminders is a real result.
@@ -17,8 +17,18 @@
  *      the `--json` payload so it is machine-readable for whatever consumes
  *      this later (doctor's `inconclusive` entry kind, per N87 — wiring that
  *      in is explicitly L5's job, not this command's).
+ *
+ * `reminders sync [--apply] [--json]` — PR-022's verb, attached to
+ * `lib/reminders/sync.mjs` rather than to `reconcileReminders` directly
+ * (which is why it is named `sync`, not `reconcile`: naming a verb
+ * `reconcile` when it cannot touch a register ships a command that cannot do
+ * what it says — `propagation/state/workspace/STATE.md` 2026-09-25).
+ * DRY-RUN BY DEFAULT, `--apply` REQUIRED TO WRITE — same posture as
+ * `claims render`/`claims verdict` (`commands/claims.mjs`), and for the same
+ * reason: this writes into a project's register, prose a person wrote.
  */
 import { readReminders, DEFAULT_LIST } from "../lib/reminders/read.mjs";
+import { syncReminders } from "../lib/reminders/sync.mjs";
 
 /**
  * @param {string[]} [argv]
@@ -26,6 +36,8 @@ import { readReminders, DEFAULT_LIST } from "../lib/reminders/read.mjs";
  * @returns {Promise<number>} the process exit code
  */
 export async function remindersCmd(argv = [], io = console) {
+  if (argv[0] === "sync") return syncSub(argv.slice(1), io);
+
   const asJson = argv.includes("--json");
   const listFlagIdx = argv.indexOf("--list");
   const listName = listFlagIdx !== -1 ? argv[listFlagIdx + 1] : DEFAULT_LIST;
@@ -92,4 +104,60 @@ function render(result, io) {
     io.log(`\n  HELD — untagged (${untagged.length}), written nowhere:`);
     for (const r of untagged) io.log(`    ${r.title.slice(0, 72)}`);
   }
+}
+
+/**
+ * @param {string[]} rest
+ * @param {typeof console} io
+ * @returns {Promise<number>}
+ */
+async function syncSub(rest, io) {
+  const asJson = rest.includes("--json");
+  const apply = rest.includes("--apply");
+
+  // Same test-only seam as the default mode, honoured here too so a fixture
+  // drives the whole pipeline (routing AND the insert attempt) rather than
+  // only the read.
+  const fixturePath = process.env.PROPAGATE_REMINDERS_FIXTURE || undefined;
+
+  const result = await syncReminders({
+    readRemindersFn: () => readReminders({ fixturePath }),
+    apply,
+  });
+
+  if (!result.ok) {
+    if (asJson) {
+      io.log(JSON.stringify(result));
+    } else {
+      io.log(`reminders sync: could not complete — ${result.reason}`);
+      if (result.reasonDetail) io.log(`  ${result.reasonDetail}`);
+      io.log(`  nothing was written that is not already noted above`);
+    }
+    return 2;
+  }
+
+  if (asJson) {
+    io.log(JSON.stringify(result));
+    return 0;
+  }
+
+  const mode = result.applied ? "APPLIED" : "dry run";
+  io.log(`reminders sync — "${result.list}" (${result.summary.total} item${result.summary.total === 1 ? "" : "s"}, ${mode})`);
+  for (const [disposition, count] of Object.entries(result.summary.byDisposition)) {
+    io.log(`  ${disposition}: ${count}`);
+  }
+
+  const worthNaming = result.rows.filter((r) => r.disposition !== "held-untagged" && r.disposition !== "held-unknown-tag");
+  if (worthNaming.length) {
+    io.log("");
+    for (const row of worthNaming) {
+      const label = row.prId ? `${row.prId}` : row.reminderId;
+      const target = row.registerPath ? ` -> ${row.registerPath}` : "";
+      const reason = row.reason ? ` — ${row.reason}` : "";
+      io.log(`  [${row.disposition}] ${label}${target}${reason}`);
+    }
+  }
+
+  if (!result.applied) io.log("\n  re-run with --apply to write.");
+  return 0;
 }

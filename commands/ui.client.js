@@ -51,6 +51,13 @@ const DIVISIONS = [
   // with no way back.
   { key: "graph", label: "GRAPH" },
 ];
+
+/* PR-025. The rail's group separator used to be `i === 4`, a position. It was
+   correct, and it was one insertion away from silently labelling the wrong
+   group -- nothing asserted where it landed. Derive it instead: the rule is
+   "before the first division that is not actionable", which is what the line
+   actually means. Equals 4 for the current eight, so the render is unchanged. */
+const FIRST_REFERENCE = DIVISIONS.findIndex((d) => !d.act);
 const VALID = new Set(DIVISIONS.map((d) => d.key));
 
 /* Keys are offered from item.allowed so the UI can never propose a disposition
@@ -573,7 +580,7 @@ function App() {
     <div class="shell">
       <nav class="rail" aria-label="divisions">
         ${DIVISIONS.map((x, i) => html`
-          ${i === 4 ? html`<hr /><div class="lbl">reference</div>` : null}
+          ${i === FIRST_REFERENCE ? html`<hr /><div class="lbl">reference</div>` : null}
           <button key=${x.key} class=${"div" + (div === x.key ? " on" : "") + (x.act ? " act" : "")}
                   onClick=${() => go(x.key)}>
             ${x.label}

@@ -3552,3 +3552,93 @@ the next 0.1 lands the same way.
 
 **Fix order:** widen the check before fixing the value. A number corrected by hand under a guard
 that still cannot see it is the same defect with a fresh timestamp.
+
+### N98 · `GOALS.md` is the one register with no update mechanism — every goal reports `open` forever, and nothing can say a goal's premise rotted or that a project has none — **S2** — **OPEN**
+
+**The three-state parse has no state for "I checked."** `lib/report/handovers.mjs:129`:
+
+```js
+status = resolved ? "closed" : doneWhen ? "open" : "unknown"
+```
+
+`open` means *"this entry has a `Done when:` line"*. It does **not** mean the condition is unmet —
+nothing ever evaluates the condition. `closed` requires a human to hand-write `Resolved:`. So the
+header line `15 goal(s) — 15 open · 0 closed · 0 unknown` is a statement about **markup present in
+three files**, and it reads as a statement about work outstanding.
+
+**`Derived by:` commands are never executed.** The report says so in its own header —
+*"(read-only; `Derived by:` commands are printed, never run)"* — and it is true: no `execSync`,
+`spawnSync` or `exec(` in `lib/report/goals.mjs` or `commands/goals.mjs`. Every entry names a
+runnable check and nothing runs any of them. **11 of 15 goals name a command. Zero have ever been
+run by the tool that collects them.**
+
+**And `doctor` does not read goals at all.** The only reference to goals under `lib/report/doctor/`
+is `delivery.mjs` naming `commands/goals.mjs` as a *file that must be served* — the 2026-09-16
+incident. Nothing checks goal health. `goals` is a standalone report a human must remember to run.
+
+**`goals.mjs` has no notion of staleness, coverage, project, or when an entry was last looked at.**
+Grepped for all four; the only hits on `project` are in unrelated path handling.
+
+## The two failures this produced, both found by hand on 2026-09-25
+
+Neither is expressible in the current model, which is the point — they were found by a person
+reading the file, and nothing would have surfaced either.
+
+**1 · An entry's argument rotted within hours of being written, and stayed for eleven days.**
+`Vipin Kaushik/propagation/state/workspace/GOALS.md` entry 3 argued at length that whether
+embeddings work on classical Sanskrit *"is neither impossible nor fine — it is UNMEASURED, and
+this goal closes only when someone measures it here."* It was created in a single commit on
+2026-09-14. `sanskrit-texts/docs/EMBEDDING_EVAL.md` took **five commits the same day** — from a
+pre-registered protocol to a negative result — and was superseded on the 15th. `GOALS.md` was
+never touched again. The goal was still correctly `open`, but its stated closing condition was
+discharged and the live one (*nothing serves retrieval yet*) appeared only in the eval file.
+
+**`rule:state-and-decisions` warns that a count in a state file rots fastest. What rotted here was
+an ARGUMENT** — and an argument does not look stale the way a number does. It reads as reasoning
+and gets believed. A staleness signal was available and unread: the file the entry cites moved six
+times while the entry did not move at all.
+
+**2 · The workspace's busiest project had no arrival condition, and the tool has no way to say so.**
+`obsidian-vk-publish` was cloned into `Vipin Kaushik` on 2026-09-22 and registered by the hygiene
+tick as that workspace's **eighth** project on 2026-09-25, carrying its largest project `STATE.md`
+(615 lines). Since `GOALS.md` was written it has taken **210 commits — 2.5× the next busiest
+project and more than every other project in the workspace combined.** It had no goal.
+
+Worse, **entry 1's arrival condition routes through it** — *"a piece published on
+vipinkaushik.com carries a canonical citation nobody pre-selected"*, and that pipeline is what
+publishes to vipinkaushik.com. Its citation candidates come from `JYOTISH_DIR =
+"Source/concepts/jyotish/"`, a walk of 52 notes in the author's own vault, and nothing in `src/`
+or `main.js` references `3150`, `/v1/texts` or `astroacharya`. So entry 1 could never close for a
+reason entry 1 did not mention, and no check could have connected the two.
+
+## What is missing, in fix order
+
+1. **`goals --derive` — run the commands.** Report `met` / `not-met` / **`could-not-run`**, which
+   the current three-state model has no room for. **The entries already write this distinction in
+   prose and nothing reads it**: Vipin Kaushik's entry 2 says *"`404` means the route is absent —
+   the not-met reading. `000` means the server is not running, which is `could not run`, not a
+   result."* That is `rule:discernment-checks` §2 hand-written into a document because the tool
+   cannot express it. Both of that entry's checks return `000` today.
+2. **Staleness against the cited target.** An entry whose `Derived by:` path or cited file has
+   moved since the entry last moved is a re-read candidate. Failure 1 fires on this immediately
+   and cheaply — no execution required, just two mtimes or two git log dates.
+3. **Span against the project registry.** `propagation/INDEX.md` already lists every registered
+   project per workspace. Crossing it against the goal set makes "this project has no arrival
+   condition" a derivable finding. Failure 2 fires the day the project registers.
+4. **A push, not a pull.** `rule:every-project-carries-gotchas` is explicit that `STATE.md` and
+   `DECISIONS.md` are pull artifacts and `GOTCHAS.md` earns its keep by being *pushed* at the
+   moment of risk. **`GOALS.md` is a pull artifact with no moment of risk to attach to** — which
+   is why eleven days passed. The candidate trigger is the one that already exists: a goal's cited
+   file changing is exactly a `.propagates.yml` edge, and declaring `EMBEDDING_EVAL.md ->
+   GOALS.md` would have fired drift on 2026-09-14.
+
+## Why this is filed here and not in the workspace
+
+**`rule:enforcement-watches-itself`.** The hub's own `GOALS.md` entry 5 is *"Every workspace's
+direction has an arrival condition"* — marked **judgement, no command claimed**. That is precisely
+the span check in item 3. The tool that would derive the hub's goal about goals does not have it,
+and the goal declares itself underivable rather than naming the check that is missing.
+
+Three `GOALS.md` files now exist (hub, `Sindhu`, `Vipin Kaushik`) with **15 entries, 0 closed
+since the first was written**. That is either a young register or a register nothing updates, and
+**nothing in the tool can tell those two apart** — `rule:discernment-checks` §6.
