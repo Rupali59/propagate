@@ -43,6 +43,7 @@ const DIVISIONS = [
   { key: "gap", label: "BASELINE GAP", act: true },
   { key: "analytics", label: "ANALYTICS" },
   { key: "stream", label: "CHANGED" },
+  { key: "conflicts", label: "CONFLICTS" },
   { key: "reference", label: "REFERENCE" },
   // Framed rather than dropped: lib/graph/graph-html.mjs renders a whole
   // interactive page at /graph, and open-ui.sh turns a widget route into a
@@ -267,6 +268,101 @@ function Analytics({ data }) {
  * read as "this is everything since you last looked"
  * (rule:discernment-checks §2, and lib/report/stream.mjs's own header).
  */
+/**
+ * T4/D3. The six refusals are not six peers. They fall into three groups by
+ * what the reader can DO, and a flat list makes you read all of them to find
+ * the two you can act on.
+ *
+ * `held-untagged` and `held-unknown-tag` come from the ROUTING layer rather
+ * than `REFUSAL_DISPOSITIONS`, and the design did not cover them. They sit in
+ * CONFIGURATION because they are fixable the same way the other two are: add
+ * a tag, or add the tag to the table.
+ */
+const CONFLICT_GROUPS = [
+  {
+    key: "config",
+    label: "CONFIGURATION",
+    hint: "you can fix these",
+    of: ["held-no-register", "held-ambiguous-register", "held-untagged", "held-unknown-tag"],
+  },
+  {
+    key: "content",
+    label: "CONTENT",
+    hint: "the tool refused to touch a file",
+    of: ["held-unrecognized-shape", "held-would-change-classification", "held-illegal-boundary"],
+  },
+  {
+    key: "quiet",
+    label: "NOT A FAILURE",
+    hint: "the duplicate guard working",
+    of: ["already-inserted"],
+  },
+];
+
+/** Which group a disposition belongs to, or null when it is not a conflict. */
+function conflictGroup(disposition) {
+  const g = CONFLICT_GROUPS.find((x) => x.of.indexOf(disposition) >= 0);
+  return g ? g.key : null;
+}
+
+/**
+ * Split rows into the three groups, keeping the ones that are NOT conflicts
+ * separately. A reminder that routed and inserted cleanly is not a conflict
+ * and does not belong in this panel -- but its count is what makes the empty
+ * state a result rather than an absence.
+ */
+function groupConflicts(rows) {
+  const out = { config: [], content: [], quiet: [], routed: 0 };
+  for (const r of rows || []) {
+    const g = conflictGroup(r && r.disposition);
+    if (g) out[g].push(r); else out.routed += 1;
+  }
+  return out;
+}
+
+/**
+ * T4/D4. Empty is the state you see most, and "No conflicts found." is the
+ * default an engineer reaches for. It is indistinguishable from a panel that
+ * failed to load -- the same empty-versus-denied confusion the read path was
+ * built to prevent, lost again in the UI.
+ *
+ * So empty REPORTS THE POPULATION it examined. No counts means it did not run.
+ */
+function conflictsEmptyLine(data) {
+  const total = (data && data.summary && data.summary.total) || 0;
+  if (!total) return "no reminders were read — nothing to route, and nothing held";
+  return `all ${total} reminder(s) routed. Nothing held.`;
+}
+
+/**
+ * PR-023. The body for "mark as seen" -- pure, for the same reason
+ * `disposeBody` is: the payload shape is the thing worth testing, and a click
+ * is not needed to test it.
+ *
+ * It carries the payload's OWN generatedAt, never the clock. The reader saw
+ * that payload; an event that landed between its render and this click has
+ * not been seen, and stamping `now` would swallow it silently. That is
+ * advance-on-view wearing a different hat, which is the behaviour this whole
+ * feature was designed to avoid.
+ */
+function seenBody(data) {
+  return { at: data && data.generatedAt };
+}
+
+/**
+ * What window am I looking at, and WHY. Four different facts, kept apart:
+ * a cursor you set, a cursor you have never set, a cursor that could not be
+ * read, and a date you typed. Collapsing the middle two would make "you have
+ * seen everything up to here" indistinguishable from "this file is damaged".
+ */
+function windowLabel(data) {
+  const c = data && data.cursor;
+  if (!c) return sinceLabel(data && data.sinceSource);
+  if (c.status === "ok") return "since you last marked this seen";
+  if (c.status === "corrupt") return `the last 7 days — the mark could not be read (${c.error || "unknown"})`;
+  return "the last 7 days — you have not marked a point yet";
+}
+
 function sinceLabel(s) {
   if (s === "given") return "since the date you gave";
   if (s === "invalid-given-defaulted") return "the date you gave was invalid — showing the last 7 days instead";
@@ -287,14 +383,20 @@ function vintageLabel(v) {
   return "resolved";
 }
 
-function Stream({ data }) {
+function Stream({ data, markSeen }) {
   if (!data) return html`<div class="reason">folding the event store for this window…</div>`;
   if (data.error) return html`<div class="banner">stream failed to load — ${data.error}</div>`;
   const s = data.summary || { total: 0, open: 0, closed: 0 };
   const changed = data.changed || [];
   return html`<div>
     <h2 class="dtitle">What changed</h2>
-    <div class="dmeta">${sinceLabel(data.sinceSource)} · ${data.since} → ${data.generatedAt}</div>
+    <div class="dmeta">${windowLabel(data)} · ${data.since} → ${data.generatedAt}</div>
+    ${!markSeen ? null : html`<div class="seenrow">
+      <button class="ghost" onClick=${() => markSeen(data)} disabled=${!data.generatedAt}>
+        mark as seen
+      </button>
+      <span class="seenhint">sets the boundary to this view — nothing moves until you press it</span>
+    </div>`}
     <div class="sec">${s.total} edge(s) changed — ${s.open} open, ${s.closed} closed</div>
     ${data.malformed ? html`<div class="caveat">${data.malformed} malformed line(s) in the store could not be read</div>` : null}
     ${!changed.length ? html`<div class="reason">nothing changed in this window</div>` : html`
@@ -417,8 +519,22 @@ function App() {
   // this machine, but it is a single in-process fold, same shape as
   // analytics). Fetched when opened, never on first paint -- that is what
   // keeps the page near 340 ms.
+  // PR-023. Marking seen writes the cursor and then DROPS the cached stream
+  // payload, so the panel refetches against the new boundary. Without the
+  // drop the lazy map would keep serving the pre-mark window and the button
+  // would look broken while having worked.
+  const markSeen = useCallback(async (data) => {
+    const res = await api("/api/seen", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(seenBody(data)),
+    }).catch((e) => ({ ok: false, error: String(e) }));
+    if (res && res.ok) setLazy((L) => { const n = Object.assign({}, L); delete n.stream; return n; });
+    return res;
+  }, []);
+
   useEffect(() => {
-    const ep = { reference: "/api/reference", gap: "/api/baseline", analytics: "/api/analytics", stream: "/api/stream" }[div];
+    const ep = { reference: "/api/reference", gap: "/api/baseline", analytics: "/api/analytics", stream: "/api/stream", conflicts: "/api/conflicts" }[div];
     if (!ep || lazy[div]) return;
     api(ep).then((j) => setLazy((L) => Object.assign({}, L, { [div]: j })));
   }, [div, lazy]);
@@ -596,15 +712,65 @@ function App() {
       </div>
 
       <div class="detail" key=${div}>
-        <${DetailPane} div=${div} current=${current} d=${d} lazy=${lazy}
+        <${DetailPane} div=${div} current=${current} d=${d} lazy=${lazy} markSeen=${markSeen}
           reason=${reason} setReason=${setReason} judge=${judge} judgeBatch=${judgeBatch} msg=${msg}
           pending=${pending} reduced=${reduced} onUndo=${undo} />
       </div>
     </div>`;
 }
 
+/**
+ * T4. The refusals the Reminders bridge produces, which until now existed and
+ * appeared nowhere.
+ *
+ * Three states that must never look alike, because telling them apart is the
+ * whole point of the read path underneath:
+ *   could not look  -- ok:false, a named reason. NOT zero conflicts.
+ *   nothing held    -- it ran, everything routed, and it says how many.
+ *   held            -- grouped by what you can do about it.
+ */
+function Conflicts({ data }) {
+  if (!data) return html`<div class="reason">reading the reminders list…</div>`;
+
+  // "could not look" is not "nothing to show". F1 draws this line in the read
+  // path and it would be lost here if a failed read rendered as an empty list.
+  if (data.ok === false) {
+    return html`<div>
+      <h2 class="dtitle">Conflicts</h2>
+      <div class="banner">could not read the reminders list — ${data.reason}</div>
+      ${data.reasonDetail ? html`<div class="dmeta">${data.reasonDetail}</div>` : null}
+      <div class="reason">This is not "no conflicts". Nothing was examined, so nothing can be reported.</div>
+    </div>`;
+  }
+
+  const g = groupConflicts(data.rows);
+  const held = g.config.length + g.content.length + g.quiet.length;
+
+  return html`<div>
+    <h2 class="dtitle">Conflicts</h2>
+    <div class="dmeta">${data.list} · ${held} held of ${(data.summary && data.summary.total) || 0} read · dry run, nothing written</div>
+    ${!held ? html`<div class="sec">${conflictsEmptyLine(data)}</div>` : CONFLICT_GROUPS.map((grp) => {
+      const rows = g[grp.key];
+      if (!rows.length) return null;
+      return html`<div key=${grp.key}>
+        <div class="sec">${grp.label} — ${grp.hint} · ${rows.length}</div>
+        <div class="streamlist">
+          ${rows.map((r) => html`
+            <div class=${"sitem" + (grp.key === "quiet" ? " quiet" : "")} key=${r.reminderId}>
+              <span class=${"badge " + r.disposition}>${r.disposition.replace("held-", "")}</span>
+              <div>
+                <div>${r.prId ? r.prId + " · " : ""}${r.project || r.tag || "untagged"}</div>
+                ${r.reason ? html`<div class="dmeta">${r.reason}</div>` : null}
+              </div>
+            </div>`)}
+        </div>
+      </div>`;
+    })}
+  </div>`;
+}
+
 function ListPane({ div, flat, sel, setSel, d, open, setOpen }) {
-  if (div === "analytics" || div === "reference" || div === "gap" || div === "graph" || div === "stream") {
+  if (div === "analytics" || div === "reference" || div === "gap" || div === "graph" || div === "stream" || div === "conflicts") {
     const label = DIVISIONS.find((x) => x.key === div).label;
     return html`<div class="empty">${label} is read-only.<br />Its content is on the right.</div>`;
   }
@@ -652,9 +818,10 @@ function ListPane({ div, flat, sel, setSel, d, open, setOpen }) {
   })}`;
 }
 
-function DetailPane({ div, current, d, lazy, reason, setReason, judge, judgeBatch, msg, pending, onUndo, reduced }) {
+function DetailPane({ div, current, d, lazy, reason, setReason, judge, judgeBatch, msg, pending, onUndo, reduced, markSeen }) {
   if (div === "analytics") return html`<${Analytics} data=${lazy.analytics} />`;
-  if (div === "stream") return html`<${Stream} data=${lazy.stream} />`;
+  if (div === "stream") return html`<${Stream} data=${lazy.stream} markSeen=${markSeen} />`;
+  if (div === "conflicts") return html`<${Conflicts} data=${lazy.conflicts} />`;
 
   if (div === "graph") {
     return html`<iframe class="frame" src=${"/graph?token=" + encodeURIComponent(TOKEN)}
@@ -790,7 +957,7 @@ function DetailPane({ div, current, d, lazy, reason, setReason, judge, judgeBatc
  * bundler in this repo's suite, so without this the shaping logic -- batching,
  * the gap-breaking path builder, the rail counts -- has no check at all. */
 if (typeof globalThis !== "undefined") {
-  globalThis.__ui = { batched, counts, linePath, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody, sinceLabel, vintageLabel };
+  globalThis.__ui = { batched, counts, linePath, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody, sinceLabel, vintageLabel, seenBody, windowLabel, conflictGroup, groupConflicts, conflictsEmptyLine, CONFLICT_GROUPS };
 }
 
 if (typeof document !== "undefined" && document.getElementById("app")) {

@@ -358,6 +358,48 @@ test("ui.css styles every edge state the graph can emit", () => {
  * that declares BOTH a colour and a background, and asserts that pair in both
  * themes. Adding a rule adds coverage; there is no list to remember to extend.
  */
+/**
+ * T4 / D-T4 guard 1. The FOURTH instance of the shape the test above records,
+ * and the first one caught BEFORE it shipped: `.sitem.quiet` had no rule when
+ * the component that uses it was written, so the row that must read as muted
+ * would have rendered identically to a failure.
+ *
+ * The population is derived from the two modules that can put a disposition on
+ * the wire, never listed here. `reconcile.mjs` emits ROUTING dispositions and
+ * `sync.mjs` emits INSERT refusals; the panel renders rows from both, so a
+ * guard reading one of them would be blind to half the vocabulary — which is
+ * G70's defect exactly, a curated population reporting a clean sweep.
+ */
+test("ui.css styles every held disposition the reminders lane can emit", () => {
+  const sources = [
+    ["lib/reminders/sync.mjs", /export const REFUSAL_DISPOSITIONS = Object\.freeze\(\[([^\]]*)\]\)/],
+    ["lib/reminders/reconcile.mjs", /export const DISPOSITIONS = Object\.freeze\(\[([^\]]*)\]\)/],
+  ];
+
+  const dispositions = [];
+  for (const [rel, re] of sources) {
+    const m = re.exec(read(rel));
+    assert.ok(m, `could not find the disposition list in ${rel} — this check has gone blind`);
+    const found = [...m[1].matchAll(/"([a-z-]+)"/g)].map((x) => x[1]);
+    assert.ok(found.length >= 6, `${rel}: parsed only ${found.length} dispositions — the extraction has gone blind`);
+    // Only the ones the CONFLICTS panel renders as a badge. `new`, `no-change`,
+    // `completed` and `reopened` are outcomes, not conflicts, and never reach it.
+    dispositions.push(...found.filter((d) => d.startsWith("held-") || d === "already-inserted"));
+  }
+
+  assert.ok(dispositions.length >= 8,
+    `expected at least 8 held dispositions across both modules, found ${dispositions.length}: ${dispositions.join(", ")}`);
+
+  const css = read("commands/ui.css");
+  const unstyled = dispositions.filter((d) => !new RegExp(`\\.badge\\.${d}\\b`).test(css));
+  assert.deepEqual(unstyled, [],
+    `the reminders lane can emit these and ui.css gives their badge no background: ${unstyled.join(", ")}`);
+
+  // The muted row is a rule too, and it is the one that had none.
+  assert.match(css, /\.sitem\.quiet\s*\{/,
+    "`already-inserted` is rendered in a `.sitem.quiet` row and the stylesheet has no rule for it");
+});
+
 test("every colour/background pair ui.css DECLARES clears 4.5:1, both themes", () => {
   const css = read("commands/ui.css");
   const t = themes(css, ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);

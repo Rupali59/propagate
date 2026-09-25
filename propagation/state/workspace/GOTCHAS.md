@@ -1655,3 +1655,48 @@ exempt something is safe; a curated inclusion list you must remember to extend i
 was in prose, here it is in a passing test. `rule:enforcement-watches-itself` §4: "found nothing"
 and "looked at nothing" must be different outputs, and a guard over 7 of 46 reports the first while
 doing the second.
+
+### G71 · A shape-based extraction goes blind by matching MORE, and only the matching-nothing direction is ever defended
+**Trigger:** `matchAll\(/\\\{|\[\.\.\.\w+\.matchAll`
+**Fires on:** `const keys = [...ui.matchAll(/\{\s*key:\s*"([a-z]+)"\s*,\s*label:/g)]`
+
+A test that reads a literal out of another file by regex has one well-known failure — the regex
+stops matching, finds nothing, and reports a clean sweep. `tests/unit/widget-contract.test.mjs`
+knew that: its comment records the check surviving TWO moves of the view list precisely because it
+asserts `keys.length >= 5` before comparing, and it says so — *"it failed with 'gone blind' rather
+than silently matching nothing and passing. That is the behaviour it was written for, observed
+working."*
+
+**It then went blind in the other direction, and the guard against the first was no help.** The
+extraction was `{ key: "...", label: ... }` matched **anywhere in `ui.client.js`**, on the unstated
+assumption that the shape belonged to `DIVISIONS` alone. T4 added `CONFLICT_GROUPS` with the
+identical shape:
+
+```js
+const CONFLICT_GROUPS = [
+  { key: "config", label: "CONFIGURATION", hint: "you can fix these", of: [...] },
+```
+
+So the check found **12 keys for 9 divisions** and failed with `12 !== 8` under the message *"ui.mjs
+routes a view SERVED_VIEWS does not list"*. Three of those four "missing views" were group headers
+that no route will ever serve.
+
+**The failure is worse than a false negative, because it is a PLAUSIBLE true positive.** There WAS
+a real missing view in that number — `conflicts` genuinely belonged in `SERVED_VIEWS` — so the
+count was wrong, the diagnosis was half right, and the obvious fix (add four entries to
+`SERVED_VIEWS`) would have put three routes on the desktop that resolve to nothing. That is the
+dead button the list exists to prevent, arriving through the check that guards it.
+
+**Instead:** locate the literal first, then read inside it — `/const DIVISIONS\s*=\s*\[([\s\S]*?)\];/`
+then `matchAll` over `lit[1]`, which is what `tests/unit/ui-rail-separator.test.mjs` already did.
+And add the negative control: assert a key declared OUTSIDE the literal is **not** collected. A
+`keys.length >= N` floor proves the regex still fires; only an upper bound or an exclusion proves it
+fires on the right thing.
+
+**Related:** G70 is the same failure with a curated population instead of a loose pattern — there
+the guard looked at too little, here at too much, and both reported a number that read as a result.
+`rule:discernment-checks` §4: every instrument answered a *narrower or wider* question than the one
+asked, and the answer was plausible.
+
+**Cost:** ~15 minutes, and it was cheap only because the suite ran before anything was committed.
+Caught by `npm test` on a change that touched neither file's subject.

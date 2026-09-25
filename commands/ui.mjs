@@ -43,7 +43,7 @@ import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { queuePayload } from "../lib/report/queue.mjs";
-import { streamPayload } from "../lib/report/stream.mjs";
+import { streamPayload, readCursor, writeCursor } from "../lib/report/stream.mjs";
 import { CLAUDE_GLOBAL_CLAUDE_MD, stateDir } from "../lib/core/paths.mjs";
 
 const TOKEN = randomBytes(24).toString("hex");
@@ -114,6 +114,30 @@ export function validateWrite({ edge_id, disposition, reason }, item) {
  * @param {Array<{edge_id: string, state: string, allowed: string[]}>} members
  * @returns {{code: number, error: string}|null}
  */
+/**
+ * PR-023. `/api/seen`'s whole contract, pulled out for the same reason
+ * `validateBatchWrite` is: the refusals are the interesting part and they
+ * should be testable without standing up a server.
+ *
+ * `at` must be an ISO timestamp the caller OBSERVED. There is deliberately no
+ * default-to-now branch -- a missing `at` is a caller bug, and quietly
+ * stamping the clock would mark events seen that nobody rendered, which is
+ * precisely the advance-on-view behaviour this feature exists to avoid.
+ *
+ * @param {{at?: unknown}} body
+ * @returns {{code: number, error: string} | null} null when acceptable
+ */
+export function validateSeenBody(body) {
+  const at = body && body.at;
+  if (typeof at !== "string" || at.length === 0) {
+    return { code: 400, error: `"at" must be an ISO timestamp string, got ${JSON.stringify(at)}` };
+  }
+  if (Number.isNaN(Date.parse(at))) {
+    return { code: 400, error: `"at" is not a parseable timestamp: ${JSON.stringify(at)}` };
+  }
+  return null;
+}
+
 export function validateBatchWrite({ node_id, state, disposition, reason }, members) {
   if (!node_id) return { code: 400, error: "node_id is required" };
   if (!state) return { code: 400, error: "state is required" };
@@ -323,7 +347,65 @@ export async function uiCmd(argv = [], io = console) {
       // streamPayload() itself defaults to the last 7 days rather than
       // "everything" and says so via the payload's own `sinceSource`.
       if (url.pathname === "/api/stream") {
-        try { return send(200, await streamPayload({ since: url.searchParams.get("since") ?? undefined })); }
+        // PR-023. An explicit ?since= still wins; otherwise the window comes
+        // from the cursor the reader last marked. `readCursor` never throws
+        // and never invents a boundary -- missing and corrupt both fall back
+        // to seven days -- so a lost or damaged cursor degrades to today's
+        // behaviour rather than reporting that everything changed.
+        //
+        // The cursor's STATUS rides alongside rather than inside the payload:
+        // streamPayload derives `sinceSource` from whether `since` was given,
+        // which would read "given" here and lose where it came from. The
+        // panel needs to tell "since you last looked" from "the last seven
+        // days because you have never marked one" -- different facts.
+        try {
+          const explicit = url.searchParams.get("since");
+          const cursor = explicit ? null : await readCursor();
+          const payload = await streamPayload({ since: explicit ?? cursor?.since });
+          return send(200, { ...payload, cursor: cursor ? { status: cursor.status, error: cursor.error ?? null } : null });
+        } catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
+      // T4/R2. The refusals the bridge produces had no reader anywhere --
+      // measured on 2026-09-25, nothing in lib/report/surface.mjs or this file
+      // carried a held row, so every refusal existed and no surface showed it.
+      // That is the invisible-work defect PR-021 documents, one layer out.
+      //
+      // DRY RUN, always. Opening a panel must never write, and a reader could
+      // otherwise mistake looking for applying -- so `apply` is not plumbed
+      // through from the query string at all, rather than defaulting to false
+      // where a future edit could flip it.
+      //
+      // The read is bounded at doctor's 3s rather than readRaw's 15s default:
+      // this is an HTTP request a human is waiting on, and a hung Reminders
+      // read would otherwise hold the panel for fifteen seconds.
+      if (url.pathname === "/api/conflicts") {
+        try {
+          const { syncReminders } = await import("../lib/reminders/sync.mjs");
+          const { readReminders } = await import("../lib/reminders/read.mjs");
+          const { DOCTOR_READ_TIMEOUT_MS } = await import("../lib/report/doctor/reminders.mjs");
+          const out = await syncReminders({
+            apply: false,
+            readRemindersFn: () => readReminders({ timeoutMs: DOCTOR_READ_TIMEOUT_MS }),
+          });
+          return send(200, out);
+        } catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
+      // PR-023. The ONLY thing this writes is the cursor. It takes the
+      // timestamp from the body rather than reading the clock, because the
+      // reader saw a specific payload: anything that arrived between that
+      // render and this click has NOT been seen, and stamping `now` would
+      // silently swallow it. That is the whole reason advance-on-view was
+      // rejected, and reading the clock here would reintroduce it by a
+      // shorter path.
+      if (url.pathname === "/api/seen" && req.method === "POST") {
+        let raw = "";
+        for await (const c of req) raw += c;
+        let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
+        const invalid = validateSeenBody(body);
+        if (invalid) return send(invalid.code, { ok: false, error: invalid.error });
+        try { return send(200, { ok: true, since: await writeCursor(body.at) }); }
         catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
       }
 

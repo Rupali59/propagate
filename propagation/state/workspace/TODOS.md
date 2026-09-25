@@ -355,7 +355,7 @@ surface that does not exist.
 whose name implies register reconciliation, when it cannot touch a register, ships a command that
 cannot do what it says. Wire it when PR-021 is settled, and name it for what it does.
 
-### PR-023 · The stream cursor is built and wired to nothing, so every surface shows the 7-day default
+### PR-023 · The stream cursor is built and wired to nothing, so every surface shows the 7-day default — **RESOLVED 2026-09-25**
 
 `lib/report/stream.mjs` exports `readCursor`/`writeCursor` — a single disposable ISO string, with
 absence and corruption as distinct attributable outcomes, all tested. Nothing calls `writeCursor`.
@@ -369,6 +369,21 @@ by L2, which flagged it rather than guessing at scope.
 cursor when the panel is viewed — has a real failure mode. Glance at the panel, the cursor
 advances, and the thing you did not read is now "already seen". An explicit "mark as seen" is
 safer and needs an affordance nobody specified.
+
+**Resolved with the explicit affordance, decided rather than defaulted.** `/api/stream` now reads
+the cursor when no `?since=` is given and attaches `cursor: {status, error}` ALONGSIDE the payload
+rather than inside it, so a corrupt cursor is reported next to the window it produced instead of
+being smoothed into one. A new `POST /api/seen` route writes it, guarded by `validateSeenBody`.
+
+**The body carries the payload's own `generatedAt`, never the clock**, and `validateSeenBody` has no
+default-to-now branch by design: a body with no `at` is a caller bug, refused with 400. Stamping
+`now` would mark seen an event that landed between the render and the click — advance-on-view
+arriving through the back door, which is the exact behaviour this entry rejected.
+
+`tests/cli/ui-seen-cursor.test.mjs` asserts the NEGATIVE first, and that is the reason the file
+exists: reading the stream twice leaves every byte of the state dir unchanged. Marking seen writes
+`stream-cursor.json` and nothing else. `windowLabel` distinguishes four cases, so "since you last
+looked" and "the last 7 days because there is no cursor" never render alike.
 
 ### PR-024 · `propagate surface` text mode omits `changed`; only `--json` carries it — **RESOLVED 2026-09-25**
 

@@ -15,16 +15,17 @@
  * READY, 18 BLOCKED, 33 PARKED, 357 in the baseline gap.
  */
 import { test } from "node:test";
-import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { Script, createContext } from "node:vm";
 import path from "node:path";
+import assert from "node:assert/strict";
 
-import { makeDocument, byClass, byTag, textOf, findAll } from "../helpers/minidom.mjs";
+import { byClass, byTag, textOf, findAll } from "../helpers/minidom.mjs";
+import { mountClient } from "../helpers/mount-client.mjs";
+
+// Two source-text assertions below still read files directly; the harness
+// reads the client itself, but not the stylesheet.
+const read = (rel) => readFileSync(path.join(import.meta.dirname, "../..", rel), "utf8");
 import { fromRealm } from "../helpers/plain.mjs";
-
-const root = path.join(import.meta.dirname, "../..");
-const read = (rel) => readFileSync(path.join(root, rel), "utf8");
 
 /* -- fixtures, shaped exactly like the endpoints ------------------------- */
 
@@ -115,41 +116,12 @@ const ANALYTICS = {
 
 /* -- the harness ---------------------------------------------------------- */
 
-/** Mount the real client, with the real vendored Preact, into the mini DOM. */
-async function mount({ inbox = INBOX, routes = {}, hash = "#ready", reduced = false } = {}) {
-  const { doc, app } = makeDocument();
-  const calls = [];
-  const answers = { "/api/inbox": inbox, ...routes };
-
-  const ctx = createContext({
-    console, setTimeout, clearTimeout, setInterval, clearInterval,
-    Object, Array, String, Number, Boolean, Math, JSON, Map, Set, Promise, RegExp, Error, Date, isNaN, parseInt, parseFloat, Infinity,
-    document: doc,
-    location: { hash },
-    matchMedia: () => ({ matches: reduced }),
-    addEventListener() {}, removeEventListener() {},
-    requestAnimationFrame: (fn) => setTimeout(fn, 0),
-    cancelAnimationFrame: (id) => clearTimeout(id),
-    queueMicrotask,
-    fetch: async (url) => {
-      const p = String(url).split("?")[0];
-      calls.push(p);
-      if (!(p in answers)) throw new Error("no stub for " + p);
-      return { json: async () => answers[p] };
-    },
-  });
-  ctx.globalThis = ctx;
-  ctx.self = ctx;
-  ctx.window = ctx;
-
-  for (const f of ["commands/vendor/preact.js", "commands/vendor/hooks.js", "commands/vendor/htm.js"]) {
-    new Script(read(f)).runInContext(ctx);
-  }
-  new Script(read("commands/ui.client.js")).runInContext(ctx);
-  // Let the mount effect and its fetch settle.
-  await new Promise((r) => setTimeout(r, 30));
-  return { ctx, app, calls, ui: ctx.__ui };
-}
+/**
+ * Mount with this file's INBOX as the default payload. The renderer itself now
+ * lives in tests/helpers/mount-client.mjs, because a second test file needed it
+ * and forking it would have made two harnesses that drift.
+ */
+const mount = (opts = {}) => mountClient({ inbox: INBOX, ...opts });
 
 /* -- it renders at all ---------------------------------------------------- */
 

@@ -247,10 +247,28 @@ test("SERVED_VIEWS matches what the ui page can ACTUALLY render", () => {
   // became an array of division objects. This check read the old literal and
   // would have matched nothing — so it asserts it FOUND something first, which
   // is the behaviour that caught the last move too.
+  // AND IT WENT BLIND THE OTHER WAY on 2026-09-25, which the note above did not
+  // anticipate. The extraction was `{ key: "...", label: ... }` matched anywhere
+  // in the file, on the assumption that shape was unique to DIVISIONS. T4 added
+  // CONFLICT_GROUPS with the identical shape, so the regex found 12 keys for 9
+  // divisions and the failure read as "SERVED_VIEWS is missing four views".
+  // Three of those four were group headers that no route will ever serve.
+  //
+  // A guard can be blind by matching NOTHING or by matching MORE, and only the
+  // first was defended against. So the literal is located first and the keys are
+  // read from inside it — the same extraction ui-rail-separator.test.mjs uses.
   const ui = readFileSync(path.join(import.meta.dirname, "../../commands/ui.client.js"), "utf8");
-  const keys = [...ui.matchAll(/\{\s*key:\s*"([a-z]+)"\s*,\s*label:/g)].map((m) => m[1]);
+  const lit = /const DIVISIONS\s*=\s*\[([\s\S]*?)\];/.exec(ui);
+  assert.ok(lit, "could not find the DIVISIONS literal in ui.client.js — this check has gone blind, which is worse than failing");
+  const keys = [...lit[1].matchAll(/key:\s*"([a-z]+)"/g)].map((m) => m[1]);
   assert.ok(keys.length >= 5,
     "could not find the division list in ui.client.js — this check has gone blind, which is worse than failing");
+  // The negative control for the widening above: a key declared OUTSIDE the
+  // literal must not be collected. CONFLICT_GROUPS is that population today.
+  for (const outside of ["config", "content", "quiet"]) {
+    assert.ok(!keys.includes(outside),
+      `"${outside}" is not a division — the extraction is reading beyond the DIVISIONS literal again`);
+  }
   const routed = new Set(keys);
   for (const v of SERVED_VIEWS) {
     assert.ok(routed.has(v.replace(/^\//, "")), `SERVED_VIEWS promises ${v}, which ui.mjs does not route`);

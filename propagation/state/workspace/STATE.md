@@ -1,5 +1,51 @@
 # propagate — State
 
+## The refusals have a reader, and "I could not look" survives to the screen — 2026-09-25, `v0.11.0`
+
+**T4 shipped the CONFLICTS division**, the ninth, and with it PR-023's mark-as-seen. Both were
+about the same thing: a fact the code already knew and no surface carried.
+
+**The panel's job is telling three states apart**, and only one of them is "no conflicts":
+`ok:false` renders a banner with its named reason and **no counts**; nothing-held reports the
+population it examined (*"all 5 reminder(s) routed. Nothing held."*); held rows group by what the
+reader can do — CONFIGURATION, CONTENT, NOT A FAILURE — with counts in the headers. The
+empty-versus-denied distinction `read.mjs`'s F1 draws is preserved to the last step, and the test
+for it is a negative control: the two states must not produce the same text.
+
+**Six hues for six refusals, and `--st-ok` is deliberately not among them.** All three design
+mockups independently spread six refusals across the wheel and every one landed a refusal on green.
+What frees that hue is muting `already-inserted`: the one row that is *not* a failure takes `--dim`,
+so the hue that would have inverted is never spent. `DESIGN.md` §"The colour families" is amended in
+the same change — its old wording, *"nothing may bridge them"*, was narrower than the rule it was
+reaching for, and an unenforced rule the flagship surface visibly violates is worse than either
+following it or changing it.
+
+**PR-023 took the explicit affordance, not the default.** `/api/seen` carries the payload's own
+`generatedAt`; `validateSeenBody` has no default-to-now branch, because stamping the clock would
+mark seen an event that landed between the render and the click. `tests/cli/ui-seen-cursor.test.mjs`
+asserts the rejected behaviour is ABSENT first — reading the stream twice leaves every byte of the
+state dir unchanged.
+
+**Two guards, and the load-bearing one already existed.** D-T4 asked for a both-themes check on the
+new rules; `theme.test.mjs:131` already had one, and because its population is *derived* from every
+`var()` in the stylesheet rather than curated, it covered the six new rules the moment they were
+written. That is G70's argument measured rather than asserted: an allowlist you edit to exempt grows
+for free, an inclusion list you must remember to extend does not. Four mutations confirm all of it
+goes red for the stated reason.
+
+**Two couplings found by the suite, on files this change was not about.** `SERVED_VIEWS` did not
+list `/conflicts`, so the widget could never deep-link to a view the page routes. And
+`widget-contract.test.mjs`'s extraction matched `{ key, label }` *anywhere* in `ui.client.js`, so
+`CONFLICT_GROUPS` joined the division list silently — **G71**, a guard blind by matching MORE, where
+only the matching-nothing direction had ever been defended. Its failure was a plausible true
+positive: the obvious fix would have put three dead routes on the desktop.
+
+**`package-lock.json`'s own version was four minors stale** (`0.6.0` against `0.10.0`), which no
+delivery check noticed. Bumped with the rest.
+
+Suite: **2179 + 94 tests, 0 failures.**
+
+
 ## The register inserter exists, and PR-021 is answered — 2026-09-25, `v0.10.0`
 
 Four lanes, three on Sonnet against the approved and design-reviewed plan.

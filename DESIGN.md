@@ -36,19 +36,55 @@ these surfaces brown.
 Requires Chrome 119 / Safari 16.4. Verified on this machine: Chrome 153, Safari 27.
 `lib/report/color.mjs` resolves the notation for tests and any generator.
 
-### The two families, and why they are separate
+### The colour families, and which separation is load-bearing
 
 | family | question it answers | shape | hues |
 |---|---|---|---|
 | **Status** | *how bad* | ordinal | warm arc — 28° warn, 80° caution, 145° ok |
 | **Edge state** | *which side moved* | categorical | cool arc — 195° drift, 285° reverse, 340° diverge |
 | **Chrome** | neither | — | 250° accent |
+| **Refusal kind** | *why the tool would not act* | categorical | **borrows the wheel** — see below |
 
 **Green → amber → red is a ramp people already read**, so status keeps it.
 Edge state is not severity: DIVERGED is not "worse" than DRIFTED, it is a
 different fact about which end of the edge moved. Putting it on warning hues is a
-semantic error before it is a visual one. That is why the two families sit on
-opposite halves of the wheel and why nothing may bridge them.
+semantic error before it is a visual one. That is why status and edge state sit
+on opposite halves of the wheel and why **no single token may belong to both**.
+
+**Amended 2026-09-25, when the CONFLICTS division made the earlier wording
+false.** This section used to end *"nothing may bridge them"*, and the panel that
+shipped that day bridges them openly: its six refusal kinds take `--st-warn` and
+`--st-caution` from status, `--edge-drift`, `--edge-reverse` and `--edge-diverge`
+from edge state, and `--st-accent` from chrome. The wording is corrected rather
+than the panel, because the rule it was reaching for is narrower than what it
+said, and the difference matters.
+
+**What the separation protects is a TOKEN's meaning, not a hue's exclusivity.**
+`--st-warn` means *how bad*; `--edge-diverge` means *which side moved*. A token
+that meant both would make the ramp unreadable. A *third* categorical set that
+reuses those hues declares no new token and changes no existing one, so nothing
+it does can make green mean "slightly broken" — which is the failure the rule
+exists to prevent.
+
+**Refusal kinds are that third set, and they spend every hue but one.** Six
+kebab-case dispositions, six hues, and `--st-ok` is deliberately never among
+them: green means *this is fine* everywhere else in `commands/ui.css`, so putting
+a refusal on it inverts the one association a reader has without being taught.
+What frees that hue is muting `already-inserted` — the single row in the panel
+that is **not** a failure takes `--dim` rather than a colour, so the hue that
+would have inverted is simply never spent. All three design-review mockups
+independently coloured six refusals across the full wheel and every one landed a
+refusal on green; that is the default outcome of treating six enum values as
+peers, which is why it needed deciding rather than assuming.
+
+**Two things keep this honest, because prose cannot.** `tests/unit/theme.test.mjs`
+derives the disposition list from `lib/reminders/sync.mjs` and
+`lib/reminders/reconcile.mjs` and asserts `ui.css` styles each one — a
+disposition with no rule renders as ink on no background, which is invisible
+rather than wrong. And the same file's both-themes check reads every `var()` the
+stylesheet uses, so these rules were covered the moment they were written. The
+25° hue-gap floor is unaffected: it iterates the seven declared tokens, and
+reusing a hue adds none.
 
 ### The wheel
 

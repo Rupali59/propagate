@@ -290,6 +290,36 @@ h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .02em; }
    as fine. */
 .badge.open { background: var(--st-warn); }
 .badge.closed { background: var(--dim); }
+
+/* ── conflicts: the refusals the Reminders bridge produces ───────────────
+   SIX distinct hues for six refusal kinds, and DESIGN.md §"The colour families"
+   is amended in the same change to record them as a THIRD categorical set
+   reusing the existing wheel. The alternative was one hue for all six, which
+   the design review rated 2/10 on system alignment: the panel's whole job is
+   telling six different problems apart.
+
+   The hue that is NOT used is --st-ok. All three mockup variants independently
+   spread six refusals across the wheel and every one of them landed a refusal
+   on green -- a semantic inversion, since green means "this is fine" everywhere
+   else in this stylesheet. What frees that hue is muting `already-inserted`:
+   it is the one row here that is NOT a failure, so it takes --dim rather than
+   a colour, and the hue that would have inverted is simply never spent.
+
+   `held-untagged` and `held-unknown-tag` share --st-accent with each other on
+   purpose. They are ROUTING dispositions from reconcile.mjs, not insert
+   refusals, and they fold into the CONFIGURATION group for the same reason:
+   the fix is the same shape -- add a tag, or add the tag to the table. */
+.badge.held-no-register                { background: var(--st-warn); }
+.badge.held-ambiguous-register         { background: var(--st-caution); }
+.badge.held-untagged,
+.badge.held-unknown-tag                { background: var(--st-accent); }
+.badge.held-unrecognized-shape         { background: var(--edge-drift); }
+.badge.held-would-change-classification { background: var(--edge-reverse); }
+.badge.held-illegal-boundary           { background: var(--edge-diverge); }
+/* Not a failure, so not a colour. The duplicate guard working correctly must
+   not carry DIVERGE crimson, which is the loudest hue in the file. */
+.badge.already-inserted                { background: var(--dim); }
+.sitem.quiet { color: var(--dim); }
 .streamlist { display: flex; flex-direction: column; }
 .sitem { display: flex; gap: var(--s2); padding: var(--s2) 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
 .sitem:last-child { border-bottom: 0; }
@@ -432,3 +462,9 @@ button kbd { background: color-mix(in oklch, var(--on-fill) 22%, transparent); b
   .rail { position: sticky; top: 0; z-index: 2; background: var(--bg); }
   .list { max-height: 38vh; border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+/* PR-023. The mark-as-seen control. `ghost` is the existing quiet button;
+   the hint sits beside it because the one thing a reader must know is that
+   the boundary does NOT move on its own -- that was the rejected design. */
+.seenrow { display: flex; gap: var(--s2); align-items: center; margin: var(--s2) 0 var(--s3); }
+.seenhint { font-size: 11.5px; color: var(--dim); }
