@@ -273,6 +273,24 @@ h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .02em; }
    widget's six grey bars and the chart --len token. */
 .badge.UNMATCHED { background: var(--dim); }
 
+/* ── stream: "what changed since I last looked" ──────────────────────────
+   Three ref-vintage states get three rules, deliberately -- collapsing
+   "absent" (pre-2026-08-22, ~two thirds of the store) into "unresolved"
+   (a resolution that ran and failed) would mislabel most of the ledger, the
+   exact UNMATCHED-badge shape recorded above: a value the code can emit
+   that the stylesheet has no rule for renders with no background and reads
+   as fine. */
+.badge.open { background: var(--st-warn); }
+.badge.closed { background: var(--dim); }
+.streamlist { display: flex; flex-direction: column; }
+.sitem { display: flex; gap: var(--s2); padding: var(--s2) 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
+.sitem:last-child { border-bottom: 0; }
+.vin { font-size: 10px; padding: 1px 6px; border-radius: var(--r1); display: inline-block; margin-top: 3px; }
+.vin-absent { background: var(--field); color: var(--dim); border: 1px dashed var(--line); }
+.vin-unresolved { background: var(--warn-quiet); color: var(--st-warn); }
+.vin-resolved { background: var(--ok-quiet); color: var(--st-ok); }
+.vin-unknown { background: var(--field); color: var(--dim); }
+
 .itxt { min-width: 0; flex: 1 1 auto; }
 .ttl { font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .meta { font-size: 10.5px; color: var(--dim); margin-top: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

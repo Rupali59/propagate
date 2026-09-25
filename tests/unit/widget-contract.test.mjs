@@ -64,6 +64,7 @@ function fullPayload() {
     },
     registers: { totals: { hot: { issues: 86, handovers: 38, todos: 205 }, rotatable: { issues: 30, handovers: 31, todos: 89 } } },
     gotchas: { files: 11, entries: 158, triggered: 79, scope: "workspace roots + cwd" },
+    changed: { summary: { total: 5, open: 2, closed: 3 } },
   });
 }
 
@@ -115,6 +116,7 @@ test("the nested fields the widget names are present too", () => {
   for (const k of ["ok", "reason", "ageMs", "problems"]) assert.ok(k in d.snapshot, `snapshot must carry ${k}`);
   for (const k of ["declared", "expanded"]) assert.ok(k in d.edges, `edges must carry ${k}`);
   for (const k of ["value", "label", "tone"]) assert.ok(k in d.headline, `headline must carry ${k}`);
+  for (const k of ["value", "label", "tone"]) assert.ok(k in d.changed, `changed must carry ${k}, same shape as headline`);
 });
 
 test("a row is only clickable when its view is actually served", () => {
@@ -133,6 +135,45 @@ test("a row is only clickable when its view is actually served", () => {
   // availability tracks SERVED_VIEWS exactly, in both directions.
   const dead = d.groups.flatMap((g) => g.rows).filter((r) => !r.cta.available).map((r) => r.key);
   assert.deepEqual(dead, [], `these rows route nowhere: ${dead.join(", ")}`);
+});
+
+// ── the CHANGED badge — one number, not a table ─────────────────────────────
+
+test("the widget reads d.changed and renders it as a toned badge, not a per-edge list", () => {
+  // "One number, not a table" — surface.mjs's buildChangedSummary collapses
+  // streamPayload()'s whole changed-edges list to {value, label, tone} before
+  // this file ever sees it. Nothing per-edge should reach the widget, so this
+  // asserts BOTH that the badge exists and that no per-item iteration does.
+  assert.match(code, /d\.changed/, "the widget must read d.changed");
+  assert.match(code, /className=\{`chg \$\{ch\.tone\}`\}/, "the badge needs a tone class, same convention as every other coloured value on the card");
+  assert.doesNotMatch(code, /changed\.(list|items|edges)\b/, "iterating a raw changed list would be the table this design rejects");
+  assert.doesNotMatch(code, /ch\.(list|items|edges)\b/, "same check against the widget's own local name for the summary");
+});
+
+test("the badge is gated on a real value — G24: the gate must be BEFORE the marker, not just present somewhere", () => {
+  // This repo's widget has no headless renderer, so its tests match raw
+  // source text (G24). A test anchored only at "does ch.value != null appear
+  // ANYWHERE in the file" cannot see a gate written AFTER the badge markup,
+  // which would let the badge render "null changed" on every first tick
+  // before the guard ever protected anything. So the ordering is asserted
+  // explicitly: the null check must appear strictly BEFORE the JSX it guards.
+  const render = code.slice(code.indexOf("export const render"));
+  const chgIdx = render.indexOf("className={`chg");
+  assert.ok(chgIdx > -1, "no .chg badge markup found in render()");
+  const before = render.slice(0, chgIdx);
+  assert.match(before, /ch\.value\s*!=\s*null/, "the null guard must appear BEFORE the badge markup, not merely exist in the file");
+});
+
+test("ch falls back the same way h does, so an older collect.sh cannot throw reading it", () => {
+  const render = code.slice(code.indexOf("export const render"));
+  assert.match(render, /const ch = d\.changed \|\| \{[^}]*tone:\s*'unknown'[^}]*\}/, "ch must have the same absent-field fallback as h");
+});
+
+test("the .chg badge CSS carries no fixed width (G9's family) and a distinct 'none' tone", () => {
+  const cssMatch = code.match(/\.chg\s*\{([^}]*)\}/);
+  assert.ok(cssMatch, "no .chg rule found — the badge has gone unstyled");
+  assert.doesNotMatch(cssMatch[1], /(?<![-\w])width:\s*\d+px/, "a fixed badge width will clip a longer count, the G9 shape");
+  assert.match(code, /\.chg\.none\s*\{/, "the 'something is open' tone needs its own visible rule, or it reads identically to the quiet state");
 });
 
 // ── the widget's own rules, as assertions rather than comments ─────────────

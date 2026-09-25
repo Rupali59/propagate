@@ -17,6 +17,14 @@
 // each stays internally consistent (N86), so the widget, the web UI and the CLI
 // all read one payload from lib/report/surface.mjs.
 //
+// A FOURTH THING, ADDED LATER, LIVES BESIDE THE HEADLINE RATHER THAN AS A
+// FOURTH GROUP. "What changed since I last looked" had no home on any
+// surface — the `d.changed` badge in the header is that home. It answers a
+// different kind of question than EDGES/REGISTERS/HEALTH (what MOVED, not
+// what STATE something is in), and it stays ONE number, never a table of the
+// individual edges that changed — see lib/report/surface.mjs's
+// buildChangedSummary.
+//
 // ── THE IMPORT RULE, CORRECTED ─────────────────────────────────────────────
 //
 // This file used to say "NO IMPORTS, deliberately". That was wrong, and the
@@ -310,6 +318,21 @@ export const className = `
   .big.ok { color: var(--st-ok); }
   .big.unknown { color: var(--dim); }
   .of { color: var(--dim); }
+
+  /* THE CHANGED BADGE. "What changed since I last looked" -- ONE number,
+     pushed to the far end of the header row. No fixed width (G9's family):
+     the count can grow past one digit and the badge must not clip it. */
+  .chg {
+    margin-left: auto;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 8px;
+    background: rgba(127,127,127,.14);
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .chg.none { color: var(--fg); background: rgba(127,127,127,.22); }
 
   .grp { font-size: 9px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase;
          color: var(--dimmer); margin: var(--s4) 0 var(--s1); }
@@ -621,6 +644,12 @@ export const render = (state, dispatch) => {
   }
 
   const h = d.headline || { value: null, label: '', tone: 'unknown' };
+  // "WHAT CHANGED SINCE I LAST LOOKED" HAD NO HOME ON ANY SURFACE — the badge
+  // that fixes that. ONE number, not a table (see surface.mjs's
+  // buildChangedSummary): a count and a tone, nothing per-edge reaches this
+  // file. Same fallback shape as `h` above, for the same reason — an older
+  // collect.sh that predates this field must not throw reading it.
+  const ch = d.changed || { value: null, label: '', tone: 'unknown' };
 
   // DECISION 1 — GATE THE CLICKS, NOT THE CARD. An earlier draft hid the whole
   // widget behind a setup card until interaction was configured. Drawing it
@@ -653,6 +682,7 @@ export const render = (state, dispatch) => {
       <span className="of">
         {h.value == null ? h.label : `${h.label} · ${d.edges.declared} declared`}
       </span>
+      {ch.value != null ? <span className={`chg ${ch.tone}`}>{ch.value} {ch.label}</span> : null}
     </div>,
     <div>
       {d.groups.map((g) => (

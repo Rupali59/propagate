@@ -871,6 +871,25 @@ async function doctor({ exitProcess = true } = {}) {
     void counts;
   }
 
+  // # Reminders bridge — PR-007's failures, and the reason this block exists at
+  // all. A `docs/SYSTEMS.md` row does NOT integrate failure: `formatAdoptionLines()`
+  // only PRINTS the liveness_probe column, it never runs it, and the cited
+  // precedent (`ssjk-mongo-backup`) ran daily, exited 0 and produced zero backups
+  // for weeks. Detection has to be a doctor check or it is not detection (D2).
+  //
+  // Reading Reminders needs macOS TCC permission, so a denial is "could not
+  // look" -- neither pass nor fail. That is `inconclusive`, the fourth entry kind
+  // N87 slice 2 added, and this is its FIRST real consumer, which is why PR-007
+  // was sequenced behind it. `Reporter.inconclusive` throws on an empty reason
+  // and increments `problems`, so a could-not-look can never read as a pass.
+  {
+    const { checkReminders } = await import("./lib/report/doctor/reminders.mjs");
+    const reporter = new Reporter();
+    await checkReminders({ reporter });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
   // # Goals — arrival conditions. Surfaced HERE rather than left to whoever
   // remembers to type `propagate goals`, because a capability nobody invokes is
   // indistinguishable from one that was never built
@@ -4789,9 +4808,17 @@ if (_invokedDirectly) {
     // lane 1 — `check` only; scan/judge/render/contradict are later lanes.
     const { claimsCmd } = await import("./commands/claims.mjs");
     process.exitCode = await claimsCmd(process.argv.slice(3));
+  } else if (mode === "reminders") {
+    // Dynamic, same reason as surface/registers/goals/queue (D5): a static
+    // import would pull the Reminders read path into every `status` /
+    // `check` invocation. Read-only (L4 of
+    // docs/plans/2026-09-23-reminders-todo-bridge.md) — the mutable stores
+    // (identity map, reconciliation log, `--apply`) are L5's, not wired here.
+    const { remindersCmd } = await import("./commands/reminders.mjs");
+    process.exitCode = await remindersCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|plans [--check] [--root <path> ...] [--json]|ui [--port <n>]|queue [--json]|surface [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]|claims judge <file> [--json]|claims render <file> [--apply] [--json]|claims contradict <authored-file> [--json]|claims restate [--json]|claims verdict [--apply] [--json] < verdicts.json|claims answer <file> start|end --run <id> --outcome <o> [--json]]");
+    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|plans [--check] [--root <path> ...] [--json]|ui [--port <n>]|queue [--json]|surface [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]|claims judge <file> [--json]|claims render <file> [--apply] [--json]|claims contradict <authored-file> [--json]|claims restate [--json]|claims verdict [--apply] [--json] < verdicts.json|claims answer <file> start|end --run <id> --outcome <o> [--json]|reminders [--list <name>] [--json]]");
     process.exit(2);
   }
 }

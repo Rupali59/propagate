@@ -2580,7 +2580,36 @@ and `delivery.mjs`'s digest (D8 — widened the hardcoded list instead) and the 
 version-manifest location, `skills-marketplace/.claude-plugin/marketplace.json` (D1). Both
 filed as TODOs.
 
-### N87 · `doctor` reports healthy because its population excludes the failures, its checks test properties a broken thing satisfies, and 354 warnings bury the one that fires — **S1** — **OPEN**
+### N87 · `doctor` reports healthy because its population excludes the failures, its checks test properties a broken thing satisfies, and 354 warnings bury the one that fires — **S1** — **RESOLVED 2026-09-25**
+
+**RESOLVED 2026-09-25 — and it had been resolved in code for a day without this line saying so.**
+All three mechanisms this entry names now have a landed slice AND a test that pins it:
+
+| mechanism | slice | landed | pinned by |
+|---|---|---|---|
+| the population excluded the failures | 1 | `b164a9f` | `tests/cli/doctor-census-parity.test.mjs` |
+| checks tested properties a broken thing satisfies | 2a, 2c | `4063bb0`, `c1acb2b` | `tests/unit/doctor-reporter.test.mjs` |
+| severity declared per section, so one signal is findable | 2b | `de53a45` | `tests/unit/doctor-severity.test.mjs` |
+| 354 warnings buried the one that fires | 3 | `a7548a1` | `tests/unit/doctor-warn-labels.test.mjs` |
+
+`lib/report/doctor/reporter.mjs:46-124` carries the new fourth entry kind: `inconclusive` is in
+`ENTRY_KINDS`, its `reason` is mandatory and **throws** when empty, and it increments `problems` —
+so a check that could not run stops reporting success. Seven section modules declare `severity`.
+
+**Why the delay is worth recording rather than quietly fixing.** This entry is *about* a register
+reporting a state that is not real, and for a day it was one: slices landed 2026-09-23/24 and this
+line read `OPEN` on 2026-09-25, while the file was edited that same morning for an unrelated entry.
+Anything consulting it to answer "is N87 done" would have been told no. That is the same defect one
+level up, and it is the reason `rule:enforcement-watches-itself` exists.
+
+Found while scoping PR-007, which is filed as sequenced behind slice 2 and is the first real consumer
+of `inconclusive` — a TCC denial is "could not look", which is neither pass nor fail. Nearly reported
+as still open: a first pass grepping `severity` under `lib/report/doctor/` returned **zero** hits
+through the ugrep shim (G-A); `/usr/bin/grep` found seven files.
+
+**Step 4 of the original fix order — "only then add checks for other defects" — is deliberately not
+claimed here.** It was never part of closing these three mechanisms, and N87 measured 6 of 8 real
+findings that week having no corresponding check. That remains open work, separate from this entry.
 
 Filed 2026-09-17 in answer to a direct question: *"how are we running a system with this
 many defects, and doctor doesn't report it?"* Eight issues were filed in two days (N79-N86).

@@ -43,6 +43,7 @@ import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { queuePayload } from "../lib/report/queue.mjs";
+import { streamPayload } from "../lib/report/stream.mjs";
 import { CLAUDE_GLOBAL_CLAUDE_MD, stateDir } from "../lib/core/paths.mjs";
 
 const TOKEN = randomBytes(24).toString("hex");
@@ -312,6 +313,17 @@ export async function uiCmd(argv = [], io = console) {
       }
       if (url.pathname === "/api/analytics") {
         try { return send(200, await analyticsPayload({ root })); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
+      // STREAM — "what changed since I last looked", folded from the append-
+      // only event store by lib/report/stream.mjs. Same shape as /api/analytics
+      // above: in-process, no subprocess, behind the same guardRequest. `since`
+      // is an optional query param (an ISO string); when absent or unparseable,
+      // streamPayload() itself defaults to the last 7 days rather than
+      // "everything" and says so via the payload's own `sinceSource`.
+      if (url.pathname === "/api/stream") {
+        try { return send(200, await streamPayload({ since: url.searchParams.get("since") ?? undefined })); }
         catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
       }
 

@@ -26,6 +26,7 @@ import {
   buildHealthRows,
   buildGrid,
   buildSurface,
+  buildChangedSummary,
   gotchaCensus,
 } from "../../lib/report/surface.mjs";
 
@@ -474,4 +475,55 @@ test("a partially-joined payload takes the honest fallback, not a wrong split", 
   ]))[0];
   assert.equal(row.unit, "actionable");
   assert.equal(row.value, 2);
+});
+
+// ── the CHANGED badge — one number, not a re-fold ───────────────────────────
+
+test("buildChangedSummary reads streamPayload's summary VERBATIM — no re-fold (G20)", () => {
+  // The whole point: this function must not know how to fold events, only how
+  // to read a fold someone else already did. Feeding it a summary with numbers
+  // that could not come from a real fold (open > total) proves it never
+  // recomputes anything from raw events — it has none to recompute from.
+  const c = buildChangedSummary({ summary: { total: 3, open: 3, closed: 0 } });
+  assert.equal(c.value, 3, "value is summary.total, untouched");
+  assert.equal(c.tone, "none", "something is still open");
+});
+
+test("zero changed is a CLEAN result, not an unknown one — the inverse of toneFor's rule", () => {
+  // toneFor's zero-denominator case means "nothing was scanned" (N87). Here a
+  // total of 0 means the fold genuinely found nothing in the window, which is
+  // a real, common answer and must read as ok, never as unknown.
+  const c = buildChangedSummary({ summary: { total: 0, open: 0, closed: 0 } });
+  assert.equal(c.value, 0);
+  assert.equal(c.tone, "ok");
+});
+
+test("everything that changed is already closed — still ok, not neutral", () => {
+  const c = buildChangedSummary({ summary: { total: 4, open: 0, closed: 4 } });
+  assert.equal(c.value, 4);
+  assert.equal(c.tone, "ok", "nothing open among what changed is a clean result");
+});
+
+test("a missing or erroring stream payload is UNKNOWN, never a bare zero", () => {
+  // rule:discernment-checks §2 — "streamPayload could not run" and "it ran and
+  // found nothing" must not collapse into the same rendered value.
+  assert.deepEqual(buildChangedSummary(null), { value: null, label: "no stream", tone: "unknown" });
+  assert.deepEqual(
+    buildChangedSummary({ error: "ENOENT" }),
+    { value: null, label: "stream error", tone: "unknown" },
+  );
+});
+
+test("buildSurface wires changed at the TOP LEVEL, beside headline, not as a fourth group", () => {
+  const withChanges = buildSurface({ queue: queueOf([]), changed: { summary: { total: 5, open: 2, closed: 3 } }, now: NOW });
+  assert.equal(withChanges.changed.value, 5);
+  assert.equal(withChanges.changed.tone, "none");
+  assert.equal(
+    withChanges.groups.some((g) => g.key === "changed"),
+    false,
+    "changed must not become a group — it is one number, not a table",
+  );
+
+  const noChanges = buildSurface({ queue: queueOf([]), now: NOW });
+  assert.equal(noChanges.changed.tone, "unknown", "buildSurface must never silently omit the field when the caller passes nothing");
 });

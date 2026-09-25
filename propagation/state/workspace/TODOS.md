@@ -247,6 +247,127 @@ nothing in 4,384 (99.2%), replaced by a command deriving the same answer in 1.2s
 same shape at 89%. The question the rule asks is what breaks if it is computed on demand
 instead — and with `actionable` static at 67, plausibly nothing.
 
+### PR-021 · The Reminders bridge cannot reach its stated goal condition — nothing in this repo can INSERT a register line
+
+**This is the finding of the 2026-09-25 build, and it is a planning defect, not an execution one.**
+
+The spec's goal condition (`docs/plans/2026-09-23-reminders-todo-bridge.md:275-282`) is *"a reminder
+tagged `#<project>` in `Claude TODO` appears as an item in that project's register without anyone
+running a command by hand."* That requires inserting a line into a `TODOS.md`.
+
+**This entry's own heading was wrong twice, in two different ways, and both were invisible in the
+file.** First it was filed CLOSED: the heading quoted the spec's "Done when" clause, and
+`lib/report/backlog.mjs:333` matches a bare `\bdone\b` in a heading *and* looks ahead into the
+body. Reworded to "goal condition" — and it then parsed under the id **`PR-007`**, because the
+heading also named PR-007 and the id is taken from the wrong match, silently colliding with the
+real PR-007 entry above.
+
+Recorded rather than quietly fixed, because the shape is the point: the most important finding of
+this build was first invisible, then filed under another entry's identity, and **the file looked
+correct both times**. An entry is not filed until `backlog --json` says so. This is the same class
+as N87 — a register asserting a state that is not real — inside the entry that documents it.
+
+`lib/registers/write.mjs` is the only code in this repo permitted to edit a hand-written register,
+and its second stated guarantee is: **"One line changes. Never more. `applyEdit` asserts the line
+count is unchanged and that every OTHER line is identical."** It plans a change to exactly one
+EXISTING line, identified by its full current text. Inserting is not a narrower case of that — it
+is a different operation, and the file says so about `HANDOVERS.md` resolution: *"it is append-only
+by its own header, so resolving INSERTS a dated block beneath rather than rewriting, which is a
+different operation with a different guarantee. Stage 2."*
+
+So the bridge as built reconciles a reminder's completion state against **its own last recorded
+observation of that reminder**, and writes to no register. Every result carries
+`writesToRegister: false` so a caller reading the return value cannot miss it. H5's two-writer
+tie-break does not fully apply yet either: there is one clock (Reminders), not two, until a
+register reader exists.
+
+**Why nothing caught it.** The eng review, the execution plan and five lanes all read the spec,
+the doctor slices and the plist generator. None opened `write.mjs`. That is
+`rule:adversarial-review-reads-the-ledger` exactly — *a promise in one file that another file
+cannot keep*, invisible to any review scoped to a single artifact. The rule's own words: *"Treat
+'this document says X' as a claim about another file until you have opened that file."*
+
+**Before building the inserter, decide whether it should exist.** An automated line-inserter into
+prose people wrote is precisely the hazard `write.mjs`'s header is narrow about: *"a bad write does
+not append a junk row — it destroys a sentence somebody meant."*
+
+### PR-022 · `reconcileReminders()` is built, tested and mutation-proven, and no CLI verb reaches it
+
+`lib/reminders/reconcile.mjs` exists, is dry-run by default, and its F2 guard is proven across all
+six dispositions plus the inconclusive path — mutating the guard turned 8 of 11 tests red. But
+`cli.mjs` has no `reminders reconcile` verb and `commands/reminders.mjs` is read-only by design, so
+nothing a person can type reaches it.
+
+This is a boundary artifact of the 2026-09-25 lane split: L5 was forbidden `cli.mjs` and
+`commands/reminders.mjs` to keep it disjoint from L4, and correctly flagged rather than crossing
+the line. The spec's own F2 pseudocode (`runCli(["reminders", "reconcile", ...])`) assumes a CLI
+surface that does not exist.
+
+**Deliberately not wired on 2026-09-25**, and the reason is PR-021: exposing a `reconcile` verb
+whose name implies register reconciliation, when it cannot touch a register, ships a command that
+cannot do what it says. Wire it when PR-021 is settled, and name it for what it does.
+
+### PR-023 · The stream cursor is built and wired to nothing, so every surface shows the 7-day default
+
+`lib/report/stream.mjs` exports `readCursor`/`writeCursor` — a single disposable ISO string, with
+absence and corruption as distinct attributable outcomes, all tested. Nothing calls `writeCursor`.
+`/api/stream` takes an optional `?since=`; the widget and `journal --since` take their own. So
+"since I last looked" is always "the last 7 days".
+
+The execution plan assigned the cursor to L1 and never assigned its *wiring* to any lane — caught
+by L2, which flagged it rather than guessing at scope.
+
+**The design question, which is why this was not just done:** the obvious behaviour — advance the
+cursor when the panel is viewed — has a real failure mode. Glance at the panel, the cursor
+advances, and the thing you did not read is now "already seen". An explicit "mark as seen" is
+safer and needs an affordance nobody specified.
+
+### PR-024 · `propagate surface` text mode omits `changed`; only `--json` carries it
+
+`lib/report/surface.mjs` now derives a compact `changed` summary and `--json` carries it via
+`JSON.stringify`. `commands/surface.mjs` — the text renderer — was not updated, so the number is
+invisible to anyone not passing `--json`.
+
+Arguably correct as-is: that file's own docstring calls the text form *"a fallback, not the point —
+the surface is the widget."* Filed so the asymmetry is a decision on the record rather than an
+oversight.
+
+### PR-025 · `ui.client.js`'s division separator is a positional index, one insertion from mislabelling
+
+`commands/ui.client.js:576` renders the group separator on the condition `i === 4`, emitting an
+`<hr />` plus a label that reads "reference". Index 4 is `analytics`.
+
+Pre-existing, and preserved correctly when the `stream` division was inserted at index 5 on
+2026-09-25. But it is positional: inserting a division *before* index 4 silently moves the
+separator and no test asserts where it lands. Key it off the division's identity, not its index.
+
+### PR-026 · The Reminders read path has never actually read — TCC was never granted
+
+Every test injects `readRemindersFn`, `exec` or `fixturePath`, so `readReminders()` composed with a
+real `osascript` call has never run to success. One real attempt on 2026-09-25 (incidental, while
+verifying a dynamic import resolved) returned `timeout`, not data and not `tcc-denied` — consistent
+with a permission prompt nobody answered.
+
+`rule:name-what-no-test-executes` is about exactly this: *"the better the seam, the more completely
+the real constructor goes unrun"*, and its corollary names the cost — *"tools that exist for
+emergencies... are discovered broken at exactly the moment they are needed."* A bridge that has
+never read is a backfill that has never backfilled.
+
+**Needs a human at the keyboard**, because a first-ever grant blocks `osascript` on a GUI dialog
+that a non-interactive session cannot dismiss. Until then `doctor` will not attempt it at all — the
+PR-007 deployment gate short-circuits before any read while the bridge is uninstalled.
+
+### PR-027 · `PROPAGATE_REMINDERS_FIXTURE` is documented in one file and implemented in another
+
+`lib/reminders/read.mjs:13` documents the env var as an injection seam. Nothing in that file reads
+it; the only implementation is `commands/reminders.mjs:35`. So `readReminders()` called directly —
+as `checkReminders` does — ignores it entirely, which is how a fixture-injected probe silently
+became a live `osascript` call on 2026-09-25.
+
+Either implement it in `read.mjs` beside the `fixturePath` option, or correct the comment to say
+where it actually lives. The option seam (`fixturePath` / `exec` / `readRemindersFn`) works and is
+what every test uses.
+
 ## Finished
 
 

@@ -42,6 +42,7 @@ const DIVISIONS = [
   { key: "parked", label: "PARKED", act: true },
   { key: "gap", label: "BASELINE GAP", act: true },
   { key: "analytics", label: "ANALYTICS" },
+  { key: "stream", label: "CHANGED" },
   { key: "reference", label: "REFERENCE" },
   // Framed rather than dropped: lib/graph/graph-html.mjs renders a whole
   // interactive page at /graph, and open-ui.sh turns a widget route into a
@@ -252,6 +253,61 @@ function Analytics({ data }) {
   </div>`;
 }
 
+/* -- stream: "what changed since I last looked" --------------------------- */
+
+/**
+ * `sinceSource` -> a label a reader can trust. A 7-day default must never
+ * read as "this is everything since you last looked"
+ * (rule:discernment-checks §2, and lib/report/stream.mjs's own header).
+ */
+function sinceLabel(s) {
+  if (s === "given") return "since the date you gave";
+  if (s === "invalid-given-defaulted") return "the date you gave was invalid — showing the last 7 days instead";
+  return "the last 7 days (no since given)";
+}
+
+/**
+ * `downstream_on_ref`'s three-way vintage, kept distinguishable rather than
+ * collapsed into one branch -- "absent" means the event predates
+ * 2026-08-22, about two thirds of the store's history, and is a DIFFERENT
+ * fact from "resolution ran and failed" (unresolved). See stream.mjs's
+ * refVintage() and STATE.md's schema-vintage note.
+ */
+function vintageLabel(v) {
+  if (!v || !v.status) return "unknown";
+  if (v.status === "absent") return "pre-2026-08-22, no ref recorded";
+  if (v.status === "unresolved") return "resolution failed";
+  return "resolved";
+}
+
+function Stream({ data }) {
+  if (!data) return html`<div class="reason">folding the event store for this window…</div>`;
+  if (data.error) return html`<div class="banner">stream failed to load — ${data.error}</div>`;
+  const s = data.summary || { total: 0, open: 0, closed: 0 };
+  const changed = data.changed || [];
+  return html`<div>
+    <h2 class="dtitle">What changed</h2>
+    <div class="dmeta">${sinceLabel(data.sinceSource)} · ${data.since} → ${data.generatedAt}</div>
+    <div class="sec">${s.total} edge(s) changed — ${s.open} open, ${s.closed} closed</div>
+    ${data.malformed ? html`<div class="caveat">${data.malformed} malformed line(s) in the store could not be read</div>` : null}
+    ${!changed.length ? html`<div class="reason">nothing changed in this window</div>` : html`
+      <div class="streamlist">
+        ${changed.map((c) => html`
+          <div key=${c.edge_id} class="sitem">
+            <span class=${"badge " + (c.open ? "open" : "closed")}>${c.open ? "open" : "closed"}</span>
+            <span class="itxt">
+              <span class="ttl">${c.node_id || c.edge_id}</span>
+              <span class="meta">${c.disposition || "unknown disposition"} · ${c.at || "no timestamp"}${c.by ? " · " + c.by : ""}</span>
+              <span class=${"vin vin-" + ((c.downstreamOnRef && c.downstreamOnRef.status) || "unknown")}>${vintageLabel(c.downstreamOnRef)}</span>
+              <span class="meta">${c.judgedCount == null ? "no prior history" : "judged " + c.judgedCount + "x"}${
+                c.noiseRatio != null ? " · " + pct(c.noiseRatio) + " no-op" : ""}</span>
+              ${c.reason ? html`<span class="meta">${c.reason}</span>` : null}
+            </span>
+          </div>`)}
+      </div>`}
+  </div>`;
+}
+
 /* -- the undo window ------------------------------------------------------ */
 
 /**
@@ -350,10 +406,12 @@ function App() {
     return () => removeEventListener("hashchange", onHash);
   }, []);
 
-  // Lazy divisions: measured 300 ms, 1704 ms and 28 ms. Fetched when opened,
-  // never on first paint -- that is what keeps the page near 340 ms.
+  // Lazy divisions: measured 300 ms, 1704 ms and 28 ms (stream unmeasured on
+  // this machine, but it is a single in-process fold, same shape as
+  // analytics). Fetched when opened, never on first paint -- that is what
+  // keeps the page near 340 ms.
   useEffect(() => {
-    const ep = { reference: "/api/reference", gap: "/api/baseline", analytics: "/api/analytics" }[div];
+    const ep = { reference: "/api/reference", gap: "/api/baseline", analytics: "/api/analytics", stream: "/api/stream" }[div];
     if (!ep || lazy[div]) return;
     api(ep).then((j) => setLazy((L) => Object.assign({}, L, { [div]: j })));
   }, [div, lazy]);
@@ -539,7 +597,7 @@ function App() {
 }
 
 function ListPane({ div, flat, sel, setSel, d, open, setOpen }) {
-  if (div === "analytics" || div === "reference" || div === "gap" || div === "graph") {
+  if (div === "analytics" || div === "reference" || div === "gap" || div === "graph" || div === "stream") {
     const label = DIVISIONS.find((x) => x.key === div).label;
     return html`<div class="empty">${label} is read-only.<br />Its content is on the right.</div>`;
   }
@@ -589,6 +647,7 @@ function ListPane({ div, flat, sel, setSel, d, open, setOpen }) {
 
 function DetailPane({ div, current, d, lazy, reason, setReason, judge, judgeBatch, msg, pending, onUndo, reduced }) {
   if (div === "analytics") return html`<${Analytics} data=${lazy.analytics} />`;
+  if (div === "stream") return html`<${Stream} data=${lazy.stream} />`;
 
   if (div === "graph") {
     return html`<iframe class="frame" src=${"/graph?token=" + encodeURIComponent(TOKEN)}
@@ -724,7 +783,7 @@ function DetailPane({ div, current, d, lazy, reason, setReason, judge, judgeBatc
  * bundler in this repo's suite, so without this the shaping logic -- batching,
  * the gap-breaking path builder, the rail counts -- has no check at all. */
 if (typeof globalThis !== "undefined") {
-  globalThis.__ui = { batched, counts, linePath, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody };
+  globalThis.__ui = { batched, counts, linePath, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody, sinceLabel, vintageLabel };
 }
 
 if (typeof document !== "undefined" && document.getElementById("app")) {

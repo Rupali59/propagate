@@ -1,5 +1,61 @@
 # propagate — State
 
+## The event stream on three surfaces, and a bridge that cannot reach its own goal — 2026-09-25, `v0.9.0`
+
+**What landed.** One derivation, three renderers, plus PR-007's read path — six lanes, five on
+Sonnet against an approved plan, reviewed and re-verified here.
+
+| | |
+|---|---|
+| `lib/report/stream.mjs` | `streamPayload({since})` — folds the ledger, never counts it |
+| `/api/stream` + a sixth UI division | lazy, byte-identical emitted script, **HTTP 200 in 89 ms** |
+| `surface.mjs` `changed` + widget badge | ONE number, derived nowhere else |
+| `lib/reminders/**` + `propagate reminders` | read-only by construction |
+| identity map, reconcile log, digest slot | dry-run by default, F2 mutation-proven |
+| `doctor` reminders section | `inconclusive`'s first real consumer, behind a deployment gate |
+
+**Full suite 2092 tests / 2087 pass / 0 fail / 5 skipped**, curate-docs 94/94, and the production
+event ledger byte-identical across every run (`cb48d1e7d506236a`, G56 respected).
+
+**The finding, which is a planning defect rather than an execution one — PR-021.** PR-007 cannot
+reach its stated goal condition and never could. The spec requires a tagged reminder to appear as
+an item in a project's register; that means INSERTING a line into `TODOS.md`, and
+`lib/registers/write.mjs` — the only module permitted to touch a register — guarantees *"One line
+changes. Never more"*, editing exactly one EXISTING line. The eng review, the plan and five lanes
+all read the spec and the doctor slices. **None opened `write.mjs`.**
+`rule:adversarial-review-reads-the-ledger`, exactly: a promise in one file another file cannot keep.
+
+**Three defects the repo's own guards caught in work authored this session**, all in the final
+suite rather than in review:
+
+- **A check that could not fail.** `reporter.check("reminders list readable", true, …)` — a literal
+  condition. `tests/cli/doctor-check-coverage.test.mjs` refused it: *"a check nobody has seen fail
+  is not known to work."*
+- **`doctor` could never be clean again.** Every non-ok read routes to `inconclusive`, which
+  increments `problems`, so on a machine without Reminders access a component **nobody had
+  installed** produced a permanent problem. That is N87's own disease inside N87's cure. Fixed by a
+  deployment gate that reads the INSTALLED plist (G-O: launchd never re-reads a bootstrapped job's
+  file) and reports *not installed* as informational. The gate also means `doctor` cannot provoke a
+  permission prompt until the bridge is deliberately deployed. The installed plist carries **1**
+  schedule entry, not 2 — the bridge is generated, not deployed.
+- **A literal NUL byte re-entered through a refactor.** `tests/portability/no-literal-nul.test.mjs`
+  caught it in an extracted helper, after the same defect had already been fixed once in the file
+  it was extracted from.
+
+**And one in the register write itself.** PR-021's heading was wrong twice and the file looked
+correct both times: first it parsed CLOSED (it quoted the spec's "Done when" clause, and
+`backlog.mjs:333` matches a bare `\bdone\b` in a heading and looks ahead into the body), then it
+parsed under the id **`PR-007`** because the heading named that entry too. The most important
+finding of the build was first invisible, then filed under another entry's identity. **An entry is
+not filed until `backlog --json` says so.**
+
+**Deliberately not done, and why** — PR-022 (no CLI verb reaches `reconcileReminders`: naming a
+verb `reconcile` when it cannot touch a register ships a command that cannot do what it says),
+PR-023 (the cursor is wired to nothing; advance-on-view would silently mark unread changes seen),
+PR-026 (**the Reminders read path has never actually read** — TCC was never granted, and a
+first-ever grant blocks on a GUI dialog a non-interactive session cannot dismiss).
+
+
 ## Document kinds became guidelines, and five instruments lied — 2026-09-25, `v0.7.0`
 
 `KINDS` in `lib/report/doc-kind.mjs` is a record per kind now — `what` / `create` /

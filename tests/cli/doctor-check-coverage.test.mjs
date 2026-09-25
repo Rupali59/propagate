@@ -75,6 +75,23 @@ const covered = (label) => TESTS.includes(label.split("—")[0].trim().slice(0, 
 // The other two stay: `parseable` only runs when the file exists, so it cannot fail a
 // fresh machine, and `.bak` already degrades to `!` with a reason.
 const KNOWN_UNCOVERED = [
+  // "reminders list readable" — added 2026-09-25 with PR-007's doctor check.
+  // This one is uncoverable BY CONSTRUCTION rather than by neglect, which is
+  // why it is declared here instead of being given a fixture: the check is
+  // only reached after `readReminders()` returned ok, so the condition is
+  // literally `true`, and EVERY failure mode of the read — all seven reason
+  // strings — routes to `inconclusive`, not to a failing check. There is no
+  // input that makes this check report false.
+  //
+  // The seven inconclusive paths ARE covered, in
+  // tests/unit/doctor-reminders.test.mjs, and the not-installed path in
+  // tests/unit/doctor-reminders.test.mjs's deployment cases. So the check's
+  // real behaviour is tested; what does not exist is a FAILING case.
+  //
+  // If this check ever gains a genuine false condition (e.g. asserting the
+  // routed count against the register once a register writer exists), delete
+  // this entry and write the fixture — do not widen the reason.
+  "reminders list readable",
   // "Affects: tokens parse" — PAID 2026-08-25. tests/unit/doctor-decisions.test.mjs
   // makes DECISIONS.md a directory so existsSync passes and readFile throws EISDIR,
   // then asserts problems === 1. That was the one failure mode EXPECTATIONS cannot
