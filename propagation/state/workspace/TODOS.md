@@ -287,9 +287,27 @@ the doctor slices and the plist generator. None opened `write.mjs`. That is
 cannot keep*, invisible to any review scoped to a single artifact. The rule's own words: *"Treat
 'this document says X' as a claim about another file until you have opened that file."*
 
-**Before building the inserter, decide whether it should exist.** An automated line-inserter into
-prose people wrote is precisely the hazard `write.mjs`'s header is narrow about: *"a bad write does
-not append a junk row — it destroys a sentence somebody meant."*
+**DECIDED 2026-09-25: it should exist.** Rupali, asked directly. Recorded in `DECISIONS.md`
+(2026-09-25, append-only) with the reasoning; this entry stays OPEN because the decision is not the
+build.
+
+**The decision is NOT "relax `write.mjs`".** It is a second operation with its own guarantees,
+because the existing three do not transfer to an insert:
+
+| existing guarantee (edit) | what it becomes (insert) |
+|---|---|
+| exactly one line changes, every other identical | one line is ADDED — assert a line count of +1, not 0 |
+| identified by its full current text | meaningless for a line that does not exist; anchor on the NEIGHBOUR's full current text and refuse when it has moved |
+| nothing written that was not previewed | unchanged, and it matters more |
+
+`write.mjs` already anticipated this exact split for `HANDOVERS.md`: *"it is append-only by its own
+header, so resolving INSERTS a dated block beneath rather than rewriting, which is a different
+operation with a different guarantee. Stage 2."* That is this work.
+
+The hazard the narrowness protects against is still real and still applies: *"a bad write does not
+append a junk row — it destroys a sentence somebody meant."* An inserter is safer than an editor in
+one respect (it destroys nothing) and worse in another (it multiplies, and nobody reviews an entry
+that arrived on its own).
 
 ### PR-022 · `reconcileReminders()` is built, tested and mutation-proven, and no CLI verb reaches it
 
@@ -341,7 +359,24 @@ Pre-existing, and preserved correctly when the `stream` division was inserted at
 2026-09-25. But it is positional: inserting a division *before* index 4 silently moves the
 separator and no test asserts where it lands. Key it off the division's identity, not its index.
 
-### PR-026 · The Reminders read path has never actually read — TCC was never granted
+### PR-026 · The Reminders read path has never actually read — TCC was never granted — RESOLVED 2026-09-25
+
+**Rupali granted Reminders access and the path read on the first try.** `propagate reminders`
+against the live list, exit 0 unpiped: **5 items — 4 routed, 1 held-untagged, 0 held-unknown-tag.**
+
+**F5 was vindicated on live data, not on a fixture.** Two completed items carry
+`completedAt=2026-09-12` against `modifiedAt=2026-09-23` — **eleven days apart**. Had the clock
+been `modification date`, the obvious choice the spec rejected, both would have been reported as
+completed on the 23rd. The third item has the two timestamps equal, so a fixture with only that
+shape would have proven nothing.
+
+**The held item is the routing rule earning its place:** an untagged fragment of a payment
+receipt (`US$236.00 / View invoice and payment details / Invoice number ...`). Not a task, no tag,
+and held rather than guessed into the nearest project — written nowhere, as designed.
+
+What remains untested is the failure side: this run proves a GRANTED read works. The seven
+inconclusive reasons are still covered only by injection, which is correct — a denial cannot be
+provoked on a machine where permission has been given.
 
 Every test injects `readRemindersFn`, `exec` or `fixturePath`, so `readReminders()` composed with a
 real `osascript` call has never run to success. One real attempt on 2026-09-25 (incidental, while

@@ -1181,3 +1181,41 @@ the comment warning against it.
 
 **Refs:** `40ec5dd`, `c0858a1`, `6a25f93`; plan
 `~/.claude/plans/claude-propagation-plugin-has-buzzing-jellyfish.md`; N63, N64, N65.
+
+---
+
+## 2026-09-25: a register INSERTER should exist — PR-021 answered
+
+**What:** Rupali, asked directly whether the capability to insert a new line into
+a `TODOS.md` should exist at all, answered **yes**. `lib/registers/write.mjs` will
+gain an insert operation alongside `applyEdit`, and PR-007's bridge becomes its
+first consumer.
+
+**Why:** the question was worth asking rather than assuming, because `write.mjs`
+is deliberately narrow and says so: *"a bad write does not append a junk row — it
+destroys a sentence somebody meant."* Its three guarantees — line-anchored,
+re-read immediately before writing; exactly one line changes; nothing is written
+that was not previewed — are built around EDITING one existing line. Inserting is
+not a narrower case of that. The file already anticipated this exact split for
+`HANDOVERS.md` resolution: *"it is append-only by its own header, so resolving
+INSERTS a dated block beneath rather than rewriting, which is a different
+operation with a different guarantee. Stage 2."*
+
+So the decision is not "relax write.mjs". It is **a second operation with its own
+guarantees**, and the existing ones do not transfer:
+
+- "one line changes, every other line identical" becomes "one line is ADDED, every
+  pre-existing line identical" — a line-count assertion of +1, not 0.
+- "identified by its full current text" has no meaning for a line that does not
+  exist yet. An insert is anchored by its NEIGHBOURS, so it needs the preceding
+  line's full current text and a refusal when that has moved.
+- preview-then-apply still holds and matters more, not less.
+
+**Affects:** propagate/lib/registers/write.mjs, propagate/lib/reminders/reconcile.mjs,
+propagate/propagation/state/workspace/TODOS.md
+
+**Refs:** PR-021 (the finding: the bridge could not reach its stated goal condition
+and never could), PR-022 (the CLI verb that was deliberately not wired pending this
+answer), `docs/plans/2026-09-23-reminders-todo-bridge.md:275-282` (the goal
+condition), `rule:adversarial-review-reads-the-ledger` (why five lanes and an eng
+review all missed it: none opened `write.mjs`).

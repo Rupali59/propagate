@@ -51,9 +51,20 @@ not filed until `backlog --json` says so.**
 
 **Deliberately not done, and why** — PR-022 (no CLI verb reaches `reconcileReminders`: naming a
 verb `reconcile` when it cannot touch a register ships a command that cannot do what it says),
-PR-023 (the cursor is wired to nothing; advance-on-view would silently mark unread changes seen),
-PR-026 (**the Reminders read path has never actually read** — TCC was never granted, and a
-first-ever grant blocks on a GUI dialog a non-interactive session cannot dismiss).
+PR-023 (the cursor is wired to nothing; advance-on-view would silently mark unread changes seen).
+
+**Both of the day's open questions were then answered.** Rupali granted Reminders access and the
+read path read on the first attempt — 5 items, 4 routed, 1 held — closing PR-026. **F5's clock
+choice was vindicated on live data rather than a fixture:** two completed items carry
+`completedAt=2026-09-12` against `modifiedAt=2026-09-23`, eleven days apart, so
+`modification date` would have reported both as completed on the wrong day. The held item is an
+untagged payment-receipt fragment, refused rather than guessed into a project.
+
+And PR-021 is **decided: the register inserter should exist** (`DECISIONS.md`, 2026-09-25). Not as
+a relaxation of `write.mjs` but as a second operation with its own guarantees — an insert asserts a
+line count of **+1**, and anchors on a NEIGHBOUR's current text, because "identified by its full
+current text" is meaningless for a line that does not exist yet. `write.mjs` had already named this
+split for `HANDOVERS.md` and called it "Stage 2". PR-021 stays open: the decision is not the build.
 
 
 ## Document kinds became guidelines, and five instruments lied — 2026-09-25, `v0.7.0`
