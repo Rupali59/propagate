@@ -48,3 +48,6 @@ docs/archive/*watcher*.log*
 # Not portable: a clone elsewhere has no such source, and a worktree-scoped id
 # would be wrong for a sibling worktree. Added 2026-09-24 with the pin itself.
 .gbrain-source
+
+# gstack design/session artifacts — tool state, not source
+.gstack/

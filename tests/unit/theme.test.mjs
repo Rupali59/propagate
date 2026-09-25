@@ -344,3 +344,49 @@ test("ui.css styles every edge state the graph can emit", () => {
   assert.deepEqual(unstyled, [],
     `the graph can emit these states and ui.css gives their badge no background: ${unstyled.join(", ")}`);
 });
+
+// ── the population, derived rather than curated ─────────────────────────────
+
+/**
+ * N97 / G70. Every colour assertion above iterates SEMANTIC — seven tokens.
+ * `commands/ui.css` uses forty-six. The thirty-nine outside that list carry the
+ * actual text of the interface and were checked by nothing, which is how four
+ * rules shipped putting --dim on --field at 4.40 and .badge.none at 3.60, in a
+ * repo whose DESIGN.md sets the floor at 4.5 and whose suite was green.
+ *
+ * So this check does not name tokens. It reads the stylesheet, finds every rule
+ * that declares BOTH a colour and a background, and asserts that pair in both
+ * themes. Adding a rule adds coverage; there is no list to remember to extend.
+ */
+test("every colour/background pair ui.css DECLARES clears 4.5:1, both themes", () => {
+  const css = read("commands/ui.css");
+  const t = themes(css, ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);
+
+  const pairs = [];
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const sel = m[1].trim().split("\n").pop().trim();
+    const fg = m[2].match(/(?:^|[;\s])color:\s*var\((--[a-z0-9-]+)\)/);
+    const bg = m[2].match(/background(?:-color)?:\s*var\((--[a-z0-9-]+)\)/);
+    if (fg && bg) pairs.push({ sel, fg: fg[1], bg: bg[1] });
+  }
+
+  // Absence must be attributable: a regex that stops matching would otherwise
+  // report a clean sweep of nothing. This is the same guard the edge-state
+  // check carries, and the reason it is here is that this test's whole subject
+  // is a population that was smaller than anyone thought.
+  assert.ok(pairs.length >= 12,
+    `only ${pairs.length} colour/background pairs found — the extraction has gone blind`);
+
+  const fails = [];
+  for (const [name, vars] of [["light", t.light], ["dark", t.darks[0].map]]) {
+    for (const p of pairs) {
+      let ink, ground;
+      try { ink = resolveColor(vars.get(p.fg), vars); ground = resolveColor(vars.get(p.bg), vars); }
+      catch (err) { fails.push(`${name}: ${p.sel} — cannot resolve ${p.fg}/${p.bg}: ${err.message}`); continue; }
+      const v = contrast(ink, ground);
+      if (v < 4.5) fails.push(`${name}: ${p.sel} — ${p.fg} on ${p.bg} is ${v.toFixed(2)}`);
+    }
+  }
+  assert.deepEqual(fails, [],
+    `${pairs.length} pairs checked in 2 themes; under 4.5:1:\n  ${fails.join("\n  ")}`);
+});

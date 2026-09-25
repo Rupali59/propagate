@@ -3476,3 +3476,79 @@ fifth manifest (PR-016). Both were "a path decided at the point of use".
 The fix is a registry that grows by declaration — add a name, not a `path.join` — and a test
 asserting no path literal for a known root appears outside it. Without that assertion the
 registry becomes the 39th symbol nobody reaches for, which is the same failure one level up.
+
+### N97 · Seven declared colour pairs sat under 4.5:1 in the light theme, and the guard could not see any of them — **S2** — **RESOLVED 2026-09-25**
+
+**This entry was filed naming ONE pair. A derived check found SEVEN, which is the finding.**
+Filed against `--dim` on `--field` at 4.40; then, instead of fixing that value, the check was widened
+first — and it immediately returned five more, across five distinct token combinations, every one in
+the light theme and none in dark:
+
+| contrast | rule | pair |
+|---|---|---|
+| **3.60** | `.badge.none` | `--dim` on `--line` |
+| **3.85** | `.vin-resolved` | `--st-ok` on `--ok-quiet` |
+| **4.00** | `.vin-unresolved` | `--st-warn` on `--warn-quiet` |
+| 4.40 | `.vin-absent` · `.vin-unknown` · `.reason` · `kbd` | `--dim` on `--field` |
+
+Three of the seven were added the same day by the stream-panel work, in a change that ran the full
+suite and shipped green.
+
+**Fixed by derivation, not by eye** — `lib/report/color.mjs`'s own `contrast()` solved for each
+threshold, then took headroom:
+
+- `--dim` light **.546 → .490** (.495 is the threshold against `--line`). One change cleared five of
+  the seven. Now 4.57 on `--line` through 6.24 on `--card`. The dark `--dim` is a separate
+  declaration and is untouched.
+- `--warn-quiet` and `--ok-quiet` light offsets **+.38 → +.44** (.433 and .432 are the thresholds).
+  Now 4.58 and 4.60. Their only other consumer, `.banner`, puts `--fg` on `--warn-quiet`, so a
+  lighter ground only improves it.
+
+**The guard was widened before the values were touched**, which is why this entry is worth reading:
+`tests/unit/theme.test.mjs` now carries *"every colour/background pair ui.css DECLARES clears 4.5:1,
+both themes"* — it reads the stylesheet, finds every rule declaring both a `color` and a
+`background`, and checks that pair. It names no tokens, so adding a rule adds coverage and there is
+no list to remember to extend. It refuses to run on fewer than 12 pairs, because a regex that stops
+matching would otherwise report a clean sweep of nothing.
+
+**Mutation-proven:** reverting `--dim` to `.546` turns it red naming all five affected rules with
+their measured values and the line *"15 pairs checked in 2 themes"*. Restored, green. General form
+filed as **G70**.
+
+**Measured 2026-09-25** with the repo's own `contrast()` from `lib/report/color.mjs`, resolving
+`commands/ui.css` in both themes:
+
+| pair | light | dark |
+|---|---|---|
+| `--fg` on `--bg` | 16.71 | 14.37 |
+| `--dim` on `--bg` | 4.72 | 5.65 |
+| `--fg` on `--card` | 17.43 | 13.08 |
+| `--dim` on `--card` | 4.92 | 5.14 |
+| `--fg` on `--field` | 15.59 | 14.95 |
+| **`--dim` on `--field`** | **4.40** | 5.88 |
+
+Everything clears except that one pair, in light only. `DESIGN.md` §"The three things a colour must
+survive" sets the floor at **4.5:1 against its own declared ground, both themes**.
+
+**Three rules declare exactly that pair**, all at small sizes, so the 3.0 large-text allowance does
+not apply (large means ≥18.66px bold or ≥24px):
+
+```
+commands/ui.css:289  .vin-absent  { background: var(--field); color: var(--dim); border: 1px dashed var(--line); }
+commands/ui.css:292  .vin-unknown { background: var(--field); color: var(--dim); }
+commands/ui.css:332  .reason      { font-size: 12.5px; color: var(--dim); background: var(--field); ... }
+```
+
+**Two of the three were added on 2026-09-25**, by the stream-panel work, in a change that ran the
+full suite and shipped green — because nothing checks this pair. `tests/unit/theme.test.mjs` runs
+19 tests including contrast in both themes, but every colour assertion iterates `SEMANTIC`
+(`:120-121`), which is **seven** tokens; `ui.css` uses **46**. `--dim`, `--field` and every other
+token carrying real interface text are outside the population. Filed as **G70**.
+
+**It is a 0.1 miss, and that is the point.** Nobody would catch 4.40 by eye, which is exactly what
+a derived floor is for. The fix is a lightness nudge on `--dim` in the light branch, or a different
+ground for those three rules — but it should not be applied without extending the guard first, or
+the next 0.1 lands the same way.
+
+**Fix order:** widen the check before fixing the value. A number corrected by hand under a guard
+that still cannot see it is the same defect with a fresh timestamp.

@@ -1619,3 +1619,39 @@ assumed. `0 open` on a file with seven open items is loud; the same defect in a 
 one open item would have read as plausible. N51 is the same family one step less literal —
 there a fenced example minted a phantom SECTION in HANDOVERS.md and reported it **closed**,
 which that entry calls the one state that must never be wrong.
+
+### G70 · A palette guard whose population is a curated list proves nothing about the tokens outside it
+**Trigger:** `(prefers-color-scheme|SEMANTIC\s*=|color:\s*var\(--)`
+**Fires on:** `grep -n "color: var(--dim)" commands/ui.css`
+
+`tests/unit/theme.test.mjs` is a strong suite — 19 tests covering contrast at 4.5:1 on a declared
+ground in both themes, deuteranope separation, a 25° minimum hue gap, one wheel across three
+surfaces, reduced motion, and duration tokens. Its header says *"every token defined in both
+themes"*.
+
+**Every colour assertion in it iterates `SEMANTIC` (`:120-121`), which is SEVEN tokens.**
+`commands/ui.css` uses **46** via `var()`. So 39 of 46 — including `--fg`, `--bg`, `--card`,
+`--field`, `--line`, `--dim`, `--on-fill`, `--ok-quiet`, `--warn-quiet`, `--lift-1` — carry the
+actual text of the interface and are checked by nothing.
+
+**Measured 2026-09-25, and it is not theoretical:** `--dim` on `--field` is **4.40:1 in the light
+theme**, under the floor DESIGN.md sets. Three rules declare exactly that pair — `.vin-absent`
+(`:289`), `.vin-unknown` (`:292`) and `.reason` (`:332`) — all at small sizes, so the 3.0
+large-text allowance does not apply. Two of the three were added the same day, by work that ran a
+full test suite and shipped green. Filed as N97.
+
+**The signal is a suite that feels thorough.** Nineteen passing tests about colour is exactly what
+makes nobody ask what the population is. The question is never "is there a check" — it is **"what
+does the check iterate, and how much of the surface is that?"**
+
+**Instead:** derive the population rather than curating it. Take the tokens the stylesheet actually
+uses (`var\((--[a-z0-9-]+)`), subtract an explicit `THEME_INDEPENDENT` allowlist, and assert on
+what remains — the sibling at `Rupali/claude-usage-widget/test/widget.test.mjs` does exactly this,
+and its own comment records that omitting the hyphen from the character class once silently skipped
+**seven** tokens while the test still claimed to check every one. An allowlist you must edit to
+exempt something is safe; a curated inclusion list you must remember to extend is not.
+
+**Related:** G67 (a spec asserting a property nothing checks) is this one level up — there the claim
+was in prose, here it is in a passing test. `rule:enforcement-watches-itself` §4: "found nothing"
+and "looked at nothing" must be different outputs, and a guard over 7 of 46 reports the first while
+doing the second.

@@ -64,7 +64,11 @@
   --card:  #ffffff;
   --field: oklch(.962 .006 85);
   --line:  oklch(.895 .006 var(--h-accent));
-  --dim:   oklch(.546 .008 var(--h-accent));
+  /* .546 -> .490 (N97): at .546 this cleared --bg and --card but sat at 4.40 on
+     --field and 3.60 on --line, and FOUR rules put it on one of those two.
+     Derived, not nudged: .495 is the threshold against --line, .490 keeps a
+     little headroom. Now 4.57 (line) to 6.24 (card). Dark is unaffected. */
+  --dim:   oklch(.490 .008 var(--h-accent));
   --fg:    oklch(.217 .002 var(--h-accent));
   --on-fill: #ffffff;
 
@@ -74,8 +78,12 @@
   --accent-hover:  oklch(from var(--st-accent) calc(l - .06) c h);
   --accent-active: oklch(from var(--st-accent) calc(l - .10) c h);
   --accent-quiet:  oklch(from var(--st-accent) calc(l + .38) calc(c * .30) h);
-  --warn-quiet:    oklch(from var(--st-warn)   calc(l + .38) calc(c * .30) h);
-  --ok-quiet:      oklch(from var(--st-ok)     calc(l + .38) calc(c * .30) h);
+  /* warn/ok carry +.44 rather than accent's +.38 (N97): these two are the only
+     quiet tints used as a GROUND for their own full-strength colour, in
+     .vin-unresolved and .vin-resolved, and at +.38 that pairing measured 4.00
+     and 3.85. Thresholds are .433 and .432; +.44 lands 4.58 and 4.60. */
+  --warn-quiet:    oklch(from var(--st-warn)   calc(l + .44) calc(c * .30) h);
+  --ok-quiet:      oklch(from var(--st-ok)     calc(l + .44) calc(c * .30) h);
 
   /* Issue severity reuses the STATUS ramp deliberately: both answer "how bad",
      unlike edge state. S3 takes --dim — least severe gets no hue. */
