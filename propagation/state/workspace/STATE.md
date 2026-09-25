@@ -1,5 +1,25 @@
 # propagate — State
 
+## The UX did not meet its own contrast floor in seven places — 2026-09-25, `934d183`
+
+Found while auditing the CONFLICTS panel design against `DESIGN.md`. **Seven declared
+colour/background pairs sat under 4.5:1, all in the light theme**, including `.badge.none` at 3.60
+and the `.vin-*` badges added hours earlier the same day. Dark was clean throughout.
+
+**The defect was the guard's population, not the values.** `tests/unit/theme.test.mjs` runs 19
+colour tests — contrast in both themes, deuteranope separation, a 25° hue floor — and every one
+iterates `SEMANTIC`, which is **seven** tokens. `commands/ui.css` uses **46**. The 39 outside that
+list carry the interface's actual text and were checked by nothing, which is why three bad pairs
+shipped green that morning.
+
+Fixed by derivation (`--dim` .546 → .490; the warn/ok quiet tints +.38 → +.44), but **the guard was
+widened first** — the new check reads the stylesheet and asserts every rule that declares both a
+`color` and a `background`, so adding a rule adds coverage. Mutation-proven red.
+
+N97 (corrected from one pair to seven, then closed) · **G70** for the general form, which is G67's
+shape with the unchecked claim living in a passing test rather than in prose.
+
+
 ## The event stream on three surfaces, and a bridge that cannot reach its own goal — 2026-09-25, `v0.9.0`
 
 **What landed.** One derivation, three renderers, plus PR-007's read path — six lanes, five on
