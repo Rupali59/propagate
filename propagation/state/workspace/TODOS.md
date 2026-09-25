@@ -27,7 +27,7 @@ explanation as a real heading — closing every entry below it. The reader said 
 Derive the open count rather than reading one here:
 
 ```sh
-node cli.mjs backlog --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(JSON.stringify(j.stats||{}))})'
+node cli.mjs backlog --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(JSON.stringify(j.totals||{}))})'
 ```
 
 ---
@@ -72,6 +72,19 @@ so a `\n`-anchored parser misses them, and `completion date` is the clock while
 
 ### PR-008 · Chase the intermittent `ui-client` failure — the 91 "missing" tests were the ruler
 
+**Half of this landed 2026-09-25.** `package.json`'s `test` script no longer short-circuits:
+both sub-suites run unconditionally and both exit codes print, verified by planting a
+propagate-side failure and watching curate-docs still run 91/91. The aggregate still fails when
+either does.
+
+**The flake itself is untouched, and it is wider than this heading says.** Six full runs that day
+produced 2, 0, 2, 1, 0 and 2 failures across **at least six different test names** inside
+`tests/unit/ui-client.test.mjs` — `opening a lazy division fetches it, once`, `a per-division
+error renders in that division`, `the top row is fixOrder's first`, `a baseline split that does
+not add up SAYS so`, `READY collapses a shared node+state into ONE expandable row`. That is
+file-wide nondeterminism, plausibly fetch/async ordering, rather than one intermittent
+assertion. The singular framing in this heading is the thing to correct first.
+
 Reframed 2026-09-24 by measuring the two npm sub-suites separately, which is the one thing three
 sessions of looking at aggregate lines could not do. **No tests were ever lost.**
 
@@ -112,26 +125,6 @@ an unrelated one indefinitely. And N91's `doctor.duration_ms` spikes of 18-24 mi
 share a cause with an async test that is sensitive to load — that pairing survives the reframe,
 because it was never about the count.
 
-### PR-011 · A fifth version-manifest location the delivery gate does not check: hub `marketplace.json` pinned at 0.5.0
-
-Filed 2026-09-24, deferred by D1 of the plugin-delivery review
-(`docs-plans-2026-09-23-reminders-todo-bri-playful-dawn.md`) rather than folded into that
-review's 7-file scope.
-
-`skills-marketplace/.claude-plugin/marketplace.json` (the `tathya` marketplace) pins
-propagate at `0.5.0`, last touched 2026-09-01, while the repo's `VERSION` is `0.6.2`.
-`gateVersionManifests` (`lib/core/release.mjs:48-55`) checks only the four in-repo version
-strings (`VERSION`, `package.json`, `.claude-plugin/plugin.json`,
-`.claude-plugin/marketplace.json`) and never reads this fifth, cross-repo one.
-
-**`propagation/state/workspace/DECISIONS.md:1169-1171` overstates what this gap does** —
-it claims the gap can "leave the served plugin behind." N78's own transcript refutes that:
-the updater reported *"already at the latest version (0.6.1)"* while the hub manifest
-still said `0.5.0`, so the marketplace `version` field is stale listing metadata, not
-something `claude plugin update` consults to decide whether to re-copy. Correcting
-`DECISIONS.md:1169-1171` is part of this work, alongside adding the fifth path to
-`gateVersionManifests` and the cross-repo `VERSION` edge that would keep it in step.
-
 ### PR-012 · `post-merge`'s completeness list is hand-maintained at 5 of 141 plugin files
 
 Filed 2026-09-24, residual from D8/D9 of the plugin-delivery review
@@ -152,8 +145,137 @@ call that answers only "is the served tree missing any shipped file", built on `
 and have `post-merge` call that instead of its own list. **Depends on `treeDigest` landing
 first** — it does not exist standalone yet outside `delivery.mjs`'s internal use.
 
+### PR-013 · 241 of 501 gotcha entries carry no trigger, and propagate's own register is the worst
+
+Measured 2026-09-25 across 26 `GOTCHAS.md` files: 263 entries carry a `**Trigger:**` and can
+fire; 241 do not. Not every hazard has a mechanical hook and inventing one makes noise, so the
+target is not 100%. The distribution is the finding, not the total:
+
+| register | inert |
+|---|---|
+| `propagate/propagation/state/workspace` | **55 of 74 (74%)** |
+| `propagate/propagation/state/curate-docs` | 21 of 25 (84%) |
+| `Vipin Kaushik/…/sanskrit-texts` | 27 of 70 |
+| `Sindhu/…/sipl-tms` | 19 of 43 |
+
+The repo that built the trigger mechanism has the highest proportion of entries that cannot use
+it — `rule:enforcement-watches-itself`'s shape, in the register rather than the code. 74% is not
+a considered ratio, it is an unexamined one. The work is to walk propagate's own 55 and decide,
+per entry, whether a trigger exists — not to add 55 triggers.
+
+### PR-014 · `rules promote` stays unbuilt, and the measurement says why
+
+`cli.mjs:1449` prints `not implemented — declared in the Phase 5 plan and not built` and tells
+you to file by hand. The standing assumption was that automating promotion would pay for itself.
+Measured 2026-09-25, it does not: across 26 `GOTCHAS.md` files and ~500 entries there is exactly
+**one** genuinely unpromoted cross-project hazard, and it was promoted by hand the same day
+(G-P). One candidate is not a pipeline.
+
+Two corrections worth keeping with this entry. An earlier count of 31 candidates was duplicate
+checkouts — `curate-docs-skill` is an archived copy of `curate-docs`, and a `worktrees/` path
+without the leading dot escaped the exclusion list. A later count of 2 came from a filter that
+globbed for `GOTCHAS.md` and therefore never loaded `gotchas-global.md` at all, so it excluded
+nothing and looked like it worked. The true yield is 1.
+
+So the decision this entry records is **to leave the stub standing**, with the number that
+justifies it. Revisit if a census ever shows the candidate count in double figures.
+
+### PR-015 · Decide the N35 excused bucket — 17 files the restatement check declines to read
+
+`rules check` reports 1 restatement and separately notes that 17 files "restate a rule they also
+reference — excused, not checked". Twelve of those are `tool-priority`, the rule whose whole
+origin is nine divergent copies making four mutually exclusive claims. The consolidation that
+fixed it left twelve files carrying a pointer and a copy at once, in the one bucket the detector
+skips.
+
+Either that is a real conversion backlog or it is a permanently-fine category, and nobody has
+decided which. The decision is cheap and the ambiguity is not: a checker that reports 1 while
+holding 17 unexamined by design is the N85 shape, where a number gets dismissed because most of
+what it covers was never looked at.
+
+Breakdown: `tool-priority` 12 · `secrets-source-of-truth` 2 · `state-and-decisions` 2 ·
+`environment-vocabulary` 1.
+
+### PR-016 · `INTEGRATIONS.marketplaceDir` is null here, so the fifth manifest goes unchecked in practice
+
+`gateVersionManifests` gained the hub `marketplace.json` as a fifth location on 2026-09-25, and
+on this machine it never reads it: `INTEGRATIONS.marketplaceDir` is `null`, which
+`lib/skills/skills-scan.mjs:464` guards for as a normal state. The gate degrades correctly — the
+four in-repo manifests are still checked and `detail` says `hub marketplace.json UNCHECKED:` with
+the reason — but the fifth is verified nowhere until a hub is configured.
+
+`propagate setup --hub` derives it. Anything else keyed on `marketplaceDir` is equally inert
+locally, including skill lifecycle scans, so this is wider than one gate.
+
+### PR-017 · Decide whether the doc census earns a place in `release --check` at 21 seconds
+
+`docs --kinds` takes **21.03s** over 1513 docs, because `proseOnlySupersession` opens every file.
+The 2026-09-25 plan proposed gating it and then chose against: 21 seconds on every release, for a
+number with 988 untriaged rows behind it, is how a gate gets routed around (N85).
+
+`--json` and the full `--undeclared` worklist landed, so gating is a one-line change whenever
+someone is acting on the number. The prerequisite is PR-018, not more tooling.
+
+### PR-018 · The 988 undeclared docs now have a worklist and nobody has walked it
+
+Of 1513 docs, 988 resolve to `undeclared` and only **13** declare `kind:` in frontmatter; the
+rest are filename or directory guesses. `docs --undeclared` emits the full list with a
+best-guess kind per row as of 2026-09-25 — before that it printed 8 and "… and 980 more", which
+is why nobody could start.
+
+Walking it is judgement per doc, not a sweep. `guessKind()` is advisory and deliberately never
+feeds back into `kindOf()`.
+
+### PR-019 · Triage the 63 docs already classified `design`
+
+`design` is the fifth-largest kind and had zero consumers until the guidelines landed. The 63
+docs were never triaged against the kind's own rule — `follows its surface`, staleness `age` —
+so some of them describe surfaces that have moved.
+
+Sixteen `DESIGN.md` files exist under at least two incompatible conventions (playbook-style token
+docs, and `/office-hours`-generated build specs), and `Keerti-portfolio/docs/DESIGN.md` says in
+its own text that its `design-tokens.json` is stale.
+
+### PR-020 · The monitor notifies nothing in 89% of its runs
+
+Measured 2026-09-25 over the whole log: **5057 runs, 2041 notified, 168,739 suppressed.** 4502
+runs (89%) notified nothing at all, the suppression rate is 98%, and `actionable` has been pinned
+at 67 for every recent run.
+
+`rule:delegation-criteria` §2's worked example is a watcher that ran 4,420 times and found
+nothing in 4,384 (99.2%), replaced by a command deriving the same answer in 1.2s. This is the
+same shape at 89%. The question the rule asks is what breaks if it is computed on demand
+instead — and with `actionable` static at 67, plausibly nothing.
+
 ## Finished
 
+
+### PR-011 · A fifth version-manifest location the delivery gate does not check: hub `marketplace.json` pinned at 0.5.0
+
+Filed 2026-09-24, deferred by D1 of the plugin-delivery review
+(`docs-plans-2026-09-23-reminders-todo-bri-playful-dawn.md`) rather than folded into that
+review's 7-file scope.
+
+`skills-marketplace/.claude-plugin/marketplace.json` (the `tathya` marketplace) pins
+propagate at `0.5.0`, last touched 2026-09-01, while the repo's `VERSION` is `0.6.2`.
+`gateVersionManifests` (`lib/core/release.mjs:48-55`) checks only the four in-repo version
+strings (`VERSION`, `package.json`, `.claude-plugin/plugin.json`,
+`.claude-plugin/marketplace.json`) and never reads this fifth, cross-repo one.
+
+**`propagation/state/workspace/DECISIONS.md:1169-1171` overstates what this gap does** —
+it claims the gap can "leave the served plugin behind." N78's own transcript refutes that:
+the updater reported *"already at the latest version (0.6.1)"* while the hub manifest
+still said `0.5.0`, so the marketplace `version` field is stale listing metadata, not
+something `claude plugin update` consults to decide whether to re-copy. Correcting
+`DECISIONS.md:1169-1171` is part of this work, alongside adding the fifth path to
+`gateVersionManifests` and the cross-repo `VERSION` edge that would keep it in step.
+
+**Landed 2026-09-25.** `gateVersionManifests` (`lib/core/release.mjs`) reads the hub manifest as
+a fifth location via `INTEGRATIONS.marketplaceDir`, and all five now agree at `0.7.0`. The fifth
+degrades alone: an unreachable hub leaves the four in-repo manifests checked and says
+`hub marketplace.json UNCHECKED: <reason>` in `detail`, because returning `could-not-run` for the
+whole gate stopped it gating at all — `release.mjs:21` says that status is never a failure.
+Machines without a configured hub still verify nothing for the fifth; that is PR-016.
 The reader treats this section as closed wholesale, so entries move here rather than
 being edited in place.
 

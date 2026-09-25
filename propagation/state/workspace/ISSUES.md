@@ -3364,3 +3364,40 @@ question rather than a typo: derive the served path (the delivery work added `ac
 check the log. `rule:enforcement-watches-itself` — the register built to make components verifiable
 contains an unverifiable entry for the component its own text calls "the one most likely to become
 decorative."
+
+### N94 · A gotcha trigger matches command text inside a commit message, so writing about a hazard fires it — **S3** — **OPEN**
+
+Found 2026-09-25 while promoting G-P. `hooks/gotcha-guard.mjs` matches a `**Trigger:**` regex
+against the Bash call's whole command string, which includes heredoc bodies. A commit message
+*quoting* a hazardous command therefore fires the entry about it: writing the G-P commit — whose
+body quotes `git checkout -- <file>` — triggered both G-O and G-P at once.
+
+Harmless in itself, and the cost of a good trigger rather than a bad one: narrowing to "the
+command as executed" means parsing shell, and a guard that tries to be clever about quoting will
+miss the real thing. But it is worth knowing before anyone widens a trigger, because the noise
+scales with how often the hazard is discussed, and the entries most discussed are the ones most
+recently paid for.
+
+The honest options are to accept it, or to skip matching inside a heredoc body specifically —
+which is a narrow, testable rule rather than general shell parsing.
+
+### N95 · `fs.existsSync` gets a non-string somewhere in the digest path, and the source is unlocated — **S3** — **OPEN**
+
+`~/.propagate/digest.stderr.log` carries, on every recent run:
+
+```
+(node:48423) [DEP0187] DeprecationWarning: Passing invalid argument types to fs.existsSync is deprecated
+```
+
+Something calls `existsSync` with a value that is not a string or URL — most likely `null` or
+`undefined` from a config field that is legitimately unset on this machine, of which
+`INTEGRATIONS.marketplaceDir` is the known example (PR-016). `lib/skills/skills-scan.mjs:464`
+guards its own call with `!marketplaceDir ||` first, so it is not that one.
+
+**Not reproduced.** `node --trace-deprecation cli.mjs inventory` does not surface it, so the call
+sits on a path `inventory` does not reach. Recorded rather than guessed, because a plausible
+attribution here would be exactly the "reader invents an answer" failure `rule:discernment-checks`
+§6 describes. The next person should run the digest itself under `--trace-deprecation`.
+
+Latent rather than harmful today: Node has deprecated the coercion, so a future major turns this
+into a throw on a path nobody has identified.
