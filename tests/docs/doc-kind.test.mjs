@@ -112,7 +112,29 @@ test("supersession inverts — the superseded doc is never edited", async () => 
 test("frontmatter absent is not an error, and every KIND documents its lifecycle", () => {
   assert.equal(frontmatter("# no frontmatter\n"), null);
   for (const [k, why] of Object.entries(KINDS)) {
-    assert.ok(why.length > 10, `${k} must state the lifecycle it implies, not just exist`);
+    assert.ok(why.what.length > 10, `${k} must state the lifecycle it implies, not just exist`);
+  }
+});
+
+// Guideline completeness — D3 of docs/plans/i-saw-it-what-starry-sparkle.md §1.
+// Every kind is a RECORD now, not a string, and every record must carry all five
+// fields non-empty. A kind missing one is half-registered: it classifies docs but
+// tells nobody what should create, maintain, link or never restate.
+const MAINTAIN_RULES = ["age", "declared-state", "append-only", "completeness", "none"];
+
+test("every KIND record carries all five guideline fields, non-empty", () => {
+  for (const [k, rec] of Object.entries(KINDS)) {
+    assert.equal(typeof rec, "object", `${k} must be a record, not a string`);
+    for (const field of ["what", "create", "link", "never"]) {
+      assert.equal(typeof rec[field], "string", `${k}.${field} must be a string`);
+      assert.ok(rec[field].length > 0, `${k}.${field} must be non-empty`);
+    }
+    assert.equal(typeof rec.maintain, "object", `${k}.maintain must be an object`);
+    assert.ok(rec.maintain.why.length > 0, `${k}.maintain.why must be non-empty`);
+    assert.ok(
+      MAINTAIN_RULES.includes(rec.maintain.rule),
+      `${k}.maintain.rule "${rec.maintain.rule}" must be one of ${MAINTAIN_RULES.join(", ")}`,
+    );
   }
 });
 
@@ -321,7 +343,7 @@ test("`gotchas` is declared in KINDS with a lifecycle, like every other kind", (
   // A kind byFilename() can return but KINDS does not describe is a half-registered
   // kind: it classifies, and then no consumer can say what its staleness rule is.
   assert.ok(Object.keys(KINDS).includes("gotchas"));
-  assert.match(KINDS.gotchas, /INERT/, "its lifecycle must name the failure unique to it");
+  assert.match(KINDS.gotchas.what, /INERT/, "its lifecycle must name the failure unique to it");
 });
 
 test("registering gotchas did not steal any other filename", () => {

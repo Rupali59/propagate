@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadTaxonomy, TaxonomyUnavailable, propagateCandidates, stalenessRule } from "../lib/taxonomy.mjs";
+import { loadTaxonomy, TaxonomyUnavailable, propagateCandidates, stalenessRule, STALENESS } from "../lib/taxonomy.mjs";
 
 test("loads propagate's taxonomy and re-exports the surface we depend on", async () => {
   const t = await loadTaxonomy();
@@ -95,4 +95,39 @@ test("plan staleness is a declared-state question, not an age question", () => {
   assert.equal(stalenessRule("page-spec"), "age");
   assert.equal(stalenessRule("decision-log"), "append-only");
   assert.equal(stalenessRule(null), "none", "undeclared is a value, never a silence");
+});
+
+test("STALENESS's key set cannot silently diverge from KINDS (plan D3)", async () => {
+  // STALENESS is DERIVED from KINDS[k].maintain.rule, plus one key (`undeclared`) that has
+  // no corresponding KINDS entry at all. If a kind is added upstream and this derivation
+  // stops covering it — or `undeclared` regresses to a fallthrough and silently vanishes
+  // from the object — this is the assertion that turns red for it.
+  const { KINDS } = await loadTaxonomy();
+  assert.deepEqual(
+    Object.keys(STALENESS).sort(),
+    Object.keys(KINDS).concat("undeclared").sort(),
+  );
+});
+
+test("every KINDS[k].maintain.rule is one of the five staleness enum values", async () => {
+  const { KINDS } = await loadTaxonomy();
+  const allowed = new Set(["age", "declared-state", "append-only", "completeness", "none"]);
+  for (const [kind, { maintain }] of Object.entries(KINDS)) {
+    assert.ok(
+      allowed.has(maintain?.rule),
+      `KINDS.${kind}.maintain.rule is "${maintain?.rule}", not one of ${[...allowed].join(", ")}`,
+    );
+  }
+});
+
+test("undeclared is a DECLARED STALENESS key, not merely what stalenessRule(null) returns", () => {
+  // The property assert.equal(stalenessRule(null), "none") cannot see: that assertion
+  // passes identically whether `undeclared: "none"` is an explicit entry in STALENESS or
+  // simply the `?? "none"` fallthrough inside stalenessRule() — which is exactly why this
+  // task exists (see the "plan staleness" test above; it is proof of neither state alone).
+  // This checks the property directly instead of inferring it from a return value.
+  assert.ok(
+    "undeclared" in STALENESS,
+    "undeclared must be a declared STALENESS key, never a silent fallthrough",
+  );
 });

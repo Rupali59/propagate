@@ -55,7 +55,14 @@ function git(args, cwd) {
 // Gate 1 — version-manifests
 // ---------------------------------------------------------------------------
 
-function manifestFixture({ version = "0.1.0", pkg = version, plugin = version, marketplace = version } = {}) {
+// The hub manifest lives OUTSIDE skillDir in production (cross-repo — see
+// release.mjs's defaultHubMarketplacePath), so the fixture puts it under its
+// own subdirectory rather than beside the other four, and every call below
+// passes `hubMarketplacePath` explicitly. That is deliberate isolation, not
+// incidental: leaving it to fall back to `defaultHubMarketplacePath()` would
+// make these tests read this MACHINE's real hub, exactly the machine-layout
+// leakage `tests/portability/portability-literals.test.mjs` exists to catch.
+function manifestFixture({ version = "0.1.0", pkg = version, plugin = version, marketplace = version, hub = version, hubEntryName = "propagate" } = {}) {
   const dir = tmp("propagate-release-manifests-");
   writeFileSync(path.join(dir, "VERSION"), `${version}\n`);
   writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "x", version: pkg }));
@@ -65,15 +72,26 @@ function manifestFixture({ version = "0.1.0", pkg = version, plugin = version, m
     path.join(dir, ".claude-plugin", "marketplace.json"),
     JSON.stringify({ plugins: [{ name: "x", version: marketplace }] }),
   );
+  mkdirSync(path.join(dir, "hub", ".claude-plugin"), { recursive: true });
+  writeFileSync(
+    path.join(dir, "hub", ".claude-plugin", "marketplace.json"),
+    JSON.stringify({ plugins: [{ name: "quarantine", version: "0.1.0" }, { name: hubEntryName, version: hub }] }),
+  );
   return dir;
 }
 
-test("gate 1: all four manifests agreeing passes", () => {
+function hubPath(dir) {
+  return path.join(dir, "hub", ".claude-plugin", "marketplace.json");
+}
+
+test("gate 1: all five manifests agreeing passes", () => {
   const dir = manifestFixture({ version: "1.2.3" });
   try {
-    const g = gateVersionManifests({ skillDir: dir });
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: hubPath(dir) });
     assert.equal(g.status, "passed", g.detail);
     assert.equal(g.versions.VERSION, "1.2.3");
+    assert.equal(g.versions["hub marketplace.json"], "1.2.3");
+    assert.match(g.detail, /five/);
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
@@ -82,7 +100,7 @@ test("gate 1: all four manifests agreeing passes", () => {
 test("NEGATIVE CONTROL: a manifest that lags VERSION must fail, not pass", () => {
   const dir = manifestFixture({ version: "1.2.3", plugin: "1.2.2" });
   try {
-    const g = gateVersionManifests({ skillDir: dir });
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: hubPath(dir) });
     assert.equal(g.status, "failed", "a version mismatch must not read as passed");
     assert.match(g.detail, /1\.2\.2/);
   } finally {
@@ -94,9 +112,114 @@ test("gate 1: a missing manifest is could-not-run, never a silent pass", () => {
   const dir = manifestFixture();
   rmSync(path.join(dir, ".claude-plugin", "marketplace.json"));
   try {
-    const g = gateVersionManifests({ skillDir: dir });
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: hubPath(dir) });
     assert.equal(g.status, "could-not-run");
     assert.match(g.reason, /marketplace\.json/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+// --- PR-011: the fifth manifest ---------------------------------------------
+
+test("gate 1 / PR-011: a divergent hub marketplace.json fails, naming it — planted divergence", () => {
+  const dir = manifestFixture({ version: "2.0.0" });
+  const hub = hubPath(dir);
+  const before = readFileSync(hub, "utf8");
+  try {
+    // Plant exactly the real-world defect this gate exists for: four in-repo
+    // manifests agree, the hub one is stale (0.5.0 style).
+    const mutated = JSON.stringify({ plugins: [{ name: "quarantine", version: "0.1.0" }, { name: "propagate", version: "0.5.0" }] });
+    writeFileSync(hub, mutated);
+    // Confirm the mutation actually applied before trusting the gate's
+    // reaction to it (rule:discernment-checks §1 / §4 — a sed/write that
+    // silently no-ops has passed this exact check before).
+    assert.equal(readFileSync(hub, "utf8"), mutated, "fixture mutation did not apply — test proves nothing");
+    assert.notEqual(readFileSync(hub, "utf8"), before, "mutated content must differ from the original fixture");
+
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: hub });
+    assert.equal(g.status, "failed", g.detail);
+    assert.match(g.detail, /hub marketplace\.json/, "the failure must name the diverging manifest");
+    assert.match(g.detail, /0\.5\.0/);
+    assert.equal(g.versions["hub marketplace.json"], "0.5.0");
+  } finally {
+    // Restore, and confirm the restore itself took — same reasoning as the
+    // plant: an unverified write is a claim, not a fact.
+    writeFileSync(hub, before);
+    assert.equal(readFileSync(hub, "utf8"), before, "restore did not apply");
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+// The fifth manifest CANNOT be reached for four independent reasons — missing
+// "propagate" entry, missing file, unresolved path, and (coordinator-required)
+// unresolved path alongside a REAL divergence among the four. Every one must
+// degrade ONLY the fifth: the four in-repo manifests still get a real
+// passed/failed verdict, and `could-not-run` stays reserved for "the four
+// themselves could not be checked" — never for "the fifth was unreachable."
+// This corrects a first version of the fix that made the WHOLE gate
+// could-not-run whenever the fifth was unreachable, which is every run on any
+// machine without the marketplace integration configured — including the one
+// carrying the real 0.5.0 divergence PR-011 exists to catch. Non-blocking
+// could-not-run then means "checks nothing," silently.
+
+test('gate 1 / PR-011: a hub marketplace.json with no "propagate" entry degrades only the fifth — the four still pass', () => {
+  const dir = manifestFixture({ hubEntryName: "renamed-somehow" });
+  try {
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: hubPath(dir) });
+    assert.equal(g.status, "passed", JSON.stringify(g));
+    assert.match(g.detail, /UNCHECKED/);
+    assert.match(g.detail, /no "propagate" entry/);
+    assert.ok(!("hub marketplace.json" in g.versions), "an unreadable hub entry must not be reported as a version");
+    assert.equal(g.versions.VERSION, "0.1.0", "the four must still be reported, not dropped");
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 1 / PR-011: a missing hub manifest file degrades only the fifth — the four still pass, naming it in detail", () => {
+  const dir = manifestFixture();
+  const hub = hubPath(dir);
+  rmSync(hub);
+  try {
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: hub });
+    assert.equal(g.status, "passed", JSON.stringify(g));
+    assert.match(g.detail, /UNCHECKED/);
+    assert.match(g.detail, /hub marketplace\.json UNCHECKED: not found/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 1 / PR-011: an unresolved hub path (integration not configured) degrades only the fifth — the four agreeing still passes", () => {
+  const dir = manifestFixture();
+  try {
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: null });
+    // Must NOT be could-not-run: the four in-repo manifests are fully
+    // readable and agree, and could-not-run for the whole gate is reserved
+    // for the four being unreadable, not for the fifth being unreachable.
+    assert.equal(g.status, "passed", JSON.stringify(g));
+    assert.match(g.detail, /marketplaceDir is not configured/);
+    assert.match(g.detail, /UNCHECKED/, '"four agree, fifth unchecked" must say so, never read identically to "all five agree"');
+    // Must not have silently dropped the four-manifest verdict the way the
+    // first version of this fix did — versions carries the four real values,
+    // not an empty object.
+    assert.equal(g.versions.VERSION, "0.1.0");
+    assert.equal(Object.keys(g.versions).length, 4, "exactly the four in-repo manifests, no fabricated fifth");
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 1 / PR-011: unresolved hub path PLUS a real divergence among the four still fails on the four, naming the fifth as unchecked", () => {
+  // The coordinator's own required case: an unreachable fifth must never
+  // mask a genuine failure among the four, nor could-not-run over it.
+  const dir = manifestFixture({ version: "1.2.3", plugin: "1.2.2" });
+  try {
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: null });
+    assert.equal(g.status, "failed", JSON.stringify(g));
+    assert.match(g.detail, /1\.2\.2/, "the real four-way disagreement must still be named");
+    assert.match(g.detail, /UNCHECKED/, "the fifth being unreachable must be named too, distinctly from the failure");
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
@@ -250,6 +373,7 @@ test("runReleaseCheck: a could-not-run gate makes the run 'incomplete', never 'r
   try {
     const result = runReleaseCheck({
       manifestsDir: manifests,
+      hubMarketplacePath: hubPath(manifests),
       suiteDir: suite,
       skillDir: SKILL_DIR,
       makePublicEnv: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") },

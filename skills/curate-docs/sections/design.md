@@ -2,6 +2,14 @@
 
 *Section of the parent skill — Read this file when the situation below applies. It is deliberately NOT a discoverable skill: as one it declared the bare name `design`, which squats a generic global name.*
 
+> **Not the `design` document kind.** This file is *design as a verb* — deciding what should
+> happen to a doc. The `design` **kind** (`design/IA intent; follows its surface`, 63 docs in
+> the tree) is a different thing entirely, and nothing here is about it. For what creates,
+> maintains and links a design document, run `propagate docs --doctrine design`.
+>
+> The collision is why the pointer exists: anyone hunting design-doc guidelines reads this
+> heading first and stops.
+
 **When this applies:** Use when deciding what should happen to a document — triaging an orphan, judging whether a plan landed or was dropped, salvaging facts before anything is archived, or working out what breaks if a doc goes away. Triggers on "should this doc exist", "did this plan ship", "is this still true", "what depends on this doc", "can I archive this".
 
 Parent skill: `curate-docs` (premise, pipeline, Contract). This skill is what happens

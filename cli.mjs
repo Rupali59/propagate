@@ -4769,7 +4769,7 @@ if (_invokedDirectly) {
     process.exitCode = await plansCmd(process.argv.slice(3));
   } else if (mode === "docs") {
     const { docsCmd } = await import("./commands/docs.mjs");
-    await docsCmd();
+    process.exitCode = await docsCmd(process.argv.slice(3));
   } else if (mode === "backlog") {
     await backlogCmd();
   } else if (mode === "graph") {

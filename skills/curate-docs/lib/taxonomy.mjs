@@ -117,31 +117,58 @@ export async function loadTaxonomy(env = process.env, home = os.homedir(), selfD
  * `age` kinds are the ones that describe something still standing, so silence is a defect.
  * `plan` is STALE BY DESIGN (propagate's own KINDS says so); its defect is having no
  * DECLARED STATE, which is a graph question, not an mtime question.
+ *
+ * DERIVED from `KINDS[k].maintain.rule` (plan D3), never restated — doc-kind.mjs is the one
+ * place a rule gets to be wrong from (G20: a second mechanism duplicates the first unless
+ * you delete the first). The per-kind reasoning that used to live here as prose for
+ * `gotchas` and `issues` now lives as `KINDS[k].maintain.why`, checked adequate against the
+ * original comments rather than assumed.
+ *
+ * Top-level await, but NOT a hard fail when propagate is absent — deliberately narrower than
+ * the file header's general "FAILS LOUD" contract. cli.mjs's `analyse()` calls
+ * `loadTaxonomy()` itself, in a `try { … } catch (e) { if (!(e instanceof TaxonomyUnavailable))
+ * throw e; … }` (cli.mjs:127-138), and that catch is how "without propagate the tool still
+ * runs" (tests/report.test.mjs) stays true — a DECLARED fallback, not a silent one. A bare
+ * `await loadTaxonomy()` here would throw during THIS MODULE'S OWN IMPORT, before cli.mjs's
+ * function body — let alone its try/catch — ever runs, which made that existing, already-
+ * tested contract unreachable. Caught here for the identical reason and handled the identical
+ * way: same exception type, same "propagate absent is a declared state, not silence" posture.
  */
-export const STALENESS = {
-  state: "age",
-  "page-spec": "age",
-  "functionality-spec": "age",
-  ops: "age",
-  design: "age",
-  plan: "declared-state",
-  "decision-log": "append-only",
-  router: "completeness",
-  // Deliberately "none", not omitted. Age is the wrong axis for a gotcha: G-A is as
-  // true today as the day it was paid for, and hazards do not expire. Its defect is
-  // INERTNESS — an entry whose trigger cannot fire — which is not an mtime question
-  // and is checked by `propagate doctor` via lib/gotchas/parse.mjs.
-  //
-  // Stated explicitly because the fallthrough below would give the same answer for
-  // the wrong reason: a kind whose rule is chosen by omission is indistinguishable
-  // from one nobody has thought about.
-  gotchas: "none",
-  // Also "none", and for a different reason than gotchas. An old OPEN issue is
-  // still open; age says nothing. Its defect is a status that no longer matches
-  // reality, which needs re-triage by a person and cannot be derived from mtime.
-  issues: "none",
-  undeclared: "none",
-};
+const MAINTAIN_RULES = new Set(["age", "declared-state", "append-only", "completeness", "none"]);
+let SOURCE_KINDS = {};
+try {
+  ({ KINDS: SOURCE_KINDS } = await loadTaxonomy());
+} catch (e) {
+  if (!(e instanceof TaxonomyUnavailable)) throw e;
+  // SOURCE_KINDS stays {} — STALENESS below derives nothing from propagate, and
+  // stalenessRule() falls through to "none" for every kind via its own `?? "none"`,
+  // exactly like cli.mjs's kindFromConfig() fallback: undeclared, not wrong.
+}
+
+/** The same five values doc-kind.mjs's own comment names above `KINDS`. Checked here so a
+ *  typo'd or widened `maintain.rule` upstream fails loudly at import time, rather than
+ *  silently producing a wrong answer three call frames later. */
+export const STALENESS = Object.fromEntries(
+  Object.entries(SOURCE_KINDS).map(([kind, { maintain }]) => {
+    if (!MAINTAIN_RULES.has(maintain?.rule)) {
+      throw new Error(
+        `taxonomy: KINDS.${kind}.maintain.rule is "${maintain?.rule}", not one of ${[...MAINTAIN_RULES].join(", ")}`,
+      );
+    }
+    return [kind, maintain.rule];
+  }),
+);
+
+// Deliberately an EXPLICIT entry, assigned after the derivation, NEVER a fallthrough —
+// regardless of whether propagate resolved above. `undeclared` is not a member of KINDS —
+// there is no document kind to attach a `maintain.why` to, so its reasoning has to live here
+// as prose rather than being derived. Age is the wrong axis for a kind nobody assigned: a
+// kind whose rule is chosen by omission is indistinguishable from one nobody has thought
+// about (rule:discernment-checks §2 — undeclared is a VALUE, never a silence).
+// `stalenessRule(null)` returning "none" via the `?? "none"` fallback in stalenessRule()
+// would give the SAME answer for the WRONG reason, which is exactly the gap this explicit
+// assignment closes.
+STALENESS.undeclared = "none";
 
 export function stalenessRule(kind) {
   return STALENESS[kind ?? "undeclared"] ?? "none";
