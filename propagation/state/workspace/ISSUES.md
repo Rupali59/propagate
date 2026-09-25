@@ -3401,3 +3401,49 @@ attribution here would be exactly the "reader invents an answer" failure `rule:d
 
 Latent rather than harmful today: Node has deprecated the coercion, so a future major turns this
 into a throw on a path nobody has identified.
+
+### N96 · The three components that deliver and verify rules each compute the rules directory independently — **S2** — **OPEN**
+
+Measured 2026-09-25. `lib/core/config.mjs` already exports 37 symbols including `RULES_DIR`,
+`STATE_DIR`, `SKILL_DIR`, `HUB_ROOT` and an `INTEGRATIONS` record — so the config module is not
+missing, it is **bypassed**. 62 path literals sit outside it across 29 files.
+
+Counted by path, `config.mjs` against everywhere else:
+
+| path | in config | elsewhere | files |
+|---|---|---|---|
+| `~/.claude/rules` | 1 | **3** | 3 |
+| `~/.propagate` | 4 | **10** | 9 |
+| `~/.claude/CLAUDE.md` | 0 | 4 | 3 |
+| `~/.claude/plugins` | 0 | 3 | 2 |
+| `~/.claude/settings.json` | 0 | 2 | 2 |
+| `~/.claude/skills` | 1 | 2 | 2 |
+| `~/.claude` (bare) | 0 | 2 | 1 |
+| `~/.agents` | 0 | 1 | 1 |
+
+**The first row is the defect, not the tally.** The three files that recompute
+`~/.claude/rules` are `lib/report/doctor/discovery.mjs:531`, `hooks/load-rules.mjs` and
+`hooks/rule-guard.mjs:66` — the check that verifies rules, the hook that reports them at session
+start, and the hook that pushes them at tool time. Each decides for itself where rules live. They
+agree today by coincidence, and the failure mode if one ever drifts is silent and total: rules
+load from one directory while the checker reads another, and both report success.
+
+That is `rule:tool-priority`'s own history — nine divergent copies making four mutually exclusive
+claims — reproduced in code rather than prose, inside the tool built to detect it.
+
+**Paths that exist in no config at all**, each defined where it is used:
+`gotchas-global.md` and `gotcha-guard.log` (`lib/gotchas/parse.mjs:43-44`), `rule-guard.log`
+(`hooks/rule-guard.mjs:67`), `skills-registry.off` (`lib/skills/skills-lifecycle.mjs:87`),
+`~/.claude/skills` and `~/.agents/.skill-lock.json` and `~/.claude/projects`
+(`lib/skills/skills-scan.mjs:47-53`), `~/.claude/plugins/cache` and `installed_plugins.json`
+(`lib/report/doctor/delivery.mjs:277,312`), `DAILY.md` (`lib/report/inventory.mjs:76`).
+
+**Why this matters beyond tidiness.** Two of this session's findings were path-location failures
+that a single registry would have made structural rather than accidental: the hub's task list was
+invisible because `lib/report/backlog.mjs:117` matches the filename `TODOS.md` literally
+(landed 2026-09-25), and `gateVersionManifests` had to grow a cross-repo path by hand for the
+fifth manifest (PR-016). Both were "a path decided at the point of use".
+
+The fix is a registry that grows by declaration — add a name, not a `path.join` — and a test
+asserting no path literal for a known root appears outside it. Without that assertion the
+registry becomes the 39th symbol nobody reaches for, which is the same failure one level up.

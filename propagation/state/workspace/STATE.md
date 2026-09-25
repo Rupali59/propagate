@@ -1,5 +1,53 @@
 # propagate — State
 
+## Document kinds became guidelines, and five instruments lied — 2026-09-25, `v0.7.0`
+
+`KINDS` in `lib/report/doc-kind.mjs` is a record per kind now — `what` / `create` /
+`maintain: {rule, why}` / `link` / `never` — so the doctrine for each document category lives
+where the taxonomy already lives. `design` had been defined as *"follows its surface"*,
+classified 63 docs, and had **zero consumers** since it was written.
+
+`docs --doctrine [kind]` renders it. `--json` works for the first time in any `docs` mode (it
+was accepted and silently ignored, so a CI step piping to `jq` failed confusingly), and
+`--undeclared` emits the full 988-row worklist instead of 8 plus "and 980 more" — which is why
+nobody had started on it. `docs/REFERENCE.md` gained a generated section carrying the ten kinds
+and the tier precedence, reusing `rollup`'s hash footer and its four exit codes rather than a
+second implementation.
+
+**The census is NOT gated.** `docs --kinds` measures 21.03s over 1513 docs. A gate that slow,
+over 988 untriaged rows, is how a gate gets routed around — N85. PR-017 holds the decision.
+
+**Two pre-existing defects closed because this change stood on them.** `npm test` was
+`test:propagate && test:curate-docs`, so one propagate failure meant the 91 curate-docs tests
+never ran — and the seam this change created *is* that boundary. And `gateVersionManifests` now
+reads the hub `marketplace.json` as a fifth location; all five agree at `0.7.0`. The fifth
+degrades alone, deliberately: returning `could-not-run` for the whole gate stopped it gating at
+all, because `release.mjs:21` says that status is never a failure.
+
+Suites: propagate **1972** / 1967 pass / 5 skipped, curate-docs **94** / 94. Sidecars 47 of 47
+loading after `Rupali/Experiments/ClaudeBuild/Grid` was recovered — its `concepts` was a list
+where the schema wants an anchor-keyed map, a source-level violation, so **all 19 of its edges
+had been inert since the file was written**. Declared edges 554 → 573.
+
+### What this cost, and it was never the code
+
+Five measurements were wrong before they were right, every one from the instrument:
+
+| reported | actual | the flaw |
+|---|---|---|
+| aggregate exit 0 on a failing suite | 1 | `${PIPESTATUS[0]}` is bash; zsh populates `pipestatus`, so it read `tail` |
+| hand-edit refusal exit 0 | 3 | `\| head` — G-C, the entry sitting in the global file |
+| 0 sidecars found | 47 | `PROPAGATE_STATE_DIR` set to the test dir has no `config.yml`, so discovery found zero workspaces — G56's own text says so |
+| 2 promotion candidates | 1 | the filter globbed `GOTCHAS.md` and so never loaded `gotchas-global.md`; it excluded nothing and looked like it worked |
+| `rules check` 2 restatements | 1 | `delegation-criteria`'s fingerprint matched prose *describing* a derive-on-demand component — and propagate's whole architecture is one |
+
+The sixth was self-inflicted: a `git add` naming a pre-rename path aborts the whole add, and
+`2>/dev/null` hid it, so a pushed commit carried a rename and none of the content its message
+described. **`rule:discernment-checks` §4 says suspect the ruler when a number surprises you; four
+of these six were not surprising.** They were caught because re-measuring a second way is cheap
+and the gotcha hook put two of the entries in front of the exact command that was about to be
+wrong.
+
 ## the plugin gate: code was authored and never delivered — 2026-09-24
 
 **N78 is RESOLVED**, eng-reviewed before implementation (12 decisions, D1-D12; the review report
