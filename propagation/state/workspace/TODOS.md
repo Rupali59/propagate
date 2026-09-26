@@ -196,7 +196,7 @@ what it covers was never looked at.
 Breakdown: `tool-priority` 12 · `secrets-source-of-truth` 2 · `state-and-decisions` 2 ·
 `environment-vocabulary` 1.
 
-### PR-016 · `INTEGRATIONS.marketplaceDir` is null here, so the fifth manifest goes unchecked in practice
+### PR-016 · `INTEGRATIONS.marketplaceDir` is null here, so the fifth manifest goes unchecked in practice — **RESOLVED 2026-09-26**
 
 `gateVersionManifests` gained the hub `marketplace.json` as a fifth location on 2026-09-25, and
 on this machine it never reads it: `INTEGRATIONS.marketplaceDir` is `null`, which
@@ -206,6 +206,24 @@ the reason — but the fifth is verified nowhere until a hub is configured.
 
 `propagate setup --hub` derives it. Anything else keyed on `marketplaceDir` is equally inert
 locally, including skill lifecycle scans, so this is wider than one gate.
+
+**A hub is configured now, so the fifth manifest is checked here.** Measured 2026-09-26:
+
+```
+INTEGRATIONS.marketplaceDir -> /Users/rupali.b/Documents/GitHub/skills-marketplace
+HUB_ROOT                    -> /Users/rupali.b/Documents/GitHub  (from ~/.propagate/config.yml hubRoot)
+gateVersionManifests()      -> passed — all five manifests agree at 0.11.0
+```
+
+It was not theoretical while it lasted: the v0.11.0 bump moved the four in-repo manifests and the
+gate went **BLOCKED**, naming `hub marketplace.json=0.10.0` as the disagreement. That is the fifth
+location being checked, catching a real miss, on this machine. Closed on the measurement rather
+than on the config change, because "a hub is configured" is a fact that can rot — the gate's own
+verdict is the thing worth recording.
+
+**What this does NOT close:** a machine with no `hubRoot` still verifies nothing for the fifth, and
+`release --check` reports that in `detail` rather than failing. That degradation is deliberate
+(`release.mjs:21` — `could-not-run` is never a failure) and is described in PR-011's closure note.
 
 ### PR-017 · Decide whether the doc census earns a place in `release --check` at 21 seconds
 

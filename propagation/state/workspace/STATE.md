@@ -1,5 +1,52 @@
 # propagate — State
 
+## A test was writing to a real register, and the tag table moved into the tree — 2026-09-26
+
+**N99 (S1), and it is the reason this entry leads.** `npm test` inserted
+`### PR-001 · a ccusage item` — a literal fixture record from
+`tests/cli/reminders-sync.test.mjs` — into `Rupali/propagation/state/claude-usage-widget/TODOS.md`,
+a human-authored file in another repository. Found by comparing the file's md5 against a value
+taken before the run; otherwise it was a plausible staged item nobody filed. Removed, and the file
+verified byte-identical to its pre-incident hash.
+
+**Scoping `PROPAGATE_STATE_DIR` could not see it, because the register path was never derived from
+the state dir.** Scoping the store does not scope the tree. The test's safety instead rested on a
+sentence in its own header — *"both real tags resolve to REFUSALS on this tree"* — which was true
+when written, load-bearing, and falsified by an unrelated and correct change made the same day.
+G56's family one level worse: there a bare `node --test` wrote the production ledger; here a fully
+scoped `npm test` wrote a production register in another repo.
+
+Containment is structural now: the lane honours `PROPAGATE_HUB_ROOT`, each test builds its own temp
+hub, and each asserts in `t.after` that the real register is byte-identical — so a future escape is
+named where it happens. As a side effect that file now covers the real `--apply` insert path and
+idempotency end to end, coverage its header used to declare as a deliberate gap.
+
+**The tag table moved out of propagate's source and into the tree.** Each project declares its own
+`reminder_tags:` in `propagation/state/<project>/.sidecar.yml`; the table is derived by scanning 52
+sidecars. `tags.mjs`'s own header had called the old literal map *"the rot surface named in the
+spec's H4"*. A scan brings failure modes a literal never had, so three are asserted: an undeclared
+tag is held rather than guessed, a tag claimed by two sidecars resolves to neither, and — the one
+that needed deciding — **a scan that reads nothing is not "your tags are unknown"**, because an
+unconfigured hub would otherwise blame the user's tags for a broken lookup.
+
+**`#ccusage` routes now.** `Rupali/claude-usage-widget` gained a register, so three real reminders
+plan as `new` where all of them were `held-no-register`. Two further defects surfaced getting
+there: every inserted line would have read `(untitled)` (a second osascript read whose timeout
+degraded into an empty map rather than a refusal), and `- #ccusage` written unquoted in a sidecar
+is a YAML **comment**, which silently drops the tag.
+
+**Honest about what is unfinished:** switching the lane to a strictly configured hub broke 17 tests
+at once, because the suite's reminders coverage had been resting on a `HOME` guess throughout — not
+just the one test that wrote. A fallback keeps them green and `tagTableStatus()` reports which
+source it used, so it can never be silent about guessing. Removing it needs those tests to declare
+their own hubs. Recorded at the end of N99.
+
+**PR-016 closed on a measurement**, not on a config change: the fifth manifest is checked here, and
+it caught a real miss during the v0.11.0 bump (`hub marketplace.json=0.10.0`, gate BLOCKED).
+
+Suite: **2193 + 94, 0 failures**, and a full run leaves the real register untouched.
+
+
 ## The refusals have a reader, and "I could not look" survives to the screen — 2026-09-25, `v0.11.0`
 
 **T4 shipped the CONFLICTS division**, the ninth, and with it PR-023's mark-as-seen. Both were
