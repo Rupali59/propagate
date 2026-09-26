@@ -16,7 +16,7 @@ import path from "node:path";
 
 import { classify, buildScript } from "../../lib/reminders/osascript.mjs";
 import { extractTags, splitLines } from "../../lib/reminders/parse.mjs";
-import { TAG_TABLE, resolveTag, validateTagTable } from "../../lib/reminders/tags.mjs";
+import { resolveTag, validateTagTable, tagTableStatus } from "../../lib/reminders/tags.mjs";
 import { normalizeRecord } from "../../lib/reminders/normalize.mjs";
 import { readReminders } from "../../lib/reminders/read.mjs";
 
@@ -228,7 +228,7 @@ test("extractTags: an untagged body yields no tags", () => {
 // F4 — the tag table fails loudly
 // ---------------------------------------------------------------------------
 
-test("F4: every entry in TAG_TABLE resolves to a directory that exists on disk", () => {
+test("F4: every DISCOVERED tag resolves to a directory that exists on disk", () => {
   const rows = validateTagTable();
   assert.ok(rows.length > 0, "the table must not be empty, or this assertion is vacuous");
   const broken = rows.filter((r) => !r.exists);
@@ -237,7 +237,7 @@ test("F4: every entry in TAG_TABLE resolves to a directory that exists on disk",
 
 test("F4: validateTagTable's exists flag is a real filesystem check, not hardcoded true — proven against a path that cannot exist", () => {
   // FAILING INPUT for the check itself: a fabricated path guaranteed absent.
-  // validateTagTable() only walks the real TAG_TABLE, so this exercises the
+  // validateTagTable() only walks the discovered table, so this exercises the
   // same existsSync() call it uses, directly, to prove the flag can go false.
   const ghostPath = "/definitely/not/a/real/path/xyz-reminders-fixture";
   assert.equal(existsSync(ghostPath), false, "fixture path must genuinely not exist for this to be a real check");
@@ -274,9 +274,30 @@ test("F4: an unresolvable tag surfaces through the full read path, not silently 
   assert.equal(result.summary.heldUnknownTag, 1);
 });
 
-test("resolveTag: a known tag resolves to its table entry", () => {
-  assert.equal(resolveTag("ccusage").project, TAG_TABLE.ccusage.project);
-  assert.equal(resolveTag("CCUSAGE").project, TAG_TABLE.ccusage.project, "case-insensitive lookup");
+test("resolveTag: a known tag resolves to the project whose sidecar declared it", () => {
+  // The table is DERIVED from `.sidecar.yml` files since 2026-09-25, so the
+  // assertion is against the declaration itself rather than a literal in
+  // tags.mjs. `declaredIn` is what makes that checkable: it names the file, so
+  // a wrong answer says WHERE it came from instead of just being wrong.
+  const r = resolveTag("ccusage");
+  assert.ok(r, "#ccusage resolves to nothing — no sidecar declares it");
+  assert.match(r.declaredIn, /propagation\/state\/claude-usage-widget\/\.sidecar\.yml$/,
+    `#ccusage was declared somewhere unexpected: ${r.declaredIn}`);
+  assert.equal(r.project, "Rupali/claude-usage-widget");
+  assert.equal(resolveTag("CCUSAGE").project, r.project, "case-insensitive lookup");
+  assert.equal(resolveTag("#ccusage").project, r.project, "a leading # is stripped");
+});
+
+test("the tag table is USABLE, and says over what population — not a bare zero", () => {
+  // rule:enforcement-watches-itself §4: "found nothing" and "looked at nothing"
+  // must be different outputs. Before this, an empty table was indistinguishable
+  // from a tree where every tag was simply undeclared.
+  const st = tagTableStatus();
+  assert.equal(st.ok, true, `the tag table could not be built: ${st.reason}`);
+  assert.ok(st.sidecarsRead > 10,
+    `only ${st.sidecarsRead} sidecars read — the scan has gone blind, which is not the same as no tags`);
+  assert.ok(st.count > 0, "no tags discovered");
+  assert.deepEqual(st.errors, [], `sidecar errors: ${JSON.stringify(st.errors)}`);
 });
 
 test("resolveTag: an unknown tag returns null, not a fuzzy nearest match", () => {

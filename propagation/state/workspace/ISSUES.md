@@ -3642,3 +3642,57 @@ and the goal declares itself underivable rather than naming the check that is mi
 Three `GOALS.md` files now exist (hub, `Sindhu`, `Vipin Kaushik`) with **15 entries, 0 closed
 since the first was written**. That is either a young register or a register nothing updates, and
 **nothing in the tool can tell those two apart** — `rule:discernment-checks` §6.
+
+### N99 · A `--apply` test wrote a fixture line into a real register in another repo, because the reminders lane derived the hub from `HOME` and no scoping reached it — **S1** — **RESOLVED 2026-09-25**
+
+**What happened.** `npm test` inserted `### PR-001 · a ccusage item` — a literal fixture
+record from `tests/cli/reminders-sync.test.mjs`'s `RECORDS` array — into
+`Rupali/propagation/state/claude-usage-widget/TODOS.md`, a human-authored file in a
+different repository. Found by comparing the file's md5 against a value taken before the
+run; it would otherwise have been a plausible-looking staged item nobody filed.
+
+**Why the existing isolation did not catch it.** Every test in that file scopes
+`PROPAGATE_STATE_DIR` and snapshots the whole state directory before and after. None of
+that could see this, because **the register path was never derived from the state dir**:
+`lib/reminders/sync.mjs` computed `path.join(HOME, "Documents/GitHub")` directly. Scoping
+the store does not scope the tree.
+
+**The test's safety rested on a sentence about the filesystem.** Its header said, in
+terms: *"both real tags resolve to REFUSALS on this tree ... no test here ever needs
+`--apply` against a real register path."* That was true when written and it was
+load-bearing. The same session then created a register so `#ccusage` reminders had
+somewhere to land — which is the fix for a different issue — and the premise silently
+became false. A comment cannot hold an invariant that a later, unrelated, correct change
+can falsify.
+
+**This is G56's family one level worse.** There, a bare `node --test` wrote the production
+*ledger*. Here a fully-scoped `npm test` wrote a production *register* in another repo. In
+both cases the safety property lived somewhere no reader of the test file could see.
+
+**Fixed, in three parts:**
+
+1. `lib/reminders/{tags,sync}.mjs` resolve the hub from the configured `HUB_ROOT` when
+   there is one, so `PROPAGATE_HUB_ROOT` now reaches this lane at all. The `HOME` guess
+   remains only as a last resort and `tagTableStatus()` reports which source was used, so
+   it can never be silent about having guessed.
+2. Every test in `tests/cli/reminders-sync.test.mjs` builds its own temp hub with
+   `makeHub()` and passes `PROPAGATE_HUB_ROOT`. The real tree is unreachable **by
+   construction**, not by a comment.
+3. Each of those tests asserts, in `t.after`, that the real register is byte-identical —
+   so if containment ever breaks again it is named at the point of failure rather than
+   discovered by someone reading their own TODOS.md.
+
+The inserted line was removed and the file verified byte-identical to its pre-incident
+md5 (`e9bd9ebbe5c057809adab408314fdfdd`).
+
+**A side benefit worth keeping.** With a safe register to write into, that file now covers
+the real `--apply` insert path and idempotency end-to-end through the CLI — coverage its
+own header previously declared as a deliberate gap.
+
+**What remains, and it is the reason this entry names the general form.** Switching the
+lane to a strict configured hub broke **17 tests at once**, because the suite's reminders
+coverage had been resting on that `HOME` guess throughout — not just the one test that
+wrote. The fallback keeps them passing today. Removing it needs each of those tests to
+declare its own hub first, and until that happens `propagate`'s test suite still READS the
+real tree in places it does not announce. Reading is not writing, but it is the same
+unscoped seam.

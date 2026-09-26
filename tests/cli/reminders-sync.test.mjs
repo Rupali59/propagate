@@ -9,17 +9,32 @@
  * `rule:safety-flag-needs-a-test`: every dry-run case here snapshots the
  * WHOLE state directory, never trusting the word "dry" in a message.
  *
- * These tests use the REAL tag table (`lib/reminders/tags.mjs`) rather than
- * an injected one, because the CLI entry point exposes no override for it —
- * that is deliberate coverage of the wiring, not a gap: both real tags
- * (`#ccusage`, `#vipinkaushik`) resolve to REFUSALS on this tree
- * (held-no-register / held-ambiguous-register, both measured directly
- * against the filesystem while building this lane), so dry-run's mocked
- * write/rename never even attempt a real filesystem write, and no test here
- * ever needs `--apply` against a real register path. The full
- * insert/idempotency/write-order/refusal-disposition matrix, fully
- * hermetic against injected fake paths, lives in
- * tests/unit/reminders-sync.test.mjs.
+ * EVERY TEST HERE GETS ITS OWN HUB, and that is not tidiness -- it is the fix
+ * for a real incident on 2026-09-25.
+ *
+ * This file used to rely on a PREMISE ABOUT THE LIVE FILESYSTEM, stated right
+ * here: "both real tags resolve to REFUSALS on this tree ... no test here ever
+ * needs `--apply` against a real register path." It was true when written. Then
+ * `claude-usage-widget` gained a register so that `#ccusage` reminders had
+ * somewhere to land, `#ccusage` stopped refusing, and the `--apply` test below
+ * wrote `### PR-001 · a ccusage item` -- a FIXTURE RECORD from this file -- into
+ * a human-authored `TODOS.md` in another repo.
+ *
+ * `PROPAGATE_STATE_DIR` was scoped per test and did not help, because the
+ * register path was never derived from the state dir: `lib/reminders/sync.mjs`
+ * built it from a HOME-derived guess at the hub that no scoping reached. That
+ * guess is now `HUB_ROOT`, so `PROPAGATE_HUB_ROOT` below points the whole lane
+ * at a temp tree and the real one is unreachable BY CONSTRUCTION rather than by
+ * a sentence in a comment that a later change can quietly falsify.
+ *
+ * This is G56's family one level worse: there a bare `node --test` wrote the
+ * production LEDGER; here a scoped test wrote a production REGISTER in a
+ * different repository.
+ *
+ * The temp hub declares the same two tag shapes the real tree has, so the
+ * coverage is unchanged: one tag that resolves to a usable register, and one
+ * that is ambiguous. The full insert/idempotency/write-order matrix, hermetic
+ * against injected paths, lives in tests/unit/reminders-sync.test.mjs.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -28,20 +43,68 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { fullStateSnapshot } from "../helpers/full-state-snapshot.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
 
-function runCli(argv, { stateDir, fixturePath }) {
+function runCli(argv, { stateDir, hubDir, fixturePath }) {
+  assert.ok(hubDir, "every runCli call must pass a temp hubDir — see this file's header");
   return spawnSync(process.execPath, [CLI_PATH, ...argv], {
     encoding: "utf8",
     env: {
       ...process.env,
       PROPAGATE_STATE_DIR: stateDir,
       PROPAGATE_SEARCH_ROOTS: stateDir,
+      // The load-bearing one. Without it the reminders lane resolves registers
+      // against the real tree; with it, nothing outside hubDir is reachable.
+      PROPAGATE_HUB_ROOT: hubDir,
       ...(fixturePath ? { PROPAGATE_REMINDERS_FIXTURE: fixturePath } : {}),
     },
   });
+}
+
+/** The real register this file once wrote into. Asserted untouched, every test. */
+const REAL_REGISTER = path.resolve(
+  fileURLToPath(new URL("../../..", import.meta.url)),
+  "Rupali/propagation/state/claude-usage-widget/TODOS.md",
+);
+
+function realRegisterFingerprint() {
+  try { return readFileSync(REAL_REGISTER, "utf8"); } catch { return "<absent>"; }
+}
+
+/**
+ * A temp hub carrying the two tag shapes the real tree has:
+ *   #ccusage      -> a canonical register WITH the staging heading  => insertable
+ *   #vipinkaushik -> no canonical register, a legacy one at the root => ambiguous
+ */
+async function makeHub() {
+  const hubDir = await mkdtemp(path.join(tmpdir(), "reminders-sync-hub-"));
+
+  const cuw = path.join(hubDir, "Rupali", "propagation", "state", "claude-usage-widget");
+  await mkdir(cuw, { recursive: true });
+  await mkdir(path.join(hubDir, "Rupali", "claude-usage-widget"), { recursive: true });
+  await writeFile(path.join(cuw, ".sidecar.yml"), "project: claude-usage-widget\nreminder_tags:\n  - ccusage\n");
+  await writeFile(path.join(cuw, "TODOS.md"), [
+    "# TODOS — fixture",
+    "",
+    "## From Reminders (unreviewed)",
+    "",
+    "## Finished",
+    "",
+    "### PR-000 · seed, so the file elects id-keyed rather than unrecognised",
+    "An empty register elects no format, and A3 refuses an insert that changes the election.",
+    "",
+  ].join("\n"));
+
+  const vk = path.join(hubDir, "Vipin Kaushik", "propagation", "state", "workspace");
+  await mkdir(vk, { recursive: true });
+  await writeFile(path.join(vk, ".sidecar.yml"), "project: workspace\nreminder_tags:\n  - vipinkaushik\n");
+  // A legacy repo-root register and no canonical one => held-ambiguous-register.
+  await writeFile(path.join(hubDir, "Vipin Kaushik", "TODOS.md"), "# TODOS\n\n## Some Other Shape\n");
+
+  return hubDir;
 }
 
 async function setup() {
@@ -82,22 +145,30 @@ const RECORDS = [
 
 test("reminders sync (no --apply): writes nothing to the state directory", async (t) => {
   const stateDir = await setup();
-  t.after(() => cleanup(stateDir));
+  const hubDir = await makeHub();
+  const realBefore = realRegisterFingerprint();
+  t.after(() => cleanup(stateDir, hubDir));
+  t.after(() => assert.equal(realRegisterFingerprint(), realBefore,
+    `this test modified ${REAL_REGISTER} — the temp hub is not containing it`));
   const fixturePath = await writeFixture(stateDir, "fixture.json", { status: 0, stdout: JSON.stringify(RECORDS), stderr: "" });
 
   const before = fullStateSnapshot(stateDir);
-  const r = runCli(["reminders", "sync"], { stateDir, fixturePath });
+  const r = runCli(["reminders", "sync"], { stateDir, hubDir, fixturePath });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fullStateSnapshot(stateDir), before, "a dry-run sync must not touch the state directory");
 });
 
 test("reminders sync --json (no --apply): writes nothing, and reports the real measured dispositions", async (t) => {
   const stateDir = await setup();
-  t.after(() => cleanup(stateDir));
+  const hubDir = await makeHub();
+  const realBefore = realRegisterFingerprint();
+  t.after(() => cleanup(stateDir, hubDir));
+  t.after(() => assert.equal(realRegisterFingerprint(), realBefore,
+    `this test modified ${REAL_REGISTER} — the temp hub is not containing it`));
   const fixturePath = await writeFixture(stateDir, "fixture.json", { status: 0, stdout: JSON.stringify(RECORDS), stderr: "" });
 
   const before = fullStateSnapshot(stateDir);
-  const r = runCli(["reminders", "sync", "--json"], { stateDir, fixturePath });
+  const r = runCli(["reminders", "sync", "--json"], { stateDir, hubDir, fixturePath });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fullStateSnapshot(stateDir), before);
 
@@ -107,10 +178,17 @@ test("reminders sync --json (no --apply): writes nothing, and reports the real m
 
   const ccusage = payload.rows.find((row) => row.reminderId === "id-1");
   const vipinkaushik = payload.rows.find((row) => row.reminderId === "id-2");
-  // If either of these two ever reports anything else, that is a finding to
-  // explain, not to tune toward (per the plan's own verification item 7) --
-  // the tree may have changed since this was measured.
-  assert.equal(ccusage.disposition, "held-no-register", `expected held-no-register for #ccusage; got ${ccusage.disposition} (${ccusage.reason ?? "no reason"})`);
+  // These describe the TEMP HUB `makeHub()` built, not this machine's tree.
+  // They used to describe the real tree, and that is exactly what broke: the
+  // expectation was `held-no-register` because no register existed under
+  // `Rupali/claude-usage-widget`, and the day one did, this assertion was the
+  // SECOND thing to notice -- the first was a fixture line appearing in that
+  // register. A test whose expected value is a fact about someone's laptop is
+  // not hermetic, however carefully it is commented.
+  assert.equal(ccusage.disposition, "new",
+    `#ccusage routes to a register WITH a staging heading in the temp hub, so it should plan an insert; got ${ccusage.disposition} (${ccusage.reason ?? "no reason"})`);
+  assert.match(ccusage.wouldInsert ?? "", /^### PR-\d+ · a ccusage item$/,
+    `the planned line must carry the reminder's real title: ${JSON.stringify(ccusage.wouldInsert)}`);
   assert.equal(
     vipinkaushik.disposition,
     "held-ambiguous-register",
@@ -121,30 +199,51 @@ test("reminders sync --json (no --apply): writes nothing, and reports the real m
 });
 
 // ---------------------------------------------------------------------------
-// --apply, against fixtures that never reach a real register write (both
-// real tags refuse before any register content is touched) -- still a real
-// exercise of the --apply code path and the state directory it touches.
+// --apply, against the TEMP hub's register. This file could not cover the real
+// write path before, because its only insertable target would have been a real
+// human-authored file; the temp hub makes it both safe and meaningful, so the
+// gap its header used to declare is closed rather than documented.
 // ---------------------------------------------------------------------------
 
-test("reminders sync --apply --json: still writes nothing when every routed item is a refusal before any register write", async (t) => {
+test("reminders sync --apply --json: inserts into the register, logs it, and is idempotent on a second run", async (t) => {
   const stateDir = await setup();
-  t.after(() => cleanup(stateDir));
+  const hubDir = await makeHub();
+  const realBefore = realRegisterFingerprint();
+  t.after(() => cleanup(stateDir, hubDir));
+  t.after(() => assert.equal(realRegisterFingerprint(), realBefore,
+    `this test modified ${REAL_REGISTER} — the temp hub is not containing it`));
   const fixturePath = await writeFixture(stateDir, "fixture.json", { status: 0, stdout: JSON.stringify(RECORDS), stderr: "" });
 
   const before = fullStateSnapshot(stateDir);
-  const r = runCli(["reminders", "sync", "--apply", "--json"], { stateDir, fixturePath });
+  const r = runCli(["reminders", "sync", "--apply", "--json"], { stateDir, hubDir, fixturePath });
   assert.equal(r.status, 0, r.stderr);
 
   const payload = JSON.parse(r.stdout.trim());
   assert.equal(payload.ok, true);
   assert.equal(payload.applied, true);
-  // held-no-register / held-ambiguous-register are resolved BEFORE any
-  // register file is even read, so --apply here is safe by construction:
-  // nothing to insert, so the identity map (still created since assignId
-  // ran and the batched save runs once at the end) is the only touched file.
+  assert.equal(payload.writesToRegister, true);
+
+  // The register in the TEMP hub gained the line, under the staging heading.
+  const reg = path.join(hubDir, "Rupali", "propagation", "state", "claude-usage-widget", "TODOS.md");
+  const text = readFileSync(reg, "utf8");
+  assert.match(text, /^### PR-\d+ · a ccusage item$/m, `the line was not inserted:\n${text}`);
+  const staging = text.slice(text.indexOf("## From Reminders"), text.indexOf("## Finished"));
+  assert.match(staging, /a ccusage item/, "the line landed OUTSIDE the staging section");
+
+  // And the state dir records it: an identity map with insertedAt, and a log.
   const snapAfter = fullStateSnapshot(stateDir);
-  assert.notEqual(snapAfter, before, "the identity map IS expected to be created (ids were minted for routed rows)");
-  assert.doesNotMatch(snapAfter, /insert-log/, "no insert-log row may exist -- nothing was ever inserted");
+  assert.notEqual(snapAfter, before, "--apply must write");
+  assert.match(snapAfter, /insertedAt/, "the identity map must record the insert, or the next run duplicates it");
+
+  // Idempotency — R3's load-bearing guarantee, end to end through the CLI.
+  const second = runCli(["reminders", "sync", "--apply", "--json"], { stateDir, hubDir, fixturePath });
+  assert.equal(second.status, 0, second.stderr);
+  const p2 = JSON.parse(second.stdout.trim());
+  const again = p2.rows.find((row) => row.reminderId === "id-1");
+  assert.equal(again.disposition, "already-inserted",
+    `a second run must not re-insert; got ${again.disposition}`);
+  assert.equal(readFileSync(reg, "utf8"), text,
+    "the register must be byte-identical after the second run");
 });
 
 // ---------------------------------------------------------------------------
@@ -153,13 +252,17 @@ test("reminders sync --apply --json: still writes nothing when every routed item
 
 test("reminders sync: an inconclusive read exits non-zero and writes nothing", async (t) => {
   const stateDir = await setup();
-  t.after(() => cleanup(stateDir));
+  const hubDir = await makeHub();
+  const realBefore = realRegisterFingerprint();
+  t.after(() => cleanup(stateDir, hubDir));
+  t.after(() => assert.equal(realRegisterFingerprint(), realBefore,
+    `this test modified ${REAL_REGISTER} — the temp hub is not containing it`));
   const fixturePath = await writeFixture(stateDir, "fixture-denied.json", {
     status: 1, stdout: "", stderr: "Not authorized to send Apple events to Reminders. (-1743)",
   });
 
   const before = fullStateSnapshot(stateDir);
-  const r = runCli(["reminders", "sync", "--apply"], { stateDir, fixturePath });
+  const r = runCli(["reminders", "sync", "--apply"], { stateDir, hubDir, fixturePath });
   assert.equal(r.status, 2);
   assert.equal(fullStateSnapshot(stateDir), before, "an inconclusive read must not touch the state directory even with --apply");
 });
@@ -173,11 +276,15 @@ test("reminders sync: an inconclusive read exits non-zero and writes nothing", a
 
 test("reminders (no subverb) still works after adding the sync subverb", async (t) => {
   const stateDir = await setup();
-  t.after(() => cleanup(stateDir));
+  const hubDir = await makeHub();
+  const realBefore = realRegisterFingerprint();
+  t.after(() => cleanup(stateDir, hubDir));
+  t.after(() => assert.equal(realRegisterFingerprint(), realBefore,
+    `this test modified ${REAL_REGISTER} — the temp hub is not containing it`));
   const fixturePath = await writeFixture(stateDir, "fixture.json", { status: 0, stdout: JSON.stringify(RECORDS), stderr: "" });
 
   const before = fullStateSnapshot(stateDir);
-  const r = runCli(["reminders", "--json"], { stateDir, fixturePath });
+  const r = runCli(["reminders", "--json"], { stateDir, hubDir, fixturePath });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fullStateSnapshot(stateDir), before);
   const payload = JSON.parse(r.stdout.trim());

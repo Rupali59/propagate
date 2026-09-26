@@ -68,6 +68,26 @@ import { discoverBacklogFiles, parseTodoLikeFile as parseTodoLikeFileNew } from 
  * act by someone who checked; a file appearing WITHOUT being added means the
  * regex widened, not that a register adopted the convention.
  */
+/**
+ * Registers with one or more entries CURRENTLY STAGED.
+ *
+ * Named for what the assertion actually measures, which is not what the first
+ * version of this list assumed. The branch below keys on `after.proposed` -- a
+ * COUNT -- so a register that has adopted the convention but has nothing staged
+ * yet reports `proposed: 0`, takes the no-heading branch, and is required to
+ * parse identically old vs new. It does, so it counts as `unchanged`.
+ *
+ * That matters because it was measured wrongly first. `claude-usage-widget`
+ * gained a register on 2026-09-25 carrying `## From Reminders (unreviewed)`, and
+ * it was added here after R4 reported it -- but R4 was reading the file while a
+ * test-fixture line was still sitting in its staging section. Once that line was
+ * removed the section was empty, `proposed` went back to 0, and the expectation
+ * was wrong in the other direction.
+ *
+ * So: adopting the heading does NOT belong here. Having something staged does,
+ * and since staged entries are triaged out by hand this list should normally be
+ * empty. Paths are hub-relative; resolved against HUB_ROOT below.
+ */
 const EXPECTED_PROPOSED_FILES = [];
 
 const HERE = fileURLToPath(import.meta.url);
@@ -208,11 +228,11 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
   console.log(
     `R4 corpus check: ${registerFiles.length} TODOS.md/ISSUES.md files examined under ${HUB_ROOT} ` +
       `(discovery also found ${population.stateMd} STATE.md, not covered by this contract). ` +
-      `${unchanged} unchanged, ${withHeading.length} carry a proposed heading (intentional change), ` +
+      `${unchanged} unchanged, ${withHeading.length} have entries STAGED (intentional change), ` +
       `${regressed.length} regressed, ${unreadable.length} unreadable mid-check.`,
   );
   if (withHeading.length > 0) {
-    console.log(`Files with a proposed heading: ${withHeading.map((w) => w.file).join(", ")}`);
+    console.log(`Files with staged entries: ${withHeading.map((w) => w.file).join(", ")}`);
   }
 
   // Reporting `withHeading` is not enough, and this was measured rather than
@@ -223,19 +243,26 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
   // over-broad regex silently reclassifying real open work is exactly the
   // failure, and it would have arrived as console output nobody reads.
   //
-  // So: today NO register in this tree uses the convention, and that is the
-  // assertion. When one legitimately adopts it, this list is edited on purpose
-  // by someone who looked. An allowlist you must edit to exempt something is
-  // safe; a silent report is not (G70).
+  // So: exactly the registers in EXPECTED_PROPOSED_FILES use the convention,
+  // and that is the assertion. When one legitimately adopts it, this list is
+  // edited on purpose by someone who looked. An allowlist you must edit to
+  // exempt something is safe; a silent report is not (G70).
+  //
+  // The list is hub-relative and resolved here rather than stored absolute: a
+  // test carrying `/Users/<someone>/...` passes on one laptop and fails on
+  // every other one, which is a machine-specific assertion wearing a path.
+  const expectedAbs = EXPECTED_PROPOSED_FILES.map((rel) => path.join(HUB_ROOT, rel)).sort();
   assert.deepEqual(
     withHeading.map((w) => w.file).sort(),
-    EXPECTED_PROPOSED_FILES,
-    `files carrying a proposed heading changed.\n` +
+    expectedAbs,
+    `the set of registers with STAGED entries changed.\n` +
       `  got:      ${JSON.stringify(withHeading.map((w) => w.file).sort())}\n` +
-      `  expected: ${JSON.stringify(EXPECTED_PROPOSED_FILES)}\n` +
-      `  If a register genuinely adopted the convention, add it to ` +
-      `EXPECTED_PROPOSED_FILES deliberately. If you did not expect this, ` +
-      `PROPOSED_SECTION_RE is matching headings it should not.`,
+      `  expected: ${JSON.stringify(expectedAbs)}\n` +
+      `  A register with staged-but-untriaged entries belongs here deliberately; ` +
+      `normally the list is empty because staging is triaged by hand. Note this keys ` +
+      `on the proposed COUNT, not on the heading's presence — adopting the heading ` +
+      `alone does not appear here. If you did not expect this, PROPOSED_SECTION_RE ` +
+      `is matching headings it should not.`,
   );
   if (unreadable.length > 0) {
     console.log(`Unreadable mid-check (excluded from the comparison, reported not dropped): ${JSON.stringify(unreadable)}`);
