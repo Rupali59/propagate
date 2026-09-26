@@ -1,5 +1,44 @@
 # propagate — State
 
+## The census has a word for "present but empty" — 2026-09-26, `v0.13.0`
+
+**N82 closed (S1).** Its root was named correctly when it was filed: the census had **no
+vocabulary for absence**, so three different silences rendered identically. The fix is the
+vocabulary, not a boolean.
+
+**Two of its three symptoms were already fixed**, verified individually rather than assumed:
+`firstmate` now appears in `notStarted`, and `doctor` already calls `reporter.inconclusive()`
+over an empty population instead of printing `0/0 conform` as a tick. Only symptom 1 was live —
+an empty `state/workspace/` counted as a completed migration, because `hasProjectDir` was
+documented as *"exists and holds at least one subdirectory"* and that is precisely what it
+checked.
+
+`conformance()` now reports `empty` as a list **separate from** `missing`. Merging them would
+recreate the issue one level in: a reader told `state/` is MISSING goes to create a directory
+that is already there.
+
+**The fourth bucket was not optional, and the output is what proved it.** With `empty` reported
+but nowhere to put it, Khushboo landed in `offenders` with an empty missing list and `doctor`
+printed `Khushboo lacks ` — nothing after "lacks". N82's own failure, one level in, caught by
+reading the rendered line rather than the counts. Four states now, four words: conforming /
+offenders / hollow / notStarted.
+
+**The prediction held exactly.** The entry said two workspaces would flip green to red and that
+this is the check starting to work. Measured: **17 of 23 → 15 of 23**, Khushboo and Rishabh,
+nothing else.
+
+**A stricter predicate was measured and refused with a reason.** Also requiring
+`state/workspace/STATE.md` flips seven — but three of the extra five are `Obsidian` and two git
+**worktree copies**, so it would make a different defect louder while blaming this one. Filed as
+**N100**: worktrees are census candidates, so the same tree is graded twice.
+
+Also caught, and worth keeping: `package-lock.json` had **three** entries at `0.12.0` — the
+package's own two, and the `retry` dependency. A count-based bump would have silently downgraded
+a dependency; the assertion that the count was 2 is what stopped it.
+
+Suite: **2216 + 94, 0 failures.**
+
+
 ## A verification now says what it was, and what it cost — 2026-09-26, `v0.12.0`
 
 **N69 and N70 closed, both S1, both about the ledger's own trustworthiness.** They were picked

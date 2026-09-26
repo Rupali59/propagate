@@ -126,6 +126,14 @@ named a literal path and was wrong the moment the layout moved on 2026-08-21.
 
 The workspace's own state lives at `state/workspace/`.
 
+**`state/` conforms only when at least one project directory HOLDS something.** An empty
+`state/<project>/` is scaffolding, not state, and until 2026-09-26 it satisfied the check:
+`Khushboo` and `Rishabh` each held all four other required items plus a 0-entry
+`state/workspace/` and were reported fully migrated (ISSUES N82, S1). The report now
+distinguishes the two cases in the words it uses — a path that is **missing** and a path that
+is **present but empty** are different facts, and telling someone `state/` is missing sends
+them to create what is already there.
+
 **`GOTCHAS.md` resolves from BOTH layouts, deliberately.** `lib/gotchas/parse.mjs`'s
 `sourcesFor()` looks in `<repo>/docs/GOTCHAS.md` *and*
 `<workspace>/propagation/state/<project>/GOTCHAS.md`, nearest first. The migration is

@@ -2200,7 +2200,7 @@ the same way the lane already reports what doc-kind excluded and why.
 produced by the harness; a future change to it would silently re-merge the two
 populations. Assert the pattern in a test so the drift is visible.
 
-### N82 · The workspace census cannot tell "looked and found nothing" from "looked at nothing" — two empty directories pass, one real repo is invisible — **S1** — **OPEN**
+### N82 · The workspace census cannot tell "looked and found nothing" from "looked at nothing" — two empty directories pass, one real repo is invisible — **S1** — **RESOLVED 2026-09-26**
 
 Found 2026-09-17. Two symptoms, one root: the layout report tests for **presence of a
 path**, never for contents, and enumerates only what it already knows about.
@@ -2271,6 +2271,79 @@ from green to red. That is the check starting to work, not a regression.
 
 **Test it can fail:** create an empty `state/workspace/` in a fixture and assert the
 conformance line does NOT read `conformant`. Today it does.
+
+---
+
+**RESOLVED 2026-09-26. All three symptoms, verified individually rather than assumed from this
+entry — two of them turned out to be already fixed.**
+
+| symptom | state on 2026-09-26 |
+|---|---|
+| 2 — a real repo enumerated nowhere | already fixed; `firstmate` appears in `notStarted` |
+| 3 — `0/0 conform` as a green tick | already fixed; `discovery.mjs` calls `reporter.inconclusive()` with a mandatory reason |
+| **1 — an empty directory reports conformant** | **live, and what this change fixes** |
+
+**The root was named correctly in this entry and that is what got fixed.** Not the boolean —
+the vocabulary. `conformance()` now returns `empty` as a list SEPARATE from `missing`, because
+"the path is not there" and "the path is there and hollow" are different facts, and merging
+them recreates this issue one level in: a reader told `state/` is MISSING goes to create what
+already exists.
+
+`hasProjectDir` became `hasPopulatedProjectDir`, and the rename IS the fix — it was documented
+as *"exists and holds at least one subdirectory"*, which is exactly what it checked and exactly
+what was wrong.
+
+**`conformanceReport` gained a fourth bucket, and it was not optional.** With `empty` reported
+but no bucket for it, Khushboo landed in `offenders` with an EMPTY missing list and `doctor`
+printed `Khushboo lacks ` with nothing after "lacks" — this issue's own failure, arriving one
+level in, caught by looking at the output rather than the counts. Four states now, four words:
+
+```
+conforming 15   offenders Sindhu propagate   hollow Khushboo Rishabh
+notStarted Grid obsidian-vk-publish Motion-Graphics firstmate
+```
+
+**The prediction held exactly.** This entry said "two workspaces flip from green to red. That is
+the check starting to work, not a regression." Measured: 17 of 23 -> 15 of 23, and the two are
+Khushboo and Rishabh. Nothing else moved.
+
+**A stricter predicate was measured and REFUSED, with a reason.** Also requiring
+`state/workspace/STATE.md` would flip seven, but three of the five extra hits are
+`Obsidian` and two **git worktree copies** — so it would make a different defect louder while
+attributing it to this one. Filed separately as N100.
+
+`doctor` now reads: `2 half-migrated — … A partial migration is the state that loses data.
+2 present but EMPTY — Khushboo's state/ holds no state; … The directory exists, so this reads
+as migrated and is not.` Two clauses because they are two different repairs.
+
+### N100 · Git worktree copies are counted as workspaces, so the same tree is graded twice — **S3** — **OPEN**
+
+Found 2026-09-26, while measuring a stricter conformance predicate for N82.
+
+`ownerCandidates()` enumerates 23 workspace candidates, and two of them are worktrees:
+
+```
+calibration-sampler-52226 -> worktrees/calibration-sampler-52226
+ubersicht-widget-52226    -> worktrees/ubersicht-widget-52226
+```
+
+A worktree is a checkout of a repo already in the census, not a workspace of its own. Each
+carries its own conformance verdict, its own row, and its own contribution to the denominator —
+so the same tree is measured twice and the ratio is quietly wrong in both directions.
+
+**Why S3 rather than S2.** Both currently CONFORM, so nothing is misreported today; the count is
+inflated and that is all. It becomes sharper the moment any predicate tightens — under N82's
+rejected option B these two were 2 of the 5 extra failures, which is how they were found.
+
+**Not a silent exclusion.** `rule:discernment-checks` §2: dropping them without a word would make
+the census smaller for an unstated reason, which is the shape N82 was filed about. A worktree
+should be *named and excluded*, with the repo it belongs to, the same way `notStarted` names what
+it is not grading.
+
+**Derive, do not trust the two above:** `git worktree list` per repo, or `ownerCandidates()`
+filtered on a `worktrees/` path segment. The `-NNNNN` name suffix is a convention of
+`scripts/worktree-new.sh`, not a guarantee — asserting on it alone would go blind if that script
+changed.
 
 **Derive, do not trust the counts above** — `propagate rollup --check`, plus a `node` walk
 of `*/propagation/state/workspace/`. Not `grep`: the ugrep shim honours the hub's `/*`

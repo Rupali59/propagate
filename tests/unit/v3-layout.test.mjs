@@ -115,3 +115,63 @@ test("a workspace with no propagation/ at all is attributable, not a crash", asy
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
+
+/* ── N82: "present but empty" is its own fact ───────────────────────────── */
+
+test("N82: a project directory that EXISTS and is EMPTY does not conform", async () => {
+  // THE LIVE SYMPTOM. `hasProjectDir` was documented as "exists and holds at
+  // least one subdirectory", and an empty subdirectory satisfied that. Measured
+  // on the real tree: Khushboo and Rishabh each hold all four other required
+  // items plus a 0-entry `state/workspace/`, and both reported CONFORMING — a
+  // workspace whose entire state tree is hollow, graded as fully migrated.
+  const root = await makeWorkspace([...V3_REQUIRED]);
+  try {
+    // Empty the project dir but LEAVE IT THERE. That is the difference from the
+    // test above, which removes it entirely.
+    await rm(path.join(root, "propagation", "state", "someproject", "STATE.md"), { force: true });
+
+    const r = conformance(root);
+    assert.equal(r.conforms, false,
+      "a state/ holding only empty project directories is scaffolding, not state");
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("N82: EMPTY and MISSING are different words — neither borrows the other's", async () => {
+  // The root of N82 is that the census had no vocabulary for absence: three
+  // silences rendered identically. Flipping a boolean would fix the symptom and
+  // leave the root, so the two facts must be separately reportable.
+  const hollow = await makeWorkspace([...V3_REQUIRED]);
+  const absent = await makeWorkspace([...V3_REQUIRED]);
+  try {
+    await rm(path.join(hollow, "propagation", "state", "someproject", "STATE.md"), { force: true });
+    await rm(path.join(absent, "propagation", "state"), { recursive: true, force: true });
+
+    const h = conformance(hollow);
+    const a = conformance(absent);
+
+    assert.deepEqual(h.empty, ["state/"], "a hollow state/ belongs in `empty`");
+    assert.ok(!h.missing.includes("state/"),
+      "a hollow state/ must NOT be reported as missing — the directory is there, and saying " +
+      "otherwise sends someone to create what already exists");
+
+    assert.ok(a.missing.includes("state/"), "an absent state/ belongs in `missing`");
+    assert.deepEqual(a.empty, [], "an absent state/ is not 'empty' — it is not there at all");
+  } finally {
+    for (const d of [hollow, absent]) await rm(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("N82 positive control: one file inside the project dir conforms", async () => {
+  // Without this the test above passes by making everything non-conformant.
+  const root = await makeWorkspace([...V3_REQUIRED]);
+  try {
+    const r = conformance(root);
+    assert.equal(r.conforms, true, `a populated workspace must still conform: ${JSON.stringify(r)}`);
+    assert.deepEqual(r.missing, []);
+    assert.deepEqual(r.empty, []);
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
