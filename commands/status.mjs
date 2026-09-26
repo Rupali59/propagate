@@ -183,14 +183,35 @@ export function nestedUnderOf(ws, workspaces) {
 
 const ACTIONABLE_STATES = ["DRIFTED", "REVERSED", "DIVERGED"];
 
-function coverageFrom(rows) {
+/**
+ * Exported for direct testing (ISSUES N70's `forced` count). The CLI fixture
+ * used by tests/cli/verify-flags.test.mjs has no ledger file, so `status`
+ * short-circuits with "(no ledger file yet)" before it ever reaches this
+ * function -- an output-level assertion there passed for the wrong reason,
+ * which is worse than failing. Testing the counter directly is the honest
+ * version: it is where the distinction is actually made.
+ */
+export function coverageFrom(rows) {
   const byState = {};
   let verified = 0, actionable = 0, never_verified = 0, cannot_evaluate = 0, deferred = 0;
+  // ISSUES N70. A CLEAN edge whose last verification was FORCED past an
+  // unsettled source is a weaker claim than an ordinary CLEAN, and until the
+  // event carried `out_of_order` the two rendered identically -- so the ledger
+  // could not answer "which of these were forced?", which is the first thing
+  // `rule:adversarial-review-reads-the-ledger` says to ask before trusting a
+  // green result. Counted WITHIN verified, not beside it: it is still verified,
+  // just on a weaker footing, and splitting it out would overstate the problem.
+  let forced = 0;
   const unknown_states = {};
   for (const r of rows) {
     const s = r.state;
     byState[s] = (byState[s] || 0) + 1;
-    if (s === "CLEAN") verified++;
+    if (s === "CLEAN") {
+      verified++;
+      // `last` is the whole event (lib/edges/reconcile.mjs's reduceLastPinning
+      // stores it verbatim), so the field is here with no fold change.
+      if (r.last?.out_of_order) forced++;
+    }
     // A deferred row is split OUT of never_verified here (N71): it has an
     // event — someone examined it and parked it with a reason — so "no event
     // of any kind" is false for it, even though reconcile's `state` still
@@ -208,7 +229,7 @@ function coverageFrom(rows) {
   }
   const edges = rows.length;
   return {
-    edges, verified, actionable, never_verified, cannot_evaluate, deferred,
+    edges, verified, actionable, never_verified, cannot_evaluate, deferred, forced,
     byState, unknown_states,
     // deferred keeps `ok` false too — "examined, not resolved" is still
     // outstanding, just not a baseline gap and not what `bootstrap` fixes.
@@ -304,8 +325,11 @@ export async function status() {
     const { rows: recRows } = await reconcile([ws]);
     const cov = coverageFrom(recRows);
     console.log(
-      `  ${cov.edges} edges · ${cov.verified} verified · ` +
-        `${cov.never_verified} never verified · ${cov.deferred} deferred · ` +
+      `  ${cov.edges} edges · ${cov.verified} verified` +
+        // N70: only when there ARE forced ones. A `0 forced` on every clean
+        // tree is noise that teaches people to skip the line.
+        (cov.forced ? ` ${DIM}(${cov.forced} forced)${RESET}` : "") +
+        ` · ${cov.never_verified} never verified · ${cov.deferred} deferred · ` +
         `${cov.actionable} need attention` +
         (cov.ok ? `  ${GREEN}✓${RESET}` : ""),
     );

@@ -49,7 +49,12 @@ test("the source dispatches the subcommands this test thinks it does", () => {
 });
 
 for (const surface of [
-  "cli.mjs",
+  // Was "cli.mjs" until 2026-09-26, when the usage literal it scanned became a
+  // data table (ISSUES N69: nothing rejected unknown flags, so a justification
+  // could be written to nothing). The subcommands are still documented — this
+  // test followed them rather than being relaxed, because its point stands:
+  // "a subcommand no surface documents is one nobody can find."
+  "lib/core/commands.mjs",
   "docs/REFERENCE.md",
   "skills/propagate/sections/routing.md",
 ]) {

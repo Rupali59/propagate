@@ -1,5 +1,46 @@
 # propagate — State
 
+## A verification now says what it was, and what it cost — 2026-09-26, `v0.12.0`
+
+**N69 and N70 closed, both S1, both about the ledger's own trustworthiness.** They were picked
+up together because they are one defect wearing two hats: `verify` wrote a row that looked
+complete and was not, and nothing downstream could tell.
+
+**The fix is a table rather than a check.** `lib/core/commands.mjs` holds every subcommand as
+data — usage text and flag kinds in one object — so `renderUsage()` and `validateFlags()` read
+the same source and cannot disagree. An allowlist beside the parser would have been a second
+list, and this repo has paid twice for a second list that drifts.
+
+**The refactor is provably behaviour-preserving**, which is the only thing that made it safe:
+`renderUsage()` was asserted byte-identical to the 1756-character literal captured from HEAD
+before anything else moved. The frozen copy lives in the test, not read from HEAD — otherwise
+it would compare the new thing against itself and pass forever.
+
+**What the derivation found is the part worth keeping.** Building the allowlist from the usage
+text broke **25 tests**, because the usage string under-documents what the CLI actually accepts.
+`cli.mjs` dispatches **41** modes; the usage string named **33**; and **39** flags are accepted
+while appearing in no usage text at all. `--out-of-order` was one of them — the sanctioned
+escape hatch, documented nowhere, which is half of why N70 went unnoticed. Documenting it was
+forced by the validator rather than remembered.
+
+Both gaps are now named, bounded sets a test asserts, which may shrink and never grow. Eight
+modes still skip flag validation because their flag lists were never enumerated; four of them
+WRITE, and guessing an allowlist from a skim would break a repair tool at the moment it is
+needed. Deliberate, recorded, and the remaining work.
+
+**`--note` is an alias for `--reason`**, unknown flags exit 2 naming the nearest match, and
+`--flag=value` is refused because it has never worked. **The event carries `out_of_order` and
+`bypassed_upstreams`** — the upstreams unsettled at the time, because "it was forced" is weaker
+than "it was forced past these" and only the second survives once those upstreams resolve.
+
+Every assertion is against the event row, never stdout: N69 records that stdout "was correct and
+reassuring throughout", so a stdout test would have passed on all twenty lost justifications.
+Five mutations confirm the guards fail, the sharpest being that removing the dispatch validator
+reproduces N69 exactly — `expected exit 2, got 0`.
+
+Suite: **2213 + 94, 0 failures.**
+
+
 ## A test was writing to a real register, and the tag table moved into the tree — 2026-09-26
 
 **N99 (S1), and it is the reason this entry leads.** `npm test` inserted

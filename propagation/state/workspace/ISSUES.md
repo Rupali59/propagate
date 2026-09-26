@@ -1821,7 +1821,7 @@ names are acceptable", or "the repo should have been the scrubbed copy all along
 two answers imply very different work and the tree currently asserts both. Filed separately
 rather than resolved here, because it is a decision, not a defect.
 
-### N69 · `verify` silently discards unknown flags, so a justification can be written to nothing — **S1** — **OPEN**
+### N69 · `verify` silently discards unknown flags, so a justification can be written to nothing — **S1** — **RESOLVED 2026-09-26**
 
 Found 2026-09-14, auditing this session's own verification events.
 
@@ -1887,7 +1887,7 @@ cosmetic gap pending a backfill, it is unrecoverable the moment the command retu
 direct measurement of the *downstream*, not on the upstream being correct. **That fact is
 recoverable only from this table; the events themselves record nothing (N70).**
 
-### N70 · `--out-of-order` leaves no trace, so an overridden verification is indistinguishable from a clean one — **S1** — **OPEN**
+### N70 · `--out-of-order` leaves no trace, so an overridden verification is indistinguishable from a clean one — **S1** — **RESOLVED 2026-09-26**
 
 Found 2026-09-14, alongside N69.
 
@@ -1923,6 +1923,64 @@ cascade had never happened.
 upstream edge ids that were bypassed), and surface it — `status`/`graph` should mark a CLEAN
 edge whose last verification was forced, because that is a weaker claim than an ordinary
 CLEAN and currently renders identically.
+
+---
+
+**RESOLVED 2026-09-26, both together, because they are one defect wearing two hats: `verify`
+writes a row that looks complete and is not.**
+
+**The fix is a table, not a check.** `lib/core/commands.mjs` holds every subcommand as data —
+its usage text AND its flag kinds. `renderUsage()` builds the help line from it and
+`validateFlags()` validates against it, so the two cannot disagree. The obvious alternative,
+an allowlist beside the parser, is a second list, and this repo has paid twice for a second
+list that drifts (G70, G71).
+
+**The refactor is provably behaviour-preserving.** `renderUsage()` was asserted byte-identical
+to the 1756-character literal captured from HEAD *before* anything else changed, and that
+frozen string is embedded in the test rather than re-read from HEAD — a test that read the
+current file would compare the new thing against itself and pass forever.
+
+**N69:** `--note` is now an alias for `--reason`, and `--reason`/`--note` given with DIFFERENT
+text is refused rather than silently resolved. An unknown flag exits 2, names the nearest
+known flag, and writes nothing. `--flag=value` is refused too: `get()` reads
+`args[indexOf(flag)+1]`, so the `=` form has never worked, and accepting it would recreate this
+issue in a new place.
+
+**N70:** the event now carries `out_of_order: true` and `bypassed_upstreams` — the upstream
+edge ids that were unsettled AT THE TIME. "It was forced" is weaker information than "it was
+forced past these", and only the second survives once those upstreams resolve and stop looking
+like blockers. The blockers are now computed on the override path; previously `blockedBy()` ran
+only inside `if (!opts.outOfOrder)`, so the very thing being overridden was never calculated.
+`status` counts forced CLEANs within `verified` and marks them, because it is a weaker claim,
+not a failure.
+
+**Every assertion is against the EVENT ROW, never stdout** — this file records that stdout "was
+correct and reassuring throughout", so a stdout test would have passed on all twenty.
+
+**Five mutations confirm the guards fail.** The sharpest is M2: removing the dispatch validator
+makes the unknown-flag test report `expected exit 2, got 0` — N69 itself, reproduced on demand.
+
+**WHAT THE DERIVATION FOUND, which is the part worth keeping.** Building the allowlist from the
+usage text broke 25 tests, because the usage string under-documents what the CLI accepts. A
+sweep of what `commands/*.mjs` actually reads from argv closed it, and the arithmetic is the
+finding:
+
+| | count |
+|---|---|
+| modes `cli.mjs` dispatches | 41 |
+| modes the usage string named | 33 |
+| flags accepted but documented nowhere | **39** |
+
+`--out-of-order` was one of the 39 — read from argv, in no usage string at all, which is half of
+why an override could be used for months with nobody able to search for it. Documenting it was
+forced by the validator rather than remembered.
+
+Both populations are now NAMED, bounded sets asserted by tests (`UNVALIDATED`, `UNDOCUMENTED` in
+`tests/unit/cli-commands.test.mjs`) that may shrink and never grow. Eight modes still skip flag
+validation because their flag lists were never enumerated; four of them WRITE, so guessing an
+allowlist from a skim would break a repair tool at the moment it is needed. That is deliberate
+and it is the remaining work.
+
 
 ### N71 · `NEVER_VERIFIED` is reported for edges that were examined and deferred, and the remediation offered is wrong for all of them — **S1** — **RESOLVED 2026-09-15**
 

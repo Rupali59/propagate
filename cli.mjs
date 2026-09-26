@@ -166,6 +166,7 @@ import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/edges/event
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
 import { resolveProvenance, resolveObservedRef } from "./lib/edges/provenance.mjs";
 import { divergedGuard, buildEventPayload } from "./lib/edges/disposition.mjs";
+import { renderUsage, validateFlags } from "./lib/core/commands.mjs";
 import { appendRun } from "./lib/core/runs.mjs";
 import { describeWhy } from "./lib/edges/why.mjs";
 import {
@@ -2910,7 +2911,18 @@ function parseVerifyArgs(args) {
     glob: get("--glob") ?? null,
     state: get("--state") ?? null,
     disposition: get("--disposition") ?? null,
-    reason: get("--reason"),
+    // ISSUES N69. `--note` is the word people reach for -- it is `drain`'s flag
+    // (cli.mjs:45) and it is what was typed on 2026-09-14, twenty times, into a
+    // parser that silently ignored it. Accepting it here is the cheap half of
+    // the fix; the unknown-flag guard at dispatch is the half that generalises.
+    reason: get("--reason") ?? get("--note"),
+    // Both given with DIFFERENT text is a caller bug, not something to resolve
+    // by preferring one. Silently picking is the same class of defect as
+    // silently dropping: the user's other sentence goes nowhere.
+    reasonConflict:
+      get("--reason") !== undefined && get("--note") !== undefined && get("--reason") !== get("--note")
+        ? { reason: get("--reason"), note: get("--note") }
+        : null,
     apply: args.includes("--apply"),
     json: args.includes("--json"),
     outOfOrder: args.includes("--out-of-order"),
@@ -3227,7 +3239,10 @@ async function runDispositionBatch(selected, workspaces, opts) {
     // then refuses (e.g. wontfix with no --reason).
     const { dryValidateEvent } = await import("./lib/edges/events.mjs");
     const preview = selected.map((row) => {
-      const payload = buildEventPayload(row, disposition, reason);
+      const payload = buildEventPayload(row, disposition, reason, undefined, {
+      outOfOrder: Boolean(opts.outOfOrder),
+      bypassed: opts.bypassed?.get(row.edge_id) ?? [],
+    });
       return {
         edge_id: row.edge_id,
         node_id: row.node_id,
@@ -3272,7 +3287,10 @@ async function runDispositionBatch(selected, workspaces, opts) {
       continue;
     }
 
-    const payload = buildEventPayload(row, disposition, reason);
+    const payload = buildEventPayload(row, disposition, reason, undefined, {
+      outOfOrder: Boolean(opts.outOfOrder),
+      bypassed: opts.bypassed?.get(row.edge_id) ?? [],
+    });
 
     // lib/events.mjs's validateEvent is the one place these rules are
     // enforced (missing reason on wontfix/baselined, deferred pinning
@@ -3344,6 +3362,15 @@ async function verifyCmd() {
     );
     process.exit(2);
   }
+  if (opts.reasonConflict) {
+    console.error(
+      `${RED}error:${RESET} --reason and --note were both given with different text; ` +
+      "they are the same field, so pass one.\n" +
+      `  --reason ${JSON.stringify(opts.reasonConflict.reason)}\n` +
+      `  --note   ${JSON.stringify(opts.reasonConflict.note)}`,
+    );
+    process.exit(2);
+  }
   if (!opts.disposition) {
     console.error(`${RED}error:${RESET} --disposition <${DISPOSITIONS.join("|")}> is required`);
     process.exit(2);
@@ -3389,7 +3416,19 @@ async function verifyCmd() {
   // unverified source is precisely the claim `validateEvent` already refuses
   // to let masquerade as a verification.
   const GUARD_EXEMPT = new Set(["deferred", "decoupled"]);
-  if (!GUARD_EXEMPT.has(opts.disposition) && !opts.outOfOrder) {
+  //
+  // ISSUES N70 (S1). The blockers used to be computed ONLY on the refusal path
+  // — `!opts.outOfOrder` was part of this condition — so when the override WAS
+  // used, the very thing being overridden was never calculated and the event
+  // recorded nothing. `0 of 2771` events carried any trace of an override, and
+  // a later agent searching the store for seven known overrides concluded,
+  // reasonably and wrongly, that the cascade had never happened.
+  //
+  // So the graph is built whenever the disposition pins, and the override now
+  // decides what to DO with the blockers rather than whether to look for them.
+  // `opts.bypassed` carries them into the event payload below.
+  opts.bypassed = new Map();
+  if (!GUARD_EXEMPT.has(opts.disposition)) {
     const { buildGraph, blockedBy } = await import("./lib/graph/graph.mjs");
     const graph = buildGraph(rows, { workspaceRoots: workspaces.map((w) => w.root) });
 
@@ -3399,7 +3438,16 @@ async function verifyCmd() {
       if (blockers.length) offenders.push({ row: r, blockers });
     }
 
-    if (offenders.length) {
+    if (offenders.length && opts.outOfOrder) {
+      // Overriding deliberately: record WHICH upstreams were bypassed, per edge.
+      // "It was forced" is weaker information than "it was forced past these",
+      // and the second is what makes the row reviewable later.
+      for (const o of offenders) {
+        opts.bypassed.set(o.row.edge_id, o.blockers.map((b) => b.edge_id));
+      }
+    }
+
+    if (offenders.length && !opts.outOfOrder) {
       if (opts.json) {
         console.log(
           JSON.stringify(
@@ -4651,6 +4699,28 @@ async function graphIndexCmd() {
 if (_invokedDirectly) {
   const mode = process.argv[2] || "status";
 
+  // ISSUES N69 (S1): there was no unknown-flag rejection anywhere in this CLI,
+  // so `verify … --note "<the whole justification>"` was accepted, exited 0,
+  // printed a tick and an event id, and dropped the note. Twenty verification
+  // events landed that way with no record of why, and because the store is
+  // append-only and those edges have since resolved, the justifications can
+  // never be attached later. The loss is permanent when the command returns.
+  //
+  // So: refuse BEFORE the subcommand runs. A flag the tool does not understand
+  // must stop it, never change its meaning silently.
+  //
+  // Exit 2 matches the `unknown mode` path below — same class of failure, same
+  // code. An unknown MODE is still reported there, not here: validateFlags()
+  // returns ok for a mode it does not know, deliberately, so there is exactly
+  // one message per failure rather than two truths about one.
+  {
+    const check = validateFlags(process.argv.slice(2));
+    if (!check.ok) {
+      console.error(check.message);
+      process.exit(2);
+    }
+  }
+
   // ONE line, at most, on the two commands a person actually types. Wired here rather
   // than inside each command so there is exactly one call site to reason about — and
   // wired at all because the check previously existed and was invoked by nothing, which
@@ -4820,7 +4890,7 @@ if (_invokedDirectly) {
     process.exitCode = await remindersCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
-    console.error("usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|plans [--check] [--root <path> ...] [--json]|ui [--port <n>]|queue [--json]|surface [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]|claims judge <file> [--json]|claims render <file> [--apply] [--json]|claims contradict <authored-file> [--json]|claims restate [--json]|claims verdict [--apply] [--json] < verdicts.json|claims answer <file> start|end --run <id> --outcome <o> [--json]|reminders [--list <name>] [--json]|reminders sync [--apply] [--json]]");
+    console.error(renderUsage());
     process.exit(2);
   }
 }
