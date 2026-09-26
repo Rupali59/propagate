@@ -1051,7 +1051,7 @@ actually holds those files, rather than in a docs directory where nobody runs th
 
 ---
 
-### N55 · The refs registry changed owners on 2026-08-24 and the new owner is wired to nothing — **S1** — **OPEN**
+### N55 · The refs registry changed owners on 2026-08-24 and the new owner is wired to nothing — **S1** — **RESOLVED 2026-09-26**
 
 **Status:** open, filed 2026-08-27 while verifying the `Vipin Kaushik` propagation ledger.
 
@@ -1119,6 +1119,63 @@ predates the workspace's newest branch change, so "nobody has run it" becomes a 
 rather than a silence. **Do not simply run `migrate-refs --apply` and close this**: that refreshes
 the data, risks the G26 rows above, and leaves the wiring gap exactly where it is — which is how
 the three days accumulated.
+
+
+---
+
+**RESOLVED 2026-09-26. Re-measured first, and it had grown: 32 days, 20 workspaces, 122
+unrecorded lifecycle events** — not the 3 days and one workspace this was filed on.
+
+**A BLOCKING DEFECT THIS ENTRY DID NOT KNOW ABOUT, and it is why "a human remembering to"
+would not have worked either.** `migrate-refs` takes a workspace ROOT but its usage line says
+`<workspace>`, and `refsDir()` joins `propagation/refs` onto whatever it is given. Measured:
+
+| invocation | result |
+|---|---|
+| `migrate-refs "Vipin Kaushik"` | `previous: absent`, **0 projects, 0 refs**, exit 0 |
+| `migrate-refs "/Users/…/Vipin Kaushik"` | `previous: v2`, 9 projects, 38 refs, 32 events |
+
+The documented form silently did nothing and reported success — and `doctor` itself dispensed
+it (`workspaces.mjs:350`, `findings.mjs:42`). Under `--apply` it was worse:
+`mkdirSync(dir, {recursive: true})` would have created a stray `./<name>/propagation/refs/`
+tree in the working directory and left the real registry untouched.
+
+Fixed by `resolveWorkspace()` in `lib/core/discovery.mjs` — **moved from
+`commands/manifest.mjs`, which had already solved it, rather than copied.** A name resolves
+against discovered workspaces; an explicit path that EXISTS is taken at face value (every test
+fixture is addressed that way, and requiring discovery to know about it broke two existing
+tests, which is how that distinction was found); anything else is refused, naming what WAS
+found so a typo and a broken install stay distinguishable. The two guidance strings needed no
+edit — the code now matches what they always said.
+
+**The refresh rides the 09:00 digest.** `rule:delegation-criteria` §2 prefers derive-on-demand
+and this tree paid 4,420 runs / 99.2% no-ops for that lesson — but `lifecycle.jsonl` is an
+append-only HISTORY, and a branch created and pruned between refreshes leaves no trace
+anywhere. That is the one case §2 names as earning a schedule, and the schedule already
+existed: **zero new launchd agents, zero new plists.** The digest already carries riders.
+
+**`digest.mjs` is the file that taught this repo `rule:safety-flag-needs-a-test`**, so the new
+write path is `apply: !dryRun`, wired with the same three-link assertions the lifecycle sweep
+carries, and proven by measuring every `propagation/refs/` file byte-identical across a full
+`--dry-run`.
+
+**Doctor now reports registry AGE** — info at 2 days, warn at 7 — so a refresh that stops is
+visible. That is this issue one level up: the original defect was a correctly-retired component
+whose replacement nothing invoked, and nothing said so for a month.
+
+**A trap worth recording.** Writing the doc comment for the new rider turned
+`tests/digest/digest-dryrun.test.mjs` red: it greps `digest.mjs` for the old armed call and
+cannot tell code from prose, so QUOTING the historical bug trips the guard against it. The
+comment now says so.
+
+**G26 is closed, verified rather than assumed.** All 12 snapshots declare `schema_version: 2`
+and carry a nested `projects` shape; `convertV1()` *outputs* nested and `buildWorkspaceSnapshot()`
+confirms v2 has no flat `refs`. My first reading called that "v2 number, v1 shape" and nearly
+filed a live hazard that does not exist.
+
+**Registered in `docs/SYSTEMS.md` as `refs-registry`**, with a liveness probe that asserts the
+registries got NEWER — never that the job ran, which is precisely the claim that was already
+false for 32 days.
 
 ### N56 · `backlog` reads a STATE.md pointer stub as a live file with 0 open items — **S1** — **RESOLVED 2026-08-28**
 

@@ -485,6 +485,65 @@ function driftSnapshot(reconcileResult, workspaces = WORKSPACES) {
  * Build the full snapshot the digest diffs against. Not the same object as
  * cli.mjs's statusJson() — computed independently from lib/ primitives.
  */
+/**
+ * ISSUES N55 — refresh every workspace's `propagation/refs/` registry.
+ *
+ * `scripts/hygiene/collect.sh` retired its `branch-registry` lib on 2026-08-24
+ * for a good reason: "propagate owns propagation/refs/ now. Two writers for one
+ * artifact is the defect." The diagnosis was right. The other half never
+ * landed -- NOTHING INVOKED THE NEW OWNER. `migrate-refs` appeared in the
+ * codebase only inside error strings telling a human to run it, and in the 32
+ * days after the handover nobody did: 11 of 12 registries were still frozen at
+ * the handover date, and `Vipin Kaushik` alone had 32 unrecorded branch events.
+ *
+ * WHY THIS RIDES THE DIGEST RATHER THAN GETTING ITS OWN AGENT.
+ * `rule:delegation-criteria` §2 says to prefer derive-on-demand, and this tree
+ * paid 4,420 runs / 99.2% no-ops to learn it. But `lifecycle.jsonl` is an
+ * append-only HISTORY: a branch created and pruned between two refreshes leaves
+ * no trace anywhere, so it cannot be derived later. That is the one case §2
+ * names as earning a schedule -- and the schedule already exists. The digest is
+ * awake at 09:00 and already carries riders (`reminders-bridge`, the skill
+ * reaper), so this adds ZERO new launchd agents and ZERO new plists.
+ *
+ * DRY RUN IS LOAD-BEARING HERE ABOVE ALL FILES. This one taught the repo
+ * `rule:safety-flag-needs-a-test`: `--dry-run` promised "print, write NO state"
+ * while the lifecycle sweep ran an ARMED reap regardless, so the documented
+ * preview performed a real deletion. `apply: !dryRun` below is that lesson, and
+ * a test asserts the registries are byte-identical after a dry run rather than
+ * trusting this comment.
+ *
+ * DO NOT SPELL THE OLD ARMED CALL OUT HERE. `tests/digest/digest-dryrun.test.mjs`
+ * greps this file for that literal and cannot tell code from prose, so quoting
+ * the historical bug in a comment makes the guard against it go red. Found the
+ * hard way on 2026-09-26, writing exactly that sentence.
+ *
+ * A workspace that FAILS is reported, never skipped: a silent skip here would
+ * recreate N55 inside its own fix.
+ */
+async function refsSnapshot(dryRun) {
+  const { migrateRefs } = await import("./lib/refs/migrate-refs.mjs");
+  const results = [];
+  for (const ws of WORKSPACES) {
+    try {
+      const plan = await migrateRefs({ workspace: ws.root, apply: !dryRun });
+      results.push({
+        workspace: ws.name,
+        ok: true,
+        projects: plan.projects,
+        refs: plan.refs,
+        events: (plan.events ?? []).length,
+        applied: plan.applied === true,
+      });
+    } catch (err) {
+      // Includes the concurrent-writer abort and the unparseable-snapshot
+      // refusal. Both are refusals to proceed and both must survive into the
+      // report with their reason intact.
+      results.push({ workspace: ws.name, ok: false, error: String(err?.message ?? err) });
+    }
+  }
+  return { dryRun, results };
+}
+
 async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
   const watcher = await watcherSnapshot();
   const workspaces = [];
@@ -528,6 +587,15 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     lifecycle = await lifecycleSweep(dryRun);
   } catch (err) {
     lifecycle = { available: false, error: String(err.message || err) };
+  }
+
+  let refs;
+  try {
+    refs = await refsSnapshot(dryRun);
+  } catch (err) {
+    // Same belt-and-suspenders as disk and skills: a refs bug must never take
+    // down the only reporting channel that currently works.
+    refs = { dryRun, results: [], error: String(err?.message ?? err) };
   }
 
   const metrics = await metricsSnapshot();
@@ -608,6 +676,7 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     disk,
     skills,
     lifecycle,
+    refs,
     metrics,
     inbound,
     drift,
@@ -1152,6 +1221,31 @@ export function computeDiff(snapshot, prior) {
     metricLines.push(`!! doctor metrics no longer available: ${snapshot.metrics.error}`);
   }
 
+  // ── Refs (ISSUES N55) ─────────────────────────────────────────────────
+  // NOT diff-only, unlike Skills immediately below, and the exception is the
+  // whole reason this section exists: it is here because a refresh stopped
+  // happening and nothing said so for 32 days. A diff-only block is silent
+  // exactly when the job has died — the failure it is meant to catch.
+  const refsLines = [];
+  const rf = snapshot.refs;
+  if (rf?.error) {
+    refsLines.push(`could not run — ${rf.error}`);
+  } else if (Array.isArray(rf?.results) && rf.results.length) {
+    const failed = rf.results.filter((r) => !r.ok);
+    const events = rf.results.reduce((n, r) => n + (r.events ?? 0), 0);
+    refsLines.push(
+      `${rf.results.length - failed.length}/${rf.results.length} refreshed · ` +
+      `${events} lifecycle event(s)${rf.dryRun ? " — DRY RUN, nothing written" : ""}`,
+    );
+    // Name every workspace that changed AND every one that failed. A silent
+    // skip here would recreate N55 inside its own fix.
+    for (const r of rf.results) {
+      if (!r.ok) refsLines.push(`! ${r.workspace} — ${r.error}`);
+      else if (r.events) refsLines.push(`~ ${r.workspace} — ${r.events} event(s), ${r.refs} refs / ${r.projects} projects`);
+    }
+    if (!failed.length && !events) refsLines.push("no branch changes since the last run");
+  }
+
   // ── Skills ────────────────────────────────────────────────────────────
   // Diff-only, for the same reason disk is threshold-only: a block that
   // restates "92 skills, 36 never invoked" every morning is wallpaper within a
@@ -1414,6 +1508,7 @@ export function computeDiff(snapshot, prior) {
     hasChange,
     diskLines,
     skillLines,
+    refsLines,
     metricLines,
     inboundLines,
     driftLines,
@@ -1502,6 +1597,13 @@ export function formatDigest(diff) {
   if (skillLines.length > 0) {
     lines.push(`SKILLS:`);
     for (const l of skillLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  const refsLines = diff.refsLines || [];
+  if (refsLines.length > 0) {
+    lines.push(`REFS (branch registries):`);
+    for (const l of refsLines) lines.push(`  ${l}`);
     lines.push("");
   }
 

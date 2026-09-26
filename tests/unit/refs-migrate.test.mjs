@@ -15,7 +15,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm, utimes } from "node:fs/promises";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -216,4 +216,45 @@ test("`migrate-refs --apply` DOES write — so the test above can fail", async (
   execFileSync("node", [cli, "migrate-refs", root, "--apply"], { encoding: "utf8" });
 
   assert.notEqual(treeSnapshot(root), before, "--apply wrote nothing — the dry-run test proves nothing");
+});
+
+/* ── N55: the argument is resolved, so --apply cannot strew a stray tree ── */
+
+test("`migrate-refs <bare-name> --apply` on an UNKNOWN name creates nothing", async (t) => {
+  // THE SHARPEST CASE. `refsDir()` joins `propagation/refs` onto its argument
+  // and `migrate-refs.mjs:158` does `mkdirSync(dir, {recursive: true})`, so an
+  // unresolved name used to mean: create `./<name>/propagation/refs/` in the
+  // working directory, write a snapshot into it, and leave the real registry
+  // untouched -- at exit 0. Now it is refused before any of that.
+  const { mkdtemp, rm, readdir } = await import("node:fs/promises");
+  const cwd = await mkdtemp(path.join(tmpdir(), "refs-stray-"));
+  t.after(() => rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+
+  const cli = path.join(import.meta.dirname, "..", "..", "cli.mjs");
+  const before = (await readdir(cwd)).sort();
+
+  const r = spawnSync("node", [cli, "migrate-refs", "NoSuchWorkspaceXyz", "--apply"], {
+    cwd, encoding: "utf8",
+  });
+
+  assert.equal(r.status, 2, `expected a refusal, got ${r.status}: ${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /no workspace named/);
+  assert.deepEqual((await readdir(cwd)).sort(), before,
+    "a refused migrate-refs created something in the working directory");
+});
+
+test("`migrate-refs <known-name>` resolves — the form the usage line documents", async (t) => {
+  // The positive control, and the defect itself: a bare name used to report
+  // `previous: absent, 0 projects, 0 refs` at exit 0. It is only meaningful
+  // beside the test above; on its own it would pass with no resolution at all
+  // as long as the command exited 0.
+  const root = await fixture(t);
+  const cli = path.join(import.meta.dirname, "..", "..", "cli.mjs");
+
+  // The fixture is not a discovered workspace, so it is addressed by PATH —
+  // which the resolver accepts at face value when it exists on disk.
+  const out = execFileSync("node", [cli, "migrate-refs", root, "--json"], { encoding: "utf8" });
+  const plan = JSON.parse(out);
+  assert.notEqual(plan.previous, "absent", "the fixture HAS a snapshot; 'absent' means it was not found");
+  assert.ok(plan.projects > 0, `expected projects, got ${plan.projects} — the argument did not resolve`);
 });

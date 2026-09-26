@@ -44,14 +44,17 @@ export async function manifestCmd() {
   }
 
   const { WORKSPACES } = await import("../lib/core/config.mjs");
-  const ws = WORKSPACES.find((w) => w.name === target || w.root === target || w.root.endsWith(`/${target}`));
-  if (!ws) {
-    // Absence attributable: name what WAS found, so "no such workspace" and
-    // "discovery found nothing at all" are distinguishable.
-    console.error(`${RED}error:${RESET} no workspace named ${JSON.stringify(target)}`);
-    console.error(`  ${DIM}${WORKSPACES.length} known: ${WORKSPACES.map((w) => w.name).join(", ") || "(none — discovery found no workspaces)"}${RESET}`);
+  // The resolution moved to lib/core/discovery.mjs on 2026-09-26 so `migrate-refs`
+  // could share it instead of growing a second copy -- it had no resolution at
+  // all, which is N55's blocking defect. Absence stays attributable: "no such
+  // workspace" and "discovery found nothing" remain different messages.
+  const { resolveWorkspace } = await import("../lib/core/discovery.mjs");
+  const resolved = resolveWorkspace(target, WORKSPACES);
+  if (!resolved.ok) {
+    console.error(`${RED}error:${RESET} ${resolved.reason}`);
     process.exit(2);
   }
+  const ws = resolved.workspace;
 
   const { workspaceManifest } = await import("../lib/report/manifest.mjs");
   const result = workspaceManifest(ws.root);

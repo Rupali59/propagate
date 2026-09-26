@@ -1,5 +1,42 @@
 # propagate — State
 
+## The branch registries refresh themselves, and say so when they stop — 2026-09-26, `v0.14.0`
+
+**N55 closed (S1).** `collect.sh` retired its `branch-registry` on 2026-08-24 for the right
+reason — propagate owns `propagation/refs/` now, two writers for one artifact is the defect.
+The other half never landed: nothing invoked the replacement. Re-measured before starting, and
+it had grown from the 3 days and one workspace it was filed on to **32 days, 20 workspaces, 122
+unrecorded lifecycle events.**
+
+**A blocking defect the entry did not know about.** `migrate-refs` takes a workspace ROOT while
+its usage says `<workspace>` — so the documented form resolved against the CWD, reported
+`0 projects` and exited 0. `doctor` itself dispensed that command. Under `--apply` it would have
+created a stray `./<name>/propagation/refs/` tree and left the real registry untouched. So "a
+human remembering to" would not have worked either.
+
+Fixed by `resolveWorkspace()`, **moved from `commands/manifest.mjs` rather than copied** — it
+had already solved this. A name resolves against discovered workspaces; an explicit path that
+exists is taken at face value; anything else is refused, naming what WAS found. That last
+distinction came from breaking two existing tests whose fixtures discovery has never seen.
+
+**The refresh rides the 09:00 digest: zero new agents, zero new plists.**
+`rule:delegation-criteria` §2 prefers derive-on-demand and this tree paid 4,420 runs at 99.2%
+no-ops for that lesson — but `lifecycle.jsonl` is an append-only history, and a branch created
+and pruned between refreshes leaves no trace anywhere. That is the one case §2 says earns a
+schedule, and the schedule already existed.
+
+**Doctor reports registry AGE** (info at 2d, warn at 7d), which is this issue one level up: the
+failure was a component whose replacement nothing invoked, and nothing said so for a month.
+
+Two things worth keeping. Writing the rider's doc comment turned `digest-dryrun.test.mjs` red —
+it greps for the old armed call and cannot tell code from prose, so **quoting the historical bug
+trips the guard against it**; the comment now says so. And **G26 is closed**, verified rather
+than assumed: I first read "schema_version 2, nested shape" as a live hazard, and `convertV1()`
+outputs nested — v2 *is* nested, so there was nothing wrong.
+
+Suite: **2235 + 94, 0 failures.** Dry run proven inert across every `propagation/refs/` file.
+
+
 ## `ECOSYSTEM.md` is regenerable again, and it had quietly stopped being — 2026-09-26, `v0.13.1`
 
 Regenerating `ECOSYSTEM.md` after N82 changed two of its rows turned up **N101**: `rollup` was

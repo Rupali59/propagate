@@ -1763,10 +1763,24 @@ async function migrateRefsCmd(argv = []) {
     process.exit(2);
   }
 
+  // ISSUES N55's blocking defect. This used to hand `workspace` straight to
+  // `migrateRefs`, which joins `propagation/refs` onto it -- so a bare NAME,
+  // the form the usage line above documents and the form `doctor` told people
+  // to type, resolved against the CWD, found nothing, and exited 0 reporting
+  // `0 projects`. Under `--apply` it would have created a stray
+  // `./<name>/propagation/refs/` tree and left the real registry untouched.
+  const { WORKSPACES } = await import("./lib/core/config.mjs");
+  const { resolveWorkspace } = await import("./lib/core/discovery.mjs");
+  const resolved = resolveWorkspace(workspace, WORKSPACES);
+  if (!resolved.ok) {
+    console.error(`${RED}error:${RESET} ${resolved.reason}`);
+    process.exit(2);
+  }
+
   const { migrateRefs } = await import("./lib/refs/migrate-refs.mjs");
   let plan;
   try {
-    plan = await migrateRefs({ workspace, apply });
+    plan = await migrateRefs({ workspace: resolved.workspace.root, apply });
   } catch (err) {
     // Includes the concurrent-writer abort and the unparseable-snapshot refusal.
     // Both are refusals to proceed, not crashes, and both must reach the operator
