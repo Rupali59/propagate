@@ -3827,3 +3827,46 @@ wrote. The fallback keeps them passing today. Removing it needs each of those te
 declare its own hub first, and until that happens `propagate`'s test suite still READS the
 real tree in places it does not announce. Reading is not writing, but it is the same
 unscoped seam.
+
+### N101 · `rollup` wrote `ECOSYSTEM.md` to whichever search root sorted first, so the one every doc cites became unregenerable — **S2** — **RESOLVED 2026-09-26**
+
+Found 2026-09-26, while regenerating `ECOSYSTEM.md` after N82 changed two of its rows.
+
+`artifactPath()` (`commands/rollup.mjs`) returned `SEARCH_ROOTS[0]`. But **`searchRoots` is a
+DISCOVERY setting** — the list of places to walk looking for `.propagates.yml`, ordered for the
+walk and not to name the tree. `config.yml` lists:
+
+```yaml
+hubRoot: /Users/rupali.b/Documents/GitHub
+searchRoots:
+  - /Users/rupali.b/Documents/GitHub/Rupali/Experiments   <- sorts first
+  - /Users/rupali.b/Documents/GitHub
+```
+
+So the artifact resolved to `Rupali/Experiments/ECOSYSTEM.md` — **a file that has never
+existed** — while the real one, tool-generated (`2d5ec40` "the first generated ECOSYSTEM.md")
+and cited by four documents, sat at the hub root untouched since 2026-09-01.
+
+**Nothing moved the file.** A config key was added for an unrelated reason and a derived path
+followed it. That is G24's shape through the other door, and the symptom was the giveaway:
+`rollup --check` exited **2 (could-not-run)** with *"…/Rupali/Experiments/ECOSYSTEM.md does not
+exist yet"* — a command reporting it cannot find an artifact it would itself create, while the
+artifact it was actually maintaining went stale in silence.
+
+**Why it went unnoticed: `artifactPath()` had NO TEST AT ALL.** Not a weak one — none. The
+function that decides where the tool's only generated artifact lands was unasserted, so a path
+change produced no red anywhere.
+
+**Fixed:** `artifactPath({ hubRoot = HUB_ROOT, roots = SEARCH_ROOTS })` prefers the DECLARED
+HUB, falls back to the first root, and returns `null` with neither — a could-not-run, never a
+crash and never a guess. `ECOSYSTEM.md` rolls up the WHOLE tree and `hubRoot` is the declared
+name for that tree, so writing it inside one nested search root is incoherent whatever the
+ordering. A preference, not a sort.
+
+`tests/unit/rollup-artifact-path.test.mjs` asserts the preference, and its negative control is
+the one that matters: **reordering `searchRoots` must not move the file.** Under the old code
+those two calls agreed — both wrong — so the control would have passed while the defect stood.
+
+After the fix, `rollup --check` went 2 -> 1 (stale, correctly) -> 0 (current) once regenerated:
+734 -> 959 lines at the hub root.
+
