@@ -94,3 +94,24 @@ test("a workspace whose refresh FAILS is reported, never skipped", () => {
   assert.match(DIGEST, /refsLines\.push\(`! \$\{r\.workspace\}/,
     "and it must reach the rendered digest, not just the snapshot");
 });
+
+test("the refresh warns when it wrote into a dirty tree, and never refuses over it", () => {
+  // Reported by the session working in obsidian-vk-publish, from a real
+  // incident: the refresh created propagation/refs/* while its repo had
+  // uncommitted work, and its next `git add -A` swept those files into an
+  // unrelated commit. "One -A away from being authored by whoever commits next."
+  assert.match(DIGEST, /function treeDirty\(/, "the refresh must be able to see a dirty tree");
+  assert.match(DIGEST, /wroteIntoDirtyTree/, "and must carry that fact into its result");
+  assert.match(DIGEST, /const dirtyBefore = dryRun \? false : treeDirty\(ws\.root\)/,
+    "sampled BEFORE the write, or a file this run creates makes the tree look dirty");
+
+  // WARN, never refuse. Refusing would stop the refresh for any workspace with
+  // uncommitted work — most of them, most of the time — and a refresh that
+  // silently stops is N55, the issue this rider exists to fix.
+  assert.doesNotMatch(DIGEST, /if \(dirtyBefore\)[^\n]*continue;/,
+    "a dirty tree must not skip the refresh — that rebuilds the silence N55 is about");
+
+  // Unreadable git state is its own outcome, not "clean".
+  assert.match(DIGEST, /gitUnreadable/,
+    "could-not-read must be distinguishable from clean (rule:discernment-checks §2)");
+});

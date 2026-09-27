@@ -3995,3 +3995,46 @@ those two calls agreed — both wrong — so the control would have passed while
 After the fix, `rollup --check` went 2 -> 1 (stale, correctly) -> 0 (current) once regenerated:
 734 -> 959 lines at the hub root.
 
+### N103 · A pointer stub that points OUT of its repo was reported as dangling, and the refresh wrote into dirty trees without saying so — **S2** — **RESOLVED 2026-09-27**
+
+Both reported by the session working in `Vipin Kaushik/obsidian-vk-publish`, and both verified
+here before acting. A peer finding two real defects in one message is the best argument yet for
+`rule:adversarial-review-reads-the-ledger` — neither was visible from inside this repo.
+
+**1 · The stub check asked the wrong question.** `planMigration` only ever asked *does MY
+computed destination exist?* For a project inside a workspace that keeps state at
+`<workspace>/propagation/state/<project>/`, the real file is one level UP and outside the repo
+entirely — so a correct, deliberate stub was reported `dangling stub` and the migration refused.
+
+That is backwards for the layout `rule:state-and-decisions` now makes the DEFAULT. Per-repo
+`STATE.md` is the deviation; the stub IS the intended end state. Verified on the real pair:
+
+```
+obsidian-vk-publish/STATE.md          -> ../propagation/state/obsidian-vk-publish/STATE.md     EXISTS (889 lines)
+obsidian-vk-publish/docs/DECISIONS.md -> ../../propagation/…/DECISIONS.md                      EXISTS (511 lines)
+```
+
+`stubTarget()` / `stubTargetResolves()` now read the path the stub DECLARES and resolve it
+relative to the stub — `../` from the repo root and `../../` from `docs/` are the same
+destination at two depths. Both now report *"already migrated, nothing to move"*, naming the
+target. The negative control is the load-bearing one: a stub pointing at nothing is STILL a
+conflict, and an unreadable target reads as unresolved rather than fine — otherwise the fix
+would silence genuinely broken signposts instead of correcting the question.
+
+**2 · The refresh wrote into dirty trees silently, and it had already cost something.** The
+refs refresh created `propagation/refs/*` in that repo while it had uncommitted work, and the
+next `git add -A` swept those files into an unrelated commit (`824d079`). In the reporter's
+words: *"one `-A` away from being authored by whoever commits next."*
+
+**Warned, not refused, and that is deliberate.** Refusing would stop the refresh for any
+workspace with uncommitted work — most of them, most of the time — and a refresh that silently
+stops happening is N55, the issue this rider exists to fix. So it writes, and the digest names
+the workspace. Dirtiness is sampled BEFORE the write, or a file this run creates is what makes
+the tree look dirty. Unreadable git state is its own outcome, never "clean".
+
+**NOT done, and it is not mine to decide:** the migration still plans
+`propagation/state/workspace/` inside that project repo, which would reintroduce the split the
+rule moved to remove. Whether `obsidian-vk-publish` is a workspace or a project inside
+`Vipin Kaushik` is a decision about that tree — the same class as N100's worktrees. The peer
+says it should not migrate; I have left it unapplied and said so.
+

@@ -23,7 +23,7 @@
 
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 
@@ -520,11 +520,43 @@ function driftSnapshot(reconcileResult, workspaces = WORKSPACES) {
  * A workspace that FAILS is reported, never skipped: a silent skip here would
  * recreate N55 inside its own fix.
  */
+/**
+ * Is this workspace's git tree dirty RIGHT NOW?
+ *
+ * Reported 2026-09-27 by the session working in `obsidian-vk-publish`, from a
+ * real incident: the refresh created `propagation/refs/*` in its repo while it
+ * had uncommitted work, and its next `git add -A` swept those files into an
+ * unrelated commit. No harm that time — the files were legitimate — but as it
+ * put it, "a migration that creates files in a repo with uncommitted changes is
+ * one -A away from being authored by whoever commits next".
+ *
+ * WARN RATHER THAN REFUSE, deliberately. Refusing would stop the refresh for
+ * any workspace with uncommitted work, which is most of them most of the time —
+ * and a refresh that silently stops happening is N55, the issue this rider
+ * exists to fix. So it writes, and it SAYS it wrote into a dirty tree.
+ *
+ * Unreadable git state reads as "unknown", never as "clean": claiming a tree is
+ * clean when the check failed is the reassuring-silence this digest is full of
+ * warnings about.
+ */
+function treeDirty(root) {
+  try {
+    const r = spawnSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8", timeout: 5000 });
+    if (r.status !== 0) return null;
+    return r.stdout.trim().length > 0;
+  } catch {
+    return null;
+  }
+}
+
 async function refsSnapshot(dryRun) {
   const { migrateRefs } = await import("./lib/refs/migrate-refs.mjs");
   const results = [];
   for (const ws of WORKSPACES) {
     try {
+      // Sampled BEFORE the write, so a file this run creates cannot be the
+      // thing that makes the tree look dirty.
+      const dirtyBefore = dryRun ? false : treeDirty(ws.root);
       const plan = await migrateRefs({ workspace: ws.root, apply: !dryRun });
       results.push({
         workspace: ws.name,
@@ -533,6 +565,8 @@ async function refsSnapshot(dryRun) {
         refs: plan.refs,
         events: (plan.events ?? []).length,
         applied: plan.applied === true,
+        wroteIntoDirtyTree: Boolean(dirtyBefore) && plan.applied === true && (plan.events ?? []).length > 0,
+        gitUnreadable: dirtyBefore === null,
       });
     } catch (err) {
       // Includes the concurrent-writer abort and the unparseable-snapshot
@@ -1242,6 +1276,16 @@ export function computeDiff(snapshot, prior) {
     for (const r of rf.results) {
       if (!r.ok) refsLines.push(`! ${r.workspace} — ${r.error}`);
       else if (r.events) refsLines.push(`~ ${r.workspace} — ${r.events} event(s), ${r.refs} refs / ${r.projects} projects`);
+    }
+    // The dirty-tree warning. Named per workspace, because the action is
+    // "commit or stash that repo deliberately", not a global setting.
+    for (const r of rf.results) {
+      if (r.wroteIntoDirtyTree) {
+        refsLines.push(`? ${r.workspace} — wrote into a tree with uncommitted changes; ` +
+          "commit propagation/refs/ deliberately or the next `git add -A` adopts it");
+      } else if (r.gitUnreadable) {
+        refsLines.push(`? ${r.workspace} — could not read git status, so cannot say whether the tree was clean`);
+      }
     }
     if (!failed.length && !events) refsLines.push("no branch changes since the last run");
   }
