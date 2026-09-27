@@ -361,15 +361,31 @@ test("readLifecycle separates CURRENT from frozen v1 history, and refuses the un
   assert.equal(r.total, 5, "every line is accounted for — none silently dropped");
 });
 
-test("the real Vipin Kaushik log reads as 21 v1 events and zero current", () => {
-  // The live case this contract exists for. If this ever reports `current > 0`
-  // without a migration having run, two producers are writing again.
+test("the real Vipin Kaushik log stays fully classified, and its v1 history never grows", () => {
+  // UPDATED 2026-09-27, and the reason is this test's own original comment:
+  // "if this ever reports current > 0 WITHOUT a migration having run, two
+  // producers are writing again." A migration now runs — N55 wired the refresh
+  // onto the 09:00 digest, and the first real run appended 32 schema:2 events
+  // here. So `current === 0` stopped being the invariant and this assertion
+  // went red, correctly, for the change that was intended.
+  //
+  // THE RISK IT WAS GUARDING IS STILL GUARDED, just from the other side. The
+  // danger was never "current grew" — it was the RETIRED producer coming back.
+  // `collect.sh`'s branch-registry wrote the v1 shape and was unregistered on
+  // 2026-08-24, so the v1 count is FROZEN HISTORY: if it ever grows, two
+  // producers are writing again and that is the thing to catch.
   const vk = "/Users/rupali.b/Documents/GitHub/Vipin Kaushik";
   if (!existsSync(path.join(vk, "propagation", "refs", "lifecycle.jsonl"))) return; // not this machine
   const r = readLifecycle(vk);
-  assert.equal(r.refused.length, 0, `the live log must be fully classified, refused: ${JSON.stringify(r.refused)}`);
-  assert.equal(r.current.length, 0, "nothing has written schema:2 to VK yet");
-  assert.ok(r.v1.length >= 21, `expected at least 21 v1 events, got ${r.v1.length}`);
+
+  assert.equal(r.refused.length, 0,
+    `the live log must be fully classified, refused: ${JSON.stringify(r.refused)}`);
+  assert.equal(r.v1.length, 21,
+    `v1 events are frozen history — the producer was retired 2026-08-24. ${r.v1.length} means it is writing again.`);
+  assert.ok(r.current.length > 0,
+    "the scheduled refresh writes schema:2 here; zero means it has stopped (N55)");
+  assert.equal(r.total, r.v1.length + r.current.length + r.refused.length,
+    "every line accounted for — none silently dropped");
 });
 
 // ---------------------------------------------------------------------------

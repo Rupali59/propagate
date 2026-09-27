@@ -1832,11 +1832,30 @@ async function migrateCmd(argv = []) {
     process.exit(2);
   }
 
+  // THE SAME DEFECT `migrate-refs` HAD (N55), found 2026-09-27 while trying to
+  // finish a half-migrated workspace with it. `planMigration` joins
+  // `propagation` onto whatever it is given, so a bare NAME resolved against the
+  // CWD. Measured from the propagate repo:
+  //
+  //   migrate obsidian-vk-publish   -> propagate/obsidian-vk-publish/propagation, 0 moves
+  //   migrate /Users/…/obsidian-vk-publish -> the workspace's own, 1 move
+  //
+  // Under `--apply` the first form would have created a stray propagation tree
+  // INSIDE the propagate repo and reported 0 moves, while the real workspace
+  // stayed half-migrated -- which is exactly why it still was.
+  const { WORKSPACES } = await import("./lib/core/config.mjs");
+  const { resolveWorkspace } = await import("./lib/core/discovery.mjs");
+  const resolvedWs = resolveWorkspace(workspace, WORKSPACES);
+  if (!resolvedWs.ok) {
+    console.error(`${RED}error:${RESET} ${resolvedWs.reason}`);
+    process.exit(2);
+  }
+
   const { migrateWorkspace, planMigration, orphanedByMigration, sidecarsNamingMoves } = await import("./lib/migrate/workspace.mjs");
 
   let plan;
   try {
-    plan = planMigration(workspace, { includeUndeclared: force });
+    plan = planMigration(resolvedWs.workspace.root, { includeUndeclared: force });
   } catch (err) {
     console.error(`${RED}error:${RESET} ${err?.message ?? err}`);
     process.exit(1);
@@ -1862,7 +1881,7 @@ async function migrateCmd(argv = []) {
   const losing = orphans.filter((o) => o.losesVerification);
 
   if (asJson) {
-    const result = apply ? await migrateWorkspace({ workspace, apply: true, force }) : { ...plan, applied: false };
+    const result = apply ? await migrateWorkspace({ workspace: resolvedWs.workspace.root, apply: true, force }) : { ...plan, applied: false };
     console.log(JSON.stringify({ ...result, orphans }, null, 2));
     return;
   }
@@ -1938,7 +1957,7 @@ async function migrateCmd(argv = []) {
 
   let result;
   try {
-    result = await migrateWorkspace({ workspace, apply: true, force, now: new Date().toISOString() });
+    result = await migrateWorkspace({ workspace: resolvedWs.workspace.root, apply: true, force, now: new Date().toISOString() });
   } catch (err) {
     console.error(`\n${RED}refused:${RESET} ${err?.message ?? err}`);
     process.exit(1);

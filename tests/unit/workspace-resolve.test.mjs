@@ -93,3 +93,30 @@ test("a path-shaped argument that does NOT exist is still refused", () => {
   assert.equal(r.ok, false);
   assert.match(r.reason, /no workspace named/);
 });
+
+/* ── the two commands that take a <workspace> argument ──────────────────── */
+
+test("BOTH migrate and migrate-refs resolve their argument through this function", async () => {
+  // N55 fixed `migrate-refs`; `migrate` had the identical defect and was found
+  // 2026-09-27 trying to finish a half-migrated workspace WITH it. A bare name
+  // resolved against the CWD, so from the propagate repo it planned against
+  // `propagate/<name>/propagation` and reported 0 moves — which is why that
+  // workspace was still half-migrated.
+  //
+  // Source-level, because both resolutions live in cli.mjs's command wrappers
+  // and the alternative is a subprocess per case. The BEHAVIOUR is covered by
+  // tests/unit/refs-migrate.test.mjs's stray-tree case.
+  const { readFileSync } = await import("node:fs");
+  const path = (await import("node:path")).default;
+  const cli = readFileSync(path.join(import.meta.dirname, "../../cli.mjs"), "utf8");
+
+  for (const fn of ["migrateRefsCmd", "migrateCmd"]) {
+    const i = cli.indexOf(`async function ${fn}(`);
+    assert.ok(i > 0, `${fn} not found — this check has gone blind`);
+    // The next function boundary, so each body is read in isolation.
+    const next = cli.indexOf("\nasync function ", i + 10);
+    const body = cli.slice(i, next > 0 ? next : i + 4000);
+    assert.match(body, /resolveWorkspace\(/,
+      `${fn} does not resolve its <workspace> argument — a bare name will hit the CWD`);
+  }
+});

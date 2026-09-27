@@ -1196,30 +1196,54 @@ cannot see the dot-prefixed one. Which of the two is canonical for that project 
 about that tree, not a coding call — filed as N102. The new `propagation/` is left UNTRACKED in
 that repo, which also holds five modified files that are not mine.
 
-### N102 · One project carries both `.propagation/` and `propagation/`, and the tool can only see one — **S3** — **OPEN**
+### N102 · `migrate` resolved a bare workspace NAME against the CWD, so a half-migrated workspace could not be finished with it — **S2** — **RESOLVED 2026-09-27**
 
-Found 2026-09-26 while verifying N55's first real run.
+Found 2026-09-27, trying to finish a half-migrated workspace.
 
-`Vipin Kaushik/obsidian-vk-publish` holds a pre-existing **`.propagation/`** with `ledger.jsonl`
-and `ledger.md`, and — after the refs refresh — a **`propagation/`** with `refs/`. Two
-directories for one concept, distinguished by a leading dot.
+**THIS ENTRY WAS FILED WRONG AND IS CORRECTED HERE.** Its first version claimed
+`Vipin Kaushik/obsidian-vk-publish` carrying both `.propagation/` and `propagation/` was a
+layout defect. It is not: **`.propagation/ledger.jsonl` is propagate's own SUPPORTED LEGACY
+location** (`lib/core/discovery.mjs:366,411,446`), and discovery resolves that workspace's
+`ledgerJsonl` to it. A workspace mid-migration holds both by design, and hand-moving the dot
+directory would have broken ledger discovery. Caught by reading the discovery code before
+touching anything — the fix I was about to make was the bug.
 
-`lib/refs/snapshot.mjs`'s `refsDir()` joins `propagation`, and `docs/REFERENCE.md`
-§"Propagation layout" names `<workspace>/propagation/` with no dot. So the dot-prefixed
-directory is invisible to every propagate reader, while being the one that actually holds that
-project's ledger.
+**The real defect, found underneath it: `migrate` had N55's blocking defect too.**
+`planMigration` and `migrateWorkspace` both join `propagation` onto their argument, and
+`migrateCmd` passed the raw string. Measured from the propagate repo:
 
-**Why S3 and not higher:** nothing is misreported today — the ledger is found by its own
-discovery path, and the refs registry now exists at the documented location. The cost is that a
-reader of either directory cannot tell which is authoritative, and a future consolidation will
-have to decide.
+```
+migrate obsidian-vk-publish            -> propagate/obsidian-vk-publish/propagation, 0 moves
+migrate /Users/…/obsidian-vk-publish   -> the workspace's own propagation/,          1 move
+```
 
-**Not fixing it here.** Renaming `.propagation/` moves a tracked ledger in someone else's repo,
-which is a decision about that tree. Deleting the new `propagation/` would undo N55 for that
-workspace. Both are hers.
+So the command that exists to finish a migration silently planned against the wrong tree and
+reported nothing to do — **which is why that workspace was still half-migrated.**
 
-**Derive, do not trust this entry:** `ls -a "Vipin Kaushik/obsidian-vk-publish"` and
-`find … -name 'propagation' -o -name '.propagation'`. A `grep` will not show a directory.
+**I THEN HALF-FIXED IT AND CAUSED THE EXACT HAZARD I HAD JUST DOCUMENTED.** I routed
+`planMigration` through `resolveWorkspace()` and missed `migrateWorkspace` at the `--apply`
+call site, ran `--apply`, and created
+`propagate/obsidian-vk-publish/propagation/{README.md,INDEX.md,refs/*}` — a stray tree inside
+the propagate repo — while the real workspace stayed untouched. Untracked, removed, and both
+call sites now resolve. `tests/unit/workspace-resolve.test.mjs` asserts BOTH `migrateCmd` and
+`migrateRefsCmd` resolve their argument, because fixing one of two call sites is what happened.
+
+**What the migration does now, and why it stops.** It plans correctly and then REFUSES:
+
+```
+conflict  STATE.md         — source is a pointer stub but its destination is missing
+conflict  docs/DECISIONS.md — same
+```
+
+Two dangling stubs (N54's shape). Refusing is right — moving into that state is how a stub
+reads as content. Resolving them means deciding what that project's STATE.md and DECISIONS.md
+should hold, which is a decision about that tree, so it stops there. The agent working in that
+repo (`system-design-audit-vk-publish`) has been told, along with the `.propagates.yml` entry
+the migration will need updated.
+
+**Derive, do not trust this entry:** run both forms of `migrate <ws> --json` and compare
+`propagationDir`. And `ls -a` the workspace — a `grep` will not show a directory, which is how
+`.propagation` stayed invisible to me until I listed it.
 
 ### N56 · `backlog` reads a STATE.md pointer stub as a live file with 0 open items — **S1** — **RESOLVED 2026-08-28**
 
