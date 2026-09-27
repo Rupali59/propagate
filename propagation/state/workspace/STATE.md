@@ -36,6 +36,21 @@ outputs nested — v2 *is* nested, so there was nothing wrong.
 
 Suite: **2235 + 94, 0 failures.** Dry run proven inert across every `propagation/refs/` file.
 
+**Verified in production the next morning.** The 09:00 run fired 2026-09-27 03:37Z, 21 hours
+after the code landed, and took **13 registries from 32 days stale to 0**, appending **121
+lifecycle rows**. The SYSTEMS.md probe passes against the real tree — this is no longer a claim
+about tests.
+
+**One row is unaccounted for and is recorded as such.** 122 reported, 121 landed; localised to
+`obsidian-vk-publish`, which reported an event and created no registry. Running it by hand
+immediately afterwards worked, so the command is sound — why the scheduled call reported without
+writing is **not established**, and that is written down rather than smoothed over. If the gap
+recurs on the next run it is the thing to chase.
+
+Found alongside: that project carries both `.propagation/` (ledgers) and `propagation/` (refs),
+and `refsDir()` can only see the second. Filed as **N102** — renaming a tracked ledger in someone
+else's repo is her call, not mine.
+
 
 ## `ECOSYSTEM.md` is regenerable again, and it had quietly stopped being — 2026-09-26, `v0.13.1`
 

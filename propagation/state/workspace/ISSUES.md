@@ -1177,6 +1177,50 @@ filed a live hazard that does not exist.
 registries got NEWER — never that the job ran, which is precisely the claim that was already
 false for 32 days.
 
+**VERIFIED IN PRODUCTION, not just in tests.** The 09:00 run fired on 2026-09-27 at 03:37Z —
+21 hours after the code landed — and refreshed **13 registries from 32 days old to 0**, appending
+**121 lifecycle rows** (42 created, 22 pruned, 8 baseline, 6 worktree-removed, 2 merged, 1
+worktree-added). The `docs/SYSTEMS.md` probe passes against the real tree.
+
+**One row is unaccounted for, and it is recorded rather than explained away.** The digest reported
+**122** events and 121 landed. Localised to `obsidian-vk-publish`, which the run reported as
+`~ 1 event(s)` while creating no registry at all. Re-running `migrate-refs obsidian-vk-publish
+--apply` by hand immediately afterwards worked — `applied: true`, one `baseline` row, directory
+created — so the command is not broken. Why the scheduled invocation reported the event without
+writing it is **not established**, and a silent no-write in an append-only history is exactly the
+shape N55 is about. If the 122-vs-landed gap recurs on the next run, that is the thing to chase.
+
+**Also found there: that repo carries BOTH `.propagation/` (dot-prefixed, holding `ledger.jsonl`
+and `ledger.md`) and now `propagation/` (refs).** `refsDir()` joins `propagation`, so the tool
+cannot see the dot-prefixed one. Which of the two is canonical for that project is a decision
+about that tree, not a coding call — filed as N102. The new `propagation/` is left UNTRACKED in
+that repo, which also holds five modified files that are not mine.
+
+### N102 · One project carries both `.propagation/` and `propagation/`, and the tool can only see one — **S3** — **OPEN**
+
+Found 2026-09-26 while verifying N55's first real run.
+
+`Vipin Kaushik/obsidian-vk-publish` holds a pre-existing **`.propagation/`** with `ledger.jsonl`
+and `ledger.md`, and — after the refs refresh — a **`propagation/`** with `refs/`. Two
+directories for one concept, distinguished by a leading dot.
+
+`lib/refs/snapshot.mjs`'s `refsDir()` joins `propagation`, and `docs/REFERENCE.md`
+§"Propagation layout" names `<workspace>/propagation/` with no dot. So the dot-prefixed
+directory is invisible to every propagate reader, while being the one that actually holds that
+project's ledger.
+
+**Why S3 and not higher:** nothing is misreported today — the ledger is found by its own
+discovery path, and the refs registry now exists at the documented location. The cost is that a
+reader of either directory cannot tell which is authoritative, and a future consolidation will
+have to decide.
+
+**Not fixing it here.** Renaming `.propagation/` moves a tracked ledger in someone else's repo,
+which is a decision about that tree. Deleting the new `propagation/` would undo N55 for that
+workspace. Both are hers.
+
+**Derive, do not trust this entry:** `ls -a "Vipin Kaushik/obsidian-vk-publish"` and
+`find … -name 'propagation' -o -name '.propagation'`. A `grep` will not show a directory.
+
 ### N56 · `backlog` reads a STATE.md pointer stub as a live file with 0 open items — **S1** — **RESOLVED 2026-08-28**
 
 Found 2026-08-27 while adopting STATE/DECISIONS for `Tathya/WorkTracker`. The new root stub
