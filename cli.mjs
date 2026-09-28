@@ -689,6 +689,23 @@ async function doctor({ exitProcess = true } = {}) {
     doctorReconcileRows = details.reconcileRows;
   }
 
+  // Installed git hooks: presence is not liveness (#22). Placed immediately after
+  // the environment block because it belongs to the same question — is what was
+  // installed actually working — and because that section already owns the launchd
+  // rows, which are the other component whose presence read as health while it did
+  // nothing.
+  //
+  // SEARCH_ROOTS rather than the discovered workspaces: six of the seven hooks in
+  // this tree sit in PROJECT repos, not workspace roots, so iterating workspaces
+  // would have found the workspace hook and missed its projects'.
+  {
+    const { checkHooks } = await import("./lib/report/doctor/hooks.mjs");
+    const reporter = new Reporter();
+    await checkHooks({ reporter, roots: SEARCH_ROOTS });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
 
   // Sidecars: gather once per workspace root, then collapse duplicates.
   // findSidecars(ws.root) walks that workspace's ENTIRE subtree with no
