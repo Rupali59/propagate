@@ -90,6 +90,59 @@ test("prose-only supersession is flagged — this is the 75-instance case", asyn
   assert.match(hit.hits[0].text, /Supersedes the 2026-06-14/);
 });
 
+test("a TABLE ROW recording third-party supersession is not a claim by this doc", async () => {
+  // `docs/SYSTEMS.md` is a registry with a `superseded_by:` column. Each row is a
+  // fact about the component it names, not a claim that SYSTEMS.md overrules
+  // anything — and "fixing" it by declaring `supersedes:` would assert that it
+  // overrules `reconcile`. Same reasoning as the fence filter: a line-wise scan
+  // cannot tell whose voice a line is in.
+  const root = await tree();
+  const p = path.join(root, "docs/SYSTEMS.md");
+  await writeFile(
+    p,
+    [
+      "# Systems",
+      "",
+      "| component | status | note |",
+      "|---|---|---|",
+      "| `watcher` | retired | superseded_by: `reconcile`, see `../DECISIONS.md` |",
+    ].join("\n"),
+    "utf8",
+  );
+  assert.equal(proseOnlySupersession(p), null, "registry rows are data, not undeclared supersessions");
+});
+
+test("a prose claim is STILL flagged when the same file also has tables", async () => {
+  // The negative control. Without it the table filter could be "flag nothing", and
+  // the ratchet would quietly stop measuring the thing it names.
+  const root = await tree();
+  const p = path.join(root, "docs/plans/2026-06-21-mixed.md");
+  await writeFile(
+    p,
+    [
+      "# Plan",
+      "",
+      "| component | status |",
+      "|---|---|",
+      "| `x` | retired, superseded_by: `../OTHER.md` |",
+      "",
+      "This plan supersedes the 2026-06-14 lock in `../DECISIONS.md`.",
+    ].join("\n"),
+    "utf8",
+  );
+  const hit = proseOnlySupersession(p);
+  assert.ok(hit, "a real prose claim must survive the table filter");
+  assert.equal(hit.hits.length, 1, "and ONLY the prose line — the table row must not be counted");
+  assert.match(hit.hits[0].text, /This plan supersedes/);
+});
+
+test("an indented table row is still a table row", async () => {
+  const root = await tree();
+  const p = path.join(root, "docs/plans/2026-06-22-indented.md");
+  await writeFile(p, "# Plan\n\n  | a | superseded_by: `../X.md` |\n", "utf8");
+  assert.equal(proseOnlySupersession(p), null);
+});
+
 test("declaring it silences the prose check — a check that cannot go quiet measures nothing", async () => {
   const root = await tree();
   const p = path.join(root, "docs/plans/2026-06-20-a-thing.md");

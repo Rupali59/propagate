@@ -94,6 +94,14 @@ against a component that had not settled, which is the same signature as the fiv
 is the most specific evidence yet for the fetch/async-ordering theory. The same file then passed
 **3 of 3** in isolation and the whole suite passed on the next full run, 0 of 2244.
 
+Recurred again later on 2026-09-28, in a 2306-test run, and this time in BOTH files at once:
+`charts render, state their coverage, and name the 47%` (ui-client) and `the six dispositions render
+in three groups` (ui-conflicts). Each file then passed in isolation — ui-client 25/25 twice,
+ui-conflicts 9/9 — which is now the fourth time isolation has been clean while a full run was red.
+The pattern across all occurrences: whichever mount-based test the scheduler happens to interleave
+loses, and the actual value is always the loading placeholder. Nothing points at a specific
+assertion any more; it points at the harness.
+
 Recurred 2026-09-28 in a 2261-test run: `already-inserted is MUTED, and it is the only muted row`
 alone, then 3 of 3 passes in isolation. Second occurrence of the same name, so it is that file's
 most reproducible symptom and the place to start.
