@@ -180,6 +180,7 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
 
   let unchanged = 0;
   const regressed = [];
+  const recognised = [];
   const withHeading = [];
   const unreadable = [];
 
@@ -208,6 +209,24 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
       const afterJson = JSON.stringify(afterShape);
       if (beforeJson === afterJson) {
         unchanged++;
+      } else if (before.format === "unrecognised" && after.format !== "unrecognised") {
+        // A TRANSITION OUT OF `unrecognised` IS EXEMPT, and the exemption is
+        // principled rather than a list of files.
+        //
+        // `unrecognised` makes NO claim — open/closed/proposed are all null by
+        // design (G2: no claim is not a zero claim). So a change that recognises a
+        // previously unrecognised file cannot have LOST information; there was
+        // none to lose. What this loop exists to catch is a silent
+        // RE-classification of a file that already parsed, where counts can move
+        // under a reader without anyone choosing it.
+        //
+        // Added 2026-09-28 when `delegated` landed. Without it, this test cannot
+        // be green in the same commit that teaches the classifier a new format —
+        // HEAD's copy has no such branch, so every newly-recognised file reads as
+        // a regression, and the only way to a green suite would be to commit the
+        // classifier change and the test update separately. That is a real
+        // limitation of comparing against HEAD, not a property of the change.
+        recognised.push({ file, to: after.format });
       } else {
         const field = ["format", "open", "closed", "items"].find(
           (k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]),
@@ -264,6 +283,14 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
       `alone does not appear here. If you did not expect this, PROPOSED_SECTION_RE ` +
       `is matching headings it should not.`,
   );
+  if (recognised.length > 0) {
+    // Named, not silent. An exemption nobody sees is indistinguishable from a
+    // gap in the corpus loop's coverage.
+    console.log(
+      `${recognised.length} file(s) newly RECOGNISED by this change (exempt — unrecognised made no claim to lose): ` +
+        recognised.map((r) => `${r.file.replace(/.*GitHub\//, "")} -> ${r.to}`).join(", "),
+    );
+  }
   if (unreadable.length > 0) {
     console.log(`Unreadable mid-check (excluded from the comparison, reported not dropped): ${JSON.stringify(unreadable)}`);
   }
@@ -283,7 +310,7 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
   );
 });
 
-test("R4 sharpest case: HandReader/TODOS.md and obsidian-vk-publish's moved TODOS.md stay format:unrecognised, unaffected by the proposed-heading change", async () => {
+test("R4 sharp case, DISCHARGED: both formerly-unparsed registers now parse, each for a stated reason", async () => {
   // "The two files already fail to parse and must still fail identically" --
   // called out explicitly in the task brief because no hand-written fixture
   // would have included them. Asserted as its own test, not left to the
@@ -310,10 +337,11 @@ test("R4 sharpest case: HandReader/TODOS.md and obsidian-vk-publish's moved TODO
   // parses as `unrecognised`; the stub left behind is a different artifact with a
   // different correct classification, so asserting against the old path would
   // quietly change what this test measures while still passing.
-  const targets = [
-    "Rupali/Experiments/HandReader/TODOS.md",
-    "Vipin Kaushik/obsidian-vk-publish/propagation/state/workspace/TODOS.md",
-  ];
+  const EXPECTED_FORMAT = {
+    "Rupali/Experiments/HandReader/TODOS.md": "id-keyed",
+    "Vipin Kaushik/obsidian-vk-publish/propagation/state/workspace/TODOS.md": "delegated",
+  };
+  const targets = Object.keys(EXPECTED_FORMAT);
 
   for (const rel of targets) {
     const file = discovery.todosMd.find((f) => f.endsWith(rel));
@@ -324,12 +352,39 @@ test("R4 sharpest case: HandReader/TODOS.md and obsidian-vk-publish's moved TODO
         `not silent deletion of the assertion`,
     );
     const text = readFileSync(file, "utf8");
-    const before = parseTodoLikeFileOld(text, file);
     const after = parseTodoLikeFileNew(text, file);
-    assert.equal(before.format, "unrecognised", `${rel}: expected HEAD's classifier to still report unrecognised -- if this fails, the fixture itself changed shape and became parseable, which is a different (fine) story than the one this test is pinning`);
-    assert.equal(after.format, "unrecognised", `${rel}: the proposed-heading change must not turn a genuinely unparseable file into a false parse`);
-    assert.equal(after.open, null, `${rel}: an unrecognised file must make no claim about open`);
-    assert.equal(after.closed, null, `${rel}: an unrecognised file must make no claim about closed`);
-    assert.equal(after.proposed, null, `${rel}: an unrecognised file must make no claim about proposed either -- G2, no claim is not a zero claim`);
+
+    // DISCHARGED 2026-09-28, and its own failure message called this outcome in
+    // advance: "if this fails, the fixture itself changed shape and became
+    // parseable, which is a different (fine) story than the one this test is
+    // pinning." Both became parseable that day, for two different and deliberate
+    // reasons, so the `unrecognised` assertion is retired rather than loosened —
+    // and what replaces it pins the NEW classification so a regression in either
+    // is still caught here.
+    //
+    //   HandReader/TODOS.md            its single item gained an ID (`HR-001`).
+    //                                  It was the only file in the tree using a
+    //                                  bare prose heading, which the reader has
+    //                                  no branch for and should not grow one:
+    //                                  treating every `##` as an item would count
+    //                                  section headings as work.
+    //   obsidian-vk-publish TODOS.md   now `delegated` — it declares its open
+    //                                  work lives in GitHub issues. See
+    //                                  backlog-delegated.test.mjs.
+    //
+    // The old-vs-new comparison is dropped for these two specifically: HEAD's
+    // classifier has no `delegated` branch, so comparing across it would assert
+    // that this change did nothing, which is the opposite of true. The generic
+    // corpus loop above still runs that comparison over every OTHER register.
+    assert.notEqual(
+      after.format, "unrecognised",
+      `${rel}: this file was made parseable deliberately; if it reads unrecognised again, either ` +
+        `the file lost what made it parseable or the classifier lost a branch`,
+    );
+    assert.notEqual(after.open, null, `${rel}: a recognised register must make a claim about open`);
+    assert.ok(
+      EXPECTED_FORMAT[rel] === after.format,
+      `${rel}: expected format ${EXPECTED_FORMAT[rel]}, got ${after.format}`,
+    );
   }
 });
