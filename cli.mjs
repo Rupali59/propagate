@@ -1823,11 +1823,15 @@ async function migrateCmd(argv = []) {
   // Gated because the alternative — inferring it — is how a workspace's state
   // gets pulled into its parent cross-repo, with its history left behind.
   const force = argv.includes("--force");
+  // SEPARATE from --force on purpose: see migrateWorkspace's pre-flight. `git mv`
+  // stages, so a dirty target tree means the next commit by whoever else is
+  // working there adopts this migration. Measured 2026-09-28 — it did.
+  const allowDirty = argv.includes("--allow-dirty");
   const wsIdx = argv.indexOf("--workspace");
   const workspace = wsIdx >= 0 ? argv[wsIdx + 1] : argv.find((a) => !a.startsWith("--"));
 
   if (!workspace) {
-    console.error(`${RED}error:${RESET} usage: node cli.mjs migrate <workspace> [--apply] [--force] [--json]`);
+    console.error(`${RED}error:${RESET} usage: node cli.mjs migrate <workspace> [--apply] [--force] [--allow-dirty] [--json]`);
     console.error(`${DIM}Dry-run by default. --apply performs the moves.${RESET}`);
     process.exit(2);
   }
@@ -1881,7 +1885,7 @@ async function migrateCmd(argv = []) {
   const losing = orphans.filter((o) => o.losesVerification);
 
   if (asJson) {
-    const result = apply ? await migrateWorkspace({ workspace: resolvedWs.workspace.root, apply: true, force }) : { ...plan, applied: false };
+    const result = apply ? await migrateWorkspace({ workspace: resolvedWs.workspace.root, apply: true, force, allowDirty }) : { ...plan, applied: false };
     console.log(JSON.stringify({ ...result, orphans }, null, 2));
     return;
   }

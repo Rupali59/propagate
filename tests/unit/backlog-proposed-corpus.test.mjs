@@ -283,7 +283,7 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
   );
 });
 
-test("R4 sharpest case: HandReader/TODOS.md and obsidian-vk-publish/TODOS.md stay format:unrecognised, unaffected by the proposed-heading change", async () => {
+test("R4 sharpest case: HandReader/TODOS.md and obsidian-vk-publish's moved TODOS.md stay format:unrecognised, unaffected by the proposed-heading change", async () => {
   // "The two files already fail to parse and must still fail identically" --
   // called out explicitly in the task brief because no hand-written fixture
   // would have included them. Asserted as its own test, not left to the
@@ -300,7 +300,20 @@ test("R4 sharpest case: HandReader/TODOS.md and obsidian-vk-publish/TODOS.md sta
   }
 
   const discovery = discoverBacklogFiles({ searchRoots: [HUB_ROOT] });
-  const targets = ["Rupali/Experiments/HandReader/TODOS.md", "Vipin Kaushik/obsidian-vk-publish/TODOS.md"];
+  // PATH UPDATED 2026-09-28, and the update is this test working as designed.
+  // `migrate obsidian-vk-publish --apply` moved that register to the v3 location
+  // and left a pointer stub at the old path. This test went red, loudly, naming
+  // the file — exactly what its comment above said it existed to do, and the
+  // only check in the suite that noticed the corpus had moved under it.
+  //
+  // FOLLOW THE CONTENT, not the path. The property is about a register that
+  // parses as `unrecognised`; the stub left behind is a different artifact with a
+  // different correct classification, so asserting against the old path would
+  // quietly change what this test measures while still passing.
+  const targets = [
+    "Rupali/Experiments/HandReader/TODOS.md",
+    "Vipin Kaushik/obsidian-vk-publish/propagation/state/workspace/TODOS.md",
+  ];
 
   for (const rel of targets) {
     const file = discovery.todosMd.find((f) => f.endsWith(rel));

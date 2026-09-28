@@ -94,6 +94,10 @@ against a component that had not settled, which is the same signature as the fiv
 is the most specific evidence yet for the fetch/async-ordering theory. The same file then passed
 **3 of 3** in isolation and the whole suite passed on the next full run, 0 of 2244.
 
+Recurred 2026-09-28 in a 2261-test run: `already-inserted is MUTED, and it is the only muted row`
+alone, then 3 of 3 passes in isolation. Second occurrence of the same name, so it is that file's
+most reproducible symptom and the place to start.
+
 So the heading should not say `ui-client` at all. Whatever this is, any test that mounts the
 client can exhibit it, and every new mount-based test inherits it — which is the argument for
 chasing it rather than continuing to route around it one file at a time.

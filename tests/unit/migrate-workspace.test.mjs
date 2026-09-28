@@ -136,6 +136,101 @@ test("--apply moves the artifact and creates state/workspace/", async (t) => {
 });
 
 // ---------------------------------------------------------------------------
+// The dirty-tree pre-flight — written against an instance, 2026-09-28
+// ---------------------------------------------------------------------------
+
+/**
+ * `migrate --apply` STAGES what it moves, because `git mv` cannot decline to.
+ * So a dirty target tree means the next `git commit` by whoever else is working
+ * in that repo adopts this migration into their commit.
+ *
+ * That is not hypothetical. It happened: `obsidian-vk-publish` had four
+ * uncommitted files, `--apply` staged two of ours, and forty seconds later
+ * `aeee151 feat(review): the JSON payload a review pass writes` carried 189
+ * lines of propagation-layout move. The cost is not only mislabelled authorship
+ * — the session it happened to made the sharper point: anyone bisecting that
+ * feature, or reading that commit for the migration's history, now has to know
+ * to ignore two files.
+ *
+ * REFUSE ON ANY DIRT, with no attempt to attribute it. That is the stronger
+ * version and it was their suggestion: deciding whether dirt is "ours" needs a
+ * model of what our own writes should look like, and that model is one more
+ * population read from the wrong place. "Commit or stash and re-run" needs no
+ * such model, and a dirty tree that IS yours is also worth stopping on.
+ */
+async function seeded(t, opts) {
+  const ws = await workspace(t, opts);
+  execFileSync("git", ["init", "-q", ws]);
+  execFileSync("git", ["-C", ws, "config", "user.email", "t@e.st"]);
+  execFileSync("git", ["-C", ws, "config", "user.name", "t"]);
+  execFileSync("git", ["-C", ws, "add", "-A"]);
+  execFileSync("git", ["-C", ws, "commit", "-qm", "seed"]);
+  return ws;
+}
+
+test("--apply REFUSES on a dirty target tree, and the tree is byte-identical after", async (t) => {
+  const ws = await seeded(t, { projects: { alpha: { "STATE.md": REAL_STATE } } });
+  await writeFile(path.join(ws, "someone-elses-work.ts"), "export const inFlight = true;\n");
+  const before = treeSnapshot(ws);
+
+  await assert.rejects(
+    () => migrateWorkspace({ workspace: ws, apply: true }),
+    /uncommitted change\(s\)[\s\S]*Nothing was written/,
+    "a dirty tree must stop the migration before anything is staged",
+  );
+  assert.equal(treeSnapshot(ws), before, "the refusal must write nothing at all");
+});
+
+test("the refusal NAMES the paths, so the operator can see whose work it is", async (t) => {
+  const ws = await seeded(t, { projects: { alpha: { "STATE.md": REAL_STATE } } });
+  await writeFile(path.join(ws, "in-flight.ts"), "x\n");
+  await assert.rejects(
+    () => migrateWorkspace({ workspace: ws, apply: true }),
+    /in-flight\.ts/,
+    "listing the count without the paths makes the operator go looking",
+  );
+});
+
+test("an UNSTAGED modification counts — it is one `git commit -a` from being swept", async (t) => {
+  const ws = await seeded(t, { projects: { alpha: { "STATE.md": REAL_STATE } } });
+  await writeFile(path.join(ws, "alpha", "other.md"), "tracked and now modified\n");
+  execFileSync("git", ["-C", ws, "add", "-A"]);
+  execFileSync("git", ["-C", ws, "commit", "-qm", "second"]);
+  await writeFile(path.join(ws, "alpha", "other.md"), "changed again, uncommitted\n");
+  await assert.rejects(() => migrateWorkspace({ workspace: ws, apply: true }), /uncommitted change/);
+});
+
+test("--allow-dirty proceeds, so the guard is provably a guard and not a dead branch", async (t) => {
+  // rule:discernment-checks §1 — every check ships with the input that makes it
+  // pass as well as the one that makes it fail.
+  const ws = await seeded(t, { projects: { alpha: { "STATE.md": REAL_STATE } } });
+  await writeFile(path.join(ws, "mine.ts"), "x\n");
+  const r = await migrateWorkspace({ workspace: ws, apply: true, allowDirty: true });
+  assert.equal(r.applied, true, "the escape hatch must actually work, or operators cannot proceed at all");
+  assert.ok(existsSync(path.join(ws, "propagation", "state", "alpha", "STATE.md")));
+});
+
+test("--force does NOT bypass it — one flag must not serve two situations", async (t) => {
+  // `--force` means "hoist an undeclared workspace". If it also waived this,
+  // an operator hoisting a subdirectory would silently bypass a guard against
+  // taking a colleague's authorship — the defect this whole change removed
+  // elsewhere, reintroduced at the point of fixing it.
+  const ws = await seeded(t, { projects: { alpha: { "STATE.md": REAL_STATE } } });
+  await writeFile(path.join(ws, "mine.ts"), "x\n");
+  await assert.rejects(
+    () => migrateWorkspace({ workspace: ws, apply: true, force: true }),
+    /uncommitted change/,
+    "--force is about undeclared workspaces and must not waive the dirty-tree guard",
+  );
+});
+
+test("a CLEAN tree still migrates — the negative control", async (t) => {
+  const ws = await seeded(t, { projects: { alpha: { "STATE.md": REAL_STATE } } });
+  const r = await migrateWorkspace({ workspace: ws, apply: true });
+  assert.equal(r.applied, true, "if this failed the guard would be refusing everything");
+});
+
+// ---------------------------------------------------------------------------
 // Pointer stubs — the data-loss case
 // ---------------------------------------------------------------------------
 
@@ -450,7 +545,12 @@ test("--force proceeds, so the guard is provably a guard and not a dead branch",
   const hub = await hubFixture(t);
   const before = treeSnapshot(hub);
 
-  await migrateWorkspace({ workspace: hub, apply: true, force: true, now: "2026-08-24T00:00:00Z" });
+  // allowDirty: the HUB FIXTURE is dirty by construction — it holds a nested
+  // git repo that git cannot index, and unlike a real workspace it does not
+  // gitignore it (measured 2026-09-28: 0 of 4 real workspaces show a nested
+  // repo as untracked). The dirty-tree guard has its own tests above; this
+  // one is about something else, and says so rather than weakening the guard.
+  await migrateWorkspace({ workspace: hub, apply: true, allowDirty: true, force: true, now: "2026-08-24T00:00:00Z" });
 
   assert.notEqual(treeSnapshot(hub), before, "--force wrote nothing — the refusal test proves nothing");
   assert.ok(
@@ -467,7 +567,12 @@ test("an undeclared workspace with NO artifacts does not block the migration", a
   const plan = planMigration(hub);
   assert.deepEqual(plan.undeclaredWorkspaces ?? [], [], "nothing at stake, nothing to refuse");
 
-  await migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" });
+  // allowDirty: the HUB FIXTURE is dirty by construction — it holds a nested
+  // git repo that git cannot index, and unlike a real workspace it does not
+  // gitignore it (measured 2026-09-28: 0 of 4 real workspaces show a nested
+  // repo as untracked). The dirty-tree guard has its own tests above; this
+  // one is about something else, and says so rather than weakening the guard.
+  await migrateWorkspace({ workspace: hub, apply: true, allowDirty: true, now: "2026-08-24T00:00:00Z" });
   assert.ok(existsSync(path.join(hub, "propagation", "state", "plainproj", "STATE.md")));
 });
 
@@ -500,7 +605,12 @@ test("a DECLARED workspace is still skipped silently, by the marker and not the 
  */
 test("the scaffolded refs registry records a baseline, not an empty log", async (t) => {
   const hub = await hubFixture(t, { undeclaredHasArtifact: false });
-  await migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" });
+  // allowDirty: the HUB FIXTURE is dirty by construction — it holds a nested
+  // git repo that git cannot index, and unlike a real workspace it does not
+  // gitignore it (measured 2026-09-28: 0 of 4 real workspaces show a nested
+  // repo as untracked). The dirty-tree guard has its own tests above; this
+  // one is about something else, and says so rather than weakening the guard.
+  await migrateWorkspace({ workspace: hub, apply: true, allowDirty: true, now: "2026-08-24T00:00:00Z" });
 
   const lifePath = path.join(hub, "propagation", "refs", "lifecycle.jsonl");
   assert.ok(existsSync(lifePath), "the pair must exist");
@@ -596,7 +706,12 @@ test("a self-declared pointer stub is detected even when its heading does not sa
  */
 test("every moved artifact leaves a pointer stub naming its new home", async (t) => {
   const hub = await hubFixture(t, { undeclaredHasArtifact: false });
-  await migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" });
+  // allowDirty: the HUB FIXTURE is dirty by construction — it holds a nested
+  // git repo that git cannot index, and unlike a real workspace it does not
+  // gitignore it (measured 2026-09-28: 0 of 4 real workspaces show a nested
+  // repo as untracked). The dirty-tree guard has its own tests above; this
+  // one is about something else, and says so rather than weakening the guard.
+  await migrateWorkspace({ workspace: hub, apply: true, allowDirty: true, now: "2026-08-24T00:00:00Z" });
 
   const old = path.join(hub, "plainproj", "STATE.md");
   assert.ok(existsSync(old), "the old path must still resolve, or every referrer breaks");
@@ -671,6 +786,11 @@ test("N49: an untracked artifact is refused BEFORE anything moves, naming every 
 
 test("N49: a fully tracked workspace still migrates — the preflight must not block the good case", async (t) => {
   const hub = await hubFixture(t, { undeclaredHasArtifact: false });
-  await migrateWorkspace({ workspace: hub, apply: true, now: "2026-08-24T00:00:00Z" });
+  // allowDirty: the HUB FIXTURE is dirty by construction — it holds a nested
+  // git repo that git cannot index, and unlike a real workspace it does not
+  // gitignore it (measured 2026-09-28: 0 of 4 real workspaces show a nested
+  // repo as untracked). The dirty-tree guard has its own tests above; this
+  // one is about something else, and says so rather than weakening the guard.
+  await migrateWorkspace({ workspace: hub, apply: true, allowDirty: true, now: "2026-08-24T00:00:00Z" });
   assert.ok(existsSync(path.join(hub, "propagation", "state", "plainproj", "STATE.md")));
 });

@@ -3995,6 +3995,78 @@ those two calls agreed — both wrong — so the control would have passed while
 After the fix, `rollup --check` went 2 -> 1 (stale, correctly) -> 0 (current) once regenerated:
 734 -> 959 lines at the hub root.
 
+### N104 · `migrate --apply` stages into another repo's index with no pre-flight, and took a colleague's commit — **S2** — **RESOLVED 2026-09-28**
+
+**This one I caused, and it is the mirror image of what was reported to me hours earlier.**
+
+`migrate obsidian-vk-publish --apply` ran while a live session in that repo had four uncommitted
+files. `git mv` plus `git add` staged two paths into ITS index — the moved register and the pointer
+stub. It committed forty seconds later, and `aeee151 feat(review): the JSON payload a review pass
+writes, and its refusals` carries 189 of its 728 changed lines as a propagation-layout move.
+
+**My error of practice:** that session had told me its tree was clean, and I treated a statement
+about the past as a fact about the present instead of re-reading `git status` immediately before
+writing. It was clean when they said so and four files dirty by the time I ran.
+
+**But the practice error is not the defect, and fixing only that would leave this open.** The
+refresh hazard they reported to me — *"one `-A` away from being authored by whoever commits next"* —
+is about a tool that WRITES. This one STAGES, which is strictly worse: an unstaged file needs
+`git add -A` to be swept, a staged one needs only `git commit`. And `git mv` cannot decline to
+stage, so no care at the write site helps. The check has to be at the front.
+
+**It took two defects, and they identified theirs before I could.** They had been committing with
+`git add <explicit paths> && git commit`, treating the path list as scoping the commit — it does
+not, because `git commit` commits the INDEX, whatever else is in it. Their fix is
+`git commit -- <paths>`, a pathspec commit that ignores index state. Either defect alone was
+harmless; mine put files in an index that could not refuse them.
+
+**The guard: REFUSE, with its own flag.** `dirtyPaths()` before anything is written; any dirt at
+all stops the migration, names up to ten paths, and writes nothing. Two decisions worth stating:
+
+- **Refuse rather than warn**, which is the OPPOSITE of the refs refresh's answer in §2, and the
+  asymmetry is the point. That refresh warns because it is a scheduled job whose silence recreates
+  N55. This is a one-shot operation a person just invoked and is watching, so stopping costs them
+  one command and cannot cost anyone their authorship.
+- **Refuse on ANY dirt, with no attempt to attribute it.** Their suggestion, and stronger than my
+  first draft: deciding whether dirt is "ours" needs a model of what our own writes look like, and
+  that model is one more population read from the wrong place — §6's shape again. "Three
+  uncommitted files, commit or stash and re-run" needs no such model, and a dirty tree that IS
+  yours is also worth stopping on.
+
+**`--allow-dirty`, NOT `--force`.** `--force` already means "hoist a directory that looks like an
+undeclared workspace". Overloading it would mean an operator hoisting a subdirectory silently
+bypassed a guard against taking a colleague's authorship — one flag serving two situations, which
+is the defect N103 spent the previous day removing in four other places. A test asserts `--force`
+does NOT waive this.
+
+**`migrate` also left the unvalidated-flags set**, which is the direction `cli-commands.test.mjs`
+permits. It had to: a write command that grew a safety flag is the worst place to skip validation,
+because a typo'd `--allow-dirtty` would have been accepted in silence and the guard bypassed
+without a word. Enumerating its flags makes the typo an error.
+
+**Three pre-existing tests failed for the right reasons and one of them is the best thing here.**
+`backlog-proposed-corpus.test.mjs`'s R4 case names two real register files in the tree, and its own
+comment says it is a separate test *"so their disappearance from the tree (a migration, a rename) is
+itself a loud failure rather than a silent drop"*. My migration moved one of them and it went red
+naming the file — the only check in 2261 that noticed the corpus had moved underneath it. Its target
+now follows the CONTENT to the v3 path rather than the old path, because the stub left behind is a
+different artifact with a different correct classification, and asserting against the old path would
+have kept passing while measuring something else.
+
+Five fixtures in `migrate-workspace.test.mjs` now pass `allowDirty: true` explicitly. Their hub
+fixture is dirty by construction — it holds a nested git repo that git cannot index, and unlike a
+real workspace it does not gitignore it. Measured before weakening anything: **0 of 4 real
+workspaces show a nested repo as untracked**, so this is a fixture property and not a production
+false positive. Saying so at the call site beat loosening the guard to make tests pass.
+
+**What is left, and it is not mine:** `aeee151` was already pushed when my warning reached them, so
+the cheap fix was gone. They chose to leave it and name the mislabelling in their next commit
+message rather than force-push a branch other sessions may track — the right trade, and their
+correction to my framing of the cost is worth keeping: it is not only mislabelled authorship, it is
+that anyone bisecting that feature now has to know to ignore two files. Three files of mine are
+still untracked in their repo (`propagation/README.md`, `propagation/INDEX.md`,
+`propagation/state/workspace/.sidecar.yml`) and they have declined to sweep them.
+
 ### N103 · A pointer stub that points OUT of its repo was reported as dangling, and the refresh wrote into dirty trees without saying so — **S2** — **RESOLVED 2026-09-27**
 
 Both reported by the session working in `Vipin Kaushik/obsidian-vk-publish`, and both verified
