@@ -404,8 +404,18 @@ test("the real Vipin Kaushik log stays fully classified, and its v1 history neve
 //                                                   worktree-added, not a creation"
 //   detached worktree not diffed as a branch     -> "a DETACHED worktree is
 //                                                   tracked by path"
-//   foreign shape refused                        -> assertKnownShape now keys on
-//                                                   schema_version, tested there
+//   foreign shape refused                        -> refs-shape-guard.test.mjs
+//
+// THAT LAST POINTER WAS WRONG FOR A MONTH. It read "assertKnownShape now keys on
+// schema_version, tested there", meaning refs-workspace-snapshot.test.mjs — and
+// no such test was ever written there. Measured 2026-09-28: zero of 2261 tests
+// exercised the guard's refusal, and this comment is why nobody looked. The
+// coverage was believed to have moved and never arrived.
+//
+// It could not have been written there either: that file builds every input
+// through a `snap()` helper that hardcodes the valid schema_version and always
+// supplies `projects`, so the violation is inexpressible from inside it. Hence a
+// separate file, which says so at the top.
 //
 // What stays HERE is the single-repo primitive: buildSnapshot, writeRegistry,
 // readLifecycle, and classifyPruned — none of which changed shape.

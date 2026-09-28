@@ -3995,6 +3995,71 @@ those two calls agreed — both wrong — so the control would have passed while
 After the fix, `rollup --check` went 2 -> 1 (stale, correctly) -> 0 (current) once regenerated:
 734 -> 959 lines at the hub root.
 
+### N105 · The guard that keeps junk out of an append-only log had no test, and a pointer comment said it did — **S2** — **RESOLVED 2026-09-28**
+
+**Found by applying a shape the session in `obsidian-vk-publish` had just named**, from an instance
+of their own: they wrote an intake test asserting *"a pass cannot declare a workflow state"*, built
+the input through their own validator, and the mutation stayed **GREEN** — the validator constructs a
+fresh object holding only known fields, so the violating key never reached the module under test.
+Their generalisation: *"two layers both enforce the property, and each has to be tested against
+input that can actually express the violation; routing the second layer's test through the first
+makes it decorative."*
+
+`assertKnownShape` (`lib/refs/snapshot.mjs:309`) is propagate's instance, and the stake is on the
+record. It exists because of **G26**, which cost real rows: two producers wrote different shapes both
+labelled `schema_version: 1`, `diffSnapshots` read a flat snapshot's 36 refs as *"there was nothing
+here"*, and emitted **4 spurious `created` events** into `refs/lifecycle.jsonl` — append-only, so
+they are still there. Its own message names what it prevents: *"treating an unrecognised shape as
+empty would emit spurious lifecycle events into an append-only log."*
+
+**Zero of 2261 tests exercised its refusal.** The only mention anywhere in the suite was a handoff
+comment in `tests/unit/refs-snapshot.test.mjs`:
+
+```
+foreign shape refused -> assertKnownShape now keys on schema_version, tested there
+```
+
+*Tested there* meant `refs-workspace-snapshot.test.mjs`, and no such test was ever written in it. The
+pointer is the reason nobody looked: coverage was believed to have moved and never arrived. A promise
+in one file that another file has to keep — `rule:adversarial-review-reads-the-ledger`, occurring
+inside the test suite rather than between docs and code, which is a place that rule had not been
+pointed at before.
+
+**And it could not have been written there**, which is the peer's point exactly. That file builds
+every input through
+
+```js
+const snap = (projects, at) => ({ schema_version: WORKSPACE_SNAPSHOT_SCHEMA, …, projects, skipped: [] });
+```
+
+The helper hardcodes the valid version and always supplies `projects`, so no test authored in that
+file can express the violation; its earlier cases use `buildWorkspaceSnapshot()`, the real producer,
+which likewise only emits valid shapes. The guard was unreachable from the suite **by construction,
+not by oversight** — and a reviewer skimming that file would see thorough coverage, because it is
+thorough about everything the helper can say.
+
+`tests/unit/refs-shape-guard.test.mjs`, 9 cases, fixtures as RAW LITERALS with a note not to
+refactor them onto a shared builder, since that is the defect. It covers G26's two real shapes
+separately (they need different remedies), an unknown version, `schema_version: 2` with `projects`
+lost to a truncated write, that all three hints DIFFER, that the `next` argument is guarded and not
+only `prev`, and the negative control that a null previous snapshot still diffs — because a guard
+that refused null would fail every first run and the obvious fix would be to delete it.
+
+**The load-bearing assertion is on the EFFECT, not the throw:** refusing must return no events. A
+guard that threw after pushing rows would satisfy every message assertion and still put junk in the
+log. Three mutations, each red for its own reason — removing the guard fails 7 of 9; removing it from
+the `next` argument alone fails exactly **1**, which is the test that exists for the
+`rule:safety-flag-needs-a-test` shape of one path gated and one not; collapsing the three hints into
+one fails 5.
+
+**What generalises, and it is a widening of a rule rather than a new one.** `rule:discernment-checks`
+§1 says a check that cannot fail is worse than no check, and has always been read as being about the
+check's own logic. Both instances today were checks whose logic was fine and whose **fixture** could
+not express the failure. So the question to ask of a guard test is not "does it assert the refusal"
+but *"could the input it constructs ever have been refused?"* — and a shared fixture builder is the
+most likely place for the answer to be no, because a builder exists precisely to produce valid
+objects.
+
 ### N104 · `migrate --apply` stages into another repo's index with no pre-flight, and took a colleague's commit — **S2** — **RESOLVED 2026-09-28**
 
 **This one I caused, and it is the mirror image of what was reported to me hours earlier.**
