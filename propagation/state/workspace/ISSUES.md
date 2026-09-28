@@ -4052,13 +4052,21 @@ the `next` argument alone fails exactly **1**, which is the test that exists for
 `rule:safety-flag-needs-a-test` shape of one path gated and one not; collapsing the three hints into
 one fails 5.
 
-**What generalises, and it is a widening of a rule rather than a new one.** `rule:discernment-checks`
-§1 says a check that cannot fail is worse than no check, and has always been read as being about the
-check's own logic. Both instances today were checks whose logic was fine and whose **fixture** could
-not express the failure. So the question to ask of a guard test is not "does it assert the refusal"
-but *"could the input it constructs ever have been refused?"* — and a shared fixture builder is the
-most likely place for the answer to be no, because a builder exists precisely to produce valid
-objects.
+**The general form is now `rule:mutate-behind-the-fixture-builder`, and it is deliberately NOT
+stated here.** Two instances in two repos from opposite directions cleared this tree's bar for
+promoting a project finding to a global rule, so the reasoning lives in the rule and this entry keeps
+only what is local to propagate. Restating it here is what produced nine divergent copies of
+tool-priority.
+
+**My first framing was wrong and the peer's correction is the reason the rule is useful.** I proposed
+widening `rule:discernment-checks` §1 — "ask of every guard test whether its input could ever have
+been refused". Their objection: the obligation to mutate is ALREADY in place, in §1 and
+`rule:safety-flag-needs-a-test` step 4, and both instances were found by satisfying it. So the gap was
+never that nobody knew to mutate; a widened §1 would have added a manual review step duplicating a
+mechanical check people already own, *"and it will be skipped in exactly the sessions that skip the
+mutation."* What was missing was the signal of WHERE to aim, because nobody mutates every guard — the
+sample is chosen by intuition. It landed as a greppable targeting heuristic beside
+`rule:name-what-no-test-executes` instead.
 
 ### N104 · `migrate --apply` stages into another repo's index with no pre-flight, and took a colleague's commit — **S2** — **RESOLVED 2026-09-28**
 
