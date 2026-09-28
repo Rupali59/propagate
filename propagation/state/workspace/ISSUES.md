@@ -4029,12 +4029,147 @@ words: *"one `-A` away from being authored by whoever commits next."*
 **Warned, not refused, and that is deliberate.** Refusing would stop the refresh for any
 workspace with uncommitted work — most of them, most of the time — and a refresh that silently
 stops happening is N55, the issue this rider exists to fix. So it writes, and the digest names
-the workspace. Dirtiness is sampled BEFORE the write, or a file this run creates is what makes
-the tree look dirty. Unreadable git state is its own outcome, never "clean".
+the workspace. Unreadable git state is its own outcome, never "clean".
 
-**NOT done, and it is not mine to decide:** the migration still plans
-`propagation/state/workspace/` inside that project repo, which would reintroduce the split the
-rule moved to remove. Whether `obsidian-vk-publish` is a workspace or a project inside
-`Vipin Kaushik` is a decision about that tree — the same class as N100's worktrees. The peer
-says it should not migrate; I have left it unapplied and said so.
+**Refined the same day, on the reporter's second message, and their version is better.** The
+first fix sampled the tree BEFORE the write, which is correct for the question *"was it dirty
+when we wrote?"* — and that turned out to be the wrong question. Their argument:
+
+> "The warning is most useful **after** the write, addressed to whoever commits next, and it
+> currently goes to the log of a 09:00 job nobody reads. If the files it wrote are still
+> untracked on the next run, that is the moment worth warning at — the first warning was
+> advice, the second is evidence it went unread."
+
+So `treeDirty()` is gone and `refsUntracked()` replaced it: `git ls-files --others
+--exclude-standard -- propagation/refs`, sampled AFTER the write. Three things change. The
+warning repeats every run until the files are committed and **stops by itself** once they are,
+so it cannot become permanent furniture. It no longer fires on a tree that is dirty for reasons
+that are nobody's business but the owner's — only on output this tool produced. And a tree that
+is dirty at write time but committed by evening never warns at all, which is the case where the
+old warning was pure noise.
+
+The test moved with it, from a source assertion to a real one: `refsUntracked` is exported and
+run against a temp repo through all four states — empty, freshly written, unrelated-work-present,
+committed — plus the unreadable path, which must be `null` and never `0`. It was a read-only
+`git` call all along, so there was never a reason not to execute it
+(`rule:name-what-no-test-executes`). Both mutations go red for their own stated reason: making
+unreadable return `0` fails the §2 assertion, and dropping the `-- propagation/refs` pathspec
+fails *"the warning is about OUR output, not about the state of their tree."*
+
+**3 · The baseline evidence string read as a complaint, and someone deleted the file.** Also
+theirs, and it had already cost something before it was reported: a session read a first-run
+baseline snapshot as an accusation that something had gone wrong and removed it — which
+silently restarts drift detection from zero. In their words: *"I read three things that were
+each true as one thing that was false — something wrote a bogus baseline in the wrong place."*
+The replacement wording is theirs verbatim; they named its load-bearing parts as the last clause
+and the word "expected". `lib/refs/snapshot.mjs` now says a baseline is expected on a first run,
+not a gap, that future runs diff against it, and that deleting it restarts detection from zero.
+
+**4 · SETTLED, and the answer exposed a defect in fix 1.** Rupali: *"yes that is a workspace
+under vk."* The peer's read was the opposite — a project inside `Vipin Kaushik` that carries a
+sidecar only because it has nineteen real edges to declare — and they questioned whether
+propagate infers workspace-hood from a sidecar's presence. **It does not, and checking rather
+than relaying that was the right call:** `classifyMarker` requires a strict `workspace: true`
+and `obsidian-vk-publish/.propagates.yml:15` declares exactly that. Nothing was inferred; the
+file says so, and discovery lists it as workspace 18 of 20.
+
+So the classification was never ambiguous in the data — and with it settled, fix 1 is wrong in
+a way that only this answer could reveal:
+
+| | says |
+|---|---|
+| `.propagates.yml:15` | `workspace: true` |
+| discovery | workspace, 18 of 20 |
+| its own `propagation/refs/` | present — the per-workspace artifact |
+| its STATE / DECISIONS / GOTCHAS | **133 KB in `Vipin Kaushik/propagation/state/obsidian-vk-publish/`** — the PROJECT slot |
+| its own `propagation/state/` | **does not exist** |
+| the stubs' own text | *"propagation/ owns state and decisions for every project in this workspace"* |
+| `migrate`, before today | *"already migrated, nothing to move"* |
+
+`stubTargetResolves` asks *does the declared target exist?* and stops. It cannot distinguish a
+PROJECT pointing out to `<workspace>/propagation/state/<name>/`, which is the default layout and
+correct, from a WORKSPACE pointing at its parent's project slot, which is a misplacement. Both
+resolve. `rule:discernment-checks` §6 — a reader answering a narrower question than the one
+asked, and answering it reassuringly. It is the same shape as **G71, blind in both directions**,
+applied to a predicate: the check was defended against resolving to *nothing* and not against
+resolving to the *wrong kind of place*.
+
+`stubPlacement(stubPath, root)` now returns `inside` / `outside` / `dangling` / `not-a-stub` —
+four words, because the caller's decision differs for each — and `declaresWorkspace()` reads the
+marker through `classifyMarker`, the same function discovery uses, so the two cannot answer
+"is this a workspace" differently. An outward stub in a declared workspace is now a **conflict**
+naming both readings: *"the stub says project, the marker says workspace."*
+
+**Conflict rather than an automatic move, deliberately.** The real files are large, live, and in
+a different repo; relocating them silently would be this command settling a question about
+another tree. The test pair is the whole point — same stub, same target, one line of marker
+different, and the correct verdict inverts. The peer's case is asserted still working, and a
+typo'd `workspace: "true"` promotes nothing, matching discovery's strictness.
+
+**5 · AND THE STATE DOES NOT MOVE — which made the new conflict correct in shape and wrong in
+this instance.** Rupali, relayed the same hour: the consolidation stays, `workspace: true` stands.
+So `obsidian-vk-publish` is a declared workspace that consolidates its state UPWARD into
+`Vipin Kaushik`, deliberately. `rule:state-and-decisions` carries the reason and it is not local
+to that pair: seven projects, seven git repos, six branches, and every check that read per-repo
+state needed bespoke cross-repo, cross-branch machinery. Moving 148 KB back out would undo exactly
+that and strand this state on a feature branch in a second repo.
+
+Nothing had to be undone, because nothing was moved — the decision was left to a person, which is
+the one part of this sequence that went right first time. What had to change is the VERDICT: fix 4
+would have reported a correct tree as two conflicts forever, and
+`lib/report/doctor/workspaces.mjs:340-343` already records why that is its own defect — *a
+permanently-red check trains people to ignore it.* Naming a real shape is worth nothing if the
+name is wrong in the instance you ship it against.
+
+`consolidatesUpward()` closes it: an outward stub aimed at the parent workspace's own slot for
+this repo is a LAYOUT, reported as a skip that says *"consolidated upward deliberately"* so the
+next reader does not "fix" it. Any other outward target is still a conflict, which is what keeps
+the check meaningful.
+
+**DERIVED, not declared, and that was the choice worth making.** The peer offered a sidecar
+opt-out key as the fallback. Every consolidating workspace would have had to remember it, and the
+ones that forgot would read as faults — G70, a curated inclusion list silently fails to grow,
+where a derived population grows for free. So it asks the disk instead: the parent must itself
+declare `workspace: true` AND own the slot for this basename. The negative control is the
+load-bearing test — with an undeclared parent it is still a conflict, without which consolidation
+would be inferred from path shape alone and every outward stub excused.
+
+**6 · The stub-driven check was blind to anything that left no signpost.** Found by Rupali running
+the dry run and the plan's silence being read rather than skimmed. `STATE.md` and
+`docs/DECISIONS.md` have stubs, so fix 4 saw them. **`GOTCHAS.md` — 53 KB, the largest of the
+three — has no stub anywhere in that repo** (confirmed with `git ls-files`, not `find`, per G-L),
+so it produced ZERO rows. Acting on that plan would have addressed two artifacts and left the
+biggest silently behind, and the silence was indistinguishable from "no such file" —
+`rule:discernment-checks` §2 again, two levels deep in the same fix.
+
+The population is now DERIVED from the parent's slot rather than from local signposts. Under a
+deliberate consolidation a parked artifact is not a fault, so it is a **note**, not a conflict —
+but it is still reported, and the finding it carries is real and is about that repo rather than
+about propagate: *STATE and DECISIONS are findable from inside the plugin repo and GOTCHAS.md is
+not, so a reader standing there cannot discover it.* The peer is rewriting the stub text, which
+says "every project in this workspace" about something that is not a project — the sentence that
+made the layout look deliberate to both of us, in the one way it was not.
+
+**7 · And the replacement check was itself too narrow — caught before it ever shipped.** Found
+2026-09-28 while deciding what to stage, by reading the hub's own working tree rather than trusting
+the check: the scheduled refresh had modified **two TRACKED files** under
+`~/Documents/GitHub/propagation/refs/`, and `refsUntracked` reported **0**.
+
+`git ls-files --others` answers "what is untracked". The hazard is `git add -A`, and `-A` sweeps a
+modified tracked file exactly as it sweeps an untracked one. Worse, modified is the COMMON case: a
+registry is untracked exactly once, on the run that creates it, and modified on every run after —
+so the check would have gone quiet permanently after the first adoption, on the very repos where
+the refresh runs most often. It is now `git status --porcelain -- propagation/refs`, which covers
+untracked, unstaged and staged-not-committed; all three are swept and all three are still
+unadopted. `refsUncommitted`, not `refsUntracked`, because that is the question.
+
+The test gained the two cases the old one could not reach — modify a committed registry, then stage
+it — and both must still report 1. Staging is not committing.
+
+**Four defects, one shape, inside thirty hours:** a string written for one situation applied
+to a second (the peer's baseline), a predicate written for one situation applied to a second
+(`stubTargetResolves`), and a population read from signposts rather than from the ground
+(`GOTCHAS.md`). Each was right where its author was looking. G71's *blind in both directions*
+generalises past extraction: every one of them failed by matching the wrong thing, not nothing,
+and so returned a pass.
 

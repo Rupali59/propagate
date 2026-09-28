@@ -521,29 +521,48 @@ function driftSnapshot(reconcileResult, workspaces = WORKSPACES) {
  * recreate N55 inside its own fix.
  */
 /**
- * Is this workspace's git tree dirty RIGHT NOW?
+ * Are the files THIS TOOL writes still uncommitted in that repo?
  *
- * Reported 2026-09-27 by the session working in `obsidian-vk-publish`, from a
- * real incident: the refresh created `propagation/refs/*` in its repo while it
- * had uncommitted work, and its next `git add -A` swept those files into an
- * unrelated commit. No harm that time — the files were legitimate — but as it
- * put it, "a migration that creates files in a repo with uncommitted changes is
- * one -A away from being authored by whoever commits next".
+ * REPLACED a dirty-tree check on 2026-09-27, on a refinement from the session
+ * that got bitten. Its argument: the dirty-tree warning fires at write time,
+ * into the log of a 09:00 job nobody reads, and describes a transient state.
+ * "If the files it wrote are still untracked on the NEXT run, that is the
+ * moment worth warning at — the first warning was advice, the second is
+ * evidence it went unread."
  *
- * WARN RATHER THAN REFUSE, deliberately. Refusing would stop the refresh for
- * any workspace with uncommitted work, which is most of them most of the time —
- * and a refresh that silently stops happening is N55, the issue this rider
- * exists to fix. So it writes, and it SAYS it wrote into a dirty tree.
+ * That is strictly better and it is why this asks a different question. The
+ * hazard was never "the tree was dirty" — it was that `propagation/refs/*`
+ * sits unadopted until someone's `git add -A` claims it. Untracked is the
+ * condition that persists, so the warning repeats every run until the files are
+ * committed deliberately, and stops the moment they are.
  *
- * Unreadable git state reads as "unknown", never as "clean": claiming a tree is
- * clean when the check failed is the reassuring-silence this digest is full of
- * warnings about.
+ * Unreadable git state returns `null` and is reported as its own outcome:
+ * claiming the files are adopted when the check failed is the reassuring
+ * silence this digest is otherwise full of warnings about.
  */
-function treeDirty(root) {
+function refsUncommitted(root) {
   try {
-    const r = spawnSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8", timeout: 5000 });
+    // `status --porcelain`, NOT `ls-files --others`.
+    //
+    // WIDENED 2026-09-28, before this ever shipped, by reading the hub's own
+    // tree while deciding what to stage: the scheduled refresh had modified two
+    // TRACKED files under propagation/refs and `ls-files --others` reported 0.
+    //
+    // The hazard is `git add -A`, and `-A` sweeps a modified tracked file
+    // exactly as it sweeps an untracked one — so counting only untracked answers
+    // a narrower question than the one the warning exists to ask, and answers it
+    // as "adopted". It is also the COMMON case: a registry is untracked once, on
+    // the run that creates it, and modified on every run after.
+    //
+    // Porcelain covers untracked, unstaged and staged-not-committed, which is
+    // the right set: all three are swept, and all three are still unadopted.
+    const r = spawnSync(
+      "git",
+      ["-C", root, "status", "--porcelain", "--", "propagation/refs"],
+      { encoding: "utf8", timeout: 5000 },
+    );
     if (r.status !== 0) return null;
-    return r.stdout.trim().length > 0;
+    return r.stdout.split("\n").filter((l) => l.trim()).length;
   } catch {
     return null;
   }
@@ -554,10 +573,11 @@ async function refsSnapshot(dryRun) {
   const results = [];
   for (const ws of WORKSPACES) {
     try {
-      // Sampled BEFORE the write, so a file this run creates cannot be the
-      // thing that makes the tree look dirty.
-      const dirtyBefore = dryRun ? false : treeDirty(ws.root);
       const plan = await migrateRefs({ workspace: ws.root, apply: !dryRun });
+      // Sampled AFTER the write, deliberately: the question is whether what
+      // this tool produced is still unadopted, which is only answerable once it
+      // exists. On a dry run nothing was written, so nothing is owed adoption.
+      const pending = dryRun ? 0 : refsUncommitted(ws.root);
       results.push({
         workspace: ws.name,
         ok: true,
@@ -565,8 +585,8 @@ async function refsSnapshot(dryRun) {
         refs: plan.refs,
         events: (plan.events ?? []).length,
         applied: plan.applied === true,
-        wroteIntoDirtyTree: Boolean(dirtyBefore) && plan.applied === true && (plan.events ?? []).length > 0,
-        gitUnreadable: dirtyBefore === null,
+        refsUncommitted: typeof pending === "number" ? pending : null,
+        gitUnreadable: pending === null,
       });
     } catch (err) {
       // Includes the concurrent-writer abort and the unparseable-snapshot
@@ -1280,9 +1300,10 @@ export function computeDiff(snapshot, prior) {
     // The dirty-tree warning. Named per workspace, because the action is
     // "commit or stash that repo deliberately", not a global setting.
     for (const r of rf.results) {
-      if (r.wroteIntoDirtyTree) {
-        refsLines.push(`? ${r.workspace} — wrote into a tree with uncommitted changes; ` +
-          "commit propagation/refs/ deliberately or the next `git add -A` adopts it");
+      if (r.refsUncommitted) {
+        refsLines.push(`? ${r.workspace} — ${r.refsUncommitted} refs file(s) still UNCOMMITTED; ` +
+          "commit propagation/refs/ deliberately, or the next `git add -A` adopts them into " +
+          "whatever is being committed");
       } else if (r.gitUnreadable) {
         refsLines.push(`? ${r.workspace} — could not read git status, so cannot say whether the tree was clean`);
       }
@@ -1874,4 +1895,5 @@ export {
   adoptionSnapshot as adoptionSnapshotForTest,
   rollupSnapshot as rollupSnapshotForTest,
   safeNewestMtimeMs as safeNewestMtimeMsForTest,
+  refsUncommitted as refsUncommittedForTest,
 };

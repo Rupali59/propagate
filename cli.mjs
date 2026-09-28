@@ -1896,6 +1896,7 @@ async function migrateCmd(argv = []) {
     console.log(`          ${DIM}-> ${short(m.to)}${m.crossRepo ? "  (cross-repo: history stays behind)" : ""}${RESET}`);
   }
   for (const a of plan.alreadyMigrated) console.log(`  ${DIM}skip    ${short(a.from)} — ${a.reason}${RESET}`);
+  for (const n of plan.notes ?? []) console.log(`  ${YELLOW}note${RESET}    ${short(n.from)} — ${n.reason}`);
   for (const c of plan.conflicts) console.log(`  ${RED}conflict${RESET} ${short(c.from)} — ${c.reason}`);
   // Rendered in the DRY RUN, so the operator sees this before choosing, rather
   // than discovering it as a refusal after typing --apply.

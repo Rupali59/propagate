@@ -234,6 +234,36 @@ test("a project that appears is a baseline for THAT project, not N creations", a
   assert.match(ev[0].evidence, /unknown/i);
 });
 
+test("the two baselines say DIFFERENT things, and the first-run one says what deleting costs", async () => {
+  const { diffSnapshots } = await import("../../lib/refs/snapshot.mjs");
+
+  // The situation the supplied wording was written for: no previous snapshot
+  // at all, so the reader is looking at a brand-new file and deciding whether
+  // it is junk. A session deleted one of these on exactly that judgement.
+  const [first] = diffSnapshots(null, snap({ alpha: proj({ main: ref() }) }));
+  assert.equal(first.type, "baseline");
+  assert.match(first.evidence, /expected/i,
+    "a first run must say the baseline is EXPECTED — the old text described the gap and read as a fault report");
+  assert.match(first.evidence, /delet\w*/i,
+    "and must say what deleting it costs, which is the one fact the deleter did not have");
+
+  // The situation it was NOT written for: the workspace has been observed for
+  // months, one new project appeared. No file is being created and nobody is
+  // deciding whether to delete anything.
+  const [added] = diffSnapshots(
+    snap({ alpha: proj({ main: ref() }) }),
+    snap({ alpha: proj({ main: ref() }), beta: proj({ main: ref() }) }),
+  );
+  assert.equal(added.type, "baseline");
+  assert.doesNotMatch(added.evidence, /delet\w*/i,
+    "a project appearing must not warn about deleting a file that already exists and is not at risk");
+  assert.doesNotMatch(added.evidence, /first run/i,
+    "it is not a first run — the workspace has been snapshotted before");
+
+  assert.notEqual(first.evidence, added.evidence,
+    "if the two are identical again, one string is serving two situations and one of them is being lied to");
+});
+
 test("pruned events still carry the work verdict through the reshape", async () => {
   const { diffSnapshots } = await import("../../lib/refs/snapshot.mjs");
   const prev = snap({ alpha: proj({ feat: ref({ merge_state: "unmerged", upstream: null }) }) });

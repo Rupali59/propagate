@@ -19,9 +19,13 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+
+import { refsUncommittedForTest } from "../../digest.mjs";
 
 const DIGEST = readFileSync(
   path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "digest.mjs"),
@@ -95,23 +99,85 @@ test("a workspace whose refresh FAILS is reported, never skipped", () => {
     "and it must reach the rendered digest, not just the snapshot");
 });
 
-test("the refresh warns when it wrote into a dirty tree, and never refuses over it", () => {
+test("the adoption warning fires AFTER the write, not before it", () => {
   // Reported by the session working in obsidian-vk-publish, from a real
   // incident: the refresh created propagation/refs/* while its repo had
   // uncommitted work, and its next `git add -A` swept those files into an
   // unrelated commit. "One -A away from being authored by whoever commits next."
-  assert.match(DIGEST, /function treeDirty\(/, "the refresh must be able to see a dirty tree");
-  assert.match(DIGEST, /wroteIntoDirtyTree/, "and must carry that fact into its result");
-  assert.match(DIGEST, /const dirtyBefore = dryRun \? false : treeDirty\(ws\.root\)/,
-    "sampled BEFORE the write, or a file this run creates makes the tree look dirty");
+  //
+  // The first fix sampled `treeDirty()` BEFORE the write. They asked for a
+  // better one and were right: that warning describes a transient state, fires
+  // once into a 09:00 log, and is addressed to nobody. Untracked-after-the-write
+  // persists until someone acts on it. "The first warning was advice, the
+  // second is evidence it went unread."
+  assert.doesNotMatch(DIGEST, /treeDirty/,
+    "the dirty-tree check is superseded — warn on files still uncommitted on a LATER run instead");
+  assert.match(DIGEST, /const pending = dryRun \? 0 : refsUncommitted\(ws\.root\)/);
+  assert.doesNotMatch(DIGEST, /ls-files", "--others/,
+    "untracked-only is too narrow: `git add -A` sweeps MODIFIED tracked files too");
+
+  const writeAt = DIGEST.indexOf("await migrateRefs({ workspace: ws.root");
+  const checkAt = DIGEST.indexOf("refsUncommitted(ws.root)");
+  assert.ok(writeAt > 0 && checkAt > 0, "the refresh block moved — this check has gone blind");
+  assert.ok(checkAt > writeAt,
+    "the check must run AFTER the write: what it asks is whether what this tool produced is unadopted");
 
   // WARN, never refuse. Refusing would stop the refresh for any workspace with
-  // uncommitted work — most of them, most of the time — and a refresh that
+  // uncommitted work -- most of them, most of the time -- and a refresh that
   // silently stops is N55, the issue this rider exists to fix.
-  assert.doesNotMatch(DIGEST, /if \(dirtyBefore\)[^\n]*continue;/,
-    "a dirty tree must not skip the refresh — that rebuilds the silence N55 is about");
+  assert.doesNotMatch(DIGEST, /if \(pending\)[^\n]*continue;/,
+    "uncommitted output must not skip the refresh — that rebuilds the silence N55 is about");
 
-  // Unreadable git state is its own outcome, not "clean".
+  // Unreadable git state is its own outcome, not "adopted".
   assert.match(DIGEST, /gitUnreadable/,
     "could-not-read must be distinguishable from clean (rule:discernment-checks §2)");
+});
+
+test("refsUncommitted RUNS, and tells the cases apart — including a MODIFIED tracked file", () => {
+  // Behavioural, unlike its neighbours above, and deliberately so: those are
+  // source assertions because executing reap() would delete real skills. This
+  // is a read-only `git ls-files`, so there is no excuse for not running it --
+  // rule:name-what-no-test-executes. A source assertion here would prove the
+  // call is spelled correctly and nothing about whether it answers.
+  const root = mkdtempSync(path.join(tmpdir(), "refs-untracked-"));
+  try {
+    const git = (...a) => spawnSync("git", ["-C", root, ...a], { encoding: "utf8" });
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+
+    assert.equal(refsUncommittedForTest(root), 0, "an empty repo owes nobody an adoption");
+
+    mkdirSync(path.join(root, "propagation", "refs"), { recursive: true });
+    writeFileSync(path.join(root, "propagation", "refs", "snapshot.json"), "{}");
+    assert.equal(refsUncommittedForTest(root), 1, "a freshly written registry is untracked — warn");
+
+    // Unrelated uncommitted work must NOT trigger it. This is the whole
+    // difference from treeDirty(), which counted exactly this as a reason.
+    writeFileSync(path.join(root, "unrelated.txt"), "someone else's work in progress");
+    assert.equal(refsUncommittedForTest(root), 1,
+      "the warning is about OUR output, not about the state of their tree");
+
+    git("add", "propagation");
+    git("commit", "-qm", "adopt the registry");
+    assert.equal(refsUncommittedForTest(root), 0,
+      "once committed the warning must STOP, or it is noise and gets filtered out");
+
+    // THE CASE `ls-files --others` MISSED, and the common one: after the first
+    // adoption every later refresh MODIFIES a tracked file. `git add -A` sweeps
+    // that identically, so reporting 0 here would be the original hazard back.
+    writeFileSync(path.join(root, "propagation", "refs", "snapshot.json"), '{"captured_at":"later"}');
+    assert.equal(refsUncommittedForTest(root), 1,
+      "a MODIFIED tracked registry is still unadopted — untracked-only answers a narrower question");
+
+    // Staged-but-not-committed is also still swept, and still unadopted.
+    git("add", "propagation/refs/snapshot.json");
+    assert.equal(refsUncommittedForTest(root), 1,
+      "staging is not committing — a staged registry is one `git commit` away from an unrelated commit");
+
+    assert.equal(refsUncommittedForTest(path.join(root, "nope")), null,
+      "a path git cannot read is null, never 0 (rule:discernment-checks §2)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

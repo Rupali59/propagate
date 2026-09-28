@@ -85,6 +85,19 @@ not add up SAYS so`, `READY collapses a shared node+state into ONE expandable ro
 file-wide nondeterminism, plausibly fetch/async ordering, rather than one intermittent
 assertion. The singular framing in this heading is the thing to correct first.
 
+**2026-09-27: it is not confined to `ui-client.test.mjs` either — it follows the MOUNT HARNESS.**
+A full run failed `the six dispositions render in three groups, each with its count` and
+`already-inserted is MUTED, and it is the only muted row`, both in `tests/unit/ui-conflicts.test.mjs`,
+a file added two days earlier that shares `tests/helpers/mount-client.mjs` with the others. Both
+actual values were the loading placeholder — `reading the reminders list…` — so the assertion ran
+against a component that had not settled, which is the same signature as the five names above and
+is the most specific evidence yet for the fetch/async-ordering theory. The same file then passed
+**3 of 3** in isolation and the whole suite passed on the next full run, 0 of 2244.
+
+So the heading should not say `ui-client` at all. Whatever this is, any test that mounts the
+client can exhibit it, and every new mount-based test inherits it — which is the argument for
+chasing it rather than continuing to route around it one file at a time.
+
 Reframed 2026-09-24 by measuring the two npm sub-suites separately, which is the one thing three
 sessions of looking at aggregate lines could not do. **No tests were ever lost.**
 
