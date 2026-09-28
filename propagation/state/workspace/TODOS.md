@@ -70,6 +70,49 @@ Three hazards are verified against the live list rather than predicted: exit cod
 so a `\n`-anchored parser misses them, and `completion date` is the clock while
 `modification date` is not — a tag edit bumps the latter.
 
+### PR-008 · Chase the intermittent `ui-client` failure — the 91 "missing" tests were the ruler — **RESOLVED 2026-09-28**
+
+**ROOT CAUSE: one line.** `tests/helpers/mount-client.mjs` ended with
+`await new Promise((r) => setTimeout(r, 30))` and called that settled. `node --test`
+parallelises across files, so under contention 30ms was not enough for the mount effect's fetch
+to resolve and Preact to re-render — assertions then ran against the loading placeholder, which
+is the actual value in **every** occurrence this entry records.
+
+That accounts for the whole shape of it and explains what three sessions of looking at aggregates
+could not: intermittent, always clean in isolation, ~11 test names across two files, and 2
+failures escalating to 6 in a day as mount-based tests were added. Nothing was ever wrong with an
+assertion.
+
+**Confirmed before rewriting rather than after:** raising the constant to 400 turned a 6-failure
+run into 2306 passing. Then NOT shipped that way — a bigger number is the same bug, re-breaking on
+a slower or busier machine with nobody remembering why.
+
+**The fix is a condition:** no fetch in flight, no pending macrotask, the mount has issued its
+first call, and the DOM signature (text + attributes + style) unchanged. Four attempts were needed
+and the three failures are recorded in the file, because each is a way of getting quiescence
+wrong:
+
+1. Text-only signature — missed the chart's `--len`, a style write that changes no text.
+2. Counting rAF callbacks — a component that schedules a frame from inside a frame is never
+   quiet; 24 of 25 tests timed out.
+3. Awaiting in-flight fetches unconditionally — a never-resolving fetch hung forever and the
+   timeout below it was unreachable.
+4. Allowing quiescence before the mount had fetched — two quiet ticks can pass before Preact's
+   double-hop fires the effect, which is the original bug in a different window.
+
+**Verified:** ui-client 25/25 and ui-conflicts 9/9 in isolation, and three consecutive full runs
+at 2306 tests / 0 failures where one run had failed six. `tests/unit/mount-client-settle.test.mjs`
+covers the harness directly — including the failing case, which found defects 3 and 4 immediately.
+
+**What this entry got right and what it got wrong.** Right: reframing it as file-wide rather than
+one assertion, and refusing to accept the aggregate-count instrument. Wrong: it read the widening
+name set as evidence of nondeterminism *in the tests*, when the names were widening simply because
+every new mount-based test inherited one shared sleep. The corpus grew; the bug did not move.
+
+---
+
+_Original entry, kept for the reasoning that led here:_
+
 ### PR-008 · Chase the intermittent `ui-client` failure — the 91 "missing" tests were the ruler
 
 **Half of this landed 2026-09-25.** `package.json`'s `test` script no longer short-circuits:
