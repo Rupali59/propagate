@@ -47,6 +47,7 @@ import {
   deliveryLag,
   sourceHashesAtHead,
   servedHashesFor,
+  SHIPPED_EXCLUDE_FILES,
   activeInstallPath,
 } from "../../lib/report/doctor/delivery.mjs";
 import { Reporter } from "../../lib/report/doctor/reporter.mjs";
@@ -186,6 +187,94 @@ test("sourceHashesAtHead excludes tests/docs/propagation and returns one hash pe
   assert.ok(!("tests/unit/x.test.mjs" in hashes), "tests/ must be excluded");
   assert.ok(!("docs/PLAN.md" in hashes), "docs/ must be excluded");
   assert.ok(!Object.keys(hashes).some((p) => p.startsWith("propagation/")), "propagation/ must be excluded");
+});
+
+/* ── the two reasons this check could never report `current` ─────────────── */
+
+/**
+ * A TRACKED SYMLINK must hash to its TARGET STRING on both sides.
+ *
+ * `git hash-object <path>` follows the link and hashes the target's CONTENT,
+ * while git stores the target PATH as the blob. So every mode-120000 file
+ * differed between served and source, permanently — and propagate ships two of
+ * them (`skills/propagate/SKILL.md`, `node_modules/.bin/yaml`). The verdict was
+ * stuck at `incoherent` and the remediation told the operator to uninstall and
+ * reinstall the plugin, which cannot help because nothing is wrong.
+ *
+ * A check that cannot PASS is the twin of one that cannot fail
+ * (`rule:discernment-checks` §1), and the dispensed remedy is what makes it
+ * expensive rather than merely noisy.
+ */
+test("a tracked SYMLINK hashes to its target string, so served matches HEAD", (t) => {
+  const { root } = gitRepo(t, { files: { "real.md": "the real content\n" } });
+  execFileSync("ln", ["-s", "real.md", path.join(root, "link.md")]);
+  git(root, "add", "-A");
+  execFileSync("git", ["-C", root, "commit", "-q", "-m", "add link"], { encoding: "utf8" });
+
+  const src = sourceHashesAtHead(root);
+  assert.equal(git(root, "ls-tree", "HEAD", "--", "link.md").split(" ")[0], "120000", "fixture must actually be a symlink");
+
+  const served = servedHashesFor(root, Object.keys(src));
+  assert.equal(
+    served["link.md"], src["link.md"],
+    "a symlink's served hash must equal its HEAD blob — hashing the dereferenced file is what made this check unable to pass",
+  );
+  // And it must NOT be the dereferenced content's hash, or the fix is a coincidence.
+  const deref = execFileSync("git", ["hash-object", path.join(root, "real.md")], { encoding: "utf8" }).trim();
+  assert.notEqual(served["link.md"], deref, "hashing the target FILE is the defect; assert it is not what happens");
+});
+
+test("a regular file that genuinely differs is still reported — the negative control", () => {
+  // Without this, the symlink fix could be "return the source hash for everything".
+  const a = mkdtempSync(path.join(tmpdir(), "delivery-a-"));
+  const b = mkdtempSync(path.join(tmpdir(), "delivery-b-"));
+  try {
+    writeFileSync(path.join(a, "x.mjs"), "one\n");
+    writeFileSync(path.join(b, "x.mjs"), "two\n");
+    const ha = servedHashesFor(a, ["x.mjs"]);
+    const hb = servedHashesFor(b, ["x.mjs"]);
+    assert.notEqual(ha["x.mjs"], hb["x.mjs"], "different content must still produce different hashes");
+  } finally {
+    rmSync(a, { recursive: true, force: true });
+    rmSync(b, { recursive: true, force: true });
+  }
+});
+
+test("a symlink whose TARGET content changes does not change the link's hash", () => {
+  // Correct, and worth pinning: git tracks the link, not the file it points at.
+  // If this ever flipped, a plugin copy that rewrote a target would read as drift
+  // in the link — which is the old defect wearing the opposite sign.
+  const d = mkdtempSync(path.join(tmpdir(), "delivery-tgt-"));
+  try {
+    writeFileSync(path.join(d, "t.md"), "before\n");
+    execFileSync("ln", ["-s", "t.md", path.join(d, "l.md")]);
+    const before = servedHashesFor(d, ["l.md"])["l.md"];
+    writeFileSync(path.join(d, "t.md"), "after — completely different\n");
+    assert.equal(servedHashesFor(d, ["l.md"])["l.md"], before);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("the installer-rewritten lockfile is dropped from BOTH sides, never one", (t) => {
+  // npm rewrites `node_modules/.package-lock.json`'s version field on install —
+  // served held 0.15.0 where the committed copy held 0.1.0 — so it differed after
+  // every install by design. Excluding it on the served side ALONE would turn
+  // "differs" into "missing", which is a louder wrong answer than the one fixed.
+  assert.deepEqual([...SHIPPED_EXCLUDE_FILES], ["node_modules/.package-lock.json"],
+    "if this list grows past two entries, derive it instead of curating it");
+
+  const { root } = gitRepo(t, {
+    files: { "cli.mjs": "x", "node_modules/.package-lock.json": '{"version":"0.1.0"}\n' },
+  });
+  const src = sourceHashesAtHead(root);
+  assert.ok(!("node_modules/.package-lock.json" in src), "excluded from the source list");
+  assert.ok("cli.mjs" in src, "and only that file — the exclusion must not widen");
+
+  // Because it left the source list, it is not in fileList, so the served side
+  // never looks for it and cannot report it missing.
+  const served = servedHashesFor(root, Object.keys(src));
+  assert.ok(!("node_modules/.package-lock.json" in served));
 });
 
 test("sourceHashesAtHead on a directory with no HEAD returns null — could-not-look, not zero files", (t) => {
