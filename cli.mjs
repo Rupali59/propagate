@@ -1909,7 +1909,19 @@ async function migrateCmd(argv = []) {
 
   const short = (p) => String(p).replace(`${HOME_DIR}/Documents/GitHub/`, "");
   console.log(`${BOLD}migrate${RESET} ${short(plan.workspace)}${apply ? "" : `  ${DIM}(dry run)${RESET}`}`);
-  console.log(`  ${DIM}conforms before:${RESET} ${plan.conformanceBefore.conforms ? "yes" : `no — missing ${plan.conformanceBefore.missing.join(", ")}`}`);
+  // BOTH WORDS, not just `missing`. `conformance()` returns `missing` AND `empty`
+  // (N82's vocabulary: absent, present-but-empty, hollow, never-started are four
+  // different facts). This line printed only `missing`, so a workspace failing for
+  // an EMPTY directory rendered as `no — missing ` with nothing after it — the
+  // exact unattributable output N82 was filed to remove, surviving in a renderer
+  // the fix did not reach. Found 2026-09-28 on Motion-Graphics, whose only defect
+  // is an empty `state/`.
+  const cb = plan.conformanceBefore;
+  const why = [
+    cb.missing?.length ? `missing ${cb.missing.join(", ")}` : null,
+    cb.empty?.length ? `present but EMPTY: ${cb.empty.join(", ")}` : null,
+  ].filter(Boolean).join("; ");
+  console.log(`  ${DIM}conforms before:${RESET} ${cb.conforms ? "yes" : `no — ${why || "reason not reported — the conformance check returned neither missing nor empty, which is a gap in this renderer"}`}`);
 
   for (const c of plan.creates) console.log(`  ${GREEN}create${RESET}  ${short(c)}`);
   for (const m of plan.moves) {

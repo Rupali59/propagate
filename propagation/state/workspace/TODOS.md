@@ -94,6 +94,23 @@ against a component that had not settled, which is the same signature as the fiv
 is the most specific evidence yet for the fetch/async-ordering theory. The same file then passed
 **3 of 3** in isolation and the whole suite passed on the next full run, 0 of 2244.
 
+**ESCALATING, and this is the line that changes the priority.** A 2306-test run later on
+2026-09-28 failed **SIX** at once — the previous maximum across all recorded occurrences was 2 —
+and four of the six are names this entry had never listed: `a fatal reconcile renders the reason,
+not an empty page`, `BLOCKED offers no disposition buttons, and says why`, `every disposition
+button comes from item.allowed, and DIVERGED gets one`, `the top row is fixOrder's first, not a
+re-sorted one`. Both files then passed fully in isolation, 25/25 and 9/9.
+
+The name set is now ~11 across two files and still growing, which settles the question this entry
+has been circling: **nothing is wrong with any assertion.** What is wrong is that mount-based
+tests do not survive being interleaved by the runner.
+
+**The cost has changed, even though nothing is broken.** At 2 failures a full run was still
+readable as "green plus the known flake". At 6 it is not: a real regression arriving today would
+land inside a set of failures that get waved through, and the suite has stopped being a gate for
+exactly the changes most likely to need one. That is the argument for chasing it now rather than
+when it reaches 10 — and it is a different argument from the one this entry was filed on.
+
 Recurred again later on 2026-09-28, in a 2306-test run, and this time in BOTH files at once:
 `charts render, state their coverage, and name the 47%` (ui-client) and `the six dispositions render
 in three groups` (ui-conflicts). Each file then passed in isolation — ui-client 25/25 twice,
