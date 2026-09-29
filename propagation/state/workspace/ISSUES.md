@@ -2,6 +2,34 @@
 
 # Propagate — issue register
 
+> **Disposition vocabulary, added 2026-09-29.** Every `### N…` heading ends in exactly one
+> of these, in bold. Derive the tally; never restate it:
+>
+> ```sh
+> node -e 'const l=require("fs").readFileSync("propagation/state/workspace/ISSUES.md","utf8").split("\n").filter(t=>/^### N\d+/.test(t));
+> const D=/\*\*(OPEN|RESOLVED|BLOCKED|ACCEPTED|APPLIED, UNVERIFIED|WITHDRAWN|MOOT)\b/;
+> console.log(l.length+" headings, "+l.filter(t=>!D.test(t)).length+" undispositioned");'
+> ```
+>
+> | word | means |
+> |---|---|
+> | `OPEN` | live, and nobody is on it |
+> | `BLOCKED` | cannot proceed; the precondition is named beside it |
+> | `ACCEPTED` | the cost was taken deliberately and will not be reverted |
+> | `APPLIED, UNVERIFIED` | the change was made; the verification is outstanding |
+> | `RESOLVED <date>` | closed, with the measurement or code path that closed it |
+> | `MOOT` | the thing it describes no longer exists to be wrong |
+>
+> **The vocabulary exists because the count was unmeasurable.** `PR-005` reported 18
+> undispositioned entries using `/\*\*OPEN\*\*/` — so seven that DID carry a disposition
+> were counted as carrying none, because they said `— OPEN` unbolded, `**OPEN (TODO)**`,
+> `**ACCEPTED, NOT REVERTED**`, `**BLOCKED (on Phase D)**` or
+> `**APPLIED 2026-08-29, VERIFICATION PENDING**`. Those seven were not sloppiness: `BLOCKED`,
+> `ACCEPTED` and `APPLIED, UNVERIFIED` are real states this register needed and had no word
+> for, so people invented one each time. A register whose own tally is an artifact of its
+> matcher is `rule:discernment-checks` §4 living inside the defect register — which is the
+> same sentence `PR-005` used about §2, one level further in.
+
 > **Triage pass, 2026-08-20.** Every entry marked RESOLVED or MOOT below carries the
 > measurement or code path that closed it, not a judgement. **Nine of the twenty-five
 > "open" issues turned out to be already closed** — mostly by the v1 watcher retirement
@@ -64,7 +92,7 @@ downstream paths resolve" check declared a `pathProblems` counter, tested it wit
 for every workspace, regardless of what it found (N17, below). None of the three were subtle once
 looked at directly; all three had been green for a long time before anyone looked.
 
-### N10 · `SKILL.md` documents a launchd label that does not exist — **S1**
+### N10 · `SKILL.md` documents a launchd label that does not exist — **S1** — **RESOLVED 2026-09-29** (0 occurrences of `com.rupali.propagate` in SKILL.md; the wrong label is gone)
 `SKILL.md:15,116,131,243-244` say `com.rupali.propagate`; `lib/plist.mjs:25` uses
 `com.tathya.propagate.watcher`. Every documented `bootout`/`bootstrap` command targets a nonexistent
 label and **fails silently**.
@@ -82,7 +110,7 @@ The `doctor`-prints-the-resolved-label half, previously called out as still open
 `// N10 (doctor half)`, and the subsequent `launchctl list` check (`:651-652`) checks against that
 same resolved label rather than a hardcoded string.
 
-### N14 · `init` rewrites the real plist from a scoped run, disarming the watcher — **S1**
+### N14 · `init` rewrites the real plist from a scoped run, disarming the watcher — **S1** — **RESOLVED 2026-09-29** (`init` no longer regenerates it: `regeneratePlist`/`reloadLaunchd` now sit in `cli.mjs`'s `reload()`, where rewriting the plist is the documented purpose rather than a side effect)
 The same defect as N13, in a second location, and worse because the blast radius is the whole
 machine. `PROPAGATE_SEARCH_ROOTS` scopes discovery, but `PLIST_PATH` (`lib/plist.mjs:26`) is fixed
 to `~/Library/LaunchAgents/`. `cli.mjs init` ends by calling `regeneratePlist({workspaces})` with
@@ -120,7 +148,7 @@ launchd state, and a stray registered job's `ProgramArguments` carry no environm
 scoped-but-imperfectly-cleaned-up test job would run the real watcher against real production paths
 — exactly what this task's safety section forbids).
 
-### N15 · `init` creates a marker that is not a workspace — **S2**
+### N15 · `init` creates a marker that is not a workspace — **S2** — **RESOLVED 2026-09-29** (the template carries a `workspaceLine`; `init --workspace` writes `workspace: true`, and the output names which kind it created)
 `cli.mjs init` writes a template containing `sources: {}` and **no `workspace: true`**. Since
 `lib/discovery.mjs:113` promotes a marker to a ledger-owning workspace only on a strict `true`,
 the directory `init` just created is invisible to discovery. Reproduced 2026-08-13: init printed
@@ -143,7 +171,7 @@ next to `discovered 0 workspaces` as if both were success. `tests/cli/init-reloa
 flags, the default, and the loud-failure path (a target deliberately outside `SEARCH_ROOTS`, so
 discovery can never see it regardless of the marker).
 
-### N11 · Moving a directory silently breaks every `../` edge — **S1**
+### N11 · Moving a directory silently breaks every `../` edge — **S1** — **OPEN** (a design property of sidecar-relative paths rather than a bug with a patch; doctor's ability to tell a MOVE from a declare-ahead has not been re-measured)
 `propagates_to` paths and `sources:` keys both resolve relative to the sidecar's own directory.
 Moving the parent breaks all of them, and `doctor` reports only a yellow "downstream missing" —
 indistinguishable from a declare-ahead entry.
@@ -153,7 +181,7 @@ Hit twice in one day: `design/` → `docs/design/` (3 paths), then the `docs/` r
 *Fix:* keep a last-seen set in `state.json`; "existed at last run, now missing" is a break, not a
 warning.
 
-### N16 · `doctor`'s graph-integration check spent 94% of the run on a known-deferred answer — **S2**
+### N16 · `doctor`'s graph-integration check spent 94% of the run on a known-deferred answer — **S2** — **OPEN** (the same defect as GitHub propagate#4, still open there — `claude mcp list` in a health-check path is what rule:tool-priority forbids)
 Measured 2026-08-13 from `~/Documents/GitHub/Vipin Kaushik`:
 
 ```
@@ -184,7 +212,7 @@ unknown`, a distinct `status: "timeout"` outcome that is never treated as, or pr
 whole register). Measured after: doctor's graph-integration section drops from ~17.8s to
 sub-millisecond on a warm cache, cold-cache cost bounded to ≤2s instead of unbounded.
 
-### N19 · 39 Event rows carry a terminal status with no Transition — no audit trail — **S1**
+### N19 · 39 Event rows carry a terminal status with no Transition — no audit trail — **S1** — **RESOLVED 2026-09-29, MOOT** (describes the v1 schema; v2 rows carry `disposition` directly — 2,946 rows across 8 dispositions — so there is no status/Transition pair left to be missing)
 Full analysis: `docs/DATA_MODEL.md` §6.1. Measured 2026-08-13 in the Vipin Kaushik ledger: 39
 `type: "drift"` rows are written already `status: "done"` or `"wontfix"`, with no matching
 `status_change` row anywhere in the file — no `closed_at`, no `closed_by`, no reasoning trail. All
@@ -200,7 +228,7 @@ as pre-tooling history (no action) or re-emitted under a type that says what the
 has not been made. `doctor` should count `rows.closed_without_transition` (see
 `docs/OBSERVABILITY.md` §1) so this stays visible rather than being forgotten a second time.
 
-### N20 · 87% of the Vipin Kaushik ledger is hand-authored, outside any schema — **S2**
+### N20 · 87% of the Vipin Kaushik ledger is hand-authored, outside any schema — **S2** — **OPEN** (not re-measured since the 2026-08-20 triage, which said so itself; the 87% is an August figure nobody has re-derived)
 Full analysis: `docs/DATA_MODEL.md` §6, §9. Forensic split (`JSON.stringify` emits `{"type":"drift"`
 with no space; hand-authored JSON commonly has a space after the colon) puts 578 of 664 rows in
 that ledger outside this codebase entirely — because `markStatus` had zero production callers for
@@ -217,7 +245,7 @@ rows stop accumulating this way). The 578 existing rows are unmigrated hand-auth
 **freeze, don't convert** — a synthesised identity on historical rows would make a stale
 verification look current, which is worse than no record.
 
-### N22 · Glob expansion correlates states, so raw expanded counts mislead a future drain UI — **S3, design**
+### N22 · Glob expansion correlates states, so raw expanded counts mislead a future drain UI — **S3, design** — **OPEN** (a design question about what a future drain UI should count; no such UI exists yet to be misled)
 Not a v1 defect — a design finding from the v2 spike, recorded here because a finding that lives
 only in a plan file is a finding that is already lost (Phase C of
 `~/.claude/plans/okay-i-dont-think-logical-haven.md`, itself citing R4). Measured in the read-only
@@ -446,7 +474,7 @@ Remaining, re-ordered against what actually shipped:
 Everything else is friction rather than error. **N8** dropped off this list entirely 2026-08-14 —
 moot, not fixed, once `watcher.mjs` (its only caller) was retired; see N8's entry.
 
-### N25 · A ledger is read from the working tree, so its state is whatever branch is checked out — **S2**
+### N25 · A ledger is read from the working tree, so its state is whatever branch is checked out — **S2** — **RESOLVED 2026-09-29** (the v2 store is `~/.propagate/events`, outside every working tree, so no branch can change what it reads. `propagation/PROPAGATION_CROSS_LEDGER.jsonl` is the surviving in-tree exception and doctor reports it separately as unowned)
 
 `reconcile`, `status` and `verify` read ledger and source files from the **working tree**.
 The skill already knows this — every verify event records
@@ -511,7 +539,7 @@ the branches; both are answers that decline to name their scope.
   supersedes
 - `docs/DECISIONS.md` — six 2026-08-10 entries that constrain any fix
 
-### N26 · A stale rendered `PROPAGATION_LEDGER.md` can be committed beside a correct `.jsonl`, and nothing detects it — **S1**
+### N26 · A stale rendered `PROPAGATION_LEDGER.md` can be committed beside a correct `.jsonl`, and nothing detects it — **S1** — **OPEN** (still live: 4 rendered `docs/PROPAGATION_LEDGER.md` files on disk today — Keerti-portfolio, keerti-job-radar, Manav-portfolio, SSJK-mb — all in the location the 2026-08-21 move superseded)
 
 **Symptom.** Committed ledger markdown shows rows as `open` that the authoritative JSONL
 records as `wontfix` or `done`. A reader of the `.md` sees a large open backlog that does
@@ -719,7 +747,7 @@ close it by widening `partner_roots` to make the declaration validate. The entry
 records that exact draft being caught in adversarial review once already.
 
 
-### N39 · A subagent's unscoped `bootstrap --apply` wrote 7 events to the live store — **S2** — **ACCEPTED, NOT REVERTED**
+### N39 · A subagent's unscoped `bootstrap --apply` wrote 7 events to the live store — **S2** — **ACCEPTED** (not reverted — an append-only store cannot be edited; the entry says why)
 
 **2026-08-20.** A Phase 2 lane debugging a dirty-tree test ran `bootstrap --apply` without
 setting `PROPAGATE_SEARCH_ROOTS` / `PROPAGATE_STATE_DIR`. It hit the real search roots and
@@ -762,7 +790,7 @@ NEVER_VERIFIED, 0 REVERSED**. The 2 formerly-REVERSED edges were resolved by han
 (`d1ae5ac0` both-reconciled, `0775c32e` no-change-needed). The 9 never-verified stay
 blocked on N40.
 
-### N42 · `renderMarkdown` has no live caller, and the file it renders is hand-written — **S2** — **BLOCKED (on Phase D)**
+### N42 · `renderMarkdown` has no live caller, and the file it renders is hand-written — **S2** — **BLOCKED** (on Phase D)
 
 > **DUPLICATE OF N31.** One defect, filed twice, five days apart. This entry carries the
 > decision and the full option analysis; N31 carries the earlier false-lines argument, one
@@ -818,7 +846,7 @@ deferral is free.
 
 **Unresolved and needed before the branch-node view reaches a human.**
 
-### N50 · `inventory.test.mjs` classifies by a 5s git timeout, so its verdict depends on machine load
+### N50 · `inventory.test.mjs` classifies by a 5s git timeout, so its verdict depends on machine load — **RESOLVED 2026-09-29** (`tests/cli/inventory.test.mjs` contains no timeout; the 5s git classification is gone)
 
 **Status:** open. Reproduced in 3 of 4 full-suite runs 2026-08-25; passes in isolation every
 time. A third test joins the set intermittently: `a recently-committed repo with a remote
@@ -871,7 +899,7 @@ site so a timeout produces an attributable `status`, not a silently different
 classification. Do NOT simply raise the constant — that moves the threshold without removing
 the dependence on load.
 
-### N52 · `migrate-refs`'s markdown renderer prints `undefined` and misplaces paths into the ref column — **S3** — OPEN
+### N52 · `migrate-refs`'s markdown renderer prints `undefined` and misplaces paths into the ref column — **S3** — **OPEN**
 
 Found 2026-08-27 while refreshing the branch registry after pruning worktrees. The
 **data layer is correct**; only the human-readable rendering is wrong, which is why this is
@@ -1008,7 +1036,7 @@ trade twice over.
 
 ---
 
-### N54 · The gotchas liveness probe counts pointer stubs as inert files, inflating its own headline — **S3** — OPEN
+### N54 · The gotchas liveness probe counts pointer stubs as inert files, inflating its own headline — **S3** — **OPEN**
 
 > **Same root cause as N53 and N55** (cross-linked 2026-08-27). N53 was filed independently hours apart by another session, against a different reader of the same stubs — that neither knew of the other is itself the argument for treating this as one relocation-completeness defect.
 
@@ -1317,7 +1345,7 @@ state-live-sections`, and the mutation was confirmed present in the file before 
 (`rule:discernment-checks` §4 — a `sed` that matches nothing silently no-ops this check).
 Suite: 61 pass, 0 fail.
 
-### N57 · `claudeMdExcludes` is unset, so 76,038 B of non-rules load as memory every session — **S2** — **APPLIED 2026-08-29, VERIFICATION PENDING**
+### N57 · `claudeMdExcludes` is unset, so 76,038 B of non-rules load as memory every session — **S2** — **APPLIED, UNVERIFIED** (2026-08-29)
 
 `.claude/rules/` is a NATIVE Claude Code memory directory (verified against the 2.1.236
 binary, 2026-08-29) and is walked **recursively**. `~/.claude/rules` symlinks to the hub
@@ -1516,7 +1544,7 @@ appends non-heading lines to the current entry, their ~200 lines get absorbed in
 body. **The fix must ship with a per-file assertion that parsed entries equals the count of
 entry-level `##` headings**, or it makes the defect quieter instead of smaller.
 
-### N62 · `scope:` no longer filters delivery; convert `nextjs-dev-server-port` to native `paths:` — **S3** — **OPEN (TODO)**
+### N62 · `scope:` no longer filters delivery; convert `nextjs-dev-server-port` to native `paths:` — **S3** — **OPEN**
 
 Fallout from the 2026-08-29 change that stopped `load-rules.mjs` injecting rule bodies.
 Delivery is now the platform's, and **the native loader has no concept of `scope:`** — that

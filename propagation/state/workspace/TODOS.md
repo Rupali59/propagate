@@ -32,7 +32,41 @@ node cli.mjs backlog --json | node -e 'let s="";process.stdin.on("data",d=>s+=d)
 
 ---
 
-### PR-005 · Give the 18 undispositioned `ISSUES.md` entries a marker
+### PR-005 · Give the 18 undispositioned `ISSUES.md` entries a marker — **RESOLVED 2026-09-29**
+
+**Done, and the count in this heading was wrong — by this entry's own instrument.** Its derive
+command tests `/\*\*OPEN\*\*/`, so seven entries that DID carry a disposition were counted as
+carrying none: `— OPEN` unbolded (N52, N54), `**OPEN (TODO)**` (N62), `**ACCEPTED, NOT REVERTED**`
+(N39), `**BLOCKED (on Phase D)**` (N42), `**BLOCKED**` with the qualifier outside the bold (N38),
+and `**APPLIED 2026-08-29, VERIFICATION PENDING**` (N57). Genuinely undispositioned: **11**.
+
+Those seven were the more useful finding. `BLOCKED`, `ACCEPTED` and `APPLIED, UNVERIFIED` are real
+states the register needed and had no word for, so each author invented one — which is why the
+matcher could not see them. `ISSUES.md` now opens with the vocabulary and the derive command.
+
+**The 11, each disposition carrying its evidence** — 6 closed, 5 open:
+
+| | |
+|---|---|
+| N10 | RESOLVED — 0 occurrences of `com.rupali.propagate` in SKILL.md |
+| N14 | RESOLVED — `init` no longer regenerates the plist; it moved to `reload()`, where that IS the job |
+| N15 | RESOLVED — the template carries a `workspaceLine`; `init --workspace` writes `workspace: true` |
+| N19 | RESOLVED, MOOT — describes the v1 schema; v2 rows carry `disposition` directly |
+| N25 | RESOLVED — the v2 store is outside every working tree; the in-tree cross-ledger is the named exception |
+| N50 | RESOLVED — no timeout left in `tests/cli/inventory.test.mjs` |
+| N11 | OPEN — a design property of sidecar-relative paths, not a bug with a patch |
+| N16 | OPEN — the same defect as GitHub propagate#4, still open there |
+| N20 | OPEN — not re-measured since the 2026-08-20 triage, which said so itself |
+| N22 | OPEN — a design question about a drain UI that does not exist yet |
+| N26 | OPEN — 4 rendered ledgers still on disk, in the location the 2026-08-21 move superseded |
+
+**Four of the five still-open ones are open for a reason worth distinguishing from neglect:** N11
+and N22 are design questions rather than defects, and N16 is tracked publicly. Only N20 and N26 are
+work nobody has done — and N26 gained live evidence today that it is real.
+
+_Original entry:_
+
+### PR-005 · Give the undispositioned `ISSUES.md` entries a marker
 
 Measured 2026-09-23: `ISSUES.md` holds 55 `###` headings — 29 marked `**OPEN**`, 8 marked with a
 terminal word, and **18 carrying neither**. Those 18 are indistinguishable from "nobody said",
