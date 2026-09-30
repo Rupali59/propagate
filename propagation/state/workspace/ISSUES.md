@@ -2858,6 +2858,46 @@ which question it answered.
 
 ### N79 · `rules list` reports a RELEVANCE verdict from a scan of one file type, and calls the three most-cited rules in the tree `unexercised` — **S2** — **OPEN**
 
+**MEASURED 2026-09-30, and it is worse than "one file type" suggests — but the obvious fix is wrong.**
+
+Ran all 30 fingerprints over every markdown file in the tree (4,105 files, node walk not grep — the
+ugrep shim's `--ignore-files` has produced a confident zero twice):
+
+```
+532 (rule, file) hits across the tree
+ 20   4%  CLAUDE.md  <- all rules check can see
+512  96%  invisible to it: STATE/DECISIONS/TODOS 82 · other RULE files 73 · docs 70
+          · GOTCHAS 47 · plan docs 39 · ISSUES 17 · other 184
+```
+
+**And it falsified the premise the work was proposed on.** I had expected many of the 22 pre-existing
+fingerprints to be effectively dead — self-quoting, unable to fire on real prose. **0 of 30 fire only
+on their own body.** Every one fires on between 2 and 107 other files. So [[n35]]'s worry about
+self-quotation is largely answered by measurement: the fingerprints work. The defect is the corpus.
+
+**But widening the corpus naively would flood the output, and a 12-hit sample of the invisible 96%
+says why.** Judged individually rather than counted — because "does the fingerprint fire" is a proxy
+for "does this file restate the rule", which is [[n26]]'s error and now
+`rule:measure-the-claim-not-a-proxy`:
+
+| verdict | n | example |
+|---|---|---|
+| legitimate citation or project compliance | 6 | `NORTH_STAR.md:108` cites `rule:delegation-criteria` §2 and quotes it |
+| **real finding** | 3 | `SSJK-mb/docs/DEPLOY.md:26` *"Doppler is the single source of truth"* — uncited |
+| worktree duplicate | 1 | the same `propagation/INDEX.md` counted twice ([[n100]], [[n88]]) |
+| false positive | 1 | `Rupali/Obsidian/Calendar/2026/September/19-09-2026.md` — a daily journal note |
+
+So roughly a quarter of the invisible hits are actionable, and the rest are noise of three distinct
+kinds. **The fix is a considered corpus, not more files:** decide which file KINDS carry a
+restatement worth converting. `docs/` and `GOTCHAS.md` plainly do — one of the three real findings is
+in each. A personal calendar note plainly does not. A worktree copy is the same file twice.
+
+**One result worth keeping as validation of the authoring method.** `measure-the-claim-not-a-proxy`,
+written hours earlier against a held-out corpus, fired on
+`Rupali/Experiments/HandReader/DESIGN.md:1470` — *"The pipeline work was right; it answered a
+different question."* Someone else's words, in a design doc, predating the rule. That is the property
+a self-quoting fingerprint does not have, demonstrated on prose nobody wrote for the test.
+
 Found 2026-09-17 while answering "how do we keep the hub and the workspaces relevant to
 each other". The answer had to start by admitting the instrument that reports hub
 relevance is measuring the wrong population.
