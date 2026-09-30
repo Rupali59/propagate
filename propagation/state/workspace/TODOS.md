@@ -611,7 +611,22 @@ what every test uses.
 
 ---
 
-### PR-030 · The events layer was designed against five issues that no longer need catching
+### PR-031 · Step 2's stated target no longer exists, so the step cannot be built as written
+**S3.** §6 step 2 is *"`run_id` + JSON log lines"*, scoped as *"`watcher.log` lines still do not
+[carry one] (out of scope: watcher.mjs was explicitly off-limits for this build)."*
+
+`watcher.log` was last written **2026-08-21**, and `watcher.mjs` **was deleted** in `2f1612b`
+("delete the retired watcher"). The live log producers are `monitor.{log,stdout,stderr}.log` and
+`digest.{stdout,stderr}.log`. So the step needs re-pointing before it can be built, and the
+question it answers — can a log line be joined to a `doctor` run — is worth asking of the monitor,
+which runs 48 times a day.
+
+## Finished
+
+
+### PR-030 · DECIDED — The events layer was designed against five issues that no longer need catching
+
+**DECIDED 2026-09-30: none of the eight is being built, and §2 is annotated as superseded rather than deleted.** Five cite issues that are closed (N9, N13, N14, N7, N6), so they would be detectors with no failing input. The three that looked like survivors are not: `row.fired` reintroduces the recorded-moment architecture the watcher retirement removed (4,420 runs, 99.2% no-ops, a baseline that INVENTED ~120 spurious rows) and all 2,949 live events are dispositions because v3 deliberately has no open moment; `row.closed`'s `age_ms` therefore has no defined start, and the derivable form already exists via each event's `observed_at_commit` plus git; `close.rejected` is proven by `tests/unit/ledger-activity.test.mjs:139`, which is where `rule:safety-flag-needs-a-test` says a guard belongs. §6 step 3 stops being pending and step 5's gate drops to 1, 2 and 4.
 **S3, and the deliverable is a decision rather than code.** `docs/OBSERVABILITY.md` §2 designs
 eight events and §6 step 3 records them as unbuilt. Checked 2026-09-30, every issue the event
 table cites is resolved:
@@ -632,18 +647,6 @@ answers a question nothing currently can.
 Decide: build those three, or record that the events layer is superseded by the metrics layer plus
 `doctor`'s checks and stop carrying it as pending. Either way `OBSERVABILITY.md` §2 needs the
 closed-issue column, because a design table citing five resolved issues reads as live work.
-
-### PR-031 · Step 2's stated target no longer exists, so the step cannot be built as written
-**S3.** §6 step 2 is *"`run_id` + JSON log lines"*, scoped as *"`watcher.log` lines still do not
-[carry one] (out of scope: watcher.mjs was explicitly off-limits for this build)."*
-
-`watcher.log` was last written **2026-08-21**, and `watcher.mjs` **was deleted** in `2f1612b`
-("delete the retired watcher"). The live log producers are `monitor.{log,stdout,stderr}.log` and
-`digest.{stdout,stderr}.log`. So the step needs re-pointing before it can be built, and the
-question it answers — can a log line be joined to a `doctor` run — is worth asking of the monitor,
-which runs 48 times a day.
-
-## Finished
 
 
 ### PR-029 · DONE — Six of twelve metrics have no expectation, which the design calls decoration

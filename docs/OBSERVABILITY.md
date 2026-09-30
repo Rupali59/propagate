@@ -122,6 +122,54 @@ Metrics show drift in aggregate; events say what happened and to what.
 **Rare by design.** If `sidecar.rejected` fires routinely it stops being read, which
 is the failure mode all over again. Any event whose rate rises becomes a metric.
 
+---
+
+## §2 IS SUPERSEDED — decided 2026-09-30 (TODOS PR-030), and none of the eight is being built
+
+Reviewed against the issues it cites and against the architecture that arrived after it was
+designed. **Five of the eight events exist to catch defects that are now closed:**
+
+| event | cites | status |
+|---|---|---|
+| `sidecar.rejected` | N9 | RESOLVED 2026-08-13 |
+| `state.baseline_changed` | N13 | RESOLVED 2026-08 |
+| `plist.regenerated` | N14 | RESOLVED 2026-09-29 |
+| `discovery.degraded` | N7 | RESOLVED 2026-08-20 |
+| `edge.unenforced` | N6 | RESOLVED 2026-08-20 |
+
+Building a detector for a fixed defect is work with no failing input, which
+`rule:discernment-checks` §1 already forbids.
+
+**The three without a closed-issue citation looked like survivors and are not:**
+
+- **`row.fired` contradicts the architecture that replaced the watcher.** v1 had to *catch* a
+  change to record it; v3 derives drift from content on demand. `rule:delegation-criteria` §2
+  records what the first approach cost — a 60-second watcher that ran **4,420 times and found
+  nothing in 4,384 of them**, maintaining a mutable baseline whose loss did not lose drift but
+  **invented** it, one bad state file producing ~120 spurious rows. `row.fired` reintroduces a
+  recorded moment, and a moment you must catch is a moment you can miss. Measured 2026-09-30:
+  all 2,949 events in the live store are dispositions — there is no "open" moment in v3 because
+  the concept was deliberately removed.
+- **`row.closed`'s `age_ms` therefore has no defined start**, and the derivable form already
+  exists. Every event carries `observed_at_commit`, so *"how long between the commit that
+  introduced the drift and the disposition"* is answerable from git plus the event, on demand,
+  with no new store and nothing to miss. That is the same question in the shape this tool
+  actually uses.
+- **`close.rejected` is already proven, by a test rather than by telemetry.**
+  `tests/unit/ledger-activity.test.mjs:139` —
+  *"markStatus: terminal close without closed_by throws; invalid closed_by throws"* — constructs
+  the refusal. `rule:safety-flag-needs-a-test` is explicit that a guard is proven by the input
+  that makes it fail, not by observing it fire in production.
+
+**So the metrics layer (§1, built) plus `doctor`'s own checks plus `doctor --since` (§6 step 4,
+built 2026-09-30) cover what §2 was for**, and §6 step 3 stops being pending work. This section
+stays as the design record and the reasoning, which is why it is annotated rather than deleted.
+
+**What this does NOT claim.** Events are not a bad idea, and this is not "telemetry is
+unnecessary". It is that these eight were specified against a v1 architecture and five specific
+open issues, and both have moved. A future event should be specified against a defect that is
+open, with a failing input, at the time it is written.
+
 ## 3 · Logs — structured, levelled, and actually consumed
 
 `watcher.log` already exists and already contained the evidence. The SSJK-mb sidecar
@@ -269,11 +317,12 @@ Cheapest first, and each is independently useful.
 2. **`run_id` + JSON log lines.** One field, unlocks correlation and §4 later. Not built —
    `metrics.jsonl` records carry a `run_id` per doctor run, but `watcher.log` lines still
    do not (out of scope: watcher.mjs was explicitly off-limits for this build).
-3. **Events to an append-only `~/.propagate/events/telemetry.jsonl`.** Same store as
-   the v2 ledger; the disposable-index discipline applies. Not built — every §2 event
-   (`sidecar.rejected`, `state.baseline_changed`, `plist.regenerated`, etc.) is still
-   design-only; `doctor`'s per-run gauges are a substitute for the aggregate picture,
-   not for "what happened and to what."
+3. **Events to an append-only `~/.propagate/events/telemetry.jsonl`.**
+   **SUPERSEDED 2026-09-30 (TODOS PR-030) — see the annotation under §2.** Not built and no
+   longer pending: five of the eight events cite issues that are now closed, `row.fired`
+   reintroduces the recorded-moment architecture the watcher retirement removed, `row.closed`'s
+   age has no defined start once drift is derived rather than caught, and `close.rejected` is
+   proven by a test. §1 plus `doctor`'s checks plus step 4 cover the ground.
 4. **`doctor --since <t>`** reading the above — troubleshooting becomes a query
    rather than an archaeology dig. **BUILT 2026-09-30** (TODOS PR-028): `parseSince` +
    `summariseSince` in `lib/report/metrics.mjs`, a thin renderer in `cli.mjs`. Accepts a span
@@ -295,7 +344,9 @@ Cheapest first, and each is independently useful.
    **Its first real run found something N91 did not know.** That entry records spikes at 18-24
    minutes; over seven days `doctor.duration_ms` has a max of **11,272,497 ms — 188 minutes** —
    against this document's own p95 < 5s target, with a median around 100s.
-5. **Spans.** Only after 1–4, and only if attribution is still slow. Not built.
+5. **Spans.** Gated on 1–4, and step 3 is now superseded rather than pending — so the gate
+   reads 1, 2 and 4. Not built, and nothing has asked for it: `doctor --since` made attribution
+   a query, which was the complaint spans were held in reserve for.
 
 **Design rule, restated because it is the whole point:** a metric without an
 expectation is decoration. Every gauge above ships with the assertion that makes it
