@@ -1,5 +1,41 @@
 # propagate — State
 
+## The sidecar SOURCE check was always there, and a move is now a break — 2026-09-30, `v0.15.13`
+
+**One glob-aware source check, where yesterday there were two.** The second was written on the
+belief that no source-side check existed. It has existed since `360ecb9`, 2026-08-20, with
+`tests/cli/doctor-source-keys.test.mjs` beside it, and this workspace's own register said so in
+its archive section the whole time. The duplicate printed every dead source twice (G20); it is
+gone, its glob awareness merged into the original, and the predicate is now shared with the
+downstream side at function scope. Recorded as N116, with G73 carrying the mechanical half: a
+`doctor` check that emits no section label is invisible to a label grep, which is what produced
+the false claim.
+
+**The glob flaw it nominally fixed was latent.** Derived across the tree: 49 sidecars hold 294
+literal source keys and **0** glob source keys, against 589 declared downstream paths of which 33
+are true globs that all match. Globs are used only downstream, so a bare `existsSync` on the
+source side had never once reported a live glob wrongly. Nothing was rescued — a latent flaw was
+closed before the first true glob source arrives.
+
+**N11 is closed, and not the way it prescribed.** A declared downstream that USED TO RESOLVE now
+fails, naming the commit that removed it; one nobody has written yet still warns. The
+discriminator is `git log --diff-filter=D`, which needs no remembered state — and that matters
+because both of N11's prescribed homes for a last-seen set are dead: `state.json` is in
+`setup.mjs`'s `retired:` array, and `doctor-snapshot.json` records problems rather than the
+declared set, so a path that was healthy at the last run leaves no trace of itself.
+`rule:delegation-criteria` §2 is the general form, and the 4,420-run watcher this tree deleted is
+the lesson behind it.
+
+The git call is bounded at 2s and reached only when a path is already missing — **0 of 589 today**
+— because N16 in this register is an unbounded subprocess that once cost 94% of a doctor run.
+Three negative controls hold the escalation honest: a path never written stays a warn, a
+non-repo stays a warn, and `kind: code` stops being an excuse once the file has existed. Both
+directions of the discriminator were mutated and went red for their stated reasons.
+
+**What is NOT covered:** `1979c2d` is pushed and still asserts the false claim under the words
+"MEASURED BEFORE WRITING". A correcting comment is on `workspace-hub#8` and N116 is the register's
+counterweight; the commit itself cannot be edited.
+
 ## The branch registries refresh themselves, and say so when they stop — 2026-09-26, `v0.14.0`
 
 **N55 closed (S1).** `collect.sh` retired its `branch-registry` on 2026-08-24 for the right

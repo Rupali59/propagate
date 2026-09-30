@@ -207,3 +207,91 @@ test("doctor passes clean (no directory/missing findings) on a healthy fixture",
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
+
+// ── N11: a MOVED downstream versus one nobody has written yet ─────────────────
+//
+// Both were a warn, so the two were indistinguishable — N11 (S1), hit twice in one
+// day. The discriminator is git: a deletion commit means the path EXISTED.
+//
+// THE NEGATIVE CONTROLS ARE THE POINT, and there are two of them, because the
+// escalation is only as good as its refusals. A path never written must stay a warn,
+// or every declare-ahead entry in the tree turns red. And a NON-GIT directory must
+// also stay a warn, or "git could not answer" silently becomes "the path existed" —
+// absence of confirmation reading as confirmation (rule:discernment-checks §2).
+
+/** Like makeWorkspaceWithSidecar, but the workspace is a git repo. */
+async function makeGitWorkspace({ downstreamPath, kind, commitThenDelete }) {
+  const { root, sidecarPath } = await makeWorkspaceWithSidecar({ downstreamPath, kind });
+  const git = (...args) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  git("init", "-q", ".");
+  git("config", "user.email", "t@example.invalid");
+  git("config", "user.name", "t");
+  if (commitThenDelete) {
+    const target = path.join(root, "sub", downstreamPath);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, "# downstream, for now\n", "utf8");
+    git("add", "-A", ".");
+    git("commit", "-qm", "the downstream exists at this point");
+    // The move N11 describes: the file leaves, the sidecar entry does not.
+    await rm(target, { force: true });
+    git("add", "-A", ".");
+    git("commit", "-qm", "moved the downstream away and forgot the sidecar");
+  } else {
+    git("add", "-A", ".");
+    git("commit", "-qm", "the downstream was never written");
+  }
+  return { root, sidecarPath };
+}
+
+test("a downstream that EXISTED and is gone FAILS, naming the commit that removed it", async () => {
+  const { root } = await makeGitWorkspace({ downstreamPath: "moved.md", commitThenDelete: true });
+  try {
+    const out = runDoctor(root).stdout;
+    assert.match(out, /downstream EXISTED and is gone/, `a moved downstream must not be a warn:\n${out}`);
+    // The commit is the actionable part — it is what tells a reader WHEN, so they can
+    // find where the file went. A verdict without it is unauditable.
+    assert.match(out, /deleted or moved at [0-9a-f]{7,}/, "the verdict must name the deletion commit");
+    assert.match(out, /✗[^\n]*moved\.md/, "and it must be a failure, not a warning");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("NEGATIVE CONTROL: a downstream never written stays a declare-ahead WARN", async () => {
+  // Without this, every declare-ahead entry in the tree goes red and the check is
+  // switched off within a day.
+  const { root } = await makeGitWorkspace({ downstreamPath: "not-yet.md", commitThenDelete: false });
+  try {
+    const out = runDoctor(root).stdout;
+    assert.doesNotMatch(out, /downstream EXISTED and is gone/, `a path never written is not a break:\n${out}`);
+    assert.match(out, /prose downstream missing/, "it stays the v1 warn");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("NEGATIVE CONTROL: git that cannot answer stays a WARN, never an escalation", async () => {
+  // A non-git workspace. `git log` fails, the helper returns null, and the verdict
+  // must be unchanged — "could not establish" must not render as "established".
+  const { root } = await makeWorkspaceWithSidecar({ downstreamPath: "absent.md" });
+  try {
+    const out = runDoctor(root).stdout;
+    assert.doesNotMatch(out, /downstream EXISTED and is gone/, `no repo means no claim:\n${out}`);
+    assert.match(out, /prose downstream missing/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a kind:code downstream that EXISTED is still a break — declare-ahead is about the FUTURE", async () => {
+  // The prose/code allowance exists for code not written yet. Code that was written
+  // and removed is the same dead edge as prose, so the kind must not exempt it.
+  const { root } = await makeGitWorkspace({ downstreamPath: "gone.ts", kind: "code", commitThenDelete: true });
+  try {
+    const out = runDoctor(root).stdout;
+    assert.match(out, /downstream EXISTED and is gone/, `kind:code must not exempt a path that existed:\n${out}`);
+    assert.doesNotMatch(out, /declare-ahead code, not on disk/, "it is not declare-ahead once it has existed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

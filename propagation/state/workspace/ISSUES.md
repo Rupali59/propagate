@@ -179,7 +179,7 @@ next to `discovered 0 workspaces` as if both were success. `tests/cli/init-reloa
 flags, the default, and the loud-failure path (a target deliberately outside `SEARCH_ROOTS`, so
 discovery can never see it regardless of the marker).
 
-### N11 · Moving a directory silently breaks every `../` edge — **S1** — **OPEN** (RE-MEASURED 2026-09-30: closed on the SOURCE side, still open on the DOWNSTREAM side; both prescribed fix targets are dead and a state-free replacement is demonstrated below)
+### N11 · Moving a directory silently breaks every `../` edge — **S1** — **RESOLVED 2026-09-30** (a downstream that once resolved now FAILS naming the deletion commit, while a never-written one still warns; the discriminator is `git log --diff-filter=D`, so no last-seen state exists to go stale — both prescribed homes for one were dead)
 `propagates_to` paths and `sources:` keys both resolve relative to the sidecar's own directory.
 Moving the parent breaks all of them, and `doctor` reports only a yellow "downstream missing" —
 indistinguishable from a declare-ahead entry.
@@ -239,9 +239,33 @@ claimed *"prose missing → problem (fail)"* and had since before 2026-09-30, wh
 `reporter.warn()` and `pathWarns++` for both kinds. A comment asserting a severity the code does not
 implement is `rule:adversarial-review-reads-the-ledger`'s exact shape, inside doctor.
 
-**Remaining, and it is now one narrow change rather than a design question:** escalate a missing
-downstream to a failure naming the deletion commit when git says the path existed, leaving genuine
-declare-ahead as a warn.
+**RESOLVED the same day.** `lib/report/doctor/workspaces.mjs` gained `deletedAt(dir, rel)` — a
+2s-bounded `git log -1 --diff-filter=D` reached only once a path is already missing. A hit escalates
+to a FAILURE reading *"downstream EXISTED and is gone — deleted or moved at `<sha> <date>`"*; a miss
+leaves v1's warn and its prose/code wording exactly as they were.
+
+**The warn-only rationale in the code was preserved and narrowed rather than overruled.** It reads
+that doctor is a cross-workspace report, so one stale edge must not red the aggregate, and
+`kind: code` missing is declare-ahead. That is right about a path nobody has written yet and wrong
+about one that used to resolve — which is what this entry always said. The source side already
+fails on the same fact, so this makes doctor consistent about a dead edge rather than newly strict.
+
+**Four tests in `tests/unit/downstream-path-guard.test.mjs`, three of them negative controls**,
+because an escalation is only as good as its refusals:
+
+| case | verdict |
+|---|---|
+| committed, then deleted | FAIL, naming the commit |
+| never written | WARN — or every declare-ahead entry in the tree turns red |
+| not a git repo at all | WARN — "could not establish" must never render as "established" |
+| `kind: code`, committed then deleted | FAIL — declare-ahead is about the future, not the past |
+
+**Both directions mutated, and each went red for its stated reason** (`rule:discernment-checks` §1,
+`rule:require-a-demonstration`). Forcing `deletedAt` to return `null` reds the two escalation tests
+and leaves both controls green; forcing it to return a fixed sha reds the never-written control
+alone. The cannot-answer control stays green under the second mutation because it exercises the
+`catch`, which that mutation does not touch — worth stating so nobody reads its green as coverage
+of the throw path.
 
 ### N16 · `doctor`'s graph-integration check spent 94% of the run on a known-deferred answer — **S2** — **RESOLVED 2026-09-01** (the subprocess was replaced by a config read: 17,793ms → 11ms, re-timed 2026-09-30)
 **RESOLVED 2026-09-01, and this entry's OPEN disposition was wrong for the same reason [[n26]]'s
