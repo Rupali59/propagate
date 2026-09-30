@@ -1726,10 +1726,28 @@ git reflog show origin/main --date=format:'%H:%M:%S'   # what each PUSH moved th
 ```
 
 `origin/main` had been at `40519b6` since 09:10; the push at 09:49:35 advanced it to
-`0e369a2` — **one or two commits, both theirs.** We had each reconstructed from `git log`,
-which shows **ancestry** and cannot say when a ref moved or who moved it. Same family as
+`0e369a2` — **one or two commits.** We had each reconstructed from `git log`, which shows
+**ancestry** and cannot say when a ref moved or who moved it. Same family as
 `rule:absence-claims-need-state-and-branch`: ancestry answers a different question from the
 one asked, and answers it plausibly.
+**AND THEN A FOURTH CORRECTION, which is the one to keep: the reflog answers WHEN, not WHOSE.**
+Having got the timing right I filled in ownership by inference — `0e369a2` was authored while
+the other session's lock was held, therefore theirs. It was a THIRD session's: its files are
+`TODOS.md` and `propagation/state/sanskrit-texts/STATE.md`, and that session had spent the
+morning re-deriving sanskrit-texts figures. Three sessions were in that tree, not two.
+**Git holds no instrument that answers whose, and it offers three that look like they do:**
+
+| instrument | what it actually says |
+|---|---|
+| `git log --author` | **uniform** — every commit in this tree is `Rupali Bhatnagar` |
+| `index.lock` | **anonymous** — a git process is running, never which session's |
+| `reflog` | **agentless** — when a ref moved, never who moved it |
+
+**The file list is the only column that distinguishes sessions.** Read what a commit touched
+and match it to what a session was working on. `bab7d42` is one file under
+`obsidian-vk-publish/` — that session's whole subject. `0e369a2` touches neither.
+**Four confident wrong accounts of one trivial event**, each from an instrument answering an
+adjacent question. That ratio is the reason this entry is long.
 **Instead:** `set -e` at the top of any block that pushes, or chain with `&&`, or capture
 `git rev-parse HEAD` before and after and refuse to push if it did not change. When a repo is
 shared with a live session, expect the lock — and note the contention is **bidirectional but

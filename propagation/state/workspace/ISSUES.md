@@ -4389,13 +4389,17 @@ mine. Disclosed immediately. Rupali reviewed it and let it stand — only `GOTCH
    have PREVENTED it — the hazard is its absence. Corrected only after reproducing it in a
    throwaway repo, and the peer noted the inverted version was the more dangerous record because it
    would have had the next reader removing the one construct that helps.
-2. **My count and attribution were wrong**, and so was the peer's correction of them, in the
-   opposite direction. I said three commits and named one already on the remote; they said six and
-   attributed one of their own to me. **`git reflog show origin/main` settles it in one command:**
-   the tip had been `40519b6` since 09:10 and the 09:49:35 push advanced it to `0e369a2` — one or
-   two commits, both theirs. We had each reconstructed from `git log`, which shows ancestry and
-   cannot say when a ref moved. Same shape as [[n26]] and [[n16]] earlier today: a plausible
-   instrument answering a different question.
+2. **My count was wrong, then the peer's correction was wrong, then my correction of that was
+   wrong.** I said three commits and named one already on the remote. They said six, and
+   attributed one of their own to me. `git reflog show origin/main` fixed the TIMING — the tip had
+   been `40519b6` since 09:10 and the 09:49:35 push advanced it to `0e369a2`, so one or two commits
+   — and I then declared both theirs. **`0e369a2` is a THIRD session's**: its files are `TODOS.md`
+   and `propagation/state/sanskrit-texts/STATE.md`, and that session spent the morning re-deriving
+   sanskrit-texts figures. So my push carried at most ONE of the peer's commits and possibly none.
+   **The reflog answers WHEN, not WHOSE**, and I filled whose by inference — authored during their
+   lock, therefore theirs — when a lock is anonymous. Git offers three instruments that look like
+   they answer ownership and none does: `--author` is uniform in this tree, the lock is anonymous,
+   the reflog is agentless. **The file list is the only column that distinguishes sessions.**
 3. **The gotcha's emphasis was wrong**, and the peer supplied the better framing: the dangerous half
    is not the missing `set -e`, it is that the push **exits 0 and reports success**, printing nothing
    that distinguishes publishing your commit from publishing whatever `HEAD` was. Fix only the
