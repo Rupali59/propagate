@@ -228,7 +228,7 @@ as pre-tooling history (no action) or re-emitted under a type that says what the
 has not been made. `doctor` should count `rows.closed_without_transition` (see
 `docs/OBSERVABILITY.md` §1) so this stays visible rather than being forgotten a second time.
 
-### N20 · 87% of the Vipin Kaushik ledger is hand-authored, outside any schema — **S2** — **OPEN** (not re-measured since the 2026-08-20 triage, which said so itself; the 87% is an August figure nobody has re-derived)
+### N20 · 87% of the Vipin Kaushik ledger is hand-authored, outside any schema — **S2** — **RESOLVED 2026-09-29** (re-measured; the prescribed remedy — freeze, don't convert — has happened)
 Full analysis: `docs/DATA_MODEL.md` §6, §9. Forensic split (`JSON.stringify` emits `{"type":"drift"`
 with no space; hand-authored JSON commonly has a space after the colon) puts 578 of 664 rows in
 that ledger outside this codebase entirely — because `markStatus` had zero production callers for
@@ -244,6 +244,35 @@ rows stop accumulating this way). The 578 existing rows are unmigrated hand-auth
 `content_id`/`ref`; per `~/.claude/plans/okay-i-dont-think-logical-haven.md` §8, v2's answer is
 **freeze, don't convert** — a synthesised identity on historical rows would make a stale
 verification look current, which is worse than no record.
+
+**RE-MEASURED 2026-09-29**, the first time since this was filed. The 2026-08-20 triage listed
+this entry among those it had NOT re-measured, and that stayed true for five weeks.
+
+**The remedy this entry prescribes for itself has happened.** `propagation/archive/ledger-v1-2026-08-24.jsonl`
+is the frozen v1 file — last touched 2026-08-27, nothing appended since — and
+`propagation/ledger.jsonl` holds **0 rows**, untouched since 2026-08-25. The 2,946 live rows are
+in the v2 store at `~/.propagate/events`, outside every working tree. Freeze, don't convert, is
+what §8 of the plan called for and what was done; no historical row was given a synthesised
+identity that would make a stale verification look current.
+
+**The numerator survived exactly and the headline did not.** 578 hand-authored rows, precisely as
+filed. But the denominator is **876, not 664**, so the figure is **66%, not 87%** — the ledger grew
+by 212 rows between the August measurement and the freeze, and those rows are machine-authored.
+That is not a correction of a mistake so much as evidence the forward fix was already working:
+N4 landed `drain` as the supported close path and the proportion fell because machine rows diluted
+it.
+
+**One caveat on the instrument, stated rather than smoothed.** The forensic split keys on
+`JSON.stringify` emitting no space after a colon, and it is a heuristic. Re-derived: 617 rows carry
+`wontfix_reason`, of which 556 classify as hand-authored — so this entry's "100% of the 556
+`wontfix_reason` rows" is right about the 556 and the total is 617. Either 61 machine-written rows
+also carry the invented field, or the heuristic misclassifies 61 rows. Both are plausible and the
+difference does not change the disposition, so it is recorded rather than resolved — a heuristic
+reported as a census is how the 87% got here.
+
+**What stays true:** the 578 rows are unmigrated and unschema'd, and they are meant to be. They are
+history now, reachable and frozen, which `status` already reports as `frozen: 401 v1 event(s) in
+archive/ — history, not a worklist`.
 
 ### N22 · Glob expansion correlates states, so raw expanded counts mislead a future drain UI — **S3, design** — **OPEN** (a design question about what a future drain UI should count; no such UI exists yet to be misled)
 Not a v1 defect — a design finding from the v2 spike, recorded here because a finding that lives
