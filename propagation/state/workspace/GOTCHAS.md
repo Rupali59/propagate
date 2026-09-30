@@ -1754,3 +1754,32 @@ shared with a live session, expect the lock — and note the contention is **bid
 not symmetric**: their `cannot lock ref 'HEAD': is at X but expected Y` is loud and git
 refuses; a failed commit followed by a push is quiet and succeeds. Only one of the two needs
 a gotcha.
+
+### G73 · A `doctor` check with no section label is invisible to a label grep, so "no such check" is what you get for asking the wrong question
+**Trigger:** `grep\s+[-\w ]*"?[a-z]+ paths? resolve`
+**Fires on:** `grep -rn "source paths resolve" lib/`
+**Some checks print a labelled section; some print only per-entry lines. Grepping for a label
+finds the first kind and reports the second kind as absent.** The SOURCE-side sidecar check has
+existed since `360ecb9` (2026-08-20) and emits `✗   sub/.propagates.yml: source "x.md"  does not
+exist …` — one line per offending entry, and **no label at all**. Its neighbour prints
+`✓ sidecar downstream paths resolve`. So `grep -rn "source paths resolve" lib/` returns nothing
+and the asymmetry it appears to prove is an artifact of the two checks' output styles.
+
+**The signal that should stop you:** the grep returns *exactly* zero and the feature is one you
+would expect to exist. `reporter.check()` takes a free-text first argument, so there is no
+enumerable list of check names anywhere in this codebase — a label is a string in a call site,
+not an interface.
+
+**Instead:** construct the fixture and run the tool. A dead source in a temp workspace, one
+`doctor` run, and read the output. That is 30 seconds and it answers the question asked, rather
+than a question about strings. `ls tests/` is the cheap second opinion — here
+`tests/cli/doctor-source-keys.test.mjs` was sitting in the repo, named after the exact behaviour
+claimed to be missing.
+
+**Cost:** a duplicate check shipped and printed every dead source twice (G20); a doctor crash on
+every workspace from the merge that removed it; a false claim published in pushed commit
+`1979c2d` under the words "MEASURED BEFORE WRITING". And the defect the duplicate was
+nominally fixing turned out to have **zero live instances** — derived the same day, 49 sidecars
+and 294 literal source keys against **0 glob source keys** — so the whole detour was spent on a
+latent flaw in a check that was working. Recorded as N116.
+`rule:measure-the-claim-not-a-proxy`.

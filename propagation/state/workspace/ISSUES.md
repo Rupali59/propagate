@@ -179,15 +179,69 @@ next to `discovered 0 workspaces` as if both were success. `tests/cli/init-reloa
 flags, the default, and the loud-failure path (a target deliberately outside `SEARCH_ROOTS`, so
 discovery can never see it regardless of the marker).
 
-### N11 · Moving a directory silently breaks every `../` edge — **S1** — **OPEN** (a design property of sidecar-relative paths rather than a bug with a patch; doctor's ability to tell a MOVE from a declare-ahead has not been re-measured)
+### N11 · Moving a directory silently breaks every `../` edge — **S1** — **OPEN** (RE-MEASURED 2026-09-30: closed on the SOURCE side, still open on the DOWNSTREAM side; both prescribed fix targets are dead and a state-free replacement is demonstrated below)
 `propagates_to` paths and `sources:` keys both resolve relative to the sidecar's own directory.
 Moving the parent breaks all of them, and `doctor` reports only a yellow "downstream missing" —
 indistinguishable from a declare-ahead entry.
 
 Hit twice in one day: `design/` → `docs/design/` (3 paths), then the `docs/` reorg (9 source keys).
 
-*Fix:* keep a last-seen set in `state.json`; "existed at last run, now missing" is a break, not a
-warning.
+*Fix as originally prescribed:* keep a last-seen set in `state.json`; "existed at last run, now
+missing" is a break, not a warning.
+
+**RE-MEASURED 2026-09-30 — this was the entry's own open question, and the answer is split.**
+Four fixtures, verdict severity read from `doctor --json`:
+
+| a declared path is absent because… | verdict |
+|---|---|
+| a **source** key is gone | **FAIL** — *"does not exist — this edge can never fire (a source is not declare-ahead eligible)"* |
+| a **prose** downstream is gone | **WARN** — *"prose downstream missing"* |
+| a **`kind: code`** downstream is gone | **WARN** — *"declare-ahead code, not on disk"* |
+| control, both present | silent, with the fixture's sidecars provably scanned |
+
+**So the ambiguity this entry describes is closed for source keys and survives for downstream
+paths.** That maps onto its own two incidents: the `docs/` reorg broke **9 source keys**, which now
+fail attributably; `design/` → `docs/design/` broke **3 `propagates_to` paths**, which still warn.
+The prose/code wording difference is about KIND, not history — a moved prose downstream and a
+never-yet-written one produce the identical warn.
+
+**Both prescribed homes for the last-seen set are dead ends, which is why this was never built:**
+
+- `state.json` is **retired** — `lib/core/setup.mjs:213` lists it in the `retired:` array beside
+  `heartbeat` and `watcher.log`. Same dead-artifact class as [[n115]].
+- `doctor-snapshot.json` exists and is current, but records **problems, not the declared set** — 59
+  entries naming a sidecar, every one a verdict. A move takes a path from healthy (no entry at all)
+  to missing, so the snapshot has no record of the path to compare against. **It cannot answer
+  "existed at last run" for exactly the case that matters.**
+
+**A state-free discriminator exists, and it is demonstrated rather than proposed.** Built on this
+entry's own incident shape — `git init`, commit `design/SPEC.md`, `git mv` it under `docs/`:
+
+```
+git log --diff-filter=D -- design/SPEC.md            -> 1 deletion commit   (it was moved)
+git log --diff-filter=D -- docs/NOT-WRITTEN-YET.md   -> 0                   (declare-ahead)
+git log --follow --name-status --find-renames …      -> R100  design/SPEC.md  docs/design/SPEC.md
+```
+
+The negative control is the load-bearing half: a path that never existed returns 0, so this
+separates MOVED from NOT-YET-WRITTEN without remembering anything. `rule:delegation-criteria` §2 is
+explicit that derive-on-demand beats remember-in-background, and the 4,420-run watcher this tree
+replaced is the same lesson — a mutable baseline whose loss does not lose drift, it *invents* it.
+
+**And the cost objection that [[n16]] would raise does not apply**, measured rather than assumed: a
+git call would fire only on a missing path, and **0 of 589 declared downstream paths are missing on
+the real tree today** (the 501 warns are 490 `ref registry finding` plus 11 unrelated). N16's hazard
+was an *unbounded* subprocess run unconditionally on every doctor run; this is a bounded one on an
+empty population. It still ships with a timeout or it repeats N16.
+
+**Found while measuring, and fixed in the same pass:** the comment above the downstream check
+claimed *"prose missing → problem (fail)"* and had since before 2026-09-30, while the code calls
+`reporter.warn()` and `pathWarns++` for both kinds. A comment asserting a severity the code does not
+implement is `rule:adversarial-review-reads-the-ledger`'s exact shape, inside doctor.
+
+**Remaining, and it is now one narrow change rather than a design question:** escalate a missing
+downstream to a failure naming the deletion commit when git says the path existed, leaving genuine
+declare-ahead as a warn.
 
 ### N16 · `doctor`'s graph-integration check spent 94% of the run on a known-deferred answer — **S2** — **RESOLVED 2026-09-01** (the subprocess was replaced by a config read: 17,793ms → 11ms, re-timed 2026-09-30)
 **RESOLVED 2026-09-01, and this entry's OPEN disposition was wrong for the same reason [[n26]]'s
@@ -1057,9 +1111,39 @@ edited, per this register's own standard that evidence is not rewritten.
 
 ---
 
-### N53 · The size-cap check reads `STATE.md` at the pre-move path, so it measures 14-line stubs — **S1** — **OPEN**
+### N53 · The size-cap check reads `STATE.md` at the pre-move path, so it measures 14-line stubs — **S1** — **RESOLVED 2026-09-10** (fixed in `Vipin Kaushik` `422bc4c`; verified behaviourally 2026-09-30, 0 of 8 measuring a stub)
 
 > **Same root cause as N54 and N55** (cross-linked 2026-08-27): the 2026-08-21/24 relocations left readers pointed at what is no longer the thing. N54 is the mirror image of this one — there a stub reads as *broken*, here it reads as *passing*.
+
+**RESOLVED 2026-09-10, and this entry carried OPEN for three weeks after the fix landed.**
+`Vipin Kaushik` commit `422bc4c` — *"fix(hygiene): size-caps was measuring pointer stubs and
+reporting green"* — made the checker follow the pointer chain (`size-caps.sh:94-99,165`, bounded
+against a redirect cycle).
+
+**Verified behaviourally rather than from the commit message**, by running the check:
+
+| declared | measured at | lines | cap | status |
+|---|---|---:|---:|---|
+| `STATE.md` | `propagation/state/workspace/STATE.md` | 377 | 200 | red |
+| `VipinKaushik/STATE.md` | `propagation/state/VipinKaushik/STATE.md` | 291 | 200 | red |
+| `marketing-intel/STATE.md` | `propagation/state/marketing-intel/STATE.md` | 310 | 200 | red |
+| `astroacharya/STATE.md` | `propagation/state/astroacharya/STATE.md` | 215 | 200 | red |
+| `obsidian-vk-publish/STATE.md` | `propagation/state/obsidian-vk-publish/STATE.md` | **1412** | 200 | red |
+| `Astroclarity`, `VipinKaushik-mb`, `sanskrit-texts` | resolved | 93 / 38 / 197 | 200 | green / green / yellow |
+
+**0 of 8 measure a 14-line stub**, against this entry's 5 of 7. And N53's own derivation now
+returns a match where it returned nothing: `grep -l 'propagation/state' scripts/hygiene/lib/size-caps.sh`.
+
+The five RED rows are the point — every one was silently green while this was broken, and
+`sanskrit-texts` has since come down from 586 to 197 on its own.
+
+**This is the FOURTH stale OPEN disposition found today**, after [[n26]] (dispositioned on file
+existence), [[n16]] (on a GitHub issue's state) and [[n53]] (this one, never re-measured after the
+fix). All four were S1 or S2. `rule:measure-the-claim-not-a-proxy` names the class; what this
+instance adds is that **no proxy was involved at all — the entry was simply never re-read**, and
+three weeks of an S1 reading OPEN is its own kind of wrong answer. The disposition legend's
+requirement that a verdict carry its evidence is what makes that detectable: `OPEN` cannot be
+audited, `OPEN (checker still reads the stub — verified <date>)` can.
 
 **Status:** open, filed 2026-08-27. Found while reconciling
 `Vipin Kaushik/propagation/state/marketing-intel/STATE.md`, not by any check.
@@ -4621,6 +4705,74 @@ change for anyone mid-authoring. The minimum honest fix is that `PASS` becomes `
 the headline itself, so the caveat cannot be read past. **Until then: the acceptance criterion is
 `N of N rules probed`, never `selftest PASS`.** The seven rules written 2026-09-30 were gated on the
 count line for this reason.
+
+### N116 · A source check with tests since 2026-08-20 was reported absent, a duplicate shipped, and the false claim is published in a pushed commit — **S2** — **RESOLVED 2026-09-30**
+Found 2026-09-30 by the author of the defect, one commit later, while writing the test for it.
+
+**The claim.** `1979c2d` (pushed to `origin/main`) opens *"MEASURED BEFORE WRITING, because
+workspace-hub#8 asked for exactly that: can propagate already detect a sidecar entry whose source
+path is absent? No. … there was no source-side check anywhere — no check, no doctor section, no
+test."*
+
+**Every clause of that is false.** The check landed in `360ecb9`, **2026-08-20**, whose subject is
+*"fix(doctor): surface dead source keys and unenforced glob-code edges"*, filed as N18, and it
+shipped with `tests/cli/doctor-source-keys.test.mjs` — 81 lines, two tests, still green. It is a
+**failure**, not a warning, and that file's header already carried the reasoning the duplicate
+re-derived: *"A downstream may legitimately not exist yet — that is declare-ahead… A SOURCE cannot:
+the edge fires when the source changes, so a source that is not there is an edge that is already
+dead."*
+
+**And this register already held the answer.** The archive section of this same file carries
+`N18 · Source keys are never validated to exist — **S1** — **RESOLVED 2026-08-20**` — one line,
+with the disposition and the date, five weeks before the claim that no such check existed. It was
+not read, because the search was for a string in `lib/` rather than for the question in the
+register.
+
+**How the measurement went wrong.** `lib/` was grepped for the *label* `source paths resolve`. That
+returned nothing, and nothing was read as absence. The source check emits **no section label** — its
+output is one `✗` line per offending entry — so it is invisible to a label grep by construction. The
+grep was correct about the string and answered a different question than the one asked:
+`rule:measure-the-claim-not-a-proxy`, and the eighth instance of it.
+
+**What the wrong answer cost.**
+- A second, warn-level source check shipped, so **one dead source printed twice** — G20. Removed.
+- The original was **glob-blind, but latently — zero live instances**, and the first version of this
+  entry said "five weeks of glob sources reported as missing files", which was a third proxy in the
+  same episode: the false positive was measured on a fixture I built and then written down as though
+  it had been firing. Derived the same day, with a floor: **49 sidecars · 294 literal source keys
+  (0 missing) · 0 glob source keys**. Exactly one source key in the tree contains a glob
+  metacharacter — one client portfolio's sidecar declaring a Next.js dynamic segment,
+  `src/app/work/[slug]/page.tsx` — and it is a literal that looks like a glob, which
+  `existsSync` resolves correctly. **So the
+  pre-existing check had no live defect at all.** The bracket false positive ([[n113]]) came from the
+  duplicate's `globSync`-first ordering and was never in the original.
+- **Three proxies, one episode, each one narrowing the claim:** a label for a behaviour ("no check
+  exists"), then a fixture for live impact ("glob sources were being reported dead"), and in between
+  a crashed run for a clean one ("six fixtures, zero verdicts"). Each was caught only by measuring
+  the thing the sentence was actually about.
+- The commit attributes the asymmetry to **G71**, which is about a shape-based extraction going
+  blind and says nothing about one-directional checks.
+- The first merge attempt then **crashed doctor on every workspace** — `isGlob` declared inside one
+  of the two `for (const sc of sidecars)` loops, `ReferenceError` in the other. `node --check`
+  passed, because scope is not syntax. It was read as *six fixtures reporting zero verdicts*, i.e. a
+  crash rendered as a clean pass, which is `rule:discernment-checks` §6 **inside the harness built to
+  verify the fix**. The harness now carries a `RUN` column, and that column was itself wrong first
+  (`found 1 sidecar` against a two-sidecar fixture) until it was measured rather than assumed.
+
+**Why nothing caught the glob bug for five weeks.** `workspace()` in the pre-existing test file takes
+one `sourceKey` and creates exactly that file, so *"a pattern matching two files"* was inexpressible
+from inside it — `rule:mutate-behind-the-fixture-builder` exactly. The four cases added today are
+built from literals for that reason and say so in a comment.
+
+**Resolved by:** one glob-aware check at `lib/report/doctor/workspaces.mjs`, predicate shared with
+the downstream side at function scope; the duplicate deleted; `tests/unit/sidecar-source-guard.test.mjs`
+folded into `tests/cli/doctor-source-keys.test.mjs` (6 tests, including an exactly-once double-print
+guard); `rule:refactor-updates-sidecar-same-commit` corrected in the same change.
+
+**What is NOT fixed, and cannot be:** `1979c2d` is pushed. A commit body asserting its own
+measurement is the worst carrier for a proxy, because the assertion is what stops the next reader
+checking. This entry and the corrected rule are the only counterweight.
+
 
 ### N112 · `description-standard`'s fingerprint matches its body but no single LINE, so a real restatement would report line 0 — **S3** — **OPEN**
 Found 2026-09-30 while establishing how `checkRules` matches, before authoring seven fingerprints.
