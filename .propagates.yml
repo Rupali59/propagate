@@ -33,6 +33,19 @@
 # 2026-09-23; that file has never existed at that path. A comment that hands someone a
 # dead path is a referrer too — rule:adversarial-review-reads-the-ledger.)
 
+# DECLARED A WORKSPACE 2026-09-30, and the omission was the reason `migrate` could
+# not reach this repo. `doctor`'s v3-conformance check derives its population from
+# VERSION CONTROL — every depth-1 directory under a search root carrying a `.git` —
+# so it demanded the v3 layout here. `migrate --workspace propagate` answered
+# `no workspace named "propagate" — 21 known`, because that command reads the
+# MARKER-based population and this file had no `workspace:` key. So the tool
+# required conformance from a directory its own migration command could not see.
+#
+# It has behaved as a workspace throughout: propagation/state/workspace/ holds
+# STATE.md, DECISIONS.md, ISSUES.md, GOTCHAS.md and TODOS.md. Only the declaration
+# was missing — the same shape as this file's own opening note, that the skill which
+# exists to catch undeclared couplings had none of its own.
+workspace: true
 sources:
   # The one-surface work, 2026-09-17. Declared because the review that produced it
   # found its defects by looking at COUPLINGS, not files

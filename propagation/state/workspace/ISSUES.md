@@ -4730,6 +4730,85 @@ the headline itself, so the caveat cannot be read past. **Until then: the accept
 `N of N rules probed`, never `selftest PASS`.** The seven rules written 2026-09-30 were gated on the
 count line for this reason.
 
+### N117 · The cross-repo ledger resolved inside a nested search root, so its rows were ownerless and a `--cross` write would have landed in a gitignored directory — **S2** — **RESOLVED 2026-09-30**
+Found 2026-09-30 by following `doctor`'s "1 ledger file(s) on disk that no workspace owns" to its cause
+instead of patching the symptom.
+
+**`CROSS_LEDGER_JSONL` was derived from `SEARCH_ROOTS[0]`,** and on this machine that is
+`Rupali/Experiments`:
+
+```
+CROSS_LEDGER_JSONL -> <hub>/Rupali/Experiments/PROPAGATION_CROSS_LEDGER.jsonl   (never existed)
+the real file      -> <hub>/propagation/PROPAGATION_CROSS_LEDGER.jsonl          (owned by nobody)
+```
+
+`doctor` builds `ownedLedgers` as `[...WORKSPACES.map(w => w.ledgerJsonl), CROSS_LEDGER_JSONL]`, so the
+real file was never in the owned set and its rows were reported invisible to `status`/`reconcile`.
+**0 rows today, which is the only reason this cost nothing** — the file is empty.
+
+**The write path is the part that matters.** `freeze-ledger --cross --apply` (`cli.mjs`) sets
+`ledgerOverride = { jsonl: CROSS_LEDGER_JSONL, md: CROSS_LEDGER_MD }`, so a cross-repo freeze would
+have written into `Rupali/Experiments/` — a **gitignored** directory, untracked, and not the path any
+reader of record expects.
+
+**Two comments already asserted the behaviour the code did not have:** `lib/edges/ledger.mjs` —
+*"`CROSS_LEDGER_JSONL` is derived from the hub, so it is null when no hub is declared"* — and
+`cli.mjs`'s freeze branch — *"the cross-repo one shares the hub's propagation/ dir"*. Neither was
+true. Both are true now, which is the direction to fix such a pair in: bring the code to the claim
+when the claim is the correct design.
+
+**IT IS [[n101]] IN A SECOND PLACE.** `artifactPath()` resolved `ECOSYSTEM.md` from `SEARCH_ROOTS[0]`
+for the same reason and was fixed by taking `hubRoot` explicitly — *"`searchRoots` is a DISCOVERY
+setting… ordered for the walk, not to name the tree"*. The class was not swept, so the fix landed at
+the site where the symptom had been seen. `lib/edges/ledger.mjs`'s own header describes that exact
+failure about a different bug in the same file: *"the fix had been applied to the sites where a crash
+was OBSERVED rather than to the class."* Third recorded instance of `SEARCH_ROOTS[0]` standing in for
+the hub, counting `rule:measure-the-claim-not-a-proxy`'s instance table.
+
+**Resolved by** a pure `crossLedgerRoot({ hubRoot, roots })` in `lib/core/config.mjs`, mirroring
+`artifactPath`'s signature. **It takes `roots` and ignores it deliberately:** the property is "the hub
+wins over whichever search root sorts first", and a resolver accepting only `hubRoot` makes the
+violating input inexpressible, so the test would assert nothing while looking thorough
+(`rule:mutate-behind-the-fixture-builder`). G24's `?? null` sentinel is preserved — an unconfigured
+machine must resolve to null and be refused loudly, never to a plausible wrong path.
+
+**5 tests in `tests/unit/cross-ledger-root.test.mjs`**, and two of them exist because the first
+draft was wrong:
+
+- the hub wins over a nested `roots[0]`; search-root ORDER cannot move the file; the null sentinel holds
+- **the WIRING, on a fixture whose `searchRoots[0]` is not the hub.** The first version of this read
+  the LIVE config and opened `if (!HUB_ROOT) return;` — and under `npm test` the scoped state dir has
+  no config, so `HUB_ROOT` is null, `SEARCH_ROOTS` is `[]`, and it passed in 0.4ms asserting nothing.
+  It was the one test that stayed green under the mutation that reddened the other three. Same trap
+  `tests/cli/doctor-census-parity.test.mjs` records about its own first draft.
+- **the LEGACY un-relocated layout**, added after the fixture test failed for a reason that was about
+  the fixture: `crossLedgerRelocated` stats the FILE, not the directory, so creating only
+  `propagation/` fell back to the hub-root filename. That fallback carried the same bug and needed
+  its own case — fixing only the relocated branch would leave every un-migrated install pointing into
+  a nested root.
+
+Mutating the resolver away reds the unit cases for their stated reasons.
+
+**THE FIRST FIX WAS WRONG, AND THE SUITE CAUGHT WHAT MY UNIT TEST ASSERTED.** I wrote
+`hubRoot ?? null`, and my own test asserted that no hub resolves to null "per G24's sentinel".
+That reddened **8 pre-existing tests** — 7 in `tests/portability/cross-ledger-cascade.test.mjs`,
+including one named *"END TO END: status --cross reports real rows at the root path, not '0 open'
+(the exact regression that was caught)"*, plus the config export-surface gate. Those fixtures
+configure `PROPAGATE_SEARCH_ROOTS` and **no hub**, which G24 says is every install predating the
+`hubRoot` key — so nulling the fallback would have taken the cross-ledger away from all of them.
+
+The correct shape is three-way, and `artifactPath()` already had it:
+`hubRoot ?? roots[0] ?? null`. The hub wins when declared (the N117 fix), `roots[0]` remains the
+pre-`hubRoot` fallback, and null is reached only when neither exists — which is where G24's
+sentinel actually lives. My unit test had encoded a stricter rule than the codebase's own
+precedent for the sibling path, and it passed while eight others failed.
+
+**Two things worth keeping from that.** A unit test agreeing with the change it was written
+beside is not evidence — it was written from the same wrong premise. And the export-surface gate
+(`tests/portability/paths-migration.test.mjs`) refused `crossLedgerRoot` until it was declared,
+which is the allowlist direction working: forget to add an entry and the check FIRES, rather than
+silently not looking (`rule:derive-dont-curate`).
+
 ### N116 · A source check with tests since 2026-08-20 was reported absent, a duplicate shipped, and the false claim is published in a pushed commit — **S2** — **RESOLVED 2026-09-30**
 Found 2026-09-30 by the author of the defect, one commit later, while writing the test for it.
 

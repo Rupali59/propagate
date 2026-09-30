@@ -1,0 +1,211 @@
+{
+  "schema_version": 2,
+  "captured_at": "2026-09-30T09:01:44.510Z",
+  "captured_by": "propagate/refs",
+  "blind_spot": "a ref created and deleted inside one window is invisible to this instrument",
+  "workspace_root": "/Users/rupali.b/Documents/GitHub/propagate",
+  "projects": {
+    "workspace": {
+      "repo_root": "/Users/rupali.b/Documents/GitHub/propagate",
+      "base_ref": null,
+      "error": null,
+      "merge_state_error": null,
+      "refs": {
+        "docs/premise-and-routing": {
+          "head": "360ecb925114799b00e6693794c62c40efdb3d18",
+          "merge_state": null,
+          "upstream": "origin/docs/premise-and-routing",
+          "upstream_track": "",
+          "last_commit_iso": "2026-08-20T13:37:52+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "feat/glob-dedup-pathcheck": {
+          "head": "f1019c97be99f896831d3ece4d2b1877170f0399",
+          "merge_state": null,
+          "upstream": null,
+          "upstream_track": "",
+          "last_commit_iso": "2026-07-17T10:33:16+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "main": {
+          "head": "fdf12df8847aa9a7bfcd6bdfacfe2d3ffdbf43ad",
+          "merge_state": null,
+          "upstream": "origin/main",
+          "upstream_track": "[ahead 2]",
+          "last_commit_iso": "2026-09-30T13:11:28+05:30",
+          "is_active_line": null,
+          "worktrees": [
+            "/Users/rupali.b/Documents/GitHub/propagate"
+          ]
+        },
+        "bootstrap-defer-guard": {
+          "head": "09d34ac914116bf09d538fef33aa65476b3cb83f",
+          "merge_state": null,
+          "upstream": "origin/bootstrap-defer-guard",
+          "upstream_track": "",
+          "last_commit_iso": "2026-09-14T18:56:18+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "ci-trim-matrix": {
+          "head": "45660b6d5e6b1354d8532af3536c731a44e692d6",
+          "merge_state": null,
+          "upstream": "origin/ci-trim-matrix",
+          "upstream_track": "",
+          "last_commit_iso": "2026-09-14T19:41:10+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "claims-unpaired-drain": {
+          "head": "ec98e84a5ea718c0395142bd37e1c8a6c6e5ce36",
+          "merge_state": null,
+          "upstream": "origin/claims-unpaired-drain",
+          "upstream_track": "",
+          "last_commit_iso": "2026-09-16T14:34:30+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "docs/size-caps-plan-2026-08-27": {
+          "head": "0ff19d3765d450be316419c0842c8d317e796a38",
+          "merge_state": null,
+          "upstream": "origin/docs/size-caps-plan-2026-08-27",
+          "upstream_track": "",
+          "last_commit_iso": "2026-08-27T18:28:16+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "feat/backlog-affects": {
+          "head": "0a818af4835918805e87428a76f5ed0df2ed5b41",
+          "merge_state": null,
+          "upstream": "origin/feat/backlog-affects",
+          "upstream_track": "",
+          "last_commit_iso": "2026-08-27T21:45:48+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "feat/backlog-brief": {
+          "head": "e359e30997a99ee171b5aa884ad985f5a1525e18",
+          "merge_state": null,
+          "upstream": "origin/feat/backlog-brief",
+          "upstream_track": "",
+          "last_commit_iso": "2026-08-28T12:47:13+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "feat/caps-command": {
+          "head": "e7cec0d1aa508295b2e0fe0eaef4aaa148acf60d",
+          "merge_state": null,
+          "upstream": "origin/feat/caps-command",
+          "upstream_track": "",
+          "last_commit_iso": "2026-08-28T09:24:12+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "feat/caps-ratchet-gate": {
+          "head": "7105484902ecf51343ed412f6ab1b41e7ef64a8e",
+          "merge_state": null,
+          "upstream": "origin/feat/caps-ratchet-gate",
+          "upstream_track": "",
+          "last_commit_iso": "2026-08-28T09:56:49+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "feat/narrow-ratchet": {
+          "head": "216403da41fbb4654c6e4627004dd2911cf7d678",
+          "merge_state": null,
+          "upstream": "origin/feat/narrow-ratchet",
+          "upstream_track": "",
+          "last_commit_iso": "2026-08-28T12:35:52+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "fix/probe-rendering-and-locatable-restatements": {
+          "head": "a874783f2a761b1f7d2db1f66df48c671d0ddeaf",
+          "merge_state": null,
+          "upstream": "origin/fix/probe-rendering-and-locatable-restatements",
+          "upstream_track": "",
+          "last_commit_iso": "2026-09-17T07:58:22+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "gbrain-judge-phase-1": {
+          "head": "a75027e56de270cea2748a40ee653afa1bc2c08f",
+          "merge_state": null,
+          "upstream": "origin/gbrain-judge-phase-1",
+          "upstream_track": "",
+          "last_commit_iso": "2026-09-14T18:24:17+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "n76-probe-1": {
+          "head": "60a61bc990e254ded699c25b59243bea99cf0257",
+          "merge_state": null,
+          "upstream": "origin/n76-probe-1",
+          "upstream_track": "",
+          "last_commit_iso": "2026-09-16T14:47:36+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        },
+        "phase-2a-restatement-lane": {
+          "head": "c3cce263ac6b975775e65e8059cd8ff68df6fbe6",
+          "merge_state": null,
+          "upstream": "origin/phase-2a-restatement-lane",
+          "upstream_track": "",
+          "last_commit_iso": "2026-09-14T20:26:39+05:30",
+          "is_active_line": null,
+          "worktrees": []
+        }
+      },
+      "detached_worktrees": []
+    }
+  },
+  "skipped": [
+    {
+      "name": "${TMPDIR:-",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "bin",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "commands",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "docs",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "hooks",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "lib",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "node_modules",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "propagation",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "skills",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "tests",
+      "reason": "inside the workspace repo — shares its refs"
+    },
+    {
+      "name": "widget",
+      "reason": "inside the workspace repo — shares its refs"
+    }
+  ],
+  "active_lines_reason": "no CONTEXT-BUDGET.md at docs/conventions/CONTEXT-BUDGET.md — no active line is declared for this workspace"
+}

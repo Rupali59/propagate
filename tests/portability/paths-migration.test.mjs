@@ -151,7 +151,16 @@ test("migration equality — all 36 pre-existing config.mjs exports are byte-ide
       "STATE_PATH", "SUSPICIOUS_MARKERS", "WATCHER_LOG", "WORKSPACES", "currentWorkspace",
       "searchRootsExplain", "shortPath",
     ]);
-    const NEW = new Set(["PATHS", "PATHS_DIAGNOSTIC", "requirePath", "INTEGRATIONS_DIAGNOSTIC", "requireIntegration"]);
+    // `crossLedgerRoot` added 2026-09-30 (N117): the cross-ledger resolved from
+    // SEARCH_ROOTS[0], which on the author's machine is a NESTED root, so the file
+    // doctor owns and the file config named were different files. Extracting a pure
+    // resolver is what makes the hostile ordering testable. This gate is the reason
+    // the addition had to be declared rather than noticed later — an allowlist you
+    // must edit to exempt something is safe (rule:derive-dont-curate).
+    const NEW = new Set([
+      "PATHS", "PATHS_DIAGNOSTIC", "requirePath", "INTEGRATIONS_DIAGNOSTIC", "requireIntegration",
+      "crossLedgerRoot",
+    ]);
     const actualKeys = new Set(Object.keys(after).filter((k) => k !== "searchRootsExplain()"));
     const unexpected = [...actualKeys].filter((k) => !PREEXISTING.has(k) && !NEW.has(k));
     const missing = [...PREEXISTING].filter((k) => !actualKeys.has(k));
