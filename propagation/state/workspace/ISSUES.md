@@ -3745,6 +3745,11 @@ that the gap is real and currently harmless.
 
 ### N91 · `doctor.duration_ms` spikes recur at 18-24 minutes, most recently in the last 24 hours — **S2** — **OPEN**
 
+**CALIBRATED 2026-09-30 (PR-029): `doctor.duration_ms < 30 min` is asserted on every run**, which
+makes this the first thing in the codebase that can fail on N91. Deliberately NOT the design's
+p95 < 5s target — 95.8% of 1,092 runs exceed 5s, so asserting it would be permanently red and
+therefore ignored. 30 min sits ~5x above p99 (367s) and below all four real outliers.
+
 **RE-MEASURED 2026-09-30 with `doctor --since 7d` — the first thing that command was used for —
 and the range is far wider than this heading says:**
 
@@ -4503,6 +4508,37 @@ the rule being followed. Dropped before shipping. `rule:nextjs-dev-server-port` 
 trade in its own fingerprint note — the wide version flagged 8 files to find 1 — and the general form
 is that **a fingerprint matching a rule's IMPERATIVE catches compliance; only one matching its CLAIM
 catches restatement.**
+
+### N115 · `state.tracked_files` has read 0 on 831 consecutive runs because it measures a deleted file — **S2** — **OPEN**
+Found 2026-09-30 while calibrating the six uncalibrated metrics (PR-029). The distribution is not
+noisy, it is a cliff:
+
+```
+208  on every run 2026-08-13 .. 2026-08-19
+  0  on every run 2026-08-20 .. today — 831 runs, no exceptions
+```
+
+`STATE_PATH` is `~/.propagate/state.json`, the **retired watcher's mtime baseline**, and that file
+does not exist. So the gauge has faithfully reported zero for six weeks about a subject removed with
+the watcher — and it was `UNCALIBRATED`, exempt from assertion, which is exactly why nothing could
+say so. A metric with no expectation is unfalsifiable, so it can die in silence. That is
+`docs/OBSERVABILITY.md`'s own closing line — *"a metric without an expectation is decoration"* — with
+a cost attached.
+
+**`detectVanishedKeys` cannot catch this, and the reason generalises.** That check fires when a KEY
+present last run is absent this run. Here the key is present on every run; it is the SUBJECT that is
+gone, and a reader of a deleted file returns a clean, plausible zero rather than an error. Same
+family as [[n26]] and `rule:measure-the-claim-not-a-proxy` — the instrument worked perfectly and
+answered a question about nothing.
+
+**The fix is retirement, not a threshold.** N13's wanted *">20% run-over-run drop"* is moot for the
+same reason: there is no subject to drop. Decide whether the metric is removed outright (it costs a
+`readFile` per doctor run to report a constant) or re-pointed at whatever replaced the watcher's
+baseline, if anything did.
+
+**And worth asking of the other eleven.** This was found only because PR-029 went looking. A metric
+measuring a deleted artifact is invisible by construction, so the general check is *"does each
+gauge's subject still exist"* — and nothing asks it.
 
 ### N110 · `supersedes:` is frontmatter that no code reads — every rule declares it and nothing acts on it — **S3** — **OPEN**
 Found 2026-09-30 while planning the rule-promotion pass. All 22 rules at the time carried a

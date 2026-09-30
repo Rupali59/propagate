@@ -279,6 +279,20 @@ test("EXPECTATIONS table holds only sole-source assertions (no invented extras, 
   // would print 107 findings on day one and a wall of expected failures is where a real
   // one hides (G23).
   //
+  // 2026-09-30: +3 from PR-029, and a fourth was tried and REVERTED the same day.
+  // Every UNCALIBRATED entry had said "needs history to calibrate against" while the
+  // history was one run; there are now 1,092 records, so the blocker they named lifted.
+  //   `ledger.malformed == 0`      — 0 on all 1,092 records since 2026-08-13.
+  //   `doctor.duration_ms < 30min` — deliberately NOT OBSERVABILITY's p95 < 5s, which
+  //     95.8% of runs miss: a permanently-red doctor gets ignored. 30 min is ~5x p99
+  //     and below all four real outliers, so it is the first thing that can fail on N91.
+  //   `sidecars.problems <= 2`     — a ratchet, since 45 of 1,092 runs are non-zero.
+  // NOT ADDED: `sidecars.loaded >= 40`. Derived from this machine's 47-53 band, it broke
+  // 11 tests immediately — a fixture loads ONE sidecar — and would fail doctor on any
+  // smaller real install. A threshold derived from one machine's SCALE is not global;
+  // rule:enforcement-watches-itself §3, inverted. It stays UNCALIBRATED with that
+  // recorded, and tests/unit/metrics-calibration.test.mjs pins the reversal.
+  //
   // 2026-08-17: +2 graph-structure entries. Both are sole-source — doctor
   // deliberately does NOT also carry an inline check() for either (that would
   // be the G20 double-print), and the graph derivation shares the existing
@@ -291,9 +305,12 @@ test("EXPECTATIONS table holds only sole-source assertions (no invented extras, 
     "decisions.with_tokens",
     "docs.supersedes_unresolvable",
     "docs.supersession_prose_only",
+    "doctor.duration_ms",
     "graph.cycles",
     "graph.duplicate_pairs",
+    "ledger.malformed",
     "ledger.unknown_types",
+    "sidecars.problems",
     "sidecars.rejected",
     "workspaces.discovered",
   ]);

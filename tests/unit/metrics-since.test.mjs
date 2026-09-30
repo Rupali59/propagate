@@ -137,8 +137,10 @@ test("UNCALIBRATED is an array of OBJECTS, so a key lookup cannot use includes()
   assert.ok(Array.isArray(UNCALIBRATED));
   assert.equal(typeof UNCALIBRATED[0], "object");
   assert.ok("key" in UNCALIBRATED[0] && "reason" in UNCALIBRATED[0]);
-  assert.equal(UNCALIBRATED.includes("doctor.duration_ms"), false, "includes() on a string can never match");
-  assert.ok(UNCALIBRATED.some((u) => u.key === "doctor.duration_ms"), "a keyed lookup does");
+  assert.equal(UNCALIBRATED.includes("rows.open"), false, "includes() on a string can never match");
+  // `rows.open` rather than `doctor.duration_ms`: the latter was CALIBRATED on 2026-09-30
+  // (PR-029) and left this list, which this test noticed when the suite went red.
+  assert.ok(UNCALIBRATED.some((u) => u.key === "rows.open"), "a keyed lookup does");
 });
 
 // ── the CLI layer ───────────────────────────────────────────────────────────

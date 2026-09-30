@@ -611,19 +611,6 @@ what every test uses.
 
 ---
 
-### PR-029 · Six of twelve metrics have no expectation, which the design calls decoration
-**S2.** `doctor` prints `uncalibrated metrics recorded, not asserted  rows.open,
-doctor.duration_ms, sidecars.loaded, sidecars.problems, ledger.malformed, state.tracked_files`.
-`docs/OBSERVABILITY.md` §6 closes with *"a metric without an expectation is decoration. Every
-gauge above ships with the assertion that makes it alertable, or it does not ship."* Six of twelve
-do not.
-
-**Not simply "add thresholds."** G3/G16 say an invented number is worse than none, which is why
-these were left uncalibrated deliberately. The work is to decide, per metric, whether a real
-expectation is derivable from history — 841 records exist — or whether it stays uncalibrated with
-that stated. `doctor.duration_ms` is the one with a live defect attached ([[n91]]: spikes at 18-24
-minutes, hit three times on 2026-09-30), so it is the natural first.
-
 ### PR-030 · The events layer was designed against five issues that no longer need catching
 **S3, and the deliverable is a decision rather than code.** `docs/OBSERVABILITY.md` §2 designs
 eight events and §6 step 3 records them as unbuilt. Checked 2026-09-30, every issue the event
@@ -657,6 +644,22 @@ question it answers — can a log line be joined to a `doctor` run — is worth 
 which runs 48 times a day.
 
 ## Finished
+
+
+### PR-029 · DONE — Six of twelve metrics have no expectation, which the design calls decoration
+
+**DONE 2026-09-30.** Four calibrated from 1,092 records, two deliberately not, and one of the two turned out to be a defect rather than a calibration gap. `ledger.malformed == 0` (1,092 clean runs). `doctor.duration_ms < 30 min` — NOT the design's p95 < 5s, which 95.8% of runs miss, because a permanently-red doctor gets ignored; 30 min sits ~5x above p99 and below all four real outliers, so it is the first thing that can fail on N91. `sidecars.problems <= 2` as a ratchet (45 of 1,092 non-zero, max 2). `sidecars.loaded >= 40` as a floor, because N9's failure direction is downward. `rows.open` stays exempt with a corrected reason — it is a trend question and `doctor --since 30d` answers it. And `state.tracked_files` is N115: 831 consecutive zeros because it measures `~/.propagate/state.json`, which does not exist.
+**S2.** `doctor` prints `uncalibrated metrics recorded, not asserted  rows.open,
+doctor.duration_ms, sidecars.loaded, sidecars.problems, ledger.malformed, state.tracked_files`.
+`docs/OBSERVABILITY.md` §6 closes with *"a metric without an expectation is decoration. Every
+gauge above ships with the assertion that makes it alertable, or it does not ship."* Six of twelve
+do not.
+
+**Not simply "add thresholds."** G3/G16 say an invented number is worse than none, which is why
+these were left uncalibrated deliberately. The work is to decide, per metric, whether a real
+expectation is derivable from history — 841 records exist — or whether it stays uncalibrated with
+that stated. `doctor.duration_ms` is the one with a live defect attached ([[n91]]: spikes at 18-24
+minutes, hit three times on 2026-09-30), so it is the natural first.
 
 
 ### PR-028 · DONE — `doctor --since <t>` — the cheapest telemetry item, and the one step 1 points at
