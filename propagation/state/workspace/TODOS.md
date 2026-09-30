@@ -609,6 +609,80 @@ Either implement it in `read.mjs` beside the `fixturePath` option, or correct th
 where it actually lives. The option seam (`fixturePath` / `exec` / `readRemindersFn`) works and is
 what every test uses.
 
+---
+
+### PR-028 · `doctor --since <t>` — the cheapest telemetry item, and the one step 1 points at
+**S2.** `docs/OBSERVABILITY.md` §6 step 4, and its own words say why this is first: *"a `--since`
+flag is a thin CLI layer over data that already exists, not a new storage problem."*
+`readMetricsRecords` and `readLastMetricsRecord` (`lib/report/metrics.mjs`) already read the full
+history and the newest record.
+
+It also closes the limitation step 1 states about itself: *"`doctor` is a manual/point-in-time
+check; nothing in this codebase runs it on a schedule… a metric that regresses between `doctor`
+invocations is invisible until someone runs `doctor` again."* §6 names step 4 as the thing that
+closes it.
+
+Acceptance: a window with no records reads as `no records in that window`, never as `nothing
+wrong` — `rule:discernment-checks` §2. And the flag must not silently accept an unparseable
+timestamp.
+
+### PR-029 · Six of twelve metrics have no expectation, which the design calls decoration
+**S2.** `doctor` prints `uncalibrated metrics recorded, not asserted  rows.open,
+doctor.duration_ms, sidecars.loaded, sidecars.problems, ledger.malformed, state.tracked_files`.
+`docs/OBSERVABILITY.md` §6 closes with *"a metric without an expectation is decoration. Every
+gauge above ships with the assertion that makes it alertable, or it does not ship."* Six of twelve
+do not.
+
+**Not simply "add thresholds."** G3/G16 say an invented number is worse than none, which is why
+these were left uncalibrated deliberately. The work is to decide, per metric, whether a real
+expectation is derivable from history — 841 records exist — or whether it stays uncalibrated with
+that stated. `doctor.duration_ms` is the one with a live defect attached ([[n91]]: spikes at 18-24
+minutes, hit three times on 2026-09-30), so it is the natural first.
+
+### PR-030 · The events layer was designed against five issues that no longer need catching
+**S3, and the deliverable is a decision rather than code.** `docs/OBSERVABILITY.md` §2 designs
+eight events and §6 step 3 records them as unbuilt. Checked 2026-09-30, every issue the event
+table cites is resolved:
+
+| event | cites | status |
+|---|---|---|
+| `sidecar.rejected` | N9 | RESOLVED 2026-08-13 |
+| `state.baseline_changed` | N13 | RESOLVED 2026-08 |
+| `plist.regenerated` | N14 | RESOLVED 2026-09-29 |
+| `discovery.degraded` | N7 | RESOLVED 2026-08-20 |
+| `edge.unenforced` | N6 | RESOLVED 2026-08-20 |
+
+So building them now means building detectors for defects already fixed by other means. The three
+without a closed-issue citation — `row.fired`, `row.closed` (with `age_ms`), `close.rejected` —
+are the only ones whose stated purpose survives, and `row.closed`'s time-to-close is the one that
+answers a question nothing currently can.
+
+Decide: build those three, or record that the events layer is superseded by the metrics layer plus
+`doctor`'s checks and stop carrying it as pending. Either way `OBSERVABILITY.md` §2 needs the
+closed-issue column, because a design table citing five resolved issues reads as live work.
+
+### PR-031 · Step 2's stated target no longer exists, so the step cannot be built as written
+**S3.** §6 step 2 is *"`run_id` + JSON log lines"*, scoped as *"`watcher.log` lines still do not
+[carry one] (out of scope: watcher.mjs was explicitly off-limits for this build)."*
+
+`watcher.log` was last written **2026-08-21**, and `watcher.mjs` **was deleted** in `2f1612b`
+("delete the retired watcher"). The live log producers are `monitor.{log,stdout,stderr}.log` and
+`digest.{stdout,stderr}.log`. So the step needs re-pointing before it can be built, and the
+question it answers — can a log line be joined to a `doctor` run — is worth asking of the monitor,
+which runs 48 times a day.
+
+### PR-032 · `docs/SYSTEMS.md` describes a refusal guard on `watcher.mjs`, which is not on disk
+**S3.** Found 2026-09-30 while scoping the telemetry items. The row reads *"`watcher.mjs` (kept on
+disk, header records the retirement, refuses to run directly without
+`PROPAGATE_ALLOW_RETIRED_WATCHER=1`)"*. The file was deleted in `2f1612b`.
+
+A retirement row describing a safety guard on a file that does not exist is the reassuring half of
+`rule:enforcement-watches-itself`: the prose is fluent and there is nothing behind it. The fix is
+one row, and it matters because that row is the archive record for how the watcher was retired —
+`rule:measure-the-claim-not-a-proxy`, where the claim is about a file and nobody statted it.
+
+
+
 ## Finished
 
 
