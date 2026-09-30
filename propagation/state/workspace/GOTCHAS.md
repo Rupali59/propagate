@@ -1783,3 +1783,40 @@ nominally fixing turned out to have **zero live instances** — derived the same
 and 294 literal source keys against **0 glob source keys** — so the whole detour was spent on a
 latent flaw in a check that was working. Recorded as N116.
 `rule:measure-the-claim-not-a-proxy`.
+
+### G74 · `verify --glob` is exact equality on a field, not a pattern match — and it is `null` for every literal-path edge
+**Trigger:** `verify[\s\S]{0,80}--glob`
+**Fires on:** `node cli.mjs verify --glob '*handovers.mjs' --disposition source-corrected`
+**The flag reads like a wildcard and is not one.** `selectVerifyRows` (`cli.mjs`) does
+`if (sel.glob && r.glob !== sel.glob) return false` — **string equality** against the row's
+`glob` field, which holds the declared pattern only for edges whose downstream IS a glob. For
+an edge declaring a literal path, `r.glob` is `null`, so **no `--glob` value can ever select
+it.** The usage line says `--glob <pattern>`, which is what invites the wrong reading.
+
+**Instead:** select by `--edge` or `--node`. Neither is printed by the inbound-edge drift
+advisory, and `status --json` / `status --all --json` do not carry per-edge ids either — the
+reliable way is to call `reconcile` directly and read the row:
+
+```sh
+node -e '(async()=>{const c=await import("./lib/core/config.mjs");
+const {reconcile}=await import("./lib/edges/reconcile.mjs");
+const {rows}=await reconcile(c.WORKSPACES,{});
+for(const r of rows.filter(r=>JSON.stringify(r).includes("YOUR_FILE")))
+  console.log(r.edge_id, r.node_id, JSON.stringify(r.glob), r.state)})()'
+```
+
+That returned `4e8d1c1c  GitHub:HANDOVERS.md  null  DRIFTED` in one call, after three failed
+attempts to get the same id out of `status`.
+
+**Cost: five tool calls chasing a selector that could not match, and the expensive half was a
+MISREADING OF THIS FILE.** G44, G-B and N27 all describe `verify` writing its event on
+invocation — and all three are correctly scoped: G-B opens *"Until 2026-08-17"*, N27 reads
+**RESOLVED 2026-08-17**, and G44 names its own fix in a `**Guarded by:**` line pointing at the
+`if (!apply)` branch and `tests/cli/verify-ordering.test.mjs`. `verify` has been dry-run by
+default for every disposition since 2026-08-17, and `cli.mjs`'s header says so.
+
+I read three dated historical entries as a live hazard, warned the user that the command writes
+on enter, and put a decision to her that did not need making. **A hazard entry scoped to the
+past can make you refuse a safe thing**, which is the mirror of the failure these entries exist
+to prevent and is harder to notice because caution looks like diligence. Read the `**Guarded
+by:**` line and the date before acting on any entry here.
