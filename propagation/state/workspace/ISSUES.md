@@ -181,7 +181,32 @@ Hit twice in one day: `design/` → `docs/design/` (3 paths), then the `docs/` r
 *Fix:* keep a last-seen set in `state.json`; "existed at last run, now missing" is a break, not a
 warning.
 
-### N16 · `doctor`'s graph-integration check spent 94% of the run on a known-deferred answer — **S2** — **OPEN** (the same defect as GitHub propagate#4, still open there — `claude mcp list` in a health-check path is what rule:tool-priority forbids)
+### N16 · `doctor`'s graph-integration check spent 94% of the run on a known-deferred answer — **S2** — **RESOLVED 2026-09-01** (the subprocess was replaced by a config read: 17,793ms → 11ms, re-timed 2026-09-30)
+**RESOLVED 2026-09-01, and this entry's OPEN disposition was wrong for the same reason [[n26]]'s
+was.** Yesterday I dispositioned it on the state of *GitHub propagate#4* — "still open there" —
+rather than on the code. An unclosed issue is a proxy for an unfixed defect, and here the proxy was
+a month out of date: `cli.mjs` stopped shelling out on 2026-09-01, and nobody closed the issue.
+That is the second disposition in this register measured on a proxy instead of the artifact, in one
+pass, by the person auditing proxies.
+
+Re-timed today, from this repo:
+
+```
+checkGraphMcpStatus()   11ms   status=not-registered      (was 17,793ms)
+```
+
+`readGraphRegistration()` (`cli.mjs:518`) walks `.mcp.json` from cwd upward, then `~/.claude.json`,
+with no subprocess at all — and `grep -rn execSync … claude` over `cli.mjs` and
+`lib/report/doctor/environment.mjs` returns nothing. Covered by `tests/cli/graph-check.test.mjs`.
+
+**Two things the fix got right that are worth keeping, because each was a near-miss recorded in
+the code's own comments.** Reading *only* user scope would have been fast and WRONG: all 24
+registrations in this tree are project-scoped `.mcp.json` files and `~/.claude.json` holds none of
+them, so it would have traded a slow honest `unknown` for a quick confident `not-registered`. And
+the cache had to become cwd-keyed the moment the answer stopped being global — uncached it reported
+`registered` from `Motherboard/motherboard-infra`, cached it reported `not-registered`, which is
+`rule:discernment-checks` §4 arriving through the cache rather than the instrument.
+
 Measured 2026-08-13 from `~/Documents/GitHub/Vipin Kaushik`:
 
 ```
@@ -568,7 +593,42 @@ the branches; both are answers that decline to name their scope.
   supersedes
 - `docs/DECISIONS.md` — six 2026-08-10 entries that constrain any fix
 
-### N26 · A stale rendered `PROPAGATION_LEDGER.md` can be committed beside a correct `.jsonl`, and nothing detects it — **S1** — **OPEN** (still live: 4 rendered `docs/PROPAGATION_LEDGER.md` files on disk today — Keerti-portfolio, keerti-job-radar, Manav-portfolio, SSJK-mb — all in the location the 2026-08-21 move superseded)
+### N26 · A stale rendered `PROPAGATION_LEDGER.md` can be committed beside a correct `.jsonl`, and nothing detects it — **S1** — **RESOLVED 2026-09-30** (all four surviving renders carry a frozen-historical header, and `renderMarkdown` was removed 2026-08-25 so a new one cannot be produced)
+
+**RESOLVED 2026-09-30, and yesterday's disposition of this entry was wrong.** On 2026-09-29 I
+marked it OPEN on the evidence that four `docs/PROPAGATION_LEDGER.md` files still existed. I had
+not opened them. **Existence was a proxy for the hazard and the proxy was wrong** — which is the
+same defect this register spent that day removing from six other checks, committed here by the
+person removing them, in the register itself.
+
+What the four actually contain, read this time:
+
+| repo | first line |
+|---|---|
+| `Keerti/Keerti-portfolio` | `# Propagation Ledger — frozen historical render` |
+| `Keerti/keerti-job-radar` | `# Propagation Ledger — frozen historical render, and it never held anything` |
+| `ManavDaehi/Manav-portfolio` | `# Propagation Ledger — frozen historical render` |
+| `PanditPawanKaushik/SSJK-mb` | `# Propagation Ledger — frozen historical render` |
+
+Each then explains, unprompted, that its old header carried a liveness line — *"Last entry: N days
+ago. Watcher healthy."* — produced by `renderMarkdown` from `watcher.mjs`, retired 2026-08-14, so
+the line froze while asserting a deleted component was healthy; and that the renderer flipped to
+"⚠️ Watcher may be dead" after 30 days, a tripwire that could never fire because nothing recomputed
+it. That is this entry's symptom, named by the artifact itself.
+
+**And it cannot recur.** `renderMarkdown` was REMOVED 2026-08-25 (v3 Phase D, closing N42/N31).
+The only surviving references are comments in `lib/core/discovery.mjs` and `lib/edges/ledger.mjs`
+recording the removal. Nothing can produce a new stale render, so the detection half this entry
+asks for has nothing left to detect — which is a better outcome than a checker, and the reason the
+files were kept rather than deleted: a labelled frozen artifact preserves the history and answers
+the question a reader would otherwise ask.
+
+**One caveat on my own re-measure, which fooled me twice in one pass.** Grepping each file for
+`Watcher healthy|Last entry:.*days ago` returns 1 hit per file — and every hit is the new header
+QUOTING the old false line in order to explain it. A text scan cannot tell a defect from prose
+about the defect. That is the third time in two days the same thing has happened here (the fenced
+supersession examples, the `conformance` call inside a string), and it is the reason this entry now
+cites first lines rather than match counts.
 
 **Symptom.** Committed ledger markdown shows rows as `open` that the authoritative JSONL
 records as `wontfix` or `done`. A reader of the `.md` sees a large open backlog that does
@@ -4051,6 +4111,45 @@ those two calls agreed — both wrong — so the control would have passed while
 
 After the fix, `rollup --check` went 2 -> 1 (stale, correctly) -> 0 (current) once regenerated:
 734 -> 959 lines at the hub root.
+
+### N106 · A v1 ledger frozen under its ORIGINAL name would be indexed as live rows — containment rests on naming, not structure — **S3** — **OPEN** (0 instances tree-wide today; the invariant is a convention with no check)
+Found 2026-09-30 while closing GitHub propagate#3, and the finding is that my own close was one step
+short. That issue tracked an ambiguous append-only row in a workspace's v1 ledger. I closed it as
+*contained*, on the evidence that every live reader resolves a ledger by exact path
+(`lib/core/discovery.mjs:362`) or by basename **with a parent directory named** `propagation` /
+`.propagation` (`lib/skills/index-db.mjs:79-87`), and a file at
+`propagation/archive/ledger-v1-<date>.jsonl` satisfies neither.
+
+**That is true, and it is true because of how the file was NAMED.** `sweepFilesystem`'s
+`EXCLUDE_DIR_NAMES` contains `_archive` and **not** `archive`, and its `LEDGER_FILENAMES` set matches
+`PROPAGATION_LEDGER.jsonl` and `PROPAGATION_CROSS_LEDGER.jsonl` **by basename anywhere in the tree**.
+So a v1 ledger frozen under its original name inside `archive/` would be swept — and its rows
+inserted into `ledger_row` unconditionally, because the insert loop runs BEFORE the reachability
+test at `index-db.mjs:481`. It would also be flagged `found-by-sweep-not-discovery`, so it is
+attributable — but attributable and inert are different, and only the second is what "contained"
+claims.
+
+**Measured across the tree: 0 instances.** Every frozen artifact in all seven `propagation/archive/`
+directories carries a version-or-date suffix — `ledger-v1-2026-08-24.jsonl`,
+`PROPAGATION_CROSS_LEDGER-v1-2026-08-24.jsonl`, `STATE-marketing-intel-2026-09.md`,
+`STATE_2026-09-14-drain.md`, `ISSUES-2026-08.md`. The discipline is real and universal. It is also
+written down nowhere and enforced by nothing.
+
+**The obvious fix is wrong, and that is why this is filed rather than patched.** Adding `archive` to
+`EXCLUDE_DIR_NAMES` would make the containment structural — and would break the reason
+`sweepFilesystem` exists. Its own header states it: *"This sweep walks the raw tree directly, so its
+result can be diffed against discovery to catch the next blind spot instead of trusting the same
+function that caused the last one."* The sweep is deliberately WIDER than discovery so that a ledger
+discovery cannot reach surfaces as a coverage gap. Narrowing it would convert
+`found-by-sweep-not-discovery` — a gap a human reads — into silence, which is the exact trade
+`rule:discernment-checks` §2 exists to forbid. **Do not "fix" this by excluding the directory.**
+
+**So the remedy is a check on the naming convention, not on the walker**: assert that no file matching
+a live-ledger name sits under an `archive/` directory, derived over the real roots rather than a
+fixture, and stated as the invariant it is. Left open because writing it is a doctor check rather
+than a line, and because the population is currently empty — which is exactly when a guard is cheap
+and exactly when nobody writes one (G70).
+
 
 ### N105 · The guard that keeps junk out of an append-only log had no test, and a pointer comment said it did — **S2** — **RESOLVED 2026-09-28**
 
