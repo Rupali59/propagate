@@ -275,10 +275,26 @@ Cheapest first, and each is independently useful.
    design-only; `doctor`'s per-run gauges are a substitute for the aggregate picture,
    not for "what happened and to what."
 4. **`doctor --since <t>`** reading the above — troubleshooting becomes a query
-   rather than an archaeology dig, which is what this session actually was. Not built.
-   `readMetricsRecords`/`readLastMetricsRecord` (`lib/report/metrics.mjs`) already read the
-   full history and the newest record respectively — a `--since` flag is a thin CLI
-   layer over data that already exists, not a new storage problem.
+   rather than an archaeology dig. **BUILT 2026-09-30** (TODOS PR-028): `parseSince` +
+   `summariseSince` in `lib/report/metrics.mjs`, a thin renderer in `cli.mjs`. Accepts a span
+   (`30m`/`24h`/`7d`/`2w`) or any date `Date.parse` takes. **0.7s against a doctor run's
+   minutes**, because it reads `metrics.jsonl` and runs no checks — and it prints
+   `THIS COMMAND RAN NO CHECKS` on its first line for exactly that reason: a metrics summary
+   under the word `doctor` otherwise reads as "doctor ran and is happy", which is N87's defect
+   in a new command.
+
+   Three refusals are load-bearing rather than polish. An **empty window** is attributable and
+   distinguishes "no runs in that window" from "`metrics.jsonl` is empty" — a quiet week from a
+   broken collector. A **bad spec** exits 2 instead of widening, because a tolerated spec
+   becomes a silently-wide window and an empty wide window reads as "nothing wrong". And a
+   **bare number** is refused with the unit named: `Date.parse` reads 1-3 digits as a YEAR, so
+   `--since 7` would otherwise open a window back to 2001-06-30 — the likeliest typo producing
+   the most dangerous result, found by a test that loops the bad inputs rather than asserting
+   one.
+
+   **Its first real run found something N91 did not know.** That entry records spikes at 18-24
+   minutes; over seven days `doctor.duration_ms` has a max of **11,272,497 ms — 188 minutes** —
+   against this document's own p95 < 5s target, with a median around 100s.
 5. **Spans.** Only after 1–4, and only if attribution is still slow. Not built.
 
 **Design rule, restated because it is the whole point:** a metric without an

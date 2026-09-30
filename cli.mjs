@@ -4807,6 +4807,61 @@ if (_invokedDirectly) {
   if (mode === "status") {
     const { status } = await import("./commands/status.mjs");
     await status();
+  } else if (mode === "doctor" && process.argv.includes("--since")) {
+    // `doctor --since <t>` — OBSERVABILITY §6 step 4, TODOS PR-028.
+    //
+    // A QUERY OVER metrics.jsonl, NOT A DOCTOR RUN. That is the whole value: §6
+    // step 1 records that doctor is point-in-time so a regression between
+    // invocations is invisible, and this makes the history answerable in
+    // milliseconds instead of by re-running a check that takes minutes.
+    //
+    // THE OUTPUT SAYS IT RAN NO CHECKS, first line, every time. A metrics summary
+    // printed under the word `doctor` otherwise reads as "doctor ran and is happy",
+    // which is N87's failure — green meaning the checks it ran, over the workspaces
+    // it listed — reproduced in a new command.
+    const { parseSince, summariseSince, readMetricsRecords, METRICS_PATH, UNCALIBRATED } =
+      await import("./lib/report/metrics.mjs");
+    const i = process.argv.indexOf("--since");
+    const asJson = process.argv.includes("--json");
+    let since;
+    try {
+      since = parseSince(process.argv[i + 1]);
+    } catch (err) {
+      // REFUSE, never widen. A tolerated bad spec silently becomes a wide window,
+      // and an empty wide window reads as "nothing wrong".
+      if (asJson) console.log(JSON.stringify({ ok: false, reason: String(err.message) }, null, 2));
+      else console.error(`${RED}${err.message}${RESET}`);
+      process.exit(2);
+    }
+    const sum = summariseSince(await readMetricsRecords(), since.at, { label: since.label });
+    if (asJson) {
+      console.log(JSON.stringify({ ok: true, ran_checks: false, source: METRICS_PATH, ...sum }, null, 2));
+    } else if (sum.reason) {
+      // Attributable absence. "No runs in that window" and "every metric held
+      // steady" are different facts and only one is reassuring.
+      console.log(`\n  ${YELLOW}no data${RESET} — ${sum.reason}`);
+      console.log(`  ${DIM}source ${METRICS_PATH.replace(HOME_DIR, "~")}; this command RAN NO CHECKS${RESET}\n`);
+    } else {
+      console.log(`\n  ${DIM}metrics history only — THIS COMMAND RAN NO CHECKS. Run \`doctor\` for that.${RESET}`);
+      console.log(`  ${sum.runs} doctor run(s) ${sum.window}, of ${sum.records} record(s) — ${sum.from} .. ${sum.to}\n`);
+      const moved = sum.metrics.filter((m) => m.delta !== null && m.delta !== 0);
+      const odd = sum.metrics.filter((m) => m.vanished || m.appeared);
+      if (!moved.length && !odd.length) {
+        console.log(`  every one of ${sum.metrics.length} metric(s) ended where it started${RESET}`);
+      }
+      for (const m of moved) {
+        const arrow = m.delta > 0 ? `+${m.delta}` : String(m.delta);
+        const u = UNCALIBRATED.find((x) => x.key === m.key);
+        const cal = u ? `\n${" ".repeat(36)}${DIM}uncalibrated — ${String(u.reason).split(".")[0]}${RESET}` : "";
+        console.log(`  ${m.key.padEnd(32)} ${String(m.first).padStart(9)} -> ${String(m.last).padEnd(9)} ${arrow.padStart(8)}   ${DIM}min ${m.min} max ${m.max}${RESET}${cal}`);
+      }
+      // A key that stopped being recorded is not a key that went to zero — the
+      // distinction detectVanishedKeys exists for, held across a window.
+      for (const m of odd) {
+        console.log(`  ${YELLOW}!${RESET} ${m.key} ${m.vanished ? "VANISHED during the window" : "APPEARED during the window"} ${DIM}(seen in ${m.runsSeen} of ${sum.runs} runs)${RESET}`);
+      }
+      console.log("");
+    }
   } else if (mode === "doctor" && process.argv.includes("--json")) {
     // `--json` CAPTURES doctor's own output and classifies it, rather than
     // instrumenting Reporter. Measured 2026-09-17 before building: doctor prints

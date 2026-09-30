@@ -3745,6 +3745,23 @@ that the gap is real and currently harmless.
 
 ### N91 · `doctor.duration_ms` spikes recur at 18-24 minutes, most recently in the last 24 hours — **S2** — **OPEN**
 
+**RE-MEASURED 2026-09-30 with `doctor --since 7d` — the first thing that command was used for —
+and the range is far wider than this heading says:**
+
+```
+doctor.duration_ms   92842 -> 105043   (+12201)   min 32940   max 11272497
+                     uncalibrated - target is p95 < 5s (docs/OBSERVABILITY.md)
+```
+
+**Max 11,272,497 ms = 188 minutes**, across 207 runs in seven days — not 18-24. The median run is
+also ~100s against a stated target of **5s**, so the ordinary case is 20x over and the worst 2,254x.
+The heading's range came from a narrower window and should not be trusted as the bound.
+
+Two things this changes. The entry is no longer "spikes recur" — the whole distribution sits far
+above target, with occasional three-hour outliers. And it is the natural first item for PR-029 (six
+metrics carry no expectation): `doctor.duration_ms` is the one where a target already exists in the
+design doc and nothing asserts it.
+
 Filed from the same follow-ups list, which flagged the metric's all-time max
 (1,446,450 ms / 24m6s) as "unexplained." Re-measured against `~/.propagate/metrics.jsonl`
 directly (841 rows, `metrics["doctor.duration_ms"]` is a dotted key nested one level under

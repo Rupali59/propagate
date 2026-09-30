@@ -611,21 +611,6 @@ what every test uses.
 
 ---
 
-### PR-028 · `doctor --since <t>` — the cheapest telemetry item, and the one step 1 points at
-**S2.** `docs/OBSERVABILITY.md` §6 step 4, and its own words say why this is first: *"a `--since`
-flag is a thin CLI layer over data that already exists, not a new storage problem."*
-`readMetricsRecords` and `readLastMetricsRecord` (`lib/report/metrics.mjs`) already read the full
-history and the newest record.
-
-It also closes the limitation step 1 states about itself: *"`doctor` is a manual/point-in-time
-check; nothing in this codebase runs it on a schedule… a metric that regresses between `doctor`
-invocations is invisible until someone runs `doctor` again."* §6 names step 4 as the thing that
-closes it.
-
-Acceptance: a window with no records reads as `no records in that window`, never as `nothing
-wrong` — `rule:discernment-checks` §2. And the flag must not silently accept an unparseable
-timestamp.
-
 ### PR-029 · Six of twelve metrics have no expectation, which the design calls decoration
 **S2.** `doctor` prints `uncalibrated metrics recorded, not asserted  rows.open,
 doctor.duration_ms, sidecars.loaded, sidecars.problems, ledger.malformed, state.tracked_files`.
@@ -671,7 +656,30 @@ closed-issue column, because a design table citing five resolved issues reads as
 question it answers — can a log line be joined to a `doctor` run — is worth asking of the monitor,
 which runs 48 times a day.
 
-### PR-032 · `docs/SYSTEMS.md` describes a refusal guard on `watcher.mjs`, which is not on disk
+## Finished
+
+
+### PR-028 · DONE — `doctor --since <t>` — the cheapest telemetry item, and the one step 1 points at
+
+**DONE 2026-09-30.** Built as `parseSince` + `summariseSince` (`lib/report/metrics.mjs`) with a renderer in `cli.mjs`; 0.7s against a doctor run's minutes. 13 tests, three mutations each red for their stated reason. Its first real run re-measured N91: `doctor.duration_ms` max over 7 days is **188 minutes**, not the 18-24 that entry records.
+**S2.** `docs/OBSERVABILITY.md` §6 step 4, and its own words say why this is first: *"a `--since`
+flag is a thin CLI layer over data that already exists, not a new storage problem."*
+`readMetricsRecords` and `readLastMetricsRecord` (`lib/report/metrics.mjs`) already read the full
+history and the newest record.
+
+It also closes the limitation step 1 states about itself: *"`doctor` is a manual/point-in-time
+check; nothing in this codebase runs it on a schedule… a metric that regresses between `doctor`
+invocations is invisible until someone runs `doctor` again."* §6 names step 4 as the thing that
+closes it.
+
+Acceptance: a window with no records reads as `no records in that window`, never as `nothing
+wrong` — `rule:discernment-checks` §2. And the flag must not silently accept an unparseable
+timestamp.
+
+
+### PR-032 · DONE — `docs/SYSTEMS.md` describes a refusal guard on `watcher.mjs`, which is not on disk
+
+**DONE 2026-09-30.** The row corrected. Two of its three artifact claims were false: `watcher.mjs` was deleted in `2f1612b`, and the heartbeat was given at `~/.claude/skills/propagate/heartbeat`, a path the plugin cutover removed (`HEARTBEAT_PATH` resolves to `~/.propagate/heartbeat`, also absent, guarded by `existsSync`). The archived plist is present, verified 2,700 bytes.
 **S3.** Found 2026-09-30 while scoping the telemetry items. The row reads *"`watcher.mjs` (kept on
 disk, header records the retirement, refuses to run directly without
 `PROPAGATE_ALLOW_RETIRED_WATCHER=1`)"*. The file was deleted in `2f1612b`.
@@ -682,8 +690,6 @@ one row, and it matters because that row is the archive record for how the watch
 `rule:measure-the-claim-not-a-proxy`, where the claim is about a file and nobody statted it.
 
 
-
-## Finished
 
 
 ### PR-011 · A fifth version-manifest location the delivery gate does not check: hub `marketplace.json` pinned at 0.5.0

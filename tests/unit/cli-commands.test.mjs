@@ -24,7 +24,15 @@ import { COMMANDS, renderUsage, validateFlags, resolveCommand } from "../../lib/
 /**
  * Captured from HEAD before the table existed. Do not retype; paste.
  *
- * CHANGED ONCE SINCE, deliberately, at offset 617 in `verify`:
+ * CHANGED TWICE SINCE, both deliberately.
+ *
+ * 2026-09-30, `doctor`: was bare `doctor`, now
+ * `doctor [--since <span|date>] [--json]`. `--since` is OBSERVABILITY §6 step 4
+ * (TODOS PR-028) — a query over `metrics.jsonl` that runs no checks. `--json` was
+ * already accepted and appears here for the first time, which SHRINKS the
+ * undocumented set below; that direction is the fix, per this file's own message.
+ *
+ * 1. at offset 617 in `verify`:
  *   was  `[--reason ...]`
  *   now  `[--reason ...|--note ...] [--out-of-order]`
  * `--note` is N69's alias (it was silently ignored twenty times), and
@@ -33,7 +41,7 @@ import { COMMANDS, renderUsage, validateFlags, resolveCommand } from "../../lib/
  * unnoticed. The table would now REFUSE it if it stayed undeclared, so
  * documenting it was forced by the validator rather than remembered.
  */
-const FROZEN_USAGE = "usage: node cli.mjs [status|doctor|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...|--note ...] [--out-of-order] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|plans [--check] [--root <path> ...] [--json]|ui [--port <n>]|queue [--json]|surface [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]|claims judge <file> [--json]|claims render <file> [--apply] [--json]|claims contradict <authored-file> [--json]|claims restate [--json]|claims verdict [--apply] [--json] < verdicts.json|claims answer <file> start|end --run <id> --outcome <o> [--json]|reminders [--list <name>] [--json]|reminders sync [--apply] [--json]|migrate (<workspace>|--workspace <name>) [--apply] [--force] [--allow-dirty] [--json]]";
+const FROZEN_USAGE = "usage: node cli.mjs [status|doctor [--since <span|date>] [--json]|migrate-refs <workspace> [--apply] [--json]|release --check [--json]|init <dir> [--workspace|--edges-only]|reload|check [--changed|--range <a>..<b>|--staged] [--strict]|drain [--all] [--close <id>[,<id>...] --status <done|wontfix|partial> [--reason ...] [--notes ...] [--closed-by ...]] [--group <correlation_id> ...] [--json]|reconcile [--all] [--inbound] [--group-by glob|node|none] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--json]|why <edge_id> [--all] [--json]|verify (--edge <id>|--node <id>|--glob <pattern>) [--state <STATE>] --disposition <d> [--reason ...|--note ...] [--out-of-order] [--ref <ref> | --source-ref <ref> --downstream-ref <ref>] [--apply] [--json]|bootstrap [--baseline-from-git|--baseline-all|--none] [--bound <n>] [--apply] [--json]|inventory [--json|--emit-rows]|skills [--json]|skills-create <name> <intent>|skills-promote <name>|skills-demote <name>|skills-reap [--apply]|backlog [--json]|goals [--json]|plans [--check] [--root <path> ...] [--json]|ui [--port <n>]|queue [--json]|surface [--json]|graph-index [--emit sqlite|cypher] [--out <path>] [--json]|graph [--all] [--node <path>] [--include-unverified] [--html <path>] [--json]|monitor [--dry-run] [--json]|manifest <workspace> [--json]|docs [<file>...|--all|--kinds|--structure [--tables]|--superseded [<doc>]]|journal --since <iso> [--until <iso>] [--json]|rollup [--check|--dry-run] [--force] [--json]|claims check [--json]|claims judge <file> [--json]|claims render <file> [--apply] [--json]|claims contradict <authored-file> [--json]|claims restate [--json]|claims verdict [--apply] [--json] < verdicts.json|claims answer <file> start|end --run <id> --outcome <o> [--json]|reminders [--list <name>] [--json]|reminders sync [--apply] [--json]|migrate (<workspace>|--workspace <name>) [--apply] [--force] [--allow-dirty] [--json]]";
 
 test("renderUsage() is byte-identical to the literal it replaced", () => {
   const got = renderUsage();
@@ -127,7 +135,6 @@ const UNDOCUMENTED = [
   "docs --json",
   "docs --reference",
   "docs --undeclared",
-  "doctor --json",
   "drain --cross",
   "reminders --apply",
   "reminders sync --list",
