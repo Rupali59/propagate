@@ -5,6 +5,14 @@
 > **Disposition vocabulary, added 2026-09-29.** Every `### N…` heading ends in exactly one
 > of these, in bold. Derive the tally; never restate it:
 >
+> **A disposition carries its EVIDENCE, not only its verdict.** The commonest defect in this
+> register is a disposition measured on a proxy — file existence for a live hazard ([[n26]]),
+> an open GitHub issue for an unfixed defect ([[n16]]), a sentence's shape for a severity
+> ([[n84]]). Seven instances in two days, and `OPEN` alone cannot be audited where
+> `OPEN (4 files still on disk)` can — which is how two of those were caught, by their own
+> author re-reading his own line. Named by `rule:measure-the-claim-not-a-proxy` since
+> 2026-09-30.
+>
 > ```sh
 > node -e 'const l=require("fs").readFileSync("propagation/state/workspace/ISSUES.md","utf8").split("\n").filter(t=>/^### N\d+/.test(t));
 > const D=/\*\*(OPEN|RESOLVED|BLOCKED|ACCEPTED|APPLIED, UNVERIFIED|WITHDRAWN|MOOT)\b/;
