@@ -305,7 +305,7 @@ them stays in `cli.mjs`.
 | `init <dir> [--workspace\|--edges-only]` | Scaffold `.propagates.yml`. `--workspace` (default) writes `workspace: true` and verifies the directory becomes discoverable, exiting non-zero if not (N15). **No longer touches the plist** — that moved to `reload` (N14). |
 | `reload` | **Obsolete as of 2026-08-14** — its only purpose was regenerating the (now retired) watcher's plist and reloading it into launchd; `lib/core/plist.mjs` has never generated any other plist (grep confirms it — the digest plist is installed by a separate mechanism it never touches, see "Canonical state" above). Not removed from `cli.mjs` by this change (out of scope — no live launchd command was run to verify/enact this), but there is no remaining reason to run it. |
 | `check` | Commit-time drift gate. Flags below. |
-| `rollup` | Derive **what exists and what is open** across every workspace and WRITE it to `<SEARCH_ROOTS[0]>/ECOSYSTEM.md`. It exists because every other cross-project answer here is command-shaped and agents read files, not commands. Reuses `backlog()` + `inventory()` — no second walk. A hand edit is REFUSED, never clobbered. |
+| `rollup` | Derive **what exists and what is open** across every workspace and WRITE it to `<HUB_ROOT>/ECOSYSTEM.md` (it said `<SEARCH_ROOTS[0]>` until 2026-09-30, which is what N101 fixed in the code and this sentence outlived — `searchRoots` is ordered for the walk, not to name the tree). It exists because every other cross-project answer here is command-shaped and agents read files, not commands. Reuses `backlog()` + `inventory()` — no second walk. A hand edit is REFUSED, never clobbered. |
 | `rollup --check` | Read-only. **Four exit codes carrying three distinct facts plus a pass:** `0` current · `1` stale (exists, tree moved past it) · `2` could-not-run (**absent** — nothing to check; a fresh clone hits this by construction) · `3` hand-edited. `1` and `2` were conflated until 2026-08-31, and 1336 tests passed anyway because they asserted the message rather than the code. |
 | `rollup --force` | Discard a hand edit and regenerate. NOT a safety flag — it enables the write rather than promising to withhold it — so `rule:safety-flag-needs-a-test` governs `--dry-run`, not this. |
 | `claims check` | Five **deterministic** checks over the declared-edge corpus: expired dates, literals against declared downstreams, footer-vs-newest-inline date, rotted citations (self-line, dead branch, dead path), and `concepts:` tokens that can never fire. `lib/claims/check.mjs` may import no model client and make no network call, and a test asserts that against the module's own source. It reports CANDIDATES — the judgment step is a later lane, deliberately. |
@@ -483,14 +483,28 @@ behaviour that already works on a machine that exports it.
 
 ### `hubRoot` — the one declared fact
 
-`setup --hub <path>` records where your code lives. Five things derive from it and
-are **not** configured separately: `searchRoots` (when not declared), the skills
-marketplace directory, and the three execution registries — `scripts/execution/`'s
-`ports.yml`, `deploy.yml` and `mongo.yml`. Derive the list rather than trusting this
-sentence: the last four are exactly the `underHub()` call sites in
-`lib/core/config.mjs`, and `searchRoots` falls back to `[HUB_ROOT]` directly rather
-than through `underHub()`. (This sentence said all five were `underHub()` call sites
-until 2026-09-10, so deriving it returned four and disagreed with its own list.)
+`setup --hub <path>` records where your code lives. Things derive from it and are
+**not** configured separately: `searchRoots` (when not declared), the skills
+marketplace directory, the three execution registries — `scripts/execution/`'s
+`ports.yml`, `deploy.yml` and `mongo.yml` — and the **cross-repo ledger**. Derive the
+list rather than trusting this sentence: the three registries and the marketplace are
+exactly the `underHub()` call sites in `lib/core/config.mjs`; `searchRoots` falls back
+to `[HUB_ROOT]` directly, and the cross-ledger goes through `crossLedgerRoot()`.
+Neither of those last two is an `underHub()` call site, so a grep for `underHub` is a
+floor on this list and not the list.
+
+(This sentence said all five were `underHub()` call sites until 2026-09-10, so
+deriving it returned four and disagreed with its own list. It said **five** things
+until 2026-09-30, when the cross-ledger joined them — N117: it had been resolving
+from `SEARCH_ROOTS[0]`, which on one machine is a nested root, so it named a file
+that never existed while the real ledger was owned by nobody.)
+
+**The cross-ledger's cascade is three-way, and the middle case is load-bearing:**
+`HUB_ROOT`, else `SEARCH_ROOTS[0]`, else `null`. The fallback is not laziness — an
+install predating `hubRoot:` declares only `searchRoots`, and removing the fallback
+reddened eight tests including the regression guard for `status --cross` reporting
+`0 open` against real rows. `artifactPath()` keeps the same cascade, deliberately, so
+the two hub-derived paths cannot disagree.
 
 It exists because that path was previously restated four times, each independently
 overridable and each defaulting to one author's layout — so `portsFile` had to be

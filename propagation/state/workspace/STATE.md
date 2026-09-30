@@ -1,5 +1,45 @@
 # propagate — State
 
+## The cross-ledger belonged to a nested root, and propagate was not a workspace — 2026-09-30, `v0.15.14`
+
+**`doctor`'s "unowned ledger" line was pointing at the right file for the wrong reason.**
+`CROSS_LEDGER_JSONL` resolved from `SEARCH_ROOTS[0]`, which on this machine is
+`Rupali/Experiments`, so config named a file that has never existed inside a gitignored
+directory while the real cross-ledger at the hub's `propagation/` was in nobody's owned set. 0
+rows, so nothing was lost; the exposure was the write path, because `freeze-ledger --cross
+--apply` writes through that value. N117, and it is N101 in a second place — `artifactPath()`
+had the identical derivation for `ECOSYSTEM.md` and the class was never swept.
+
+**The first fix was wrong and the suite said so.** `hubRoot ?? null` reddened eight
+pre-existing tests, one of them the regression guard for `status --cross` reporting `0 open`
+against real rows, because those fixtures declare search roots and no hub — every install
+predating the `hubRoot` key. The cascade is three-way: hub, else `searchRoots[0]`, else null.
+A unit test that agrees with the change it was written beside is not evidence.
+
+**propagate now declares itself a workspace,** which it had never done. `migrate --workspace
+propagate` answered `no workspace named "propagate" — 21 known` while `doctor`'s conformance
+check — population derived from version control, every depth-1 directory with a `.git` —
+demanded the v3 layout here. The tool required conformance from a directory its own migration
+command could not see.
+
+**A decision was recovered rather than deleted.** `migrate` refused on `docs/DECISIONS.md` with
+*"two real files, resolve by hand"*, and that file held one substantial 2026-08-29 entry —
+monitor telemetry and the dedup key failing its stated purpose, with three self-corrections —
+that had never reached the canonical register. It is now in place by date; the old path is a
+pointer stub, which is what cleared the conflict.
+
+**Grid, Sindhu and propagate adopted the missing v3 items.** All three plans were creates-only,
+so `--allow-dirty` was safe on dirty trees: N104's hazard is staging, and a creates-only plan
+runs no git commands. The staged-file count was checked before and after each. Sindhu and
+propagate report `conforms after: yes`; **Grid says `✗ still missing` with an empty list** while
+all five required items measure present — a verdict that names nothing, which is
+`rule:discernment-checks` §2 in the migrate reporter, and its `state/workspace` is an empty
+directory.
+
+**Still open:** `Motion-Graphics` has neither ledger file and is handed back in
+`HANDOVERS.md`; `docs/REFERENCE.md` had outlived N101, claiming `rollup` writes to
+`<SEARCH_ROOTS[0]>/ECOSYSTEM.md`, and is corrected here.
+
 ## The sidecar SOURCE check was always there, and a move is now a break — 2026-09-30, `v0.15.13`
 
 **One glob-aware source check, where yesterday there were two.** The second was written on the
