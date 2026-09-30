@@ -18,7 +18,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { EXPECTATIONS, UNCALIBRATED, evaluateExpectations } from "../../lib/report/metrics.mjs";
+import {
+  EXPECTATIONS, UNCALIBRATED, RETIRED_METRICS, evaluateExpectations, detectVanishedKeys,
+} from "../../lib/report/metrics.mjs";
 
 /** A record that violates nothing — the base every case mutates one key of. */
 const CLEAN = Object.freeze({
@@ -126,21 +128,26 @@ test("every new expectation carries a basis naming its derivation, never a bare 
   }
 });
 
-test("the two remaining UNCALIBRATED entries say why they are NOT waiting on history", () => {
+test("the remaining UNCALIBRATED entries say why they are NOT waiting on history", () => {
   // The list's value is the distinction. "Needs more data" and "a per-run gate is the
   // wrong instrument" and "the subject was deleted" are three different facts, and
   // only the first is a matter of time.
-  assert.equal(UNCALIBRATED.length, 3, "three were calibrated; three remain, each for a different reason");
+  assert.equal(UNCALIBRATED.length, 2,
+    "three were calibrated, one reverted as scale-dependent, and state.tracked_files was RETIRED " +
+    "rather than exempted — four outcomes for six metrics, which is the point of keeping them apart");
   const byKey = Object.fromEntries(UNCALIBRATED.map((u) => [u.key, u.reason]));
 
   assert.ok("rows.open" in byKey);
   assert.match(byKey["rows.open"], /trend/i, "rows.open is a trend question");
   assert.match(byKey["rows.open"], /--since/, "and --since is where it is answered");
 
-  assert.ok("state.tracked_files" in byKey);
-  assert.match(byKey["state.tracked_files"], /deleted file|does not exist/i,
-    "state.tracked_files measures a removed artifact — that is not a calibration problem");
-  assert.match(byKey["state.tracked_files"], /831/, "and the reason must carry the measurement");
+  // state.tracked_files is NOT here any more — it was retired, which is a third
+  // state and has its own tests below. Asserting its absence is what stops it
+  // quietly reappearing as "exempt" when the honest answer is "gone".
+  assert.ok(!("state.tracked_files" in byKey), "a retired metric is not an exempt one");
+
+  assert.ok("sidecars.loaded" in byKey);
+  assert.match(byKey["sidecars.loaded"], /scale/i, "sidecars.loaded is scale-dependent, not pending data");
 
   // None of the four calibrated keys may linger here, or doctor would print a metric
   // as both asserted and exempt.
@@ -153,5 +160,54 @@ test("no metric is both asserted and exempt", () => {
   const asserted = new Set(EXPECTATIONS.map((e) => e.key));
   for (const u of UNCALIBRATED) {
     assert.ok(!asserted.has(u.key), `${u.key} appears in both EXPECTATIONS and UNCALIBRATED`);
+  }
+});
+
+// ── retirement (N115) ───────────────────────────────────────────────────────
+
+test("a DECLARED retirement is not reported as a vanished signal", () => {
+  // `detectVanishedKeys` is right to report a key that stops being emitted — R6's
+  // silent absence. But it cannot tell a broken collector from a deliberate removal,
+  // and without the distinction a retirement prints a doctor failure and the next
+  // reader investigates a non-issue.
+  assert.deepEqual(detectVanishedKeys({}, { "state.tracked_files": 0 }), [],
+    "a retired key must not read as vanished");
+  assert.deepEqual(detectVanishedKeys({}, { "rows.open": 0 }), ["rows.open"],
+    "a real vanish still must");
+});
+
+test("every retirement carries a DATE and a reason, not just a key", () => {
+  // The list's whole value is that absence stays attributable. A bare key would make
+  // a retirement indistinguishable from a typo in the collector.
+  assert.ok(RETIRED_METRICS.length >= 1);
+  for (const r of RETIRED_METRICS) {
+    assert.match(r.retired, /^20\d\d-\d\d-\d\d$/, `${r.key} needs a retirement date`);
+    assert.ok(r.reason && r.reason.length > 60, `${r.key} needs a reason, not a bare key`);
+  }
+});
+
+test("state.tracked_files is RETIRED, and is no longer collected, asserted or exempt", () => {
+  // It measured ~/.propagate/state.json — the retired watcher's mtime baseline —
+  // which does not exist: 208 until 2026-08-19, then 0 on 831 consecutive runs.
+  const r = RETIRED_METRICS.find((x) => x.key === "state.tracked_files");
+  assert.ok(r, "it belongs in RETIRED_METRICS");
+  assert.match(r.reason, /831/, "and the reason must carry the measurement");
+  assert.match(r.reason, /does not exist/, "and name why there is nothing to calibrate");
+
+  assert.equal(EXPECTATIONS.find((e) => e.key === "state.tracked_files"), undefined,
+    "a retired metric must not also be asserted");
+  assert.equal(UNCALIBRATED.find((u) => u.key === "state.tracked_files"), undefined,
+    "nor exempt — it is gone, which is a third state");
+});
+
+test("no key is in more than one of EXPECTATIONS, UNCALIBRATED and RETIRED_METRICS", () => {
+  // Three mutually exclusive states: asserted, exempt, gone. A key in two of them
+  // means doctor would describe one metric two ways.
+  const seen = new Map();
+  for (const [list, name] of [[EXPECTATIONS, "EXPECTATIONS"], [UNCALIBRATED, "UNCALIBRATED"], [RETIRED_METRICS, "RETIRED_METRICS"]]) {
+    for (const x of list) {
+      assert.ok(!seen.has(x.key), `${x.key} is in both ${seen.get(x.key)} and ${name}`);
+      seen.set(x.key, name);
+    }
   }
 });

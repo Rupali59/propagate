@@ -4509,7 +4509,39 @@ trade in its own fingerprint note — the wide version flagged 8 files to find 1
 is that **a fingerprint matching a rule's IMPERATIVE catches compliance; only one matching its CLAIM
 catches restatement.**
 
-### N115 · `state.tracked_files` has read 0 on 831 consecutive runs because it measures a deleted file — **S2** — **OPEN**
+### N115 · `state.tracked_files` has read 0 on 831 consecutive runs because it measures a deleted file — **S2** — **RESOLVED 2026-09-30** (retired, with a declared-retirement mechanism so the removal is attributable; the general check it asked for now ships in `--since`)
+**RESOLVED 2026-09-30. Retired, not re-pointed** — nothing replaced the watcher's baseline
+(`reconcile` / `check` / the monitor do its job and none keeps one), so there was no subject to aim
+it at. Removed from the collector, from `UNCALIBRATED`, and from the emitted record.
+
+**The removal needed a mechanism first, which is the part worth keeping.** `detectVanishedKeys` had
+no notion of a deliberate retirement, so deleting the key would have printed `metric still emitted:
+state.tracked_files` as a doctor FAILURE — a real defect reported for an intentional change, and the
+next reader investigating nothing. `RETIRED_METRICS` now carries the key, the date and the reason;
+`detectVanishedKeys` skips those, and `doctor` reports them **as retired** rather than suppressing
+them. Absence stays attributable; which of the two facts it is, is now answerable. Verified live:
+`· metric retired: state.tracked_files  withdrawn 2026-09-30`.
+
+**And the general check this entry asked for now ships.** It closed with *"the general check is
+'does each gauge's subject still exist', and nothing asks it"*. `doctor --since` now names every
+gauge that did not move in the window and splits them by whether `EXPECTATIONS` asserts the value —
+an asserted constant is known good, an unasserted one is only unexamined. On 30 days it reports:
+
+```
+9 gauge(s) did not move; 7 of those are asserted, so a constant is known good
+unmoved and NOT in EXPECTATIONS — check whether an inline doctor check covers each:
+  plist.watchpaths = 0 across all 502 run(s) — may be covered by an inline check()
+  rows.open = 0 across all 502 run(s) — declared UNCALIBRATED, so genuinely unexamined
+```
+
+**That report overclaimed in its first version and was narrowed within the hour**, which belongs in
+the record because it is this register's own recurring defect. It said *"nothing would notice if
+their subject disappeared"* — measured as "absent from `EXPECTATIONS`", a proxy for "asserted
+nowhere". Wrong: `plist.watchpaths` IS asserted, by an inline `check()` in
+`lib/report/doctor/discovery.mjs`, proven failable by `doctor.test.mjs`'s G20 test. So the line now
+claims only what it can see and says where to look next. `rule:measure-the-claim-not-a-proxy`,
+written this morning, inside the feature built to surface that class.
+
 Found 2026-09-30 while calibrating the six uncalibrated metrics (PR-029). The distribution is not
 noisy, it is a cliff:
 

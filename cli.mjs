@@ -175,6 +175,7 @@ import {
   UNCALIBRATED,
   evaluateExpectations,
   detectVanishedKeys,
+  RETIRED_METRICS,
   readLastMetricsRecord,
   appendMetricsRecord,
 } from "./lib/report/metrics.mjs";
@@ -626,7 +627,6 @@ async function doctor({ exitProcess = true } = {}) {
   let decisionsEntriesCount = 0;
   let decisionsWithTokensCount = 0;
   let plistWatchpathsCount = 0;
-  let stateTrackedFilesCount = 0;
   // Set by checkEnvironment and read by `# Metrics` — the ONE reconcile() of the run (D8).
   let doctorReconcileRows = null;
   // Detail collected for the four subjects whose sole assertion now lives in
@@ -685,7 +685,6 @@ async function doctor({ exitProcess = true } = {}) {
     const { counts, details } = await checkEnvironment({ reporter });
     renderDoctorEntries(reporter.drain());
     problems += reporter.problems;
-    stateTrackedFilesCount = counts.stateTrackedFiles;
     doctorReconcileRows = details.reconcileRows;
   }
 
@@ -1301,7 +1300,6 @@ async function doctor({ exitProcess = true } = {}) {
       "decisions.entries": decisionsEntriesCount,
       "decisions.with_tokens": decisionsWithTokensCount,
       "plist.watchpaths": plistWatchpathsCount,
-      "state.tracked_files": stateTrackedFilesCount,
       "doctor.duration_ms": Date.now() - doctorStart,
       // Placeholder — the real value (this run's final `problems` count,
       // including the metrics checks below) is assigned right before
@@ -1326,6 +1324,15 @@ async function doctor({ exitProcess = true } = {}) {
         false,
         `present in the previous run (${previousRecord.run_id}, ${previousRecord.ts}), absent from this one`,
       );
+    }
+    // A DECLARED retirement is reported, not suppressed. It is not a failure —
+    // somebody removed it on purpose — but it must not be silent either, or the
+    // first run after a retirement is indistinguishable from a collector that
+    // quietly stopped emitting (rule:discernment-checks §2).
+    for (const r of RETIRED_METRICS) {
+      if (previousRecord?.metrics && r.key in previousRecord.metrics && !(r.key in metrics)) {
+        info(`metric retired: ${r.key}`, `withdrawn ${r.retired} — ${String(r.reason).split(".")[0]}`);
+      }
     }
 
     // G16: these are predictions, not targets — a violation here is real
@@ -4819,7 +4826,7 @@ if (_invokedDirectly) {
     // printed under the word `doctor` otherwise reads as "doctor ran and is happy",
     // which is N87's failure — green meaning the checks it ran, over the workspaces
     // it listed — reproduced in a new command.
-    const { parseSince, summariseSince, readMetricsRecords, METRICS_PATH, UNCALIBRATED } =
+    const { parseSince, summariseSince, readMetricsRecords, METRICS_PATH, UNCALIBRATED, EXPECTATIONS } =
       await import("./lib/report/metrics.mjs");
     const i = process.argv.indexOf("--since");
     const asJson = process.argv.includes("--json");
@@ -4859,6 +4866,31 @@ if (_invokedDirectly) {
       // distinction detectVanishedKeys exists for, held across a window.
       for (const m of odd) {
         console.log(`  ${YELLOW}!${RESET} ${m.key} ${m.vanished ? "VANISHED during the window" : "APPEARED during the window"} ${DIM}(seen in ${m.runsSeen} of ${sum.runs} runs)${RESET}`);
+      }
+      // THE GENERAL FORM OF N115, and the question nothing else asks: which gauges
+      // have not moved at all? `state.tracked_files` read 0 on 831 consecutive runs
+      // because it measured a deleted file, and being uncalibrated made that
+      // unfalsifiable. A constant gauge is not proof of death — `graph.cycles` is
+      // legitimately always 0 — so this NAMES them rather than failing, and splits
+      // them by whether EXPECTATIONS asserts the value.
+      //
+      // THE LIMIT, stated because the first version overclaimed: this can only see
+      // EXPECTATIONS. A gauge asserted by an inline `check()` in a doctor module —
+      // `plist.watchpaths` is — looks unexamined here and is not. So the output
+      // names what it can see and tells the reader where to look, rather than
+      // asserting that nothing covers the key.
+      const flat = sum.metrics.filter((x) => x.delta === 0 && !x.vanished && !x.appeared);
+      if (flat.length) {
+        const asserted = new Set(EXPECTATIONS.map((e) => e.key));
+        const unexamined = flat.filter((x) => !asserted.has(x.key));
+        console.log(`  ${DIM}${flat.length} gauge(s) did not move; ${flat.length - unexamined.length} of those are asserted, so a constant is known good${RESET}`);
+        if (unexamined.length) {
+          console.log(`  ${DIM}unmoved and NOT in EXPECTATIONS — check whether an inline doctor check covers each (N115's shape):${RESET}`);
+          for (const x of unexamined) {
+            const exempt = UNCALIBRATED.some((u) => u.key === x.key);
+            console.log(`    ${DIM}${x.key} = ${x.last} across all ${x.runsSeen} run(s)${exempt ? " — declared UNCALIBRATED, so genuinely unexamined" : " — may be covered by an inline check(); EXPECTATIONS is all this can see"}${RESET}`);
+          }
+        }
       }
       console.log("");
     }
