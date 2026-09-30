@@ -668,6 +668,16 @@ date, or omit the freshness line from the file and leave it to `status`.
 
 ### N35 · `selftest` proves self-match, not wild-match — 7 rules are unexercised — **S2** — **OPEN**
 
+**MEASURED 2026-09-30, and the number this entry wanted is worse than it guessed.** Three sentences
+lifted VERBATIM out of canonical rule bodies fire **zero** of 22 fingerprints — including each
+sentence's own rule. `delegation-criteria.md:94` and `discernment-checks.md:33` both read *"A report
+saying \"verified\" is a claim about verification"*, and neither rule's fingerprint matches it. All
+seven claims from the rule-promotion backlog, written in ordinary English, likewise fire nothing.
+So `rules check`'s "0 silent restatements" means **"nobody copy-pasted a rule uncited"**, never
+"nobody restated one". The seven rules written that day were authored against a held-out corpus of
+real scattered copies instead of their own bodies — see [[n72]] for why the corpus must be claim
+lines rather than headings.
+
 **Filed 2026-08-19**, found while widening `never-commit-unless-asked`.
 
 `selftest` asserts every fingerprint matches **its own rule body**. That body is written
@@ -2307,6 +2317,24 @@ call site, rather than the sentence describing it, is what found it.
 
 ### N72 · The restatement pairer anchors on the heading, so real restatements are never examined — **S2** — **OPEN**
 
+**MEASURED 2026-09-30 on the rule that DEFINES the discipline.** `discernment-checks`'s own
+fingerprint matches 7 lines of its own body, and the first four are all `## ` headings:
+
+```
+HEADING  ## 1 · A check that cannot fail is worse than no check
+HEADING  ## 2 · Absence must be attributable
+HEADING  ## 3 · Verify the work, not the report
+HEADING  ## 4 · Verify the instrument before believing a surprising number
+```
+
+Its selftest is green because it matched structure. The claim two lines under §3 is invisible to it —
+which is this entry's defect, in the rule that names it.
+
+**One distinction this measurement forced, worth recording before the fix:** a heading whose text IS
+the claim verbatim (`delegation-criteria.md:92`) is CORRECT to match. The harm is anchoring on a
+heading that states nothing, because then the pairer returns UNPAIRED and the claim below is never
+read. A fix that suppresses all heading matches would lose real detections.
+
 Found 2026-09-15, while judging the 15 entries Phase 2a handed over.
 
 `checkRules` reports the line where a rule's fingerprint matched. For the `tool-priority`
@@ -2621,9 +2649,52 @@ declined on 2026-09-17. Filed so the exposure is visible and the decision is del
 
 ---
 
-### N84 · Every in-tree ledger is empty and all 2839 events live outside every git remote — undecided, undocumented — **S3** — **OPEN**
+### N84 · Every in-tree ledger is empty and all 2839 events live outside every git remote — undecided, undocumented — **S3, and the severity was wrong** — **RESOLVED 2026-09-30** (decided and recorded in DECISIONS.md; store mirrored to the private hub; recurring refresh is [[n107]])
 
 Found 2026-09-17 while mapping what a workspace owns.
+
+**RESOLVED 2026-09-30. The entry asked for a decision record and got one — `DECISIONS.md`,
+2026-09-30 — plus the mirror, because one measurement made the answer obvious and reclassified the
+severity.**
+
+**Re-measured today.** The event count has grown from 2839 to **2,946**, plus **11 that survive only
+in `events/archive/2026-08.jsonl.pre-truncate-2026-08-17`** — verified by comparing `event_id` sets,
+which also cleared `~/.propagate/2026-08.jsonl.pre-reinit-2026-08-22` as **1,435 events with 0
+absent from the live store**, i.e. fully redundant. The "17 ledger.jsonl files" is now **20**, of
+which 19 hold 0 rows; `Vipin Kaushik/obsidian-vk-publish/.propagation/ledger.jsonl` holds 28. My
+first sweep today said 18 files because it used `-maxdepth 4`; depth 6 finds 20. **G-L, third
+instance in two days**, in the same pass that re-measured it.
+
+**Half the answer was already in the code, written fluently, doing nothing.**
+`lib/report/doctor/workspaces.mjs:149-152`: *"`ensureLedgerPair` does
+`writeFileSync(ledgerJsonl, "")` and NOTHING in this repo appends a row to any ledger file."* So an
+empty in-tree ledger is the ONLY state the code can produce — it is not a stalled migration, and
+this entry's central ambiguity was resolved in a comment on a retired doctor check. That comment
+answers *"are empty ledgers a defect?"* (no) and not *"should the store be backed up?"*, which is
+why it sat on top of an open entry for thirteen days. `rule:enforcement-watches-itself`.
+
+**The severity was wrong, and the mechanism is worth naming.** This entry says *"the deliverable is
+a decision record, not code"* and *"this may well be correct"*, which frames it as governance —
+so it was filed S3. The measurable fact is **611 KB of hand-written reasoning across 2,793 of 2,946
+events**, single-copy, in a directory with no `.git`. An entry phrased as a pending DECISION reads
+as lower-risk than the same entry phrased as a MEASUREMENT; the hazard did not change, the sentence
+shape did. On content it was the only irreversible-loss item in the register.
+
+**And it was invisible to the tree's own detector.** Hub `CLAUDE.md` §"No-git-remote inventory
+(data-loss risk)" derives its list with `find ~/Documents/GitHub -maxdepth 6 -name .git`.
+`~/.propagate` is outside that root, so the section written for exactly this risk class cannot see
+its largest instance — `rule:discernment-checks` §5, the check being fine and the population not.
+
+**Done:** mirrored to `workspace-hub` at `propagation/events-backup/` (private; propagate is public
+and `reason`/`node_id` carry private identifiers), under the original filenames so git stores
+deltas and history becomes the dated series, with a README stating what it is, why it is not called
+`events/` (`readEvents()` globs `*.jsonl` flat over `EVENTS_DIR`), how to restore, and that two
+stores must never be merged by concatenation. Hashes verified both sides. **Uncommitted — the
+commit is Rupali's.**
+
+**Not done:** the refresh is a manual `cp`. See [[n107]]. Until that lands this is half-delivered,
+and a stale backup reads as protection — the same shape as [[n26]]'s frozen liveness banner.
+
 
 **Measured:** all **17** `ledger.jsonl` files in the tree hold **0 rows**. The cross-ledger
 (`propagation/PROPAGATION_CROSS_LEDGER.jsonl`) has **never** recorded an entry — its
@@ -4111,6 +4182,274 @@ those two calls agreed — both wrong — so the control would have passed while
 
 After the fix, `rollup --check` went 2 -> 1 (stale, correctly) -> 0 (current) once regenerated:
 734 -> 959 lines at the hub root.
+
+### N107 · The event-store mirror has no refresh, so it will silently become a backup of 2026-09-30 — **S2** — **RESOLVED 2026-09-30** (rides the 09:00 digest, hash-gated, and reports PROTECTION separately from freshness)
+**RESOLVED 2026-09-30, same day, and the design gained one thing the plan did not anticipate.**
+`eventsBackupSnapshot()` rides the existing 09:00 digest — zero new plists, zero launchd changes.
+
+**The addition: freshness and protection are reported as SEPARATE facts, and the second is the one
+that matters.** The plan copied `refsSnapshot()`'s shape, and writing it surfaced that the model is
+insufficient for a *backup*. `refsUncommitted()` answers "is the output uncommitted" — and this
+morning the hub carried MODIFIED `propagation/refs/{snapshot.json,lifecycle.jsonl}` from 2026-09-27
+and 2026-09-29. Fresh files, in a dirty tree, protecting nothing. For a registry that is a nuisance;
+for a backup it is total failure, because **the bytes that survive a lost disk are the ones on the
+remote.** So `mirrorProtection()` reports `dirty` AND `unpushed`, and a committed-but-unpushed mirror
+is reported as UNPROTECTED — a state the refs rider cannot express at all.
+
+**Hash-gated, which is a correctness property rather than an optimisation.** The store is 2.7 MB and
+the digest fires daily. An unconditional copy would rewrite the mirror every morning and leave the
+hub permanently dirty — precisely the state `refs-registry` leaves its registries in, and it destroys
+the signal. Copying only on a hash mismatch means a quiet day leaves the destination CLEAN, so a
+dirty tree genuinely means "there are new events to adopt". The destination is also re-hashed after
+writing: `copyFileSync` not throwing is a claim about the call, not about the bytes.
+
+**Exercised, not just asserted** (`rule:name-what-no-test-executes`). Its neighbours in
+`tests/digest/digest-dryrun.test.mjs` are source-asserted because running `reap()` would delete real
+skills; this path only reads, hashes and copies, so it is run for real:
+
+| check | result |
+|---|---|
+| `digest.mjs --dry-run` against the live mirror | every file byte-and-mtime identical |
+| armed path in isolation | 3 shards · 0 copied · 3 unchanged · `{dirty:0, unpushed:0}` |
+| staged anything in the hub (N104) | **0** |
+| committed-not-pushed vs pushed, on a real git fixture with a bare origin | told apart |
+| `HUB_ROOT = null` (G24) | named refusal `hub-root-unconfigured`, not an empty result |
+
+**Three mutations, each red for its stated reason and nothing else** — removing the `dryRun` gate
+(2 tests), forcing `unpushed` to 0 (1 test, the `COMMITTED IS NOT PROTECTED` assertion), and letting
+unreadable git state read as clean (1 test). Suite 2317 + 94, 0 failures; production event store
+byte-identical across the run.
+
+**Still not earned, and the row says so as a hard gate.** `docs/SYSTEMS.md`'s `adoption_date` stays
+BLANK until events have actually been RESTORED from `origin/main` into a scratch state dir and read
+back. `ssjk-mongo-backup` is the precedent two rows up: active, exit 0, and it has produced zero
+backups in its entire existence. A backup that has never been restored from is a backup nobody has
+tested.
+
+Filed 2026-09-30 as the named residual of [[n84]]. The store is now mirrored to
+`workspace-hub:propagation/events-backup/`, verified byte-identical — **by a manual `cp`**. Nothing
+re-runs it.
+
+**A backup nobody refreshes is worse than no backup, because it reads as protection.** That is
+[[n26]]'s shape exactly: a liveness banner that froze while continuing to assert health. On the day
+this matters the mirror will be however many weeks old nobody noticed.
+
+**The host already exists and must be reused, not added to.** `com.tathya.propagate.digest` fires
+daily at 09:00 and already carries riders (`reminders-bridge`, the skill reaper —
+`docs/SYSTEMS.md:40,41,51`). `rule:delegation-criteria` §2 is explicit that a new scheduled
+component must justify itself against derive-on-demand, and this one cannot: nothing needs the
+mirror to exist *before* someone asks. So it is a rider, and **no plist is touched** — G-O records a
+plist truncated to 94 bytes that stayed `launchctl list`-green for seven days.
+
+**The probe is "the mirror got newer", never "the job ran"**, per the `reminders-bridge` row's own
+model and for the reason [[n55]] exists: a component correctly retired whose replacement nothing
+invoked. A row in `docs/SYSTEMS.md` is part of the deliverable, not a follow-up.
+
+**Two hazards specific to this rider, both already paid for in this repo.** It writes into ANOTHER
+repository's working tree, so it must never stage or commit — N104 is the entry where
+`migrate --apply` staged into a colleague's index and their next commit adopted 189 lines of it.
+And `digest.mjs` is the file that taught this repo `rule:safety-flag-needs-a-test`: its `--dry-run`
+promised *"print, write NO state"* while `lifecycleSweep()` called `reap(…, {apply: true})`
+unconditionally. **`dryRun` must be threaded and proven inert by snapshotting the mirror's bytes,
+not by reading stdout.**
+
+### N108 · The leftover-cache check names the first stale tree it finds, not the population — **S3** — **OPEN**
+Found 2026-09-30, immediately after `claude plugin update propagate@tathya` took the served plugin
+from 0.15.0 to 0.15.5. Doctor reported **one** leftover cache tree:
+
+```
+! served plugin has a LEFTOVER cache tree  tathya/propagate 0.5.0 at
+  ~/.claude/plugins/cache/tathya/propagate/0.5.0 is not the served install
+```
+
+There are **six** version-keyed directories under `~/.claude/plugins/cache/tathya/propagate/` —
+`0.5.0`, `0.6.1`, `0.6.2`, `0.6.3`, `0.15.0`, `0.15.5` — each with a `package.json` declaring its
+own version. Five are stale, and the update just created the fifth. The check reports a single
+example where it should report a count, which is the same defect shape as the `head -4` read as a
+total earlier this week: an instrument answering a narrower question than the one asked
+(`rule:discernment-checks` §4).
+
+Harmless in itself — a stale cache tree is inert, and the check's own text says so. It matters
+because **a warning that names one instance trains the reader to fix one instance**, and the pile
+grows by one on every update.
+
+### N109 · `digest.mjs`'s `GITHUB_ROOT` is `SEARCH_ROOTS[0]`, which is not the hub — the disk section measures 12% of the tree — **S2** — **OPEN**
+Found 2026-09-30 while wiring [[n107]], which needed a hub path and therefore had to establish which
+constant actually holds one.
+
+```
+digest.mjs:83   const GITHUB_ROOT = SEARCH_ROOTS[0];
+
+SEARCH_ROOTS[0] = …/Documents/GitHub/Rupali/Experiments
+HUB_ROOT        = …/Documents/GitHub
+equal?          false
+```
+
+`SEARCH_ROOTS` is an ORDERED list of roots and nothing promises the hub is first. On this machine it
+is second, because `Rupali/Experiments` is a nested search root and sorts ahead. The only consumer is
+`discoverProjectDirs()` (`digest.mjs:188`), which shells out to
+`find "$GITHUB_ROOT" -maxdepth 4 -name package.json`, so the digest's disk section enumerates:
+
+| root scanned | package.json dirs found |
+|---|---|
+| `SEARCH_ROOTS[0]` — `Rupali/Experiments` (what it uses) | **6** |
+| `HUB_ROOT` — the hub (what it means) | **49** |
+
+So the disk report covers 12% of the tree and reads as complete. This is the same class as
+[[n26]] and [[n16]] earlier today — an instrument answering a narrower question than the one asked —
+but arriving through a new door: not a bad query, a **plausible-looking index into an ordered list
+whose order is not part of its contract**.
+
+**Why it is not fixed here.** `HUB_ROOT` is the obvious substitution and it changes what the digest
+REPORTS — 6 project dirs becoming 49 will move the disk section's numbers and may trip its
+thresholds. That is a deliberate change to a daily report's content, not a typo fix, and it belongs
+with a look at whether the section wants the hub or genuinely wants every search root (the honest
+answer is probably `SEARCH_ROOTS` entire, not either single root). `GITHUB_ROOT` was left untouched by
+N107, which derives its own destination from `HUB_ROOT` directly.
+
+**The general form, which is the part worth keeping:** `SEARCH_ROOTS[0]` appears to name the hub and
+does not. Any `[0]` into a configured list is an assumption about ordering that the config never
+made — and `lib/core/release.mjs:135` already records the same lesson in the same repo, warning that
+the hub marketplace's propagate entry is *"never `.plugins[0]`, which on this hub is `quarantine`"*.
+That comment exists because someone already paid for this once.
+
+### N113 · A Next.js bracket path was classified as a glob, so an existing file read as "matched 0 files" — **S2** — **RESOLVED 2026-09-30**
+Found 2026-09-30 by RUNNING the new sidecar-source check against the real tree rather than reviewing
+it (`rule:name-what-no-test-executes`). Its one and only finding was a false positive:
+
+```
+! sidecar SOURCE glob matched 0 files   Manav-portfolio/.propagates.yml: src/app/work/[slug]/page.tsx
+```
+
+The file is on disk. `[slug]` is a Next.js App Router **dynamic segment** — a literal directory name —
+and `globSync` reads `[slug]` as a character class, so it searches `work/s/page.tsx` and finds nothing:
+
+```
+existsSync("src/app/work/[slug]/page.tsx")  ->  true
+globSync(same path)                          ->  []
+```
+
+**The DOWNSTREAM check had the identical bug from the start, at
+`lib/report/doctor/workspaces.mjs`'s `/[*?[\]]/.test(d.path)`.** It had never surfaced because no
+declared downstream happened to be a bracket path — an unknown reading as clean, which is [[n35]]'s
+shape in a different component. My new source check simply gave the tree a bracket path to trip over.
+
+**Fixed by defining the predicate ONCE**, literal-first, and using it on both sides:
+
+```js
+const isGlob = (rel, dir) => /[*?[\]]/.test(rel) && !existsSync(path.join(dir, rel));
+```
+
+A path that exists is not a pattern, whatever characters it contains. Two copies of that test are two
+chances to disagree, which is the same source-versus-downstream asymmetry this file already paid for.
+
+Covered by `tests/unit/sidecar-source-guard.test.mjs`, whose fixture declares a bracket path as BOTH
+source and downstream so one case proves both call sites; reverting to the naive predicate turns
+exactly that test red. Real tree after the fix: **0 findings**, which is a result rather than silence
+because the check is proven to fire on a fixture.
+
+### N114 · The seven new rules found 6 convertible restatements — the conversions are not done — **S3** — **OPEN**
+Filed 2026-09-30 as the named residual of the rule-promotion pass. `rules check` went from **1**
+restatement to **7**; the one it found before is `Divyansh/AuroraV3`, which is Divyansh's fork and
+permanent by decision. The other six are new, real, and each names a conversion:
+
+| file | line | what it says | convert to |
+|---|---|---|---|
+| `Vipin Kaushik/CLAUDE.md` | 126 | *"Say \"absent on `<branch>`\", never bare \"absent\" (G10)."* — **verbatim** | `rule:absence-claims-need-state-and-branch` |
+| `Motherboard/CLAUDE.md` | 426 | *"**Squash merges lie about ancestry** — `git cherry` said 14 unmerged"* | same |
+| hub `CLAUDE.md` | 46 | *"the row had drifted in both directions"* | same |
+| `obsidian-vk-publish/CLAUDE.md` | 230 | *"wrong about presence in both directions is worse than a stale one"* | same |
+| hub `CLAUDE.md` | 177 | *"The `ws.length<10` line is a **floor**: a derived population…"* | `rule:derive-dont-curate` |
+| `obsidian-vk-publish/CLAUDE.md` | 224 | *"Do not restate the count here — derive it, per `rule:state-and-decisions`"* | **repoint** the citation to `rule:derive-dont-curate` |
+
+The last row is the subtlest and the most useful: it already carries a pointer, at the rule that used
+to own the claim. A correct citation aimed at a superseded owner is invisible to every check —
+`rules check` sees a reference and is satisfied — so promotion creates this class of stale pointer by
+construction and nothing looks for it.
+
+**Not done here deliberately:** five files across three repos, two of them workspaces holding
+uncommitted work that is not mine (N104 is the entry where staging into someone else's tree cost a
+colleague's commit). The pass that wrote the rules should not also edit five other repositories.
+
+**One measured lesson from authoring, kept because it will recur.** The first
+`derive-dont-curate` fingerprint carried `derive it, never` and `never trust this number`, and those
+two alternations produced **3 hits, all compliance and zero restatements** — hub `CLAUDE.md:25`,
+`Tushar/texts:52` and `Vipin Kaushik:59`, each telling the reader to derive ITS OWN number, which is
+the rule being followed. Dropped before shipping. `rule:nextjs-dev-server-port` records the identical
+trade in its own fingerprint note — the wide version flagged 8 files to find 1 — and the general form
+is that **a fingerprint matching a rule's IMPERATIVE catches compliance; only one matching its CLAIM
+catches restatement.**
+
+### N110 · `supersedes:` is frontmatter that no code reads — every rule declares it and nothing acts on it — **S3** — **OPEN**
+Found 2026-09-30 while planning the rule-promotion pass. All 22 rules at the time carried a
+`supersedes:` key in frontmatter. `grep -n supersedes lib/rules/rules-check.mjs` returns **nothing** —
+the loader does not read it, `checkRules` does not consult it, `selftest` does not assert on it.
+
+**Why it matters rather than being cosmetic.** A promotion is exactly the moment the field would earn
+its place: `verify-work-not-report` took a claim that three other rules stated, and a reader asking
+"which rule superseded that clause" has no machine-readable answer. Worse, the field's presence
+implies the question was answered. `rule:enforcement-watches-itself` names the shape — a declaration
+that looks machine-checked and is not.
+
+**Not fixed here, and the reason is a real design question rather than effort.** Superseding is not
+rule-to-rule in this tree; it is clause-to-rule. `verify-work-not-report` did not supersede
+`discernment-checks` — it took over one section's claim while that rule kept its sentence and gained a
+pointer. A field whose only honest value is `[]` for every promotion so far should either express
+clauses or be removed, and both are decisions.
+
+### N111 · `selftest` PASSES a rule with no probes, so its headline result is weaker than the line beside it — **S2** — **OPEN**
+Found 2026-09-30 while reviewing the rule-promotion plan, and then reproduced accidentally the same
+day, which is the useful part.
+
+`lib/rules/rules-check.mjs`:
+
+```js
+const probe = probes[r.id];
+if (!probe) {
+  checks.push({ kind: "probe", id: r.id, pass: true, unprobed: true });
+  continue;
+}
+```
+
+So **`selftest PASS` is satisfiable with zero probes on every rule.** The only signal is a separate
+count line, and it is easy to read past:
+
+```
+selftest PASS — every fingerprint can fire; … 25 of 26 rules probed, 1 UNPROBED
+```
+
+That output is real: it is what `absence-claims-need-state-and-branch` produced between its rule file
+landing and its probes being written. The word PASS is doing the opposite of its job — and the probe
+mechanism exists precisely because self-match was too weak a test (N76 / propagate#18), so a PASS that
+does not require probes reintroduces the gap the probes were built to close.
+
+**The right fix is arguable and that is why this is filed rather than patched.** Failing on an
+unprobed rule makes adding a rule a two-file atomic change, which is defensible but a behaviour
+change for anyone mid-authoring. The minimum honest fix is that `PASS` becomes `PASS (N unprobed)` in
+the headline itself, so the caveat cannot be read past. **Until then: the acceptance criterion is
+`N of N rules probed`, never `selftest PASS`.** The seven rules written 2026-09-30 were gated on the
+count line for this reason.
+
+### N112 · `description-standard`'s fingerprint matches its body but no single LINE, so a real restatement would report line 0 — **S3** — **OPEN**
+Found 2026-09-30 while establishing how `checkRules` matches, before authoring seven fingerprints.
+
+The two are different by design and it is not documented anywhere:
+
+| step | scope | code |
+|---|---|---|
+| the GATE — is this file a restatement | **whole file** | `if (!re.test(raw)) continue;` |
+| the REPORT — which line | **per line** | `raw.split(/\r?\n/).findIndex((l) => re.test(l)) + 1` |
+
+So a fingerprint that only matches ACROSS a newline fires the gate and then `findIndex` returns `-1`,
+making the reported line `0`. Swept all rules for it: **1 of 22** is in that state,
+`description-standard`. It has never surfaced because nothing has restated that rule, which is the
+same unknown-versus-clean problem N35 is about.
+
+**The general form, which is the part worth keeping:** a matcher used for two purposes at two scopes
+will disagree with itself at the boundary, and the disagreement surfaces as a plausible value (`0`)
+rather than an error. The seven fingerprints authored this day were each tested per-line for exactly
+this reason, and one of them — `derive-dont-curate` — needed an extra alternation because the claim it
+targets wraps mid-sentence in its source.
 
 ### N106 · A v1 ledger frozen under its ORIGINAL name would be indexed as live rows — containment rests on naming, not structure — **S3** — **OPEN** (0 instances tree-wide today; the invariant is a convention with no check)
 Found 2026-09-30 while closing GitHub propagate#3, and the finding is that my own close was one step
