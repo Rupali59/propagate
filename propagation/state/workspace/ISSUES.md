@@ -4348,7 +4348,62 @@ source and downstream so one case proves both call sites; reverting to the naive
 exactly that test red. Real tree after the fix: **0 findings**, which is a result rather than silence
 because the check is proven to fire on a fixture.
 
-### N114 · The seven new rules found 6 convertible restatements — the conversions are not done — **S3** — **OPEN**
+### N114 · The seven new rules found 6 convertible restatements — **S3** — **RESOLVED 2026-09-30** (all six converted; `rules check` 7 -> 1, and one further site left alone with reason)
+**RESOLVED 2026-09-30. All six converted; `rules check` went 7 -> 1**, the survivor being
+`Divyansh/AuroraV3` which is Divyansh's fork and permanent by decision. Coverage moved with it:
+`absence-claims-need-state-and-branch` from `restated 5 / referenced 1` to `1 / 5`, and
+`derive-dont-curate` from `2 / 0` to `1 / 2` — both now `firing`.
+
+**Each conversion kept the LOCAL measurement and replaced only the GENERAL claim.** That split is
+`rule:nextjs-dev-server-port`'s own test: a file describing its own situation is compliance, not
+restatement. So Motherboard keeps *"`git cherry` said 14 unmerged here when the content was
+identical"*, Vipin Kaushik keeps *"four repos sit on feature branches and VK deploys from
+`production`"*, and obsidian-vk-publish keeps its whole measured story about a hardcoded-paths list
+that was wrong in both directions. Only the sentences stating the rule became pointers.
+
+**One of the six was a REPOINT, and it is the class worth remembering.** `obsidian-vk-publish`'s
+"do not restate the count here — derive it" already carried a correct citation — at
+`rule:state-and-decisions`, which no longer owns that claim. **A citation aimed at a superseded
+owner is invisible to every check**: `rules check` sees a reference and is satisfied. Promotion
+creates that class of stale pointer by construction and nothing looks for it.
+
+**A seventh site exists and was left alone deliberately.** `Keerti/CLAUDE.md:136` restates the
+rule — and, remarkably, already CITED it before it was written, a forward reference to the id
+backlogged in `rules/_TODO.md:208`. The file carries 31 uncommitted insertions that are not mine,
+and editing it would put my change into someone else's next commit — G-N, and N104 in reverse. Left
+for whoever owns that work.
+
+**Checked while there and found nothing, which is worth recording as a result:** every `rule:<id>`
+citation in the tree resolves to a real rule file. Zero dangling. I had expected a gap there — that
+a pointer at a non-existent rule would read as compliance — and the measurement says there is none.
+
+**And the pass cost one real mistake, recorded as G72 — plus two wrong reports OF that mistake.**
+A multi-line bash block committed and pushed in `Vipin Kaushik`; the commit failed on another live
+session's `index.lock`, nothing stopped the block, and the push published commits that were not
+mine. Disclosed immediately. Rupali reviewed it and let it stand — only `GOTCHAS.md`, `STATE.md`,
+`TODOS.md` and `.gitignore`, no vault content and nothing secret-shaped.
+
+**Then three corrections, each to a confident account of a small event:**
+
+1. **My mechanism was inverted.** I reported `&&` as having "moved past" the failure. `&&` would
+   have PREVENTED it — the hazard is its absence. Corrected only after reproducing it in a
+   throwaway repo, and the peer noted the inverted version was the more dangerous record because it
+   would have had the next reader removing the one construct that helps.
+2. **My count and attribution were wrong**, and so was the peer's correction of them, in the
+   opposite direction. I said three commits and named one already on the remote; they said six and
+   attributed one of their own to me. **`git reflog show origin/main` settles it in one command:**
+   the tip had been `40519b6` since 09:10 and the 09:49:35 push advanced it to `0e369a2` — one or
+   two commits, both theirs. We had each reconstructed from `git log`, which shows ancestry and
+   cannot say when a ref moved. Same shape as [[n26]] and [[n16]] earlier today: a plausible
+   instrument answering a different question.
+3. **The gotcha's emphasis was wrong**, and the peer supplied the better framing: the dangerous half
+   is not the missing `set -e`, it is that the push **exits 0 and reports success**, printing nothing
+   that distinguishes publishing your commit from publishing whatever `HEAD` was. Fix only the
+   chaining and the silent publish returns on the next commit that fails for another reason.
+
+`rule:verify-work-not-report` and `rule:require-a-demonstration` both applied to their own author,
+on the day they were written, three times in one incident.
+
 Filed 2026-09-30 as the named residual of the rule-promotion pass. `rules check` went from **1**
 restatement to **7**; the one it found before is `Divyansh/AuroraV3`, which is Divyansh's fork and
 permanent by decision. The other six are new, real, and each names a conversion:

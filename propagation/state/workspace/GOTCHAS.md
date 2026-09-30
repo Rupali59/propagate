@@ -1700,3 +1700,39 @@ asked, and the answer was plausible.
 
 **Cost:** ~15 minutes, and it was cheap only because the suite ran before anything was committed.
 Caught by `npm test` on a change that touched neither file's subject.
+
+### G72 · A failed `git commit` does not stop the block, and the `push` that follows EXITS 0 while publishing someone else's HEAD
+**Trigger:** `git\s+commit\b[\s\S]{0,400}?git\s+push`
+**Fires on:** `git add f\ngit commit -qm x\ngit push -q`
+**The dangerous half is the success, not the failure.** `git commit` on a held `index.lock`
+exits 128 and leaves `HEAD` where it was, so the following `push` does exactly what it was
+asked, **exits 0, and prints nothing that distinguishes "published my commit" from
+"published whatever HEAD happened to be"**. A reader checking exit status sees a clean run.
+Fixing only the chaining still leaves the silent publish for the next commit that fails for
+any other reason — an empty commit, a rejected pre-commit hook, a bad `-F` heredoc.
+**`&&` is the FIX, not the hazard.** `git commit … && git push` is safe; the same commands on
+separate lines are not, because bash does not stop on failure unless told. The trigger spans
+lines deliberately: the dangerous form is the one that looks tidier.
+**Signal:** a `fatal:` in the output followed by a cheerful success line from a later command.
+**Cost:** 2026-09-30. A block in `Vipin Kaushik` pushed another live session's commits to
+`origin/main` without their say. Recoverable, and the user reviewed it and let it stand — no
+vault content, no secrets, only `GOTCHAS.md` / `STATE.md` / `TODOS.md` / `.gitignore`.
+**THEN BOTH SESSIONS MISREPORTED WHAT WAS PUSHED, in opposite directions, and that is the
+second half of this entry.** I said three commits and named one already on the remote; they
+said six and attributed one of their own to me. The authoritative answer took one command:
+
+```sh
+git reflog show origin/main --date=format:'%H:%M:%S'   # what each PUSH moved the tip to
+```
+
+`origin/main` had been at `40519b6` since 09:10; the push at 09:49:35 advanced it to
+`0e369a2` — **one or two commits, both theirs.** We had each reconstructed from `git log`,
+which shows **ancestry** and cannot say when a ref moved or who moved it. Same family as
+`rule:absence-claims-need-state-and-branch`: ancestry answers a different question from the
+one asked, and answers it plausibly.
+**Instead:** `set -e` at the top of any block that pushes, or chain with `&&`, or capture
+`git rev-parse HEAD` before and after and refuse to push if it did not change. When a repo is
+shared with a live session, expect the lock — and note the contention is **bidirectional but
+not symmetric**: their `cannot lock ref 'HEAD': is at X but expected Y` is loud and git
+refuses; a failed commit followed by a push is quiet and succeeds. Only one of the two needs
+a gotcha.
