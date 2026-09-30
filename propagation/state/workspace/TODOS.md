@@ -611,7 +611,12 @@ what every test uses.
 
 ---
 
-### PR-031 · Step 2's stated target no longer exists, so the step cannot be built as written
+## Finished
+
+
+### PR-031 · DONE — Step 2's stated target no longer exists, so the step cannot be built as written
+
+**DONE 2026-09-30, re-pointed and half built.** `run_id` now lands on both monitor outputs — `run=<id>` on the `monitor.log` summary line and `run_id` on each `notified.jsonl` row — minted once per run from the existing `mintRunId`, and on the reconcile-failure path too so a run that could not look is still attributable. That makes the notified-to-run join exact instead of by timestamp proximity, which is the reconstruction PR-020's analysis did by hand. The JSON-log-lines half is DECLINED, not pending: `monitor.log` is key=value, already parseable, and read by doctor with a regex plus an 80-char slice — converting it would break both for nothing the id does not already give. 5 tests, and the two that matter assert what must NOT change: the stats still survive `slice(0, 80)`, and a row without an id stays valid.
 **S3.** §6 step 2 is *"`run_id` + JSON log lines"*, scoped as *"`watcher.log` lines still do not
 [carry one] (out of scope: watcher.mjs was explicitly off-limits for this build)."*
 
@@ -620,8 +625,6 @@ what every test uses.
 `digest.{stdout,stderr}.log`. So the step needs re-pointing before it can be built, and the
 question it answers — can a log line be joined to a `doctor` run — is worth asking of the monitor,
 which runs 48 times a day.
-
-## Finished
 
 
 ### PR-030 · DECIDED — The events layer was designed against five issues that no longer need catching

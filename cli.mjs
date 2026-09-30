@@ -4395,6 +4395,11 @@ async function monitorCmd() {
     return;
   }
 
+  // ONE id per monitor run (PR-031), minted before anything can fail so even the
+  // reconcile-failure path below is attributable to a run. `mintRunId` is reused
+  // rather than calling randomUUID a fourth time — N96 is the entry about three
+  // components computing the same thing independently and agreeing by coincidence.
+  const monitorRunId = (await import("./lib/core/runs.mjs")).mintRunId();
   let rows = [];
   let err = null;
   try {
@@ -4407,7 +4412,7 @@ async function monitorCmd() {
   // quiet run. "Found nothing" and "could not look" must not share an output
   // (rule:discernment-checks §2).
   if (err) {
-    await mon.logRun({ rows: 0, actionable: 0, notified: 0, suppressed: 0, ms: Date.now() - started, error: err });
+    await mon.logRun({ rows: 0, actionable: 0, notified: 0, suppressed: 0, ms: Date.now() - started, error: err, runId: monitorRunId });
     console.error(`${RED}monitor: reconcile failed:${RESET} ${err}`);
     process.exit(1);
   }
@@ -4438,12 +4443,12 @@ async function monitorCmd() {
 
   if (!dryRun && toNotify.length > 0) {
     await notify(title, body, { group: "propagate-monitor" });
-    await mon.recordNotified(toNotify);
+    await mon.recordNotified(toNotify, undefined, new Date(), monitorRunId);
   }
   if (!dryRun && defectPick.toNotify.length > 0) {
     const d = mon.formatDefectNotification(defectPick.toNotify, { root: SEARCH_ROOTS[0] });
     await notify(d.title, d.body, { group: "propagate-monitor" });
-    await mon.recordNotified(defectPick.toNotify);
+    await mon.recordNotified(defectPick.toNotify, undefined, new Date(), monitorRunId);
   }
   if (backlogErr) console.error(`${YELLOW}monitor: backlog check could not run:${RESET} ${backlogErr}`);
 
@@ -4456,6 +4461,7 @@ async function monitorCmd() {
     backlogNotified: dryRun ? 0 : defectPick.toNotify.length,
     backlogError: backlogErr,
     ms: Date.now() - started,
+    runId: monitorRunId,
   };
   if (!dryRun) await mon.logRun(stats);
 

@@ -314,9 +314,35 @@ Cheapest first, and each is independently useful.
 
    This alone covers the five equality-shaped issues in §5 outright and
    surfaces (without yet calibrating) six more.
-2. **`run_id` + JSON log lines.** One field, unlocks correlation and §4 later. Not built —
-   `metrics.jsonl` records carry a `run_id` per doctor run, but `watcher.log` lines still
-   do not (out of scope: watcher.mjs was explicitly off-limits for this build).
+2. **`run_id` + JSON log lines.** One field, unlocks correlation and §4 later.
+   **RE-POINTED AND HALF BUILT 2026-09-30 (TODOS PR-031).** As written this step aimed at
+   `watcher.log`, which was last written **2026-08-21** and whose producer `watcher.mjs` was
+   **deleted** in `2f1612b` — so it could not be built as specified. The live producers are
+   `monitor.{log,stdout,stderr}.log` and `digest.{stdout,stderr}.log`.
+
+   **BUILT: `run_id` on the monitor's two outputs.** One id per run, minted from
+   `lib/core/runs.mjs`'s existing `mintRunId` (not a fourth `randomUUID` call — N96 is the
+   entry about components computing the same thing independently), threaded to both
+   `logRun` and `recordNotified`, and to the reconcile-failure path so even a run that could
+   not look is attributable.
+
+   The join it unlocks is specific: `monitor.log` says `notified=6`, `notified.jsonl` says
+   WHICH edges, and before this the only link was timestamp proximity — the reconstruction
+   PR-020's analysis had to do by hand to establish that 76% of notifications were an edge
+   already notified, re-fired because its bytes changed. `run=<id>` on the line and `run_id`
+   on each row make that exact.
+
+   Two constraints shaped it, both asserted by tests rather than hoped for. `run=` goes
+   **last** on the summary line, because `lib/report/doctor/environment.mjs:218` renders
+   `last.slice(0, 80)` and a 36-character id after the timestamp would push every stat out of
+   the displayed window — the field would be added and the line would get worse. And the key
+   is **absent** rather than null on a row with no id, because `notified.jsonl` already holds
+   ~2,240 rows written before this existed and `readNotified` reads only `r.key`.
+
+   **NOT BUILT: JSON log lines.** `monitor.log` is `key=value`, already parseable, and read by
+   doctor with a regex plus an 80-character slice. Converting it would break both for no gain
+   the `run_id` does not already deliver — so this half is declined rather than pending. If a
+   consumer ever needs JSON, the summary is one line per run and trivially convertible then.
 3. **Events to an append-only `~/.propagate/events/telemetry.jsonl`.**
    **SUPERSEDED 2026-09-30 (TODOS PR-030) — see the annotation under §2.** Not built and no
    longer pending: five of the eight events cite issues that are now closed, `row.fired`
