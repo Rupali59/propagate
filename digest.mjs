@@ -22,8 +22,9 @@
  */
 
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, copyFileSync, mkdirSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 
@@ -34,6 +35,7 @@ import {
   SUSPICIOUS_MARKERS,
   CROSS_LEDGER_JSONL,
   SEARCH_ROOTS,
+  HUB_ROOT,
   SKILL_DIR, INTEGRATIONS } from "./lib/core/config.mjs";
 import { readLedgerWithStats, lastActivityAt } from "./lib/edges/ledger.mjs";
 import { reconcile, inboundRows, toNodeId } from "./lib/edges/reconcile.mjs";
@@ -598,6 +600,171 @@ async function refsSnapshot(dryRun) {
   return { dryRun, results };
 }
 
+/** sha256 of a file, or `null` if it cannot be read. Never throws. */
+function fileHash(abs) {
+  try {
+    return createHash("sha256").update(readFileSync(abs)).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Is the mirror PROTECTED — committed AND pushed — as against merely fresh?
+ *
+ * Two facts, and conflating them is the failure this whole rider exists to avoid.
+ * `refsUncommitted()` above answers the first half for the refs registries and
+ * that half alone was not enough: on 2026-09-30 the hub carried MODIFIED
+ * `propagation/refs/{snapshot.json,lifecycle.jsonl}` dating from 2026-09-27 and
+ * 2026-09-29. Fresh files, sitting in a dirty tree, protecting nothing.
+ *
+ * For a registry that is only a convenience, dirty-but-fresh is a nuisance. For a
+ * BACKUP it is the whole failure: the bytes that survive a lost laptop are the ones
+ * on the remote, so "the file is current" and "the file is safe" are different
+ * claims and only the second is what a backup promises.
+ *
+ * `status --porcelain`, never `ls-files --others` — after the first adoption every
+ * later refresh MODIFIES a tracked file, and `git add -A` sweeps that identically.
+ * That lesson is `refsUncommitted()`'s, recorded there at length.
+ *
+ * DELIBERATELY OFFLINE. `rev-list @{u}..HEAD` reads the local upstream ref rather
+ * than contacting the remote, because this runs inside a 09:00 scheduled job and a
+ * network call there can hang for the whole digest. The cost is stated rather than
+ * hidden: a remote that was force-moved behind our back reads as pushed. The
+ * SYSTEMS.md row carries the online probe (`git cat-file blob origin/main:…`) for
+ * when someone wants the stronger answer.
+ *
+ * Unreadable git state returns `null` for that field and is reported as its own
+ * outcome. Claiming protection because the check failed is the reassuring silence
+ * this digest is otherwise full of warnings about (rule:discernment-checks §2).
+ */
+function mirrorProtection(root, relPath) {
+  const run = (...args) => {
+    try {
+      const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", timeout: 5000 });
+      return r.status === 0 ? r.stdout : null;
+    } catch {
+      return null;
+    }
+  };
+  const status = run("status", "--porcelain", "--", relPath);
+  const ahead = run("rev-list", "--count", "@{u}..HEAD");
+  return {
+    // Uncommitted CHANGES to the mirror itself: written but not adopted.
+    dirty: status === null ? null : status.split("\n").filter((l) => l.trim()).length,
+    // Commits that exist here and not on the tracked remote. A committed mirror
+    // in an unpushed commit is still one disk failure from gone, which is the
+    // case the refs rider cannot see at all.
+    unpushed: ahead === null ? null : Number(ahead.trim()),
+  };
+}
+
+/**
+ * Mirror the event store into the hub so it survives the loss of this machine.
+ *
+ * WHY THIS EXISTS (N84, closed 2026-09-30). `~/.propagate/events/` holds 2,946
+ * events plus 11 that survive only in `events/archive/…pre-truncate…`, of which
+ * 2,793 carry hand-written reasoning — 611 KB of it. Every event is a disposition
+ * with a `reason` a person wrote, so a `no-change-needed` IS the judgement and
+ * nothing recomputes it. `lib/core/setup.mjs` already called this directory "the
+ * ONE whose loss is unrecoverable", and for six weeks nothing backed it up.
+ *
+ * WHY IT RIDES THE DIGEST rather than polling. `rule:delegation-criteria` §2
+ * prefers derive-on-demand, and this tree paid 4,420 runs at 99.2% no-ops to learn
+ * it. A backup is the case §2 exempts: you cannot derive it after the loss. The
+ * schedule already existed, so this adds ZERO launchd agents and ZERO plists.
+ *
+ * HASH-GATED, and that is not an optimisation. The store is 2.7 MB and the digest
+ * fires daily; an unconditional copy would rewrite the mirror every morning and
+ * leave the hub permanently dirty — which is exactly the state the refs registries
+ * are in, and it destroys the signal. Copying only on a hash mismatch means a day
+ * that produced no events leaves the destination CLEAN, so a dirty tree genuinely
+ * means "there are new events to adopt".
+ *
+ * NEVER STAGES, NEVER COMMITS. N104: `migrate --apply` staged into another repo's
+ * index and the owner's next commit adopted 189 of its lines 40 seconds later. A
+ * scheduled job that writes into someone else's working tree does not touch their
+ * index. This reports that the mirror is unprotected; a human commits it.
+ *
+ * NOT CALLED `events/`. `readEvents()` globs `*.jsonl` FLAT over `EVENTS_DIR`
+ * (lib/edges/events.mjs), so a directory of that name is one `PROPAGATE_STATE_DIR`
+ * repoint away from having its backup read back as live rows — and `setup.mjs`
+ * already relocates stray shard-shaped backups into `events/archive/` for exactly
+ * this reason. `events-backup/` cannot be mistaken for the store.
+ */
+async function eventsBackupSnapshot(dryRun) {
+  const { EVENTS_DIR } = await import("./lib/edges/events.mjs");
+
+  // HUB_ROOT has NO built-in default and resolves to null when unconfigured
+  // (G24) — deliberately, because a plausible-but-wrong hub finds zero
+  // workspaces and then reports healthy. So an unconfigured hub is a NAMED
+  // refusal, never an empty result that reads as "nothing to back up".
+  if (!HUB_ROOT) {
+    return { dryRun, dest: null, reason: "hub-root-unconfigured", results: [], protection: null };
+  }
+  if (!existsSync(EVENTS_DIR)) {
+    return { dryRun, dest: null, reason: `source-missing: ${EVENTS_DIR}`, results: [], protection: null };
+  }
+
+  const rel = path.join("propagation", "events-backup");
+  const dest = path.join(HUB_ROOT, rel);
+
+  // Both the live shards and `archive/`, whose pre-truncate file is the ONLY
+  // surviving copy of 11 events — measured by event_id set difference against
+  // the live store on 2026-09-30, so this is a fact rather than a precaution.
+  const sources = [];
+  try {
+    for (const f of readdirSync(EVENTS_DIR)) {
+      if (f.endsWith(".jsonl")) sources.push({ rel: f, abs: path.join(EVENTS_DIR, f) });
+    }
+    const archiveDir = path.join(EVENTS_DIR, "archive");
+    if (existsSync(archiveDir)) {
+      for (const f of readdirSync(archiveDir)) {
+        const abs = path.join(archiveDir, f);
+        if (statSync(abs).isFile()) sources.push({ rel: path.join("archive", f), abs });
+      }
+    }
+  } catch (err) {
+    return { dryRun, dest, reason: `source-unreadable: ${err?.message ?? err}`, results: [], protection: null };
+  }
+
+  const results = [];
+  for (const src of sources) {
+    const target = path.join(dest, src.rel);
+    const from = fileHash(src.abs);
+    const to = existsSync(target) ? fileHash(target) : null;
+    if (from === null) {
+      results.push({ file: src.rel, action: "source-unreadable" });
+      continue;
+    }
+    if (from === to) {
+      results.push({ file: src.rel, action: "unchanged" });
+      continue;
+    }
+    if (dryRun) {
+      results.push({ file: src.rel, action: "would-copy", reason: to === null ? "absent" : "differs" });
+      continue;
+    }
+    try {
+      mkdirSync(path.dirname(target), { recursive: true });
+      copyFileSync(src.abs, target);
+      // Re-hash the DESTINATION after writing. A copy that reported success and
+      // produced different bytes is the one failure a backup must never have,
+      // and `copyFileSync` not throwing is a claim about the call, not the file.
+      const verified = fileHash(target) === from;
+      results.push({ file: src.rel, action: verified ? "copied" : "copy-mismatch" });
+    } catch (err) {
+      results.push({ file: src.rel, action: "copy-failed", reason: String(err?.message ?? err) });
+    }
+  }
+
+  // Sampled AFTER the copies, for refsSnapshot()'s reason: the question is
+  // whether what this tool just produced is protected, which is only answerable
+  // once it exists. On a dry run nothing was written, so nothing is owed.
+  const protection = dryRun ? null : mirrorProtection(HUB_ROOT, rel);
+  return { dryRun, dest, rel, results, protection };
+}
+
 async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
   const watcher = await watcherSnapshot();
   const workspaces = [];
@@ -650,6 +817,17 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     // Same belt-and-suspenders as disk and skills: a refs bug must never take
     // down the only reporting channel that currently works.
     refs = { dryRun, results: [], error: String(err?.message ?? err) };
+  }
+
+  let eventsBackup;
+  try {
+    eventsBackup = await eventsBackupSnapshot(dryRun);
+  } catch (err) {
+    // Same belt-and-suspenders as disk/skills/lifecycle/refs above. A bug in the
+    // backup must never take down the only reporting channel that works — and
+    // note the asymmetry that makes this worth stating: a crash here loses the
+    // REPORT, while a silent skip would lose the BACKUP and say nothing.
+    eventsBackup = { dryRun, dest: null, results: [], error: String(err?.message ?? err) };
   }
 
   const metrics = await metricsSnapshot();
@@ -731,6 +909,7 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     skills,
     lifecycle,
     refs,
+    eventsBackup,
     metrics,
     inbound,
     drift,
@@ -1311,6 +1490,55 @@ export function computeDiff(snapshot, prior) {
     if (!failed.length && !events) refsLines.push("no branch changes since the last run");
   }
 
+  // ── Event-store backup (ISSUES N84 / N107) ────────────────────────────
+  // NOT diff-only, and for a sharper version of the reason REFS above is not: a
+  // diff-only backup block is silent on exactly the days it matters. "Nothing
+  // changed" and "the backup stopped running" render identically, and the second
+  // is the failure. So this section always prints its two facts.
+  //
+  // TWO FACTS, deliberately not one. FRESH is whether the mirror matches the live
+  // store. PROTECTED is whether those bytes are committed and pushed. Only the
+  // second is what survives a lost laptop, and the refs registries are the
+  // standing proof they come apart: fresh files, uncommitted for days.
+  const backupLines = [];
+  const eb = snapshot.eventsBackup;
+  if (eb?.error) {
+    backupLines.push(`could not run — ${eb.error}`);
+  } else if (eb?.reason) {
+    // Attributable refusal, never rendered as "nothing to do" (G24 for the
+    // unconfigured-hub case: null reads as "not configured" rather than
+    // "configured wrong", and both must be louder than silence).
+    backupLines.push(`!! NOT BACKED UP — ${eb.reason}`);
+  } else if (Array.isArray(eb?.results)) {
+    const by = (a) => eb.results.filter((r) => r.action === a).length;
+    const copied = by("copied");
+    const would = by("would-copy");
+    const broken = eb.results.filter((r) => /failed|mismatch|unreadable/.test(r.action ?? ""));
+    backupLines.push(
+      `${eb.results.length} shard(s) · ${copied} copied · ${by("unchanged")} unchanged` +
+      (eb.dryRun ? ` · ${would} WOULD copy — DRY RUN, nothing written` : ""),
+    );
+    // A copy that reported success and produced different bytes is the one
+    // failure a backup must never have quietly.
+    for (const r of broken) backupLines.push(`!! ${r.file} — ${r.action}${r.reason ? `: ${r.reason}` : ""}`);
+
+    const p = eb.protection;
+    if (p) {
+      if (p.dirty === null || p.unpushed === null) {
+        backupLines.push("? could not read git state, so cannot say whether the mirror is protected");
+      } else if (p.dirty > 0) {
+        backupLines.push(`!! UNPROTECTED — ${p.dirty} mirror file(s) uncommitted in ${eb.rel}; ` +
+          "the events on the remote are older than the ones on this disk. Commit them deliberately " +
+          "(this job never stages, per N104)");
+      } else if (p.unpushed > 0) {
+        backupLines.push(`!! UNPROTECTED — mirror committed but ${p.unpushed} commit(s) unpushed; ` +
+          "a committed backup on one disk is still one failure from gone");
+      } else {
+        backupLines.push("mirror committed and pushed — the remote has these events");
+      }
+    }
+  }
+
   // ── Skills ────────────────────────────────────────────────────────────
   // Diff-only, for the same reason disk is threshold-only: a block that
   // restates "92 skills, 36 never invoked" every morning is wallpaper within a
@@ -1574,6 +1802,7 @@ export function computeDiff(snapshot, prior) {
     diskLines,
     skillLines,
     refsLines,
+    backupLines,
     metricLines,
     inboundLines,
     driftLines,
@@ -1669,6 +1898,17 @@ export function formatDigest(diff) {
   if (refsLines.length > 0) {
     lines.push(`REFS (branch registries):`);
     for (const l of refsLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  // ALWAYS emitted when the rider produced anything, unlike most blocks here.
+  // A backup section that disappears on a quiet day is indistinguishable from a
+  // backup that stopped, and this whole feature exists because nothing noticed
+  // the absence of one for six weeks (N84).
+  const backupLines = diff.backupLines || [];
+  if (backupLines.length > 0) {
+    lines.push(`EVENT-STORE BACKUP:`);
+    for (const l of backupLines) lines.push(`  ${l}`);
     lines.push("");
   }
 
@@ -1896,4 +2136,10 @@ export {
   rollupSnapshot as rollupSnapshotForTest,
   safeNewestMtimeMs as safeNewestMtimeMsForTest,
   refsUncommitted as refsUncommittedForTest,
+  // Exported so the backup is EXERCISED rather than only source-asserted. Its
+  // neighbours above are source-asserted because running reap() would delete
+  // real skills; this path only reads, hashes and copies, so there is no excuse
+  // for not running it (rule:name-what-no-test-executes).
+  eventsBackupSnapshot as eventsBackupSnapshotForTest,
+  mirrorProtection as mirrorProtectionForTest,
 };

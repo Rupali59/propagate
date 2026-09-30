@@ -1219,3 +1219,103 @@ and never could), PR-022 (the CLI verb that was deliberately not wired pending t
 answer), `docs/plans/2026-09-23-reminders-todo-bridge.md:275-282` (the goal
 condition), `rule:adversarial-review-reads-the-ledger` (why five lanes and an eng
 review all missed it: none opened `write.mjs`).
+
+---
+
+## 2026-09-30: the event store stays machine-local for WRITES, and is mirrored because its contents are judgement rather than derived state
+
+**What:** two decisions, deliberately separated because conflating them is what left
+this undecided for six weeks.
+
+1. **`~/.propagate/events/` remains the single writer and the single source of
+   truth.** The in-tree `ledger.jsonl` files are v1 scaffolding and stay empty. No
+   attempt is made to route events into per-workspace ledgers.
+2. **The store is mirrored into `workspace-hub` at
+   `propagation/events-backup/`** — one-way, mirrored under the original filenames,
+   never read by any tool. Done 2026-09-30; 2,957 distinct events. The recurring
+   refresh is NOT built and is tracked as N107.
+
+**Why:** N84 asked whether machine-local was intended or a stalled migration, and
+half the answer was already in the code. `lib/report/doctor/workspaces.mjs:149-152`
+states it plainly — *"`ensureLedgerPair` does `writeFileSync(ledgerJsonl, "")` and
+NOTHING in this repo appends a row to any ledger file"* — so an empty in-tree ledger
+is **the only state the code can produce**, not a migration that stopped. Measured
+2026-09-30: 19 of 20 in-tree ledgers hold 0 rows; the exception
+(`Vipin Kaushik/obsidian-vk-publish/.propagation/ledger.jsonl`) holds 28.
+
+That comment answers *"are empty ledgers a defect?"* — no. It does not answer the
+half that matters, which is why the entry stayed open with a comment sitting on top
+of it. `rule:enforcement-watches-itself`: **you can describe the situation fluently
+in a comment, and fluency is what makes it feel handled.**
+
+The second half turns on one measurement, and it is the whole argument:
+
+| | |
+|---|---|
+| events | 2,946 live, + 11 surviving only in `events/archive/…pre-truncate…` |
+| carrying a hand-written `reason` | **2,793**, of which 2,789 exceed 40 characters |
+| total reasoning text | **611 KB** |
+| span | 2026-08-13 → 2026-09-28 |
+| distinct authors | **1** (one human, one machine) — which is why nobody has needed a merge rule |
+
+**A machine-local store is defensible for DERIVED state and this is not derived
+state.** Every event is a disposition with a reason a person wrote. A
+`no-change-needed` *is* the judgement that a real drift required no action; re-deriving
+it is not re-running a computation, it is asking someone to re-read 178 edges and
+remember what they concluded. propagate's own `lib/core/setup.mjs:186` already called
+`events/` *"the ONE whose loss is unrecoverable"* — written when it held 1,347 events
+— and nothing backed it up in the six weeks since.
+
+**And the exposure was invisible to the tree's own detector.** The hub's
+"No-git-remote inventory (data-loss risk)" section derives its list with
+`find ~/Documents/GitHub -maxdepth 6 -name .git`. `~/.propagate` is outside that root,
+so the section written specifically for this risk class **cannot see its largest
+instance by construction.** That is `rule:discernment-checks` §5 — the check is fine
+and the population it runs over is not.
+
+**What was rejected, and why** — so this is reopenable on evidence rather than fresh
+opinion:
+
+- **Accept machine-local with no backup.** The honest version of the status quo, and
+  the one the entry's own *"this may well be correct"* leaned toward. Rejected on the
+  611 KB: defensible for derived state, not for irreplaceable judgement.
+- **Fill the in-tree ledgers, so each workspace carries its own events.** Rejected
+  for two reasons. Routing is not obvious — an event's `node_id` can name a project
+  in a different repo from the workspace that owns the edge. And an append-only store
+  split across 20 private repos has 20 independent chances to diverge, which is the
+  heterogeneity failure `rule:state-and-decisions` records as the reason the v3
+  layout consolidated in the first place.
+- **Back up into `propagate`.** Rejected on disclosure. propagate is PUBLIC;
+  `node_id` names paths inside private repos and `reason` discusses private code.
+  `source_content`/`downstream_content` are sha256, so no file content leaks, but the
+  identifiers and the prose are enough. propagate#12 tracks this class.
+- **Two-way sync between machines.** Rejected as a different, harder problem nobody
+  needs solved: two machines can hold different dispositions for one edge at one
+  content hash, and there is no rule for which wins. **Backup is not sync** — one-way
+  export only, and the backup README says never to merge by concatenation.
+- **Dated snapshot directories.** Rejected on cost: a fresh 2.7 MB blob per backup.
+  Mirroring under the original names makes git store deltas, so **git history is the
+  dated series** for free.
+
+**Verified vs inferred**, per `rule:durable-record-shape`. Verified: every number
+above, the `ensureLedgerPair` behaviour, `~/.propagate` having no `.git`, the absence
+of any backup claim in `docs/SYSTEMS.md` or `~/.propagate/config.yml`, the sha256
+content fields, and `propagation/` being tracked in the private `workspace-hub`.
+Inferred: that machine-local was **emergent rather than chosen** — no decision record
+existed, which is evidence and not proof.
+
+**What this does NOT fix, stated rather than closed over.** The mirror is a manual
+`cp` today. A backup nobody refreshes silently becomes a backup of an old day, and
+reads as protection while providing less of it — the same shape as the frozen
+liveness banner in N26. N107 carries the recurring refresh, and until it lands this
+decision is half-delivered.
+
+**Affects:** propagate, workspace-hub
+
+**Refs:** N84 (the entry, which asked for exactly this record), N107 (the refresh
+mechanism, not built), `lib/report/doctor/workspaces.mjs:149-152` (the half already
+answered in a comment), `lib/core/setup.mjs:186` ("the ONE whose loss is
+unrecoverable"), `lib/edges/events.mjs:348` (the flat `*.jsonl` glob that dictates
+the backup's directory name), hub `CLAUDE.md` §"No-git-remote inventory" (the
+detector that cannot see this), `rule:enforcement-watches-itself`,
+`rule:discernment-checks` §5, `rule:durable-record-shape`.
