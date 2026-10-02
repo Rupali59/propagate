@@ -250,11 +250,22 @@ test("mirrorProtection RUNS, and tells committed-not-pushed apart from pushed", 
     spawnSync("git", ["clone", "-q", bare, work], { encoding: "utf8" });
     g(work, "config", "user.email", "t@t");
     g(work, "config", "user.name", "t");
+    // Pin the local branch to `main`. Without it the clone's branch follows the
+    // machine's init.defaultBranch (`master` when unset), `-u … HEAD:main` gives it a
+    // differently-named upstream, and push.default=simple then REFUSES the plain
+    // `git push` below with exit 128 — which this test never checked, so it read as
+    // mirrorProtection miscounting (it was correct: the commit really was unpushed).
+    g(work, "symbolic-ref", "HEAD", "refs/heads/main");
+    // A push that fails must fail the test, not silently leave a commit unpushed.
+    const push = (...a) => {
+      const r = g(work, "push", "-q", ...a);
+      assert.equal(r.status, 0, `git push failed: ${r.stderr}`);
+    };
     // A clone of an empty bare repo has no upstream-tracking HEAD yet, so seed one.
     writeFileSync(path.join(work, "seed.txt"), "seed");
     g(work, "add", "seed.txt");
     g(work, "commit", "-qm", "seed");
-    g(work, "push", "-q", "-u", "origin", "HEAD:refs/heads/main");
+    push("-u", "origin", "HEAD:refs/heads/main");
 
     const rel = path.join("propagation", "events-backup");
     const shard = path.join(work, rel, "2026-08.jsonl");
@@ -281,7 +292,7 @@ test("mirrorProtection RUNS, and tells committed-not-pushed apart from pushed", 
       "COMMITTED IS NOT PROTECTED — one unpushed commit is still one disk failure from gone, " +
       "and this is the case refsUncommitted() cannot express");
 
-    g(work, "push", "-q");
+    push();
     assert.deepEqual(mirrorProtectionForTest(work, rel), { dirty: 0, unpushed: 0 },
       "only pushed counts as protected");
 

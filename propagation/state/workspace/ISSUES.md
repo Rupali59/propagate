@@ -1560,7 +1560,7 @@ state-live-sections`, and the mutation was confirmed present in the file before 
 (`rule:discernment-checks` §4 — a `sed` that matches nothing silently no-ops this check).
 Suite: 61 pass, 0 fail.
 
-### N57 · `claudeMdExcludes` is unset, so 76,038 B of non-rules load as memory every session — **S2** — **APPLIED, UNVERIFIED** (2026-08-29)
+### N57 · `claudeMdExcludes` is unset, so 76,038 B of non-rules load as memory every session — **S2** — **CLOSED 2026-10-02** (applied 2026-08-29; verified in a post-change session)
 
 `.claude/rules/` is a NATIVE Claude Code memory directory (verified against the 2.1.236
 binary, 2026-08-29) and is walked **recursively**. `~/.claude/rules` symlinks to the hub
@@ -1656,6 +1656,24 @@ the PRESENT/ABSENT answers but not the third question (body appears ONCE vs TWIC
 whether that closes N57 is Rupali's call under this register's own rule, so the disposition
 is left to her. Revert hazard recorded in `hooks/load-rules.mjs`: dropping `claudeMdExcludes`
 re-adds ~60k chars to every session.
+
+**CLOSED 2026-10-02 — the three questions, answered by a session started that day (well after the
+2026-08-29 11:55 change; session start checked against the change per the method note above).**
+
+1. *"brain_score is not a health metric" — expect ABSENT.* **The probe had gone blind**: the string
+   no longer exists in any file under `rules/` (node walk, 2026-10-02), so "absent" could not fail.
+   Answered instead by direct evidence: this session's injected memory lists no file from
+   `conventions/`, no `_TODO.md` and no `gotchas-global.md`; and the fresh-session
+   `InstructionsLoaded` log above (35 loads, set-equal to the prediction) contains none of them.
+2. *"Verify the instrument before believing a surprising number" — expect PRESENT.* **PRESENT** —
+   it is `discernment-checks` §4's heading, in this session's injected rules.
+3. *Does the body of `rules/discernment-checks.md` appear ONCE or TWICE?* **ONCE** — one injected
+   copy; the SessionStart hook says it stopped injecting bodies, and its payload measures
+   907 B (`node hooks/load-rules.mjs | wc -c`), not the old 51,112 B.
+
+General form worth keeping: **a closing probe written as a literal string rots with the file it
+quotes** — question 1 went blind silently. A probe should name what it checks (a file that must be
+absent from the loaded set), not a sentence that may be edited away.
 
 ---
 
