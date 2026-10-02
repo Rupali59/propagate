@@ -97,6 +97,21 @@ test("SILENT when no CLAUDE.md restates a rule — the property that would rot f
   });
 });
 
+test("the summary splits always-loaded from path-scoped, and counts an id-less scoped companion", async () => {
+  await withFixture(async ({ home, roots }) => {
+    await writeFile(path.join(roots, "CLAUDE.md"), "# A project\n");
+    const rules = path.join(home, ".claude", "rules");
+    // id + paths: -> scoped. (scope: next-projects would be dropped by the legacy cwd filter; the
+    // summary must still count it, because native loading ignores `scope:`.)
+    await writeFile(path.join(rules, "scoped.md"), `---\nid: scoped-rule\nscope: next-projects\nstatus: active\nfingerprint: "zzz scoped zzz"\npaths:\n  - "**/package.json"\n---\n\nbody\n`);
+    // no id, paths: -> a scoped companion
+    await writeFile(path.join(rules, "scoped.evidence.md"), `---\npaths:\n  - "**/*.test.*"\n---\n\nbody\n`);
+    const { ctx } = runHook({ home, roots });
+    assert.match(ctx, /3 canonical rule file\(s\) parsed/, ctx.slice(0, 300));
+    assert.match(ctx, /\(1 always-loaded \+ 2 path-scoped\)/, ctx.slice(0, 300));
+  });
+});
+
 test("FIRES on a real restatement, and names the file", async () => {
   await withFixture(async ({ home, roots }) => {
     await writeFile(

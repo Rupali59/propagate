@@ -1479,6 +1479,19 @@ async function rulesCmd() {
       }
     }
 
+    // `paths:` globs on scoped rules: a typo'd glob means the rule never loads, silently.
+    // Shape + reachability live in lib/rules/paths-guard.mjs (also run by doctor).
+    const { checkRulePaths } = await import("./lib/rules/paths-guard.mjs");
+    const pg = checkRulePaths({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS });
+    if (pg.status === "none") {
+      console.log(`\n  ${DIM}- no rule declares paths: — glob guard has nothing to check${RESET}`);
+    } else {
+      const mark = pg.status === "pass" ? GREEN + "✓" + RESET : pg.status === "fail" ? RED + "✗" + RESET : YELLOW + "?" + RESET;
+      console.log(`\n  ${mark} paths: globs ${pg.status.toUpperCase()} — ${pg.reason}`);
+      for (const f of pg.findings) console.log(`      ${RED}✗${RESET} ${f.file}${f.entry ? ` [${f.entry}]` : ""}: ${f.problem}`);
+    }
+    if (pg.status === "fail") res.pass = false, res.failures.push(`paths: ${pg.reason}`);
+
     const probed = probes.size - unprobed.length;
     const probeNote = probes.size
       ? `${probed} of ${probes.size} rules probed${unprobed.length ? `, ${YELLOW}${unprobed.length} UNPROBED${RESET}` : ""}`

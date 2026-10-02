@@ -1640,6 +1640,23 @@ the session's start time against the change's timestamp BEFORE trusting its repo
 `rule:discernment-checks` §4 — the instrument answered a narrower question (its own stale
 context) than the one asked (the current state).
 
+**EVIDENCE 2026-10-02 (a fresh session, observed rather than inferred).** An `InstructionsLoaded`
+hook, installed temporarily for the plan `budget-1-rules-headroom` T1 proof and logging to
+`~/.propagate/instructions-loaded-T1-20261002.jsonl`, recorded a fresh Tathya session's
+`session_start` loads: **35**, set-equal to the 35 files predicted from the disk walk minus
+`claudeMdExcludes` (0 missing, 0 extra) — `conventions/`, `_TODO.md` and `gotchas-global.md`
+are ABSENT from the log. The startup warning total, `35 files, 152.8k`, matched the predicted
+152,788 chars exactly. So the exclusion did take effect in a live session, which is the
+direct observation the three-question probe above was waiting for. Same T1 run: adding `paths:`
+to `nextjs-dev-server-port` dropped the total to `34 files, 150.2k` (−2,609), and a main-session
+Read of a matching file in the cwd project loaded it (`load_reason: path_glob_match`).
+**Status line deliberately NOT changed by this agent:** the entry says to close it by asking a
+post-change session the three questions, and this evidence is the logged-load equivalent of
+the PRESENT/ABSENT answers but not the third question (body appears ONCE vs TWICE) verbatim —
+whether that closes N57 is Rupali's call under this register's own rule, so the disposition
+is left to her. Revert hazard recorded in `hooks/load-rules.mjs`: dropping `claudeMdExcludes`
+re-adds ~60k chars to every session.
+
 ---
 
 ### N58 · A live decision sits untracked at a retired path that `doctor` never reads — **S2** — **OPEN**

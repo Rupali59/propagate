@@ -2,8 +2,12 @@
 /**
  * rule-guard — deliver the relevant RULE at the moment of risk.
  *
- * WHY THIS EXISTS, and why it is not load-rules.mjs. `load-rules.mjs` injects all
- * 16 applicable rules at SessionStart. That is necessary and demonstrably not
+ * WHY THIS EXISTS, and why it is not load-rules.mjs. `load-rules.mjs` used to inject
+ * every applicable rule at SessionStart; it stopped on 2026-08-29. The rules are now
+ * native Claude Code user memory (everything under ~/.claude/rules except what
+ * `claudeMdExcludes` in settings.json keeps out -- conventions/, _TODO.md,
+ * gotchas-global.md), and rules with `paths:` frontmatter load only when a matching
+ * file is read. Native delivery is necessary and demonstrably not
  * sufficient: the rules arrive once, at the top of a session, and are then buried
  * under everything that follows. `gotcha-guard.mjs:10-15` already names the failure
  * for hazards — "knowing about it does not stop you reaching for grep" — and the

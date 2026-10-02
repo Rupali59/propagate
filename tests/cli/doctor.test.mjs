@@ -712,6 +712,51 @@ test("doctor FAILS when a CLAUDE.md restates a canonical rule, and names the fil
   }
 });
 
+/** A search root big enough that paths-guard's file floor does not call the walk blind. */
+async function fillRoot(root, n = 110) {
+  await mkdir(path.join(root, "filler"), { recursive: true });
+  for (let i = 0; i < n; i++) await writeFile(path.join(root, "filler", `f${i}.txt`), "x");
+}
+
+test("doctor FAILS when a path-scoped rule's glob matches nothing, and names rule + glob", async () => {
+  // path-scoped rules can still load (paths: globs) -- a typo'd glob means the rule
+  // silently never loads. Scoped companion has NO id/fingerprint on purpose.
+  const { root } = await makeWorkspace([driftLine("001")]);
+  const home = await mkdtemp(path.join(tmpdir(), "doctor-pathsguard-home-"));
+  try {
+    await fillRoot(root);
+    await mkdir(path.join(home, ".claude", "rules"), { recursive: true });
+    await writeFile(path.join(home, ".claude", "rules", "scoped-companion.md"), '---\npaths:\n  - "**/*.tests.nowhere"\n---\n\nbody\n');
+    const out = strip(runDoctorWithHome(root, home).stdout);
+    assert.match(out, /✗ path-scoped rules can still load/, out);
+    assert.match(out, /scoped-companion\.md \[\*\*\/\*\.tests\.nowhere\]: matches 0 files/);
+  } finally {
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("doctor PASSES a path-scoped rule whose glob matches a file, and does not fail a machine with no scoped rules", async () => {
+  const { root } = await makeWorkspace([driftLine("001")]);
+  const home = await mkdtemp(path.join(tmpdir(), "doctor-pathsguard-ok-home-"));
+  try {
+    await fillRoot(root);
+    await writeFile(path.join(root, "filler", "ports.yml"), "x");
+    await mkdir(path.join(home, ".claude", "rules"), { recursive: true });
+    await writeFile(path.join(home, ".claude", "rules", "scoped-companion.md"), '---\npaths:\n  - "**/ports.yml"\n---\n\nbody\n');
+    let out = strip(runDoctorWithHome(root, home).stdout);
+    assert.match(out, /✓ path-scoped rules can still load/, out);
+    // No scoped rule at all: an info line, never a failure.
+    await rm(path.join(home, ".claude", "rules", "scoped-companion.md"));
+    await writeFile(path.join(home, ".claude", "rules", "fixture-doctor-rule.md"), FIXTURE_RULE);
+    out = strip(runDoctorWithHome(root, home).stdout);
+    assert.doesNotMatch(out, /✗ path-scoped rules can still load/, out);
+  } finally {
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
 test("doctor does NOT fail the rules check on a machine with no rules layer", async () => {
   // The stranger-install property again: a machine that never installed the
   // rules layer must reach doctor-clean, not fail for the absence of an

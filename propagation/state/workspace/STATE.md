@@ -1,5 +1,15 @@
 # propagate — State
 
+## A scoped rule that can never load is now a doctor failure — 2026-10-02, `v0.15.15`
+
+`lib/rules/paths-guard.mjs` checks every `paths:` rule file in `~/.claude/rules` (including id-less
+scoped companions): non-empty string array, every entry `**/`-anchored, matches a file under the
+search roots, and not only Read-denied files. Missing roots are UNKNOWN and a walk under 100 files is
+`blind` — never a pass. Wired into `doctor` and `rules selftest`; plan `budget-1-rules-headroom`
+R2/D4. `hooks/load-rules.mjs` now reports "N always-loaded + M path-scoped" and warns that dropping
+`claudeMdExcludes` re-adds ~60k chars (N57 evidence appended, status left to Rupali). Plugin bumped
+to 0.15.15 (G63); the hub `marketplace.json` entry is outside this repo and must follow.
+
 ## The cross-ledger belonged to a nested root, and propagate was not a workspace — 2026-09-30, `v0.15.14`
 
 **`doctor`'s "unowned ledger" line was pointing at the right file for the wrong reason.**

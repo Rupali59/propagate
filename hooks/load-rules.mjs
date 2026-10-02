@@ -42,6 +42,10 @@
  *
  * TO REVERT: restore `header`/`body` and the old `emit(...)` at the foot of this
  * file, and drop `claudeMdExcludes` from ~/.claude/settings.json. One edit each.
+ * WARNING: dropping `claudeMdExcludes` on its own (without the hook revert) re-adds
+ * ~60k chars of rules/conventions, _TODO.md and gotchas-global.md to EVERY session's
+ * memory -- native `.claude/rules` loading is recursive and that exclusion is the only
+ * thing keeping them out (N57). Do not remove it without meaning to.
  *
  * Only files with an `id:` in frontmatter are counted. Note that `paths:` is the
  * NATIVE scoping key, not a legacy format — the three files this comment used to
@@ -103,12 +107,23 @@ try {
 
 const problems = [];
 const loaded = [];
+const parsedAll = [];   // every active rule file, whatever cwd -- what the summary counts
+let idlessScoped = 0;   // `paths:`-scoped files with no `id:`
 for (const f of files) {
   let r;
   try { r = parse(path.join(RULES_DIR, f)); }
   catch (e) { problems.push(`${f}: ${e.message}`); continue; }
-  if (!r) continue;                                   // not a rule file
+  if (!r) {                                           // not a rule file (no `id:`)
+    // ...unless it is a scoped companion: no id, but a `paths:` key. It is still native
+    // memory that loads on a matching read, so the summary must count it.
+    try {
+      const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(path.join(RULES_DIR, f), "utf8"));
+      if (fm && /^paths\s*:/m.test(fm[1])) idlessScoped += 1;
+    } catch { /* unreadable: already reported by parse() above if it threw */ }
+    continue;
+  }
   if (r.status === "obsolete") continue;              // retired on purpose
+  parsedAll.push(r);                                  // before the cwd filter: native loading ignores `scope:`
   if (!applies(r, cwd)) continue;
   loaded.push(r);
 }
@@ -140,12 +155,22 @@ if (loaded.length === 0) {
  * deliberate: a finding should speak only when there is a finding, but a delivery
  * mechanism that has gone quiet must still say it is alive.
  */
+// "Path-scoped" = frontmatter has a `paths:` key (native scoping: loads only when a
+// matching file is read, so it is NOT in a planning session's context). The line-regex
+// parse above leaves `meta.paths` as "" for a YAML list, so test for the KEY.
+// Counted over parsedAll, not `loaded`: the legacy `scope:` cwd filter (applies()) is
+// not what native loading does, and a cwd-dependent count would read 0 scoped in any
+// non-Next project while the rule is still scoped everywhere.
+const scopedCount = parsedAll.filter((r) => "paths" in r).length + idlessScoped;
+const alwaysCount = parsedAll.length - parsedAll.filter((r) => "paths" in r).length;
 const summary =
-  `_Rules: ${loaded.length} canonical rule file(s) parsed in ~/.claude/rules/ and ` +
-  `delivered natively by Claude Code as user memory — this hook stopped injecting ` +
-  `bodies on 2026-08-29 (they were arriving twice). Reference a rule as ` +
-  `\`rule:<id>\`; never restate one in a CLAUDE.md. Restating is what produced 9 ` +
-  `divergent copies of the tool-priority rule making 4 mutually exclusive claims._`;
+  `_Rules: ${parsedAll.length + idlessScoped} canonical rule file(s) parsed in ~/.claude/rules/ ` +
+  `(${alwaysCount} always-loaded + ${scopedCount} path-scoped), delivered natively by ` +
+  `Claude Code as user memory — path-scoped ones only when a matching file is read. ` +
+  `This hook stopped injecting bodies on 2026-08-29 (they were arriving twice). ` +
+  `Reference a rule as \`rule:<id>\`; never restate one in a CLAUDE.md. Restating is ` +
+  `what produced 9 divergent copies of the tool-priority rule making 4 mutually ` +
+  `exclusive claims._`;
 
 const warn = problems.length
   ? `\n\n⚠️  ${problems.length} rule file(s) failed to parse and were skipped: ${problems.join("; ")}`
