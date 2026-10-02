@@ -614,6 +614,36 @@ what every test uses.
 ## Finished
 
 
+### PR-033 · Lane worktrees whose work landed by squash are invisible as "done", and `git cherry` cannot see it either
+**Open 2026-10-02.** propagate's premise is coordinating parallel streams across branches and
+worktrees, and it has no view of the commonest parallel stream in this tree: a subagent lane in
+`propagate/.claude/worktrees/agent-*` on branch `worktree-agent-*`.
+
+**Live instances (both landed in `3cb51a8`, v0.15.16):** `worktree-agent-a80535861233b15d5` (Plan 2
+plus the scratch integration merge `83d08bc`) and `worktree-agent-a6fdc017342380450` (Plan 3,
+`0dadefa`). Both are still on disk; `git branch -d` refuses, because the merge was a squash.
+
+**The obvious detector fails, measured:** `git cherry main <branch>` prints `+` (not upstream)
+for all three lane commits. `rule:absence-claims-need-state-and-branch` names `git cherry` as the
+method that survives squash merges, and it does — for ONE commit squashed alone. Two lanes plus
+a conflict resolution squashed into one commit produce a patch-id matching neither. **What did
+answer it:** diff the branch tip against `main` restricted to the files the branch touched
+(`git diff --name-only <base> <branch>` then `git diff --name-only <branch> main -- <those>`).
+Plan 2's branch: 37 touched, 0 differ. Plan 3's: 26 touched, 3 differ — `cli.mjs`,
+`lib/core/commands.mjs`, `tests/unit/cli-commands.test.mjs`, exactly the files the other lane
+also edited, so "differs" there means "a sibling added to it", not "not landed".
+
+**Build:** a read-only `doctor` info line (or `inventory` row) listing worktrees under any
+discovered repo, each graded `landed` (touched files identical on the default branch) /
+`landed-with-siblings` (differ only in files another lane also touched) / `unlanded` / `dirty`,
+with the cleanup command printed and never run — removal is `git worktree remove` + `branch -D`,
+a destructive step that stays with a human. Floor: a repo with `.claude/worktrees/` present and 0
+worktrees parsed is a blind reader, not a clean tree. Mutate: make one touched file differ and
+confirm the grade flips to `unlanded`.
+
+**Cost so far:** none lost — the two branches are the only copy of nothing. The risk is the
+inverse: an `unlanded` lane that looks like leftover scratch gets deleted with `-D`.
+
 ### PR-031 · DONE — Step 2's stated target no longer exists, so the step cannot be built as written
 
 **DONE 2026-09-30, re-pointed and half built.** `run_id` now lands on both monitor outputs — `run=<id>` on the `monitor.log` summary line and `run_id` on each `notified.jsonl` row — minted once per run from the existing `mintRunId`, and on the reconcile-failure path too so a run that could not look is still attributable. That makes the notified-to-run join exact instead of by timestamp proximity, which is the reconstruction PR-020's analysis did by hand. The JSON-log-lines half is DECLINED, not pending: `monitor.log` is key=value, already parseable, and read by doctor with a regex plus an 80-char slice — converting it would break both for nothing the id does not already give. 5 tests, and the two that matter assert what must NOT change: the stats still survive `slice(0, 80)`, and a row without an id stays valid.

@@ -321,7 +321,7 @@ them stays in `cli.mjs`.
 | `check --staged` | Staged files only (pre-commit use). |
 | `check --strict` | Exit 1 (not 0) if any coupling is found — combine with any of the above. |
 | `check --json` | Machine-readable output: `{generatedAt, repoRoot, changedFiles, strict, exitCode, couplings}` — combine with any of the above. |
-| `settle <file> [--json]` | **Read-only worklist for one file** (2026-10-02). The edges into AND out of it, in fix order re-derived on every run; per edge: state, the diff since the last *pinning* verify against the working tree (both sides — `deferred` pins nothing, so it never moves the baseline), prior reasons, the dispositions `allowedDispositions` permits right now, what blocks it (a NEVER_VERIFIED upstream is shown, with a `settle` route), and the exact `verify --edge <id> --disposition <d> --reason '<…>' --apply` command. A file whose edges are all NEVER_VERIFIED says so. `<file>` is matched like `graph --node`, plus a path relative to the cwd; an ambiguous match lists candidates (exit 2), no match exits 1. `--json` adds `walk_started`, `session_id` and `reason_placeholder`. **Never writes** (`tests/cli/settle.test.mjs` snapshots the event store); the interactive walk is the /propagate skill's `sections/settle.md`. |
+| `settle <file> [--json]` | **Read-only worklist for one file** (2026-10-02). The edges into AND out of it, in fix order re-derived on every run; per edge: state, the diff since the last *pinning* verify against the working tree (both sides — `deferred` pins nothing, so it never moves the baseline), prior reasons, the dispositions `allowedDispositions` permits right now, what blocks it (a NEVER_VERIFIED upstream is shown, with a `settle` route), and the exact `verify --edge <id> --disposition <d> --reason '<…>' --apply` command. A file whose edges are all NEVER_VERIFIED says so. A relative `<file>` that names a declared file under the cwd wins outright; otherwise it is matched like `graph --node`, and an ambiguous match lists candidates (exit 2), no match exits 1. `--json` adds `walk_started`, `session_id` and `reason_placeholder`; each item's `diff` is `{source, downstream}`, two parallel sides. **Never writes** (`tests/cli/settle.test.mjs` snapshots the event store); the interactive walk is the /propagate skill's `sections/settle.md`. |
 | `help [command]` · `<command> --help` · `-h` | Answered from the same `COMMANDS` table the flag validator reads, ahead of it — so `verify --help` is answered rather than refused as an unknown flag. No argument: commands grouped, one line each. A command: its usage and every declared flag. The seven commands whose flags are not yet enumerated (`args: null`) say so. An unknown command exits 2. |
 | `verify` refusals | An out-of-order refusal (exit 3) now leads with the *upstream's* own `propagate verify --edge <blocker> …` command, then `--out-of-order`; `--json` carries them as `fix_first`. A DIVERGED refusal keeps "a human must look at both sides first" and prints the `both-reconciled` command. Every printed command selects with `--edge`, never `--glob` (G74), and shell-quotes a reason. `decoupled` is now refused on a DIVERGED edge like every other non-`both-reconciled` disposition — it used to branch off before the guard. |
 | `drain` | **The supported close path** (added 2026-08-13; `SPEC.md` §6). Bare, it lists open rows grouped by `correlation_id`, read-only. `--all` widens to every workspace, `--json` for machine-readable output. |
@@ -488,9 +488,10 @@ behaviour that already works on a machine that exports it.
 
 `setup --hub <path>` records where your code lives. Things derive from it and are
 **not** configured separately: `searchRoots` (when not declared), the skills
-marketplace directory, the three execution registries — `scripts/execution/`'s
-`ports.yml`, `deploy.yml` and `mongo.yml` — and the **cross-repo ledger**. Derive the
-list rather than trusting this sentence: the three registries and the marketplace are
+marketplace directory, the four execution registries — `scripts/execution/`'s
+`ports.yml`, `deploy.yml`, `mongo.yml` and `instruction-budget.yml` (absent means `doctor` skips
+the budget gate as info) — and the **cross-repo ledger**. Derive the
+list rather than trusting this sentence: the four registries and the marketplace are
 exactly the `underHub()` call sites in `lib/core/config.mjs`; `searchRoots` falls back
 to `[HUB_ROOT]` directly, and the cross-ledger goes through `crossLedgerRoot()`.
 Neither of those last two is an `underHub()` call site, so a grep for `underHub` is a

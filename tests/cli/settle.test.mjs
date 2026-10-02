@@ -126,9 +126,10 @@ test("an UNCOMMITTED source edit shows in the diff, and the downstream is diffed
     const w = settleJson(f.env, "A.md");
     const ab = w.items.find((i) => i.edge_id === f.edgeAB.edge_id);
     assert.ok(ab, "A->B is out of A.md");
-    assert.equal(ab.diff.ok, true, JSON.stringify(ab.diff));
-    assert.notEqual(ab.diff.empty, true, "the old ..HEAD diff reported empty for exactly this case");
-    assert.match(ab.diff.text, /\+A v2/);
+    assert.deepEqual(Object.keys(ab.diff).sort(), ["downstream", "source"], "two parallel sides, never one nested in the other");
+    assert.equal(ab.diff.source.ok, true, JSON.stringify(ab.diff));
+    assert.notEqual(ab.diff.source.empty, true, "the old ..HEAD diff reported empty for exactly this case");
+    assert.match(ab.diff.source.text, /\+A v2/);
     assert.ok(ab.diff.downstream, "the downstream side is present");
     assert.equal(ab.diff.downstream.empty, true, "B is unchanged, and that is a real result, not a missing one");
   } finally {
@@ -186,8 +187,11 @@ test("a file whose edges are ALL NEVER_VERIFIED says so, rather than printing no
     assert.match(text.stdout, /\[1\/1\] NEVER_VERIFIED/);
     const w = settleJson(env, "Y.md");
     assert.equal(w.allNeverVerified, true);
-    assert.equal(w.items[0].diff.ok, false, "no history means no diff, and it says why");
-    assert.match(w.items[0].diff.reason, /never judged/);
+    assert.equal(w.items[0].diff.source.ok, false, "no history means no diff, and it says why");
+    assert.match(w.items[0].diff.source.reason, /never judged/);
+    // The downstream says the same, not "events before 2026-08-22 did not record one" --
+    // which asserts an old event exists for an edge that has none.
+    assert.match(w.items[0].diff.downstream.reason, /never judged/);
   } finally {
     await cleanup(searchRoot, stateDir);
   }
@@ -237,8 +241,52 @@ test("settleWorklist: an ambiguous selector lists the candidates instead of pick
     history: async () => Object.assign(new Map(), { malformed: 0 }),
     diff: async () => ({ ok: false, kind: "diff", reason: "stub" }),
   };
-  const w = await settleWorklist("CLAUDE.md", deps);
+  // cwd pinned to a directory owning neither, so the cwd-first rule cannot pick one.
+  const w = await settleWorklist("CLAUDE.md", { ...deps, cwd: "/elsewhere" });
   assert.equal(w.ok, false);
   assert.equal(w.code, 2);
   assert.equal(w.candidates.length, 2);
+});
+
+// The cwd-first rule. Built from literal rows, not makeChain: the defect only shows
+// when a SAME-NAMED declared file exists elsewhere in the tree, which the chain
+// fixture cannot express (rule:mutate-behind-the-fixture-builder). Both cases are
+// the real ones measured 2026-10-02 on the v0.15.16 release.
+function cwdDeps(rows, roots) {
+  return {
+    loadWorkspaces: async () => roots.map((root) => ({ root })),
+    reconcile: async () => ({ rows }),
+    history: async () => Object.assign(new Map(), { malformed: 0 }),
+    diff: async () => ({ ok: false, kind: "diff", reason: "stub" }),
+  };
+}
+
+test("settleWorklist: a relative path resolving under the cwd wins over a same-named file elsewhere (the STATE.md case)", async () => {
+  // Hub /w/hub owns propagation/state/workspace/STATE.md; the nested repo /w/hub/propagate
+  // owns its own copy at the same relative path. From inside propagate, the path means
+  // propagate's file -- the first version listed the hub's.
+  const rows = [
+    synthRow("dddd0001", "DRIFTED", "/w/hub/propagation/state/workspace/TODOS.md", "/w/hub/propagation/state/workspace/STATE.md"),
+    synthRow("dddd0002", "DIVERGED", "/w/hub/propagate/propagation/state/workspace/TODOS.md", "/w/hub/propagate/propagation/state/workspace/STATE.md"),
+  ];
+  const w = await settleWorklist("propagation/state/workspace/STATE.md",
+    { ...cwdDeps(rows, ["/w/hub", "/w/hub/propagate"]), cwd: "/w/hub/propagate" });
+  assert.equal(w.ok, true, w.error);
+  assert.equal(w.file, "/w/hub/propagate/propagation/state/workspace/STATE.md");
+  assert.deepEqual(w.items.map((i) => i.edge_id), ["dddd0002"], "only the cwd file's edge is listed");
+});
+
+test("settleWorklist: a relative path matching two files by suffix is resolved by the cwd, not refused (the DATA_MODEL.md case)", async () => {
+  const rows = [
+    synthRow("eeee0001", "DRIFTED", "/w/form-collector/src/a.mjs", "/w/form-collector/docs/DATA_MODEL.md"),
+    synthRow("eeee0002", "DRIFTED", "/w/propagate/lib/b.mjs", "/w/propagate/docs/DATA_MODEL.md"),
+  ];
+  const deps = cwdDeps(rows, ["/w/form-collector", "/w/propagate"]);
+  const w = await settleWorklist("docs/DATA_MODEL.md", { ...deps, cwd: "/w/propagate" });
+  assert.equal(w.ok, true, w.error);
+  assert.equal(w.file, "/w/propagate/docs/DATA_MODEL.md");
+  // ...and from a cwd owning neither, the same selector is still an ambiguity, never a guess.
+  const elsewhere = await settleWorklist("docs/DATA_MODEL.md", { ...deps, cwd: "/w/other" });
+  assert.equal(elsewhere.ok, false);
+  assert.equal(elsewhere.code, 2);
 });

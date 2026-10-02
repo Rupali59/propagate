@@ -31,6 +31,7 @@
  */
 
 import path from "node:path";
+import { realpathSync } from "node:fs";
 
 import { allowedDispositions, verifyCommand, shellQuote } from "../lib/edges/disposition.mjs";
 import { buildGraph, fixOrder, matchNodePaths } from "../lib/graph/graph.mjs";
@@ -63,12 +64,24 @@ export async function settleWorklist(sel, deps) {
   const { rows } = await deps.reconcile(workspaces, {});
   const graph = buildGraph(rows, { workspaceRoots: workspaces.map((w) => w.root) });
 
-  // The matcher is `graph --node`'s, extended by one convenience: a relative
-  // path that exists under the cwd. `settle docs/X.md` is what a person types.
-  let match = matchNodePaths(graph.nodes.keys(), sel, shortPath);
-  if (match.length === 0 && !path.isAbsolute(sel)) {
-    match = matchNodePaths(graph.nodes.keys(), path.resolve(deps.cwd ?? process.cwd(), sel), shortPath);
+  // A relative path that names a declared file UNDER THE CWD wins outright, before
+  // `graph --node`'s suffix matcher runs. `settle docs/X.md` is what a person types,
+  // and it means the file in front of them. The first version tried the cwd only
+  // when the suffix matcher found NOTHING, so a same-named file elsewhere in the
+  // tree either won (`propagation/state/workspace/STATE.md` from inside propagate
+  // resolved to the HUB's copy) or forced a refusal (`docs/DATA_MODEL.md`: two
+  // candidates, one of them form-collector's). Measured 2026-10-02 on the v0.15.16
+  // release's own files: 7 of 30 touched edges went unlisted that way.
+  // Both the resolved path and its realpath are tried -- /var vs /private/var on
+  // macOS, the same hazard `relativeInRepo` in lib/report/evidence.mjs handles.
+  let match = [];
+  if (!path.isAbsolute(sel)) {
+    const abs = path.resolve(deps.cwd ?? process.cwd(), sel);
+    let real = abs;
+    try { real = realpathSync(abs); } catch { /* not on disk: only the literal form */ }
+    match = [...new Set([abs, real])].filter((p) => graph.nodes.has(p));
   }
+  if (match.length === 0) match = matchNodePaths(graph.nodes.keys(), sel, shortPath);
   if (match.length === 0) {
     return {
       ok: false,
@@ -122,6 +135,8 @@ export async function settleWorklist(sel, deps) {
       downstreamDirty: lv?.downstreamDirty ?? null,
     });
 
+    const { downstream: _dn, ...srcDiff } = d ?? {};
+
     const commands = {};
     for (const disp of a.allowed) {
       commands[disp] = verifyCommand({ edge: i.edge_id, disposition: disp, reason: REASON_PLACEHOLDER });
@@ -155,7 +170,12 @@ export async function settleWorklist(sel, deps) {
         .slice(0, 3),
       last: h?.last ?? null,
       since: lv ? { commit: lv.commit, ts: lv.ts, dirty: lv.dirty } : null,
-      diff: d,
+      // Two PARALLEL sides. edgeDiff returns the source diff with the downstream
+      // nested inside it -- fine for one caller, a trap for a JSON reader: on
+      // 2026-10-02 a reader took `diff.source` (absent) for "source unchanged" on an
+      // edge whose source had changed. `--json` is read by agents (sections/settle.md),
+      // so the contract is symmetric.
+      diff: { source: srcDiff, downstream: d?.downstream ?? null },
       allowed: a.allowed,
       viaOutOfOrder: a.viaOutOfOrder,
       needsReason: a.needsReason,
@@ -225,16 +245,15 @@ export function renderSettle(w, { colour: useColour = false } = {}) {
         out.push(`      ${D}${String(p.ts).slice(0, 10)} ${p.disposition}${p.by ? ` by ${p.by}` : ""}: ${p.reason}${R}`);
       }
     }
-    const dd = it.diff;
-    if (dd?.ok) {
-      out.push(`    since last pinning verify (${String(dd.since).slice(0, 8)}${it.since?.dirty ? ", tree was dirty" : ""}):`);
-      for (const side of [["source", dd], ["downstream", dd.downstream]]) {
-        const [label, s] = side;
-        if (!s) continue;
-        if (!s.ok) out.push(`      ${label}: ${D}${s.reason}${R}`);
-        else if (s.empty) out.push(`      ${label}: ${D}unchanged${R}`);
+    const sides = [["source", it.diff?.source], ["downstream", it.diff?.downstream]];
+    if (sides.some(([, x]) => x?.ok)) {
+      out.push(`    since last pinning verify (${String(it.since?.commit ?? "").slice(0, 8)}${it.since?.dirty ? ", tree was dirty" : ""}):`);
+      for (const [label, x] of sides) {
+        if (!x) continue;
+        if (!x.ok) out.push(`      ${label}: ${D}${x.reason}${R}`);
+        else if (x.empty) out.push(`      ${label}: ${D}unchanged${R}`);
         else {
-          const lines = String(s.text).split("\n");
+          const lines = String(x.text).split("\n");
           out.push(`      ${label}:`);
           for (const l of lines.slice(0, TEXT_DIFF_LINES)) out.push(`        ${l}`);
           if (lines.length > TEXT_DIFF_LINES) {
@@ -242,8 +261,8 @@ export function renderSettle(w, { colour: useColour = false } = {}) {
           }
         }
       }
-    } else if (dd) {
-      out.push(`    diff: ${D}${dd.reason}${R}`);
+    } else if (it.diff?.source) {
+      out.push(`    diff: ${D}${it.diff.source.reason}${R}`);
     }
     if (it.blocked) {
       out.push(`    ${B}blocked${R} — the source is itself unsettled:`);
