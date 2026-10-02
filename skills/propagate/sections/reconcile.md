@@ -2,12 +2,12 @@
 
 *Section of the parent skill — Read this file when the situation below applies. It is deliberately NOT a discoverable skill: as one it declared the bare name `reconcile`, which squats a generic global name.*
 
-**When this applies:** Use when declaring a new coupling in a `.propagates.yml` sidecar, or when walking open propagation-drift rows to a close (apply, defer, or wontfix). Triggers on "declare this edge", "drain the ledger", "close this drift row", "what should I do with this open row".
+**When this applies:** Use when declaring a new coupling in a `.propagates.yml` sidecar, or when closing legacy v1 ledger rows with `drain` (apply, defer, or wontfix). Triggers on "declare this edge", "drain the ledger", "close this drift row". **To settle a drifted v2 EDGE, use `sections/settle.md` instead** — `propagate settle <file>` + `verify`.
 
 Parent skill: `propagate` (premise, Contract, Important Rules — including
-"fix root-to-leaf" and "close through `cli drain`, never by hand", which this
-skill's `drain` walkthrough executes but does not restate). Routing to the
-underlying `cli.mjs` commands: `routing` skill.
+"fix root-to-leaf" and "settle an edge through `verify`", which the `settle`
+walkthrough executes). Routing to the underlying `cli.mjs` commands:
+`sections/routing.md`.
 
 ## `declare <file>` — add a coupling (agent workflow, not a CLI command)
 
@@ -31,7 +31,14 @@ matching 0 files is skipped with a log warning. `kind: code` is bidirectional
 changing fires a `code_drift` row back at the doc — for non-glob entries only;
 glob `kind: code` on the code→doc direction is deferred.
 
-## `drain` — walk the human to a decision
+## `drain` — close legacy v1 ledger rows
+
+**Scope: v1 rows only.** `drain` reads and closes the open rows in the v1
+ledgers that `status` still reads. It does **not** settle a v2 edge — a
+`DRIFTED` / `REVERSED` / `DIVERGED` edge is recorded with a `verify`
+disposition, walked by `sections/settle.md`. Closing a v1 row never changes an
+edge's state, and `verify` never closes a v1 row; mixing the two is how a file
+looks settled in one view and open in the other.
 
 The *decisions* are the agent's job; the *writing* is `cli drain`'s. Never
 hand-write a `markStatus` call — that is how rows landed in the wrong ledger
@@ -65,6 +72,6 @@ files) are handled per-row.
 ## Fix order
 
 Verify root-to-leaf — the full rule and its exemptions live in the parent
-skill's Important Rules; `routing`'s `graph` command prints the worklist
-already ordered by source layer. Don't verify a downstream against a source
+skill's Important Rules; `graph` prints the worklist already ordered by source
+layer, and `settle <file>` shows what blocks each edge, with a route. Don't verify a downstream against a source
 that is itself an unsettled edge.

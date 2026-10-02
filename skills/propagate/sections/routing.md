@@ -15,7 +15,9 @@ every command below: `docs/REFERENCE.md`.
 | `doctor` | Is the install healthy? | Event store readable + non-empty, `reconcile` completes, sidecar schema valid, ledger parseable. |
 | `check --changed` | Did I forget to update something? | Commit-time gate: for changed files, warns when a declared coupling didn't also change. `--changed` (working tree + staged vs HEAD) is the default. |
 | `graph` | What depends on what, and in what order should I fix it? | See Worklist semantics below. `--all`, `--node <path>`, `--html out.html`. |
-| `drain` | What's open, grouped for closing? | Bare = read-only list grouped by `correlation_id`. Writing closes is the `reconcile` skill's job, not this one's. |
+| `settle <file>` | What drifted on this file, and what do I run to record my decision? | **Read-only.** The file's edges into and out of it, in fix order: diff since the last pinning verify (both sides), prior reasons, allowed dispositions, what blocks it, and the exact `verify --edge … --reason '<…>' --apply` command. `--json` for the walkthrough (`sections/settle.md`). Never prompts and never writes. |
+| `verify` | Record my decision on an edge. | `--edge <id> --disposition <d> --reason '<why>'`; **dry-run unless `--apply`**. Refuses out-of-order (exit 3, prints the upstream's own command) and DIVERGED (prints the `both-reconciled` command). Always select with `--edge`, never `--glob` (G74). `<cmd> --help` / `help <cmd>` lists every flag. |
+| `drain` | What's open, grouped for closing? | Bare = read-only list of **v1 ledger rows** grouped by `correlation_id`. Closing them is `sections/reconcile.md`'s legacy `drain` walkthrough; v2 edges are settled with `settle` + `verify`. |
 | `rules <list\|check\|selftest\|promote>` | Does a `CLAUDE.md` restate a canonical rule instead of referencing it? | See Rules check below. |
 | `claims check` | Which declared claims look rotten? | Five DETERMINISTIC checks — expired dates, literals vs downstreams, footer-vs-inline dates, rotted citations, dead `concepts:` tokens. Reports candidates; it does not judge. |
 | `claims judge <file>` | Which blocks of this document has anyone ruled on? | Partitions into judged / unjudged / unanswerable / structure / orphaned. `unanswerable` means a recorded attempt failed — not that nobody tried. |
@@ -33,6 +35,8 @@ every command below: `docs/REFERENCE.md`.
 node ${CLAUDE_PLUGIN_ROOT}/cli.mjs status
 node ${CLAUDE_PLUGIN_ROOT}/cli.mjs doctor
 node ${CLAUDE_PLUGIN_ROOT}/cli.mjs check --changed
+node ${CLAUDE_PLUGIN_ROOT}/cli.mjs settle <file> --json
+node ${CLAUDE_PLUGIN_ROOT}/cli.mjs help [command]
 node ${CLAUDE_PLUGIN_ROOT}/cli.mjs graph --all --node <path>
 node ${CLAUDE_PLUGIN_ROOT}/cli.mjs rules check
 ```
@@ -92,7 +96,7 @@ meant only that nobody had copy-pasted.
 
 ## Out of scope here
 
-`declare` and `drain`'s decision-making (apply/defer/wontfix) are agent
-workflows, not routing — see the `reconcile` skill. The `skills-*` command
+`declare` and the legacy `drain` walkthrough are agent workflows, not routing —
+see `sections/reconcile.md`; settling v2 edges is `sections/settle.md`. The `skills-*` command
 family (skill lifecycle: create/promote/demote/reap) is a separate manager
 riding the same CLI; see `docs/DECISIONS.md`.

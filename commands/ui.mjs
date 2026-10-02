@@ -171,6 +171,20 @@ export function validateBatchWrite({ node_id, state, disposition, reason }, memb
 }
 
 /**
+ * The refusal for a disposition outside `allowedDispositions(...).allowed`, or
+ * null. Only the ORDERING half is reported here -- the DIVERGED pairing has its
+ * own message at both call sites and runs first.
+ */
+export function orderingRefusal(allowedResult, disposition) {
+  if (!allowedResult || allowedResult.allowed.includes(disposition)) return null;
+  if (!allowedResult.viaOutOfOrder.includes(disposition)) return null;
+  return (
+    `this edge's source is itself unsettled, so "${disposition}" would pin a downstream against a source nobody has confirmed. ` +
+    `Allowed now: ${allowedResult.allowed.join(", ") || "none"}. Settle the upstream first, or use the CLI's --out-of-order with a reason.`
+  );
+}
+
+/**
  * Write a batch: one event per member of an already-validated (node_id,
  * state) group, all carrying the SAME reason. Every member is re-checked
  * against `rows` — freshly reconciled, NOT `members` (which came from the
@@ -190,7 +204,7 @@ export function validateBatchWrite({ node_id, state, disposition, reason }, memb
  *   always the full per-`edge_id` array, never collapsed to a count, so a
  *   partial failure is legible by which edge it was.
  */
-export async function applyBatchDispose({ body, members, rows, appendEvent, buildEventPayload, divergedGuard, by }) {
+export async function applyBatchDispose({ body, members, rows, appendEvent, buildEventPayload, divergedGuard, by, allowedFor }) {
   const byEdgeId = new Map((rows ?? []).map((r) => [r.edge_id, r]));
   const reason = String(body.reason).trim();
   const results = [];
@@ -207,6 +221,17 @@ export async function applyBatchDispose({ body, members, rows, appendEvent, buil
     const guard = divergedGuard(row.state, body.disposition);
     if (guard) {
       results.push({ edge_id: m.edge_id, ok: false, error: guard });
+      continue;
+    }
+    // THE ORDERING GUARD, which this write path never had. `verify` refuses to
+    // pin a downstream against an unsettled source; the UI wrote the event
+    // anyway, so the one surface with no --out-of-order flag was the one that
+    // could bypass the rule without saying so. `allowedFor` is injected (it
+    // needs the whole graph) and OPTIONAL so a caller that cannot supply it is
+    // visibly unguarded rather than silently guarded by a stub.
+    const ordering = orderingRefusal(allowedFor?.(row), body.disposition);
+    if (ordering) {
+      results.push({ edge_id: m.edge_id, ok: false, error: ordering });
       continue;
     }
     try {
@@ -268,7 +293,14 @@ export async function uiCmd(argv = [], io = console) {
   const { backlog } = await import("../lib/report/backlog.mjs");
   const { evidenceFor } = await import("../lib/report/evidence.mjs");
   const { readSnapshot } = await import("../lib/report/doctor/snapshot.mjs");
-  const { divergedGuard, buildEventPayload } = await import("../lib/edges/disposition.mjs");
+  const { divergedGuard, buildEventPayload, allowedDispositions } = await import("../lib/edges/disposition.mjs");
+  const { buildGraph, blockedBy } = await import("../lib/graph/graph.mjs");
+  // Blockers for the rows the write path just re-derived (NOT the browser's
+  // snapshot): the graph is built once per write request from fresh rows.
+  const allowedForRows = (rows) => {
+    const graph = buildGraph(rows);
+    return (row) => allowedDispositions(row, blockedBy(graph, row.edge_id));
+  };
   const { defaultDeps } = await import("../lib/report/queue.mjs");
   // TWO MODULES EXPORT defaultDeps AND THEY ARE NOT INTERCHANGEABLE.
   // queue.mjs's has {reconcile, loadWorkspaces}; inbox.mjs's adds
@@ -445,6 +477,7 @@ export async function uiCmd(argv = [], io = console) {
             buildEventPayload,
             divergedGuard,
             by: `${process.env.USER || "ui"} (ui)`,
+            allowedFor: allowedForRows(rows),
           });
           // 200 only when every member landed. A partial failure still
           // returns 200-shaped JSON with ok:false plus the per-edge_id
@@ -468,6 +501,8 @@ export async function uiCmd(argv = [], io = console) {
         if (!row) return send(409, { ok: false, error: "edge vanished between render and write — reload" });
         const guard = divergedGuard(row.state, body.disposition);
         if (guard) return send(409, { ok: false, error: guard });
+        const ordering = orderingRefusal(allowedForRows(rows)(row), body.disposition);
+        if (ordering) return send(409, { ok: false, error: ordering });
 
         try {
           const stamped = await appendEvent(buildEventPayload(row, body.disposition, String(body.reason).trim(), `${process.env.USER || "ui"} (ui)`));
@@ -496,6 +531,9 @@ export async function uiCmd(argv = [], io = console) {
           body.file = item.source;
           body.sinceCommit = item.lastVerified?.commit ?? null;
           body.dirty = !!item.lastVerified?.dirty;
+          body.downstreamFile = item.downstream;
+          body.downstreamSinceCommit = item.lastVerified?.downstreamCommit ?? null;
+          body.downstreamDirty = item.lastVerified?.downstreamDirty ?? null;
           allowed = true;
         } else {
           const known = registerQueue({ backlogFn: backlog });

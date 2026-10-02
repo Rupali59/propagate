@@ -1390,3 +1390,40 @@ unrecoverable"), `lib/edges/events.mjs:348` (the flat `*.jsonl` glob that dictat
 the backup's directory name), hub `CLAUDE.md` §"No-git-remote inventory" (the
 detector that cannot see this), `rule:enforcement-watches-itself`,
 `rule:discernment-checks` §5, `rule:durable-record-shape`.
+
+## 2026-10-02: one function says which dispositions an edge accepts, and `decoupled` no longer bypasses DIVERGED
+
+**`allowedDispositions(row, blockers)` in `lib/edges/disposition.mjs` is the only place the
+answer lives**; `verify`, `lib/report/queue.mjs`, `commands/ui.mjs` and `propagate settle` call
+it. Before, `verify` enforced two guards inline and the queue and UI each kept their own list.
+
+**The parity test found the cost of three lists on its first run.** `verify --disposition
+decoupled` returned through `runDecoupled` before `divergedGuard` ran, so a DIVERGED edge — both
+sides moved, someone must look at both — could be closed as "the coupling ended" with no look at
+either. That contradicts `divergedGuard`'s own contract. `runDecoupled` now applies the guard,
+so **`verify` refuses where it used to accept**: a behaviour change, deliberate. The queue's list
+was wrong in the other direction — it offered pinning dispositions on edges blocked by an
+unsettled upstream, which `verify` then refused.
+
+**`settle` is read-only, and `verify --apply` stays the only write path** (plan budget-3 D2). The
+walk lives in the skill (`skills/propagate/sections/settle.md`): one AskUserQuestion per edge
+with pros and cons, then the printed command. Rejected: an interactive CLI walker that writes,
+because it would be a second write path with its own guards — the exact shape this entry removes.
+Rejected: extracting `verify`'s guards into a shared apply module (D3), because the guard
+decision was the duplicated part, not the I/O; `cli.mjs` keeps its re-exports for the tests.
+
+**`graph --node`'s path matcher moved to `matchNodePaths` in `lib/graph/graph.mjs`** so `settle`
+and `graph` cannot disagree about which file a path names. Layering (longest path from root) and
+cycle condensation, recorded 2026-08-17, are unchanged.
+
+**Verified:** `verify.test.mjs`, `verify-ordering.test.mjs`, `verify-flags.test.mjs` 38/38
+before and after; full suite 2443/0 on `main` after merge; removing the `runDecoupled` guard
+turns `tests/cli/allowed-parity.test.mjs` red naming the DIVERGED case. **Not answerable from the
+store:** whether any of the 8 past `decoupled` events (of 2990) hit a DIVERGED edge — events
+carry no prior-state field, so the store cannot say; reconstructing it needs both sides' history
+at each event's commits.
+
+**Affects:** propagate
+
+**Refs:** plan `budget-3-propagate-settle.md` D1–D5, G74 (`--glob` is not a pattern — why
+`settle` prints `--edge`), `rule:safety-flag-needs-a-test`.

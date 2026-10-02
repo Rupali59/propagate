@@ -82,6 +82,9 @@ column; without it the metric is decoration.
 | `rows.written{writer}` | counter | `external == 0` | 87% of the ledger was hand-written |
 | `rows.closed_without_transition` | gauge | **0** | 39 rows closed with no audit trail |
 | `doctor.duration_ms` | histogram | p95 < 5s | currently **21s** |
+| `instructions.unexcepted_over` | gauge | **== 0** (null = registry unresolved, stated) | a directory whose sessions load over 145,000 chars of instructions without a named entry in `scripts/execution/instruction-budget.yml` — G75 |
+| `instructions.stale_exceptions` | gauge | **== 0** | an exception outliving its reason: the dir is now under the limit, gone, or owns no CLAUDE.md |
+| `instructions.over_ceiling` | gauge | **== 0** | an excepted dir that grew past the `ceiling:` it was listed at — exceptions may only go down |
 | `check.hook_installed` | gauge | 1 where the gate is enabled | G3 · documented, never installed |
 
 Two of these would have paid for the whole exercise on their own.

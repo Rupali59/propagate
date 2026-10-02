@@ -1,5 +1,24 @@
 # propagate — State
 
+## The instruction budget is measured per directory, and one file's drift has a worklist — 2026-10-02, `v0.15.16`
+
+**Budget (plan `budget-2-metric-and-trims` Part A).** `propagate instructions [--json]` lists every
+directory owning a `CLAUDE.md` with the characters a session started there loads (G75 says why the
+hub total is only a floor). `doctor` gates on three keys — `instructions.unexcepted_over`,
+`.stale_exceptions`, `.over_ceiling` — against the hub registry
+`scripts/execution/instruction-budget.yml` (exceptions with `reason:` and `ceiling:`; inclusion is
+derived). `--calibrate --log <jsonl>` compares the model with an InstructionsLoaded log; against
+today's T1 log, 2 of 3 sessions match and the third is the pre-`paths:` baseline, a real difference.
+Derive the over-limit list with `propagate instructions`; never restate it here.
+
+**Settle (plan `budget-3-propagate-settle`).** `propagate settle <file> [--json]` is read-only: every
+edge into and out of the file, in fix order, with the diff since the last pinning verify on both
+sides, the dispositions `verify` would accept, and the exact `verify --edge` command. One
+`allowedDispositions()` now feeds `verify`, the queue and the UI, which fixed two real gaps — the
+queue offered pinning dispositions on blocked edges, and **`verify --disposition decoupled` skipped
+the DIVERGED guard** (now refused; DECISIONS 2026-10-02). `--help`/`help <cmd>` answer from
+`COMMANDS`; verify events carry `executed_by` and `session_id`.
+
 ## A scoped rule that can never load is now a doctor failure — 2026-10-02, `v0.15.15`
 
 `lib/rules/paths-guard.mjs` checks every `paths:` rule file in `~/.claude/rules` (including id-less

@@ -57,6 +57,10 @@ function cleanMetrics(overrides = {}) {
     "plist.watchpaths": 1,
     "state.tracked_files": 10,
     "doctor.duration_ms": 450,
+    // plan budget-2: null = registry not resolved (stated on an info line); 0 = measured clean.
+    "instructions.unexcepted_over": 0,
+    "instructions.stale_exceptions": 0,
+    "instructions.over_ceiling": 0,
     ...overrides,
   };
 }
@@ -308,6 +312,9 @@ test("EXPECTATIONS table holds only sole-source assertions (no invented extras, 
     "doctor.duration_ms",
     "graph.cycles",
     "graph.duplicate_pairs",
+    "instructions.over_ceiling",
+    "instructions.stale_exceptions",
+    "instructions.unexcepted_over",
     "ledger.malformed",
     "ledger.unknown_types",
     "sidecars.problems",

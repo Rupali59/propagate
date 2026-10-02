@@ -164,9 +164,12 @@ import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
 import { reconcile, STATES, groupRows, inboundRows, edgeIdFor } from "./lib/edges/reconcile.mjs";
 import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
-import { resolveProvenance, resolveObservedRef } from "./lib/edges/provenance.mjs";
-import { divergedGuard, buildEventPayload } from "./lib/edges/disposition.mjs";
-import { renderUsage, validateFlags } from "./lib/core/commands.mjs";
+import { resolveProvenance, resolveObservedRef, resolveExecution } from "./lib/edges/provenance.mjs";
+import {
+  divergedGuard, divergedRefusal, buildEventPayload,
+  orderingBlocks, verifyCommand,
+} from "./lib/edges/disposition.mjs";
+import { renderUsage, validateFlags, renderHelp, helpRequest } from "./lib/core/commands.mjs";
 import { appendRun } from "./lib/core/runs.mjs";
 import { describeWhy } from "./lib/edges/why.mjs";
 import {
@@ -1105,6 +1108,22 @@ async function doctor({ exitProcess = true } = {}) {
     info("undiscoverable-ledger scan", `walk-failed — ${err.message}`);
   }
 
+  // # Instruction budget — per-session load vs the harness warning (plan budget-2).
+  // The measurement is lib/report/instructions.mjs; the three assertions are in
+  // EXPECTATIONS, so this section prints and hands back scalars, nothing more.
+  let instructionsMetrics = {};
+  let instructionsContext = {};
+  {
+    const { checkInstructions } = await import("./lib/report/doctor/instructions.mjs");
+    const { INTEGRATIONS } = await import("./lib/core/config.mjs");
+    const reporter = new Reporter();
+    const r = checkInstructions({ reporter, roots: SEARCH_ROOTS, registryFile: INTEGRATIONS.instructionBudgetFile });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+    instructionsMetrics = r.metrics;
+    instructionsContext = r.context;
+  }
+
   console.log(`\n${BOLD}# Log tail${RESET}`);
   if (existsSync(WATCHER_LOG)) {
     const raw = await readFile(WATCHER_LOG, "utf8");
@@ -1300,6 +1319,7 @@ async function doctor({ exitProcess = true } = {}) {
       "decisions.entries": decisionsEntriesCount,
       "decisions.with_tokens": decisionsWithTokensCount,
       "plist.watchpaths": plistWatchpathsCount,
+      ...instructionsMetrics,
       "doctor.duration_ms": Date.now() - doctorStart,
       // Placeholder — the real value (this run's final `problems` count,
       // including the metrics checks below) is assigned right before
@@ -1349,6 +1369,7 @@ async function doctor({ exitProcess = true } = {}) {
       sidecarsRejectedDetails,
       graphCycleMembers,
       graphDuplicateDetails,
+      instructionsContext,
     });
     for (const v of violations) {
       const detailPrefix = v.detail ? `${v.detail} — ` : "";
@@ -1361,6 +1382,18 @@ async function doctor({ exitProcess = true } = {}) {
       "uncalibrated metrics recorded, not asserted",
       UNCALIBRATED.map((u) => u.key).join(", "),
     );
+
+    // THE SETTLE GAUGE (Plan 3 D5). Derived from the ledger -- see the module for
+    // what it excludes. Info only and uncalibrated: a median over a few gaps is a
+    // reading, and asserting a threshold on it would be the invention G16 forbids.
+    try {
+      const { sessionGapMedian, describeCadence } = await import("./lib/report/verify-cadence.mjs");
+      const { events: cadenceEvents } = await readEvents({});
+      info("verify cadence (uncalibrated, not asserted)", describeCadence(sessionGapMedian(cadenceEvents)));
+    } catch (err) {
+      // A gauge that cannot be read says so; it must not read as "no data yet".
+      info("verify cadence (uncalibrated, not asserted)", `could not derive — ${String(err?.message ?? err)}`);
+    }
 
     // Recorded AFTER the checks above so doctor.problems reflects the true
     // final count, including any violation/vanished-key checks just run.
@@ -3208,6 +3241,17 @@ async function runDecoupled(selected, workspaces, opts) {
   const results = [];
 
   for (const row of selected) {
+    // THE DIVERGED PAIRING, which this path skipped. `runDispositionBatch` applies
+    // it, but `decoupled` branches off BEFORE that function, so a DIVERGED edge
+    // could be decoupled without `both-reconciled` -- while `divergedGuard`'s own
+    // contract says that is the only disposition it accepts, and the queue, the UI
+    // and `settle` (all via allowedDispositions) all say the same. Found by the
+    // parity test in tests/cli/allowed-parity.test.mjs, not by reading.
+    const pairing = divergedRefusal(row, "decoupled");
+    if (pairing) {
+      results.push({ edge_id: row.edge_id, node_id: row.node_id, ok: false, error: pairing });
+      continue;
+    }
     const loc = await locateEdgeDeclaration(workspaces, row);
     if (!loc) {
       results.push({
@@ -3245,6 +3289,7 @@ async function runDecoupled(selected, workspaces, opts) {
         disposition: "decoupled",
         by: process.env.USER || "verify",
         ...provenance,
+        ...resolveExecution(),
         source_content: row.source.contentId,
         downstream_content: row.downstream.contentId,
       };
@@ -3335,7 +3380,7 @@ async function runDispositionBatch(selected, workspaces, opts) {
         node_id: row.node_id,
         disposition,
         priorState: row.state,
-        refusal: divergedGuard(row.state, disposition) || dryValidateEvent(payload) || null,
+        refusal: divergedRefusal(row, disposition) || dryValidateEvent(payload) || null,
       };
     });
     if (json) {
@@ -3368,7 +3413,7 @@ async function runDispositionBatch(selected, workspaces, opts) {
   const refused = [];
 
   for (const row of selected) {
-    const refusal = divergedGuard(row.state, disposition);
+    const refusal = divergedRefusal(row, disposition);
     if (refusal) {
       refused.push({ edge_id: row.edge_id, node_id: row.node_id, error: refusal });
       continue;
@@ -3502,7 +3547,9 @@ async function verifyCmd() {
   // NOT exempt: wontfix and baselined both pin, and a baseline against an
   // unverified source is precisely the claim `validateEvent` already refuses
   // to let masquerade as a verification.
-  const GUARD_EXEMPT = new Set(["deferred", "decoupled"]);
+  // (The exempt set and the predicate live in lib/edges/disposition.mjs --
+  // `GUARD_EXEMPT` / `orderingBlocks` -- shared with the queue, the UI and
+  // `settle`, so what a surface OFFERS and what verify REFUSES are one predicate.)
   //
   // ISSUES N70 (S1). The blockers used to be computed ONLY on the refusal path
   // — `!opts.outOfOrder` was part of this condition — so when the override WAS
@@ -3515,14 +3562,15 @@ async function verifyCmd() {
   // decides what to DO with the blockers rather than whether to look for them.
   // `opts.bypassed` carries them into the event payload below.
   opts.bypassed = new Map();
-  if (!GUARD_EXEMPT.has(opts.disposition)) {
+  // `orderingBlocks([{}], d)` asks only "is d exempt" -- true for every pinning disposition.
+  if (orderingBlocks([{}], opts.disposition)) {
     const { buildGraph, blockedBy } = await import("./lib/graph/graph.mjs");
     const graph = buildGraph(rows, { workspaceRoots: workspaces.map((w) => w.root) });
 
     const offenders = [];
     for (const r of selected) {
       const blockers = blockedBy(graph, r.edge_id);
-      if (blockers.length) offenders.push({ row: r, blockers });
+      if (orderingBlocks(blockers, opts.disposition)) offenders.push({ row: r, blockers });
     }
 
     if (offenders.length && opts.outOfOrder) {
@@ -3549,6 +3597,9 @@ async function verifyCmd() {
                 blockedBy: o.blockers,
               })),
               override: "--out-of-order",
+              fix_first: [...new Set(offenders.flatMap((o) => o.blockers.map((b) => b.edge_id)))].map((id) =>
+                verifyCommand({ edge: id, disposition: "<disposition>", reason: "<what you checked>" }),
+              ),
             },
             null,
             2,
@@ -3581,7 +3632,23 @@ async function verifyCmd() {
         `\n  Verifying now pins ${offenders.length === 1 ? "that downstream" : "those downstreams"} against a ` +
           `source that is not yet correct.`,
       );
-      console.error(`  Fix upstream first, or pass ${BOLD}--out-of-order${RESET}.`);
+      // LEAD WITH THE UPSTREAM'S OWN COMMAND. The refusal used to end in a
+      // sentence ("fix upstream first"), which is a next step with no command
+      // behind it -- and the human then had to find the blocker's edge id, which
+      // is in the list above but not in a runnable shape. G62: the refusal is a
+      // finding, so the first thing offered is acting on the finding.
+      const seenBlockers = new Set();
+      console.error(`\n  Settle the upstream first (it is the edge whose source is wrong):`);
+      for (const [, { blockers }] of bySource) {
+        for (const b of blockers) {
+          if (seenBlockers.has(b.edge_id)) continue;
+          seenBlockers.add(b.edge_id);
+          console.error(
+            `    ${verifyCommand({ edge: b.edge_id, disposition: "<disposition>", reason: "<what you checked>" })}`,
+          );
+        }
+      }
+      console.error(`  Or, if you can say why the upstream does not matter here, pass ${BOLD}--out-of-order${RESET}.`);
       console.error(`  ${DIM}\`propagate graph\` prints the whole worklist in dependency order.${RESET}`);
       process.exit(3);
     }
@@ -4576,14 +4643,12 @@ async function graphCmd() {
   const workspaces = showAll || !cur ? WORKSPACES : [cur];
 
   const { graph } = await loadGraph(workspaces);
-  const { fixOrder, neighbourhood } = await import("./lib/graph/graph.mjs");
+  const { fixOrder, neighbourhood, matchNodePaths } = await import("./lib/graph/graph.mjs");
   const order = fixOrder(graph, { includeUnverified });
 
   // ── --node: ancestors and descendants of one file ────────────────────────
   if (nodeSel) {
-    const match = [...graph.nodes.keys()].filter(
-      (p) => p === nodeSel || p.endsWith("/" + nodeSel) || shortPath(p) === nodeSel,
-    );
+    const match = matchNodePaths(graph.nodes.keys(), nodeSel, shortPath);
     if (match.length === 0) {
       console.error(`${RED}error:${RESET} no node matched ${JSON.stringify(nodeSel)}`);
       process.exit(1);
@@ -4791,6 +4856,23 @@ async function graphIndexCmd() {
 
 if (_invokedDirectly) {
   const mode = process.argv[2] || "status";
+
+  // HELP ROUTES FIRST, above the flag check, so `verify --help` is answered rather
+  // than refused as an unknown flag, and `--help` no longer falls through to
+  // "unknown mode". Built from the same COMMANDS table as the validator.
+  {
+    const ask = helpRequest(process.argv.slice(2));
+    if (ask) {
+      if (ask.unknown) {
+        console.error(`unknown command: ${ask.unknown}`);
+        console.error(`run \`propagate help\` for the list`);
+        process.exit(2);
+      }
+      // Exit from the write callback: a pipe may not have drained when exit() runs.
+      process.stdout.write(renderHelp(ask.name), () => process.exit(0));
+      await new Promise(() => {});
+    }
+  }
 
   // ISSUES N69 (S1): there was no unknown-flag rejection anywhere in this CLI,
   // so `verify … --note "<the whole justification>"` was accepted, exited 0,
@@ -5007,9 +5089,17 @@ if (_invokedDirectly) {
   } else if (mode === "goals") {
     const { goalsCmd } = await import("./commands/goals.mjs");
     process.exitCode = await goalsCmd(process.argv.slice(3));
+  } else if (mode === "instructions") {
+    const { instructionsCmd } = await import("./commands/instructions.mjs");
+    process.exitCode = await instructionsCmd(process.argv.slice(3));
   } else if (mode === "queue") {
     const { queueCmd } = await import("./commands/queue.mjs");
     process.exitCode = await queueCmd(process.argv.slice(3));
+  } else if (mode === "settle") {
+    // Lazy, like queue/surface: the worklist derivation (graph, history, diffs)
+    // is not something `status` should pay for. READ-ONLY -- see the module.
+    const { settleCmd } = await import("./commands/settle.mjs");
+    process.exitCode = await settleCmd(process.argv.slice(3));
   } else if (mode === "surface") {
     // Lazy, like every other command arm: cli.mjs must not pay for a module the
     // invocation does not use.

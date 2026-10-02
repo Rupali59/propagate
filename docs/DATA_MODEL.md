@@ -546,6 +546,8 @@ new event, never by editing an old one.
 | `disposition` | **yes** | one of `DISPOSITIONS` |
 | `reason` | `wontfix`, `baselined` | free text; `baselined` must name its evidence |
 | `by` / `by_kind` | `by_kind` on new events | actor, and which of `BY_KINDS` it was |
+| `executed_by` | new events (2026-10-02) | `agent` when `CLAUDECODE=1` was in the environment of the process that wrote the event, else `human`. **Who pressed the key** — `by_kind` stays **who decided** (a `settle` walkthrough has an agent run `verify` on a human's answer: `by_kind: human`, `executed_by: agent`) |
+| `session_id` | new events, only inside Claude Code | `CLAUDE_CODE_SESSION_ID` when present, **absent otherwise**. Groups a session's verifies, which is what the `doctor` "verify cadence" gauge derives from |
 | `source_content` | pinning only | sha256 of the source's bytes |
 | `downstream_content` | pinning only | sha256 of the downstream's bytes |
 | `observed_on_ref` | **yes** | the ref the **source** was read at |
@@ -586,6 +588,12 @@ wrong. `null` is a legal, meaningful value; omission is not. A reader that
 collapses these (`event.downstream_on_ref || "working-tree"`) reintroduces
 exactly the defect `lib/edges/provenance.mjs` was written to remove — see that
 module's header for the three call sites that did it first.
+
+**`executed_by` and `session_id` follow the same rule: absent means unknown.** Every
+event minted before 2026-10-02 lacks both, and a reader must NOT read the absence as
+`human` (the wrapper that stamped `agent` did not exist yet) or as "no session". The
+cadence gauge (`lib/report/verify-cadence.mjs`) counts only events that carry a
+`session_id` and says how many it skipped.
 
 **Nothing is backfilled.** All 1,912 events minted before 2026-08-22 keep their
 absent downstream fields, because their downstream ref is genuinely unknown and

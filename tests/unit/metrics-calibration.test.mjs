@@ -43,6 +43,9 @@ const CLEAN = Object.freeze({
   "doctor.duration_ms": 100_000,
   "sidecars.problems": 0,
   "sidecars.loaded": 49,
+  "instructions.unexcepted_over": 0,
+  "instructions.stale_exceptions": 0,
+  "instructions.over_ceiling": 0,
 });
 
 const fires = (metrics, key) => evaluateExpectations(metrics).filter((v) => v.key === key);
@@ -132,9 +135,10 @@ test("the remaining UNCALIBRATED entries say why they are NOT waiting on history
   // The list's value is the distinction. "Needs more data" and "a per-run gate is the
   // wrong instrument" and "the subject was deleted" are three different facts, and
   // only the first is a matter of time.
-  assert.equal(UNCALIBRATED.length, 2,
+  assert.equal(UNCALIBRATED.length, 3,
     "three were calibrated, one reverted as scale-dependent, and state.tracked_files was RETIRED " +
-    "rather than exempted — four outcomes for six metrics, which is the point of keeping them apart");
+    "rather than exempted — four outcomes for six metrics, which is the point of keeping them apart; " +
+    "instructions.chars.max (2026-10-02) is recorded for the trend and asserted by its three siblings instead");
   const byKey = Object.fromEntries(UNCALIBRATED.map((u) => [u.key, u.reason]));
 
   assert.ok("rows.open" in byKey);

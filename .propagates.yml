@@ -88,6 +88,32 @@ sources:
           three recorded instances are all one guarded path plus one unguarded path.
         kind: code
 
+  # Plan 3 (2026-10-02). `settle` is a read-only worklist whose --json output is the
+  # contract the /propagate skill's walkthrough consumes: it reads `items[].commands`,
+  # `viaOutOfOrder`, `blockedBy[].route`, `needsReason`, `allNeverVerified` and
+  # `reason_placeholder`. The skill cannot compile against them, so a renamed key
+  # reads `undefined` inside an agent's prompt and the walk silently asks the wrong
+  # question or runs a command that does not exist.
+  commands/settle.mjs:
+    propagates_to:
+      - path: skills/propagate/sections/settle.md
+        why: >-
+          settle.md walks the human through settle's --json one AskUserQuestion per edge and
+          runs the printed verify command. It names the payload keys, the `'<…>'` reason
+          placeholder it substitutes, and the order `settle` re-derives. A change to what
+          settle emits that this file does not follow is a walkthrough that asks about the
+          wrong options or runs a stale command.
+        kind: code
+  lib/edges/provenance.mjs:
+    propagates_to:
+      - path: docs/DATA_MODEL.md
+        why: >-
+          DATA_MODEL §10 documents `executed_by` and `session_id` (who pressed the key, and
+          in which session), which `resolveExecution` here stamps. Absent means UNKNOWN on
+          every pre-2026-10-02 event, and that reading is what the doctor cadence gauge
+          depends on; a change here that DATA_MODEL does not follow misdescribes the store.
+        kind: code
+
   docs/REFERENCE.md:
     propagates_to:
       - path: ../.templates/NEW-PROJECT-CHECKLIST.md

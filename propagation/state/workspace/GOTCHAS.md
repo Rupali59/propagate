@@ -1820,3 +1820,24 @@ on enter, and put a decision to her that did not need making. **A hazard entry s
 past can make you refuse a safe thing**, which is the mirror of the failure these entries exist
 to prevent and is harder to notice because caution looks like diligence. Read the `**Guarded
 by:**` line and the date before acting on any entry here.
+
+### G75 · The instruction budget is per session directory, so a trim measured from one directory reads as fixed while every other session is still over
+The harness's memory warning sums what a session loads at start: `~/.claude/CLAUDE.md`, every
+always-loaded rule, and **every ancestor `CLAUDE.md` of the session's cwd** (plus their
+`@imports` and any ancestor `.claude/rules`). The hub is an ancestor of everything, so the hub
+total is a floor, never the answer — each workspace and project stacks its own files on top.
+
+**Signal:** you trim, re-measure from the hub or from `propagate/`, get a number under 150,000,
+and the warning comes back the next time a session opens in `Motherboard/` or `Vipin Kaushik/`.
+
+**Cost, 2026-10-02:** the hub `CLAUDE.md` was cut from 29,791 to 13,476 bytes and the hub
+session measured **149,994** — read as fixed. Measured per directory the same day, **every one of
+57** directories owning a `CLAUDE.md` still started over 150,000 (worst ~228k). After the rule
+headroom work, the count over 145,000 was still in the high thirties, all now named exceptions.
+
+**Instead:** `propagate instructions` lists every directory's total; `doctor` gates on it
+(`instructions.unexcepted_over`, `.stale_exceptions`, `.over_ceiling`, OBSERVABILITY §1).
+`propagate instructions --calibrate --log <InstructionsLoaded jsonl>` compares the model with
+what a real session loaded — a mismatch is a finding about the model, never something to tune
+toward. **Guarded by:** `tests/unit/instructions.test.mjs` (two-chain fixture: max picks the
+deeper chain).

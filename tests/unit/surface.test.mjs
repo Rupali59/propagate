@@ -326,6 +326,19 @@ test("a CLEAN section is labelled with what it has, not with the name of a probl
   assert.equal(row.tone, "ok");
 });
 
+test("the Instruction budget doctor section renders as its own health row, and a failing one is red (plan budget-2)", () => {
+  const clean = buildHealthRows(snap([sec("Instruction budget", { pass: 1, info: 2 })])).find((r) => r.key === "Instruction budget");
+  assert.ok(clean, "named in HEALTH_SECTIONS, so it renders even though it is not failing");
+  assert.equal(clean.label, "Instruction budget");
+  assert.equal(clean.unit, "pass");
+  assert.equal(clean.tone, "ok");
+  const failing = buildHealthRows(snap([sec("Instruction budget", { fail: 1, pass: 0 })])).find((r) => r.key === "Instruction budget");
+  assert.equal(failing.unit, "fail");
+  assert.equal(failing.tone, "fail");
+  assert.equal(failing.cta.route, "/reference");
+  assert.equal(buildHealthRows(snap([sec("Delivery", { pass: 1 })])).some((r) => r.key === "Instruction budget"), false, "no section, no row — never a fabricated one");
+});
+
 test("a MISSING snapshot renders as unknown carrying the reason — never as healthy", () => {
   const rows = buildHealthRows({ ok: false, reason: "doctor failed on its last run — git exploded" });
   assert.equal(rows.length, 1);

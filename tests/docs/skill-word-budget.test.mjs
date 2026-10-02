@@ -43,6 +43,7 @@ const ROUTERS = [
 const SECTIONS = [
   path.join(ROOT, "skills", "propagate", "sections", "routing.md"),
   path.join(ROOT, "skills", "propagate", "sections", "reconcile.md"),
+  path.join(ROOT, "skills", "propagate", "sections", "settle.md"),
   path.join(ROOT, "skills", "curate-docs", "sections", "design.md"),
   path.join(ROOT, "skills", "curate-docs", "sections", "eng.md"),
 ];

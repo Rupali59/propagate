@@ -14,13 +14,14 @@ every stream can see what moved, where, and on which branch. It never edits a
 downstream; it tells a human.
 <!-- premise:end -->
 
-**v1 launchd watcher retired 2026-08-14, deleted 2026-08-22** (`docs/DECISIONS.md`) —
-drift derives from content on demand (`reconcile`, `check`, digest), never a poll.
+**v1 launchd watcher retired** (`docs/DECISIONS.md`) — drift derives from content
+on demand, never a poll.
 
 ## Sections
 
 - Read **`sections/routing.md`** — which `cli.mjs` command answers what.
-- Read **`sections/reconcile.md`** — `declare`/`drain` workflows, dispositions, fix order.
+- Read **`sections/settle.md`** — settle a file's drifted edges.
+- Read **`sections/reconcile.md`** — `declare`, legacy `drain`, fix order.
 
 ## Setup — once per machine, in this order
 
@@ -36,7 +37,7 @@ not verified. Outcome table: `docs/REFERENCE.md` § Install.
 
 ## Contract
 
-- **Only stop for:** a `drain`-style decision (apply / defer / wontfix a row),
+- **Only stop for:** a disposition decision (`settle`, legacy `drain`),
   a `declare` edit to a `.propagates.yml` sidecar, or a genuine one-way door
   (migrating ledger rows, or anything touching launchd/plists).
 - **Never stop for:** running `status`, `doctor`, or `check` — just run them
@@ -54,9 +55,9 @@ not verified. Outcome table: `docs/REFERENCE.md` § Install.
   names every blocking upstream; `--out-of-order` overrides deliberately.
   `deferred`/`decoupled` are exempt; `wontfix`/`baselined` are not. `graph`
   prints the worklist already ordered.
-- **Close through `cli drain`, never by hand.** It resolves the ledger via
-  discovery and verifies the row actually closed — a hand-built path is how
-  rows landed in the wrong ledger before.
+- **Settle an edge through `verify`, never by hand** — `--apply` appends the
+  event and re-reconciles to confirm. `propagate settle <file>`
+  prints the exact command per edge. `drain` closes only legacy v1 rows.
 - **Never rewrite a ledger row.** Append-only; migration is close-and-re-emit.
 - **Schema before field.** `propagates.schema.json` is
   `additionalProperties: false` — an undeclared field is rejected silently and
