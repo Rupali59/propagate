@@ -7,7 +7,7 @@ scoped companions): non-empty string array, every entry `**/`-anchored, matches 
 search roots, and not only Read-denied files. Missing roots are UNKNOWN and a walk under 100 files is
 `blind` — never a pass. Wired into `doctor` and `rules selftest`; plan `budget-1-rules-headroom`
 R2/D4. `hooks/load-rules.mjs` now reports "N always-loaded + M path-scoped" and warns that dropping
-`claudeMdExcludes` re-adds ~60k chars (N57 evidence appended, status left to Rupali). Plugin bumped
+`claudeMdExcludes` re-adds ~60k chars (N57 CLOSED 2026-10-02 — three questions answered by a post-change session). Plugin bumped
 to 0.15.15 (G63); the hub `marketplace.json` entry is outside this repo and must follow.
 
 ## The cross-ledger belonged to a nested root, and propagate was not a workspace — 2026-09-30, `v0.15.14`
