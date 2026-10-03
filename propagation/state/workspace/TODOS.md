@@ -641,6 +641,20 @@ a destructive step that stays with a human. Floor: a repo with `.claude/worktree
 worktrees parsed is a blind reader, not a clean tree. Mutate: make one touched file differ and
 confirm the grade flips to `unlanded`.
 
+**Two corrections, measured 2026-10-03 while removing exactly these two lanes:**
+1. **Compare against the LANDING commit, not the default branch's tip.** Against `main`'s tip
+   both lanes showed 11-13 differing files — every one edited again after the squash
+   (`f7004e9`, `6ff1635`, `7a228ed`). Against the squash commit `3cb51a8`: lane C identical in
+   all 37 touched files; lane D differing in 3, all sibling additions (its two removed lines
+   were replaced by the union, checked line by line). The grade needs the landing commit, so
+   the detector must find it — e.g. the first default-branch commit whose touched-file
+   content equals the lane's.
+2. **zsh does not word-split an unquoted `$files`**, so `git diff -- $files` became one
+   newline-joined pathspec, matched nothing, and reported **0 differing** — a false `landed`.
+   Build the pathspec as an array in code, never as a shell string.
+
+Both worktrees and branches were removed after that check; nothing was lost.
+
 **Cost so far:** none lost — the two branches are the only copy of nothing. The risk is the
 inverse: an `unlanded` lane that looks like leftover scratch gets deleted with `-D`.
 
