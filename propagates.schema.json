@@ -51,6 +51,15 @@
                   ],
                   "default": "prose"
                 },
+                "exclude": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "Only valid when `path` is a glob. Paths or globs (relative to this sidecar, resolved like `path`) that the glob matches but that must NOT be watched \u2014 e.g. pointer stubs (`# GOTCHAS.md \u2014 moved`) whose real file is already covered by another declaration. An excluded file mints no edge, and the remaining edges keep their ids. `doctor` FAILS on `exclude` with a literal `path`, and on an entry that matches none of the glob's matches (a stale exemption that can no longer fire). If every match is excluded the glob reports UNMATCHED. This, not `verify --disposition decoupled`, is how to drop one file from a glob: `decoupled` on a glob match is refused (N118)."
+                },
                 "authority": {
                   "type": "string",
                   "enum": [

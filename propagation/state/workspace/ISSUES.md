@@ -5295,3 +5295,46 @@ to a second (the peer's baseline), a predicate written for one situation applied
 generalises past extraction: every one of them failed by matching the wrong thing, not nothing,
 and so returned a pass.
 
+
+### N118 · `verify --disposition decoupled` on a GLOB-matched edge deletes the whole glob entry, unwatching every file it matched — **S2** — **RESOLVED 2026-10-03, v0.15.17** (was: `runDecoupled` → `applyDecoupledEdit` splices `propagates_to[loc.index]` with no glob check, cli.mjs ~3231)
+Found 2026-10-03 by a dry run, before applying, while settling the 19 `rules/discernment-checks.md →
+*/GOTCHAS.md` edges. The intent was to decouple ONE pointer stub (`Tushar/docs/GOTCHAS.md`,
+edge aee21c00). The dry run said:
+
+```
+would decouple aee21c00  remove sources."rules/discernment-checks.md".propagates_to[0]
+  (downstream: */docs/GOTCHAS.md, ...) from <hub>/.propagates.yml
+```
+
+`propagates_to[0]` is the `*/docs/GOTCHAS.md` glob itself. Applied, it would have dropped the
+edge for every workspace-level GOTCHAS.md the glob matches, to settle one stub — and the event
+would record `decoupled` against a single edge id, so the ledger would describe a narrow act
+while the sidecar recorded a wide one.
+
+**Cost: none, by luck of reading the dry-run line.** The printed edit names the glob, but
+nothing flags that the declaration covers N other edges; it reads like a per-edge removal.
+
+**Fix shape:** when the located declaration's `path` is a glob, refuse `decoupled` (exit 3)
+and name the sibling edges it would also unwatch; the per-file opt-out needs its own mechanism
+(see TODOS — glob exclusion / stub skip, O9). Test per `rule:safety-flag-needs-a-test`:
+snapshot the sidecar, run `decoupled --apply` on a glob edge, assert the sidecar is unchanged.
+
+**What was done instead:** the three stub edges were recorded `no-change-needed` with the
+reason "pointer stub — nothing to restate or contradict; real file watched by the
+`*/propagation/state/*/GOTCHAS.md` glob".
+
+**Disposition (2026-10-03, v0.15.17): RESOLVED.** `runDecoupled` now refuses (exit 3, dry run and `--json` included) when the located
+declaration is a glob and the row is a concrete match, naming the sibling count and pointing at the new `exclude:` key. The UNMATCHED glob
+identity stays decouple-able. Test: `N118: decoupled on a glob-matched edge is refused and neither the sidecar nor the event store changes`
+in `tests/cli/verify-refusals-and-stamps.test.mjs`. The per-file opt-out is `exclude:` (`expandDownstream`, `lib/edges/reconcile.mjs`).
+
+
+### N119 · `verify --disposition decoupled --apply` on an UNMATCHED glob row edits the sidecar, then fails the event write (exit 1) — **S3** — **OPEN** (`runDecoupled`, cli.mjs; reconcile.mjs UNMATCHED `makeRow` carries no `source.contentId`)
+Found 2026-10-03 while writing the N118 test for "decoupling an UNMATCHED glob stays allowed". Output:
+`sidecar edit landed but the event write failed: appendEvent: event ... — disposition "decoupled" pins a pair and is missing field "source_content"`.
+The UNMATCHED row is built with `source: { path, ref }` only, so `payload.source_content` is `null` and `validateEvent` refuses it.
+**Cost:** the sidecar loses the dead glob but the ledger has no `decoupled` event, and the run exits 1 — the disagreement N118's own
+ordering comment ("sidecar edit first") says to avoid, in the other direction. Pre-existing (the N118 guard does not touch this path);
+discovered, not introduced. Fix shape: resolve the source content for an UNMATCHED row (the source exists even though the glob matches
+nothing) or let `decoupled` carry a content-less event.
+

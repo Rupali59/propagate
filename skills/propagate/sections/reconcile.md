@@ -23,6 +23,7 @@ sources:
         why: <one-line reason>
         kind: prose  # or "code"
         # authority: counsel  # optional: counsel | spec | reference
+        # exclude: [<path or glob>]  # optional, glob `path` only: matches to NOT watch
 ```
 
 Those are every key the schema accepts, and it is `additionalProperties: false`
@@ -41,6 +42,16 @@ matching 0 files is skipped with a log warning. `kind: code` is bidirectional
 — the doc changing fires forward (verify the code), and the code file
 changing fires a `code_drift` row back at the doc — for non-glob entries only;
 glob `kind: code` on the code→doc direction is deferred.
+
+`exclude:` drops files from a glob downstream — for example pointer stubs whose
+real file another declaration already watches. Entries are paths or globs
+relative to the sidecar. An excluded file mints no edge and the remaining edges
+keep their ids; if every match is excluded the glob reports `UNMATCHED`.
+`doctor` FAILS on `exclude:` with a literal `path` and on an entry that matches
+none of the glob's matches (a stale exemption). Do not use
+`verify --disposition decoupled` for this: on a glob match it is refused
+(exit 3), because it would remove the whole declaration and unwatch every
+sibling (N118).
 
 ## `drain` — close legacy v1 ledger rows
 

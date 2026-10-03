@@ -62,6 +62,7 @@ cautionary tale of a doc that drifted from the code it described.
                         │                                          │
                         │  ── not-a-verdict, by design ──          │
                         │  UNMATCHED           glob matches 0      │
+                        │                      (after exclude:)    │
                         │  NOT_PRESENT_ON_REF  absent at this ref  │
                         │  UNRESOLVABLE        no-repo / lfs /     │
                         │                      is-dir / read-error │

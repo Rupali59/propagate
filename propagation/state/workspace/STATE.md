@@ -1,5 +1,14 @@
 # propagate — State
 
+## `exclude:` for glob downstreams, and `decoupled` refused on a glob match — 2026-10-03, `v0.15.17`
+
+A `propagates_to` entry whose `path` is a glob may carry `exclude:` (paths or globs, relative to the sidecar) to drop matches such as
+pointer stubs; excluded files mint no edge and the surviving edge ids are unchanged. One expander, `expandDownstream` in
+`lib/edges/reconcile.mjs`, now serves `reconcile` and verify's `locateEdgeDeclaration` (previously two independent glob walks).
+`doctor` FAILS on `exclude:` over a literal `path` and on an entry that matches nothing. `verify --disposition decoupled` on a glob
+match is refused with exit 3 (N118 RESOLVED), because it spliced out the whole declaration. Found on the way: N119 (`decoupled --apply`
+on an UNMATCHED glob edits the sidecar then fails the event write). The hub sidecar now excludes the four v3-move pointer stubs from `rules/discernment-checks.md`'s two `docs/` globs (`*/docs/GOTCHAS.md` back to its UNMATCHED adoption gauge). Until the served plugin is updated past 0.15.14, that version PRUNES both entries (old schema rejects `exclude`), unwatching 3 real GOTCHAS.md files.
+
 ## The instruction budget is measured per directory, and one file's drift has a worklist — 2026-10-02, `v0.15.16`
 
 **Budget (plan `budget-2-metric-and-trims` Part A).** `propagate instructions [--json]` lists every

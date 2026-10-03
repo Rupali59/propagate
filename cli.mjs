@@ -161,7 +161,7 @@ import { findLedgersUnder } from "./lib/edges/refs.mjs";
 import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatter.mjs";
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
-import { reconcile, STATES, groupRows, inboundRows, edgeIdFor } from "./lib/edges/reconcile.mjs";
+import { reconcile, STATES, groupRows, inboundRows, edgeIdFor, isGlobPattern, expandDownstream } from "./lib/edges/reconcile.mjs";
 import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
 import { resolveProvenance, resolveObservedRef, resolveExecution } from "./lib/edges/provenance.mjs";
@@ -3012,13 +3012,9 @@ async function drain() {
 // one event per edge, never a composite event across edges.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** A downstream `path` containing glob metacharacters is a generator, not a
- * concrete edge — same test as lib/reconcile.mjs's (unexported) GLOB_CHARS
- * and watcher.mjs's. Duplicated rather than imported: reconcile.mjs's
- * internals stay reconcile.mjs's (only `groupRows` was added to its exports
- * for this feature), matching content-id.mjs's precedent of duplicating
- * `resolveRepo` rather than reaching into a module another lane owns. */
-const VERIFY_GLOB_CHARS = /[*?[\]]/;
+// The glob-chars predicate and the glob expansion are lib/edges/reconcile.mjs's
+// `isGlobPattern` / `expandDownstream` (N118/O9): one copy, imported, so reconcile
+// and `decoupled` cannot disagree about what a declaration matches or excludes.
 
 function parseVerifyArgs(args) {
   const get = (flag) => {
@@ -3135,15 +3131,15 @@ export function computeVerifyAfterWrite(applied, afterRows) {
  * Recomputes edge_id per candidate declaration (literal path, glob-as-
  * generator, and every current glob match) and compares against
  * `row.edge_id` — the same three shapes lib/reconcile.mjs's
- * `expandGenerators` produces, walked independently here so this file
- * doesn't reach into reconcile.mjs's unexported internals (only `groupRows`
- * was added to its surface for this feature).
+ * `expandGenerators` produces. The glob walk is `expandDownstream`, the SAME
+ * function reconcile uses (it used to be an independent second walk; an
+ * `exclude:` honoured by one and not the other was the drift that invited).
  *
  * @param {Array<{root: string}>} workspaces
  * @param {{node_id: string, edge_id: string, source: {path: string}}} row
  * @returns {Promise<{sidecarPath: string, sourceKey: string, index: number, why: string, declaredPath: string}|null>}
  */
-async function locateEdgeDeclaration(workspaces, row) {
+export async function locateEdgeDeclaration(workspaces, row) {
   const workspaceRoots = workspaces.map((w) => w.root);
   for (const ws of workspaces) {
     const sidecarPaths = await findAllSidecarsRecursive(ws.root, workspaceRoots);
@@ -3164,12 +3160,12 @@ async function locateEdgeDeclaration(workspaces, row) {
         const downstreams = downstreamsFor(sidecar, sourceKey);
         for (let index = 0; index < downstreams.length; index++) {
           const d = downstreams[index];
-          const isGlob = VERIFY_GLOB_CHARS.test(d.path);
+          const isGlob = isGlobPattern(d.path);
 
           if (!isGlob) {
             const downstreamAbs = path.resolve(sidecarDir, d.path);
             if (edgeIdFor(row.node_id, downstreamAbs, d.why) === row.edge_id) {
-              return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path };
+              return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path, isGlob: false, unmatched: false };
             }
             continue;
           }
@@ -3177,19 +3173,15 @@ async function locateEdgeDeclaration(workspaces, row) {
           // Glob generator — the zero-match ("UNMATCHED") identity is keyed
           // on the pattern text itself (lib/reconcile.mjs's unmatchedGlob
           // row); a genuine match is keyed on the resolved concrete path.
+          const exclude = d.exclude || [];
           if (edgeId(row.node_id, d.path, d.why) === row.edge_id) {
-            return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path };
+            return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path, isGlob: true, unmatched: true, sidecarDir, exclude };
           }
-          let matches = [];
-          try {
-            matches = globSync(d.path, { cwd: sidecarDir }).filter((m) => !m.includes("node_modules/"));
-          } catch {
-            matches = [];
-          }
+          const { matches } = expandDownstream(d.path, sidecarDir, exclude);
           for (const m of matches) {
             const downstreamAbs = path.resolve(sidecarDir, m);
             if (edgeIdFor(row.node_id, downstreamAbs, d.why) === row.edge_id) {
-              return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path };
+              return { sidecarPath, sourceKey, index, why: d.why, declaredPath: d.path, isGlob: true, unmatched: false, sidecarDir, exclude };
             }
           }
         }
@@ -3239,6 +3231,19 @@ async function applyDecoupledEdit(loc) {
 async function runDecoupled(selected, workspaces, opts) {
   const { apply, reason, json } = opts;
   const results = [];
+  let refused = false;
+
+  // N118: if ANY selected edge is a glob match, refuse the whole batch before a single
+  // write — a half-applied batch would leave the ledger describing a narrower act than
+  // the sidecar recorded. The pre-pass is the same locate the loop below does.
+  if (apply) {
+    const globRows = [];
+    for (const row of selected) {
+      const pre = await locateEdgeDeclaration(workspaces, row);
+      if (pre && pre.isGlob && !pre.unmatched) globRows.push(row);
+    }
+    if (globRows.length > 0) selected = globRows; // the loop below refuses each; nothing else runs
+  }
 
   for (const row of selected) {
     // THE DIVERGED PAIRING, which this path skipped. `runDispositionBatch` applies
@@ -3259,6 +3264,27 @@ async function runDecoupled(selected, workspaces, opts) {
         node_id: row.node_id,
         ok: false,
         error: "could not locate this edge's declaration in any sidecar (sidecar changed since reconcile ran?)",
+      });
+      continue;
+    }
+    // N118 GUARD. `applyDecoupledEdit` splices the WHOLE `propagates_to` entry, so on a
+    // glob declaration a per-file decouple would silently unwatch every sibling the glob
+    // matches while the event names one edge. Refuse (exit 3), in dry run and --json too,
+    // before any write. Decoupling an UNMATCHED glob (it watches nothing) stays allowed.
+    if (loc.isGlob && !loc.unmatched) {
+      const { matches } = expandDownstream(loc.declaredPath, loc.sidecarDir, loc.exclude);
+      const siblings = Math.max(0, matches.length - 1);
+      refused = true;
+      results.push({
+        edge_id: row.edge_id,
+        node_id: row.node_id,
+        ok: false,
+        refused: true,
+        siblings,
+        error:
+          `refusing to decouple: this edge was expanded from the glob declaration ${JSON.stringify(loc.declaredPath)}, ` +
+          `and decoupling removes the whole declaration, which would also unwatch ${siblings} sibling edge(s). ` +
+          `To drop just this file, add it to that entry's \`exclude:\` list in ${loc.sidecarPath} instead (N118).`,
       });
       continue;
     }
@@ -3323,7 +3349,7 @@ async function runDecoupled(selected, workspaces, opts) {
     }
   }
 
-  const exitCode = results.some((r) => !r.ok) ? 1 : 0;
+  const exitCode = refused ? 3 : results.some((r) => !r.ok) ? 1 : 0;
   if (json) {
     console.log(JSON.stringify({ generatedAt: new Date().toISOString(), disposition: "decoupled", apply, results, exitCode }));
   } else {
