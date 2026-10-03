@@ -33,7 +33,7 @@
 import path from "node:path";
 import { realpathSync } from "node:fs";
 
-import { allowedDispositions, verifyCommand, shellQuote } from "../lib/edges/disposition.mjs";
+import { allowedDispositions, verifyCommand, shellQuote, REASON_PLACEHOLDER } from "../lib/edges/disposition.mjs";
 import { buildGraph, fixOrder, matchNodePaths } from "../lib/graph/graph.mjs";
 import { historyByEdge, defaultDeps } from "../lib/report/queue.mjs";
 import { edgeDiff } from "../lib/report/evidence.mjs";
@@ -43,7 +43,7 @@ import { shortPath } from "../lib/core/config.mjs";
 const TEXT_DIFF_LINES = 24;
 
 /** The placeholder a caller replaces with the human's typed, shell-quoted reason. */
-export const REASON_PLACEHOLDER = "<…>";
+export { REASON_PLACEHOLDER };
 
 const colour = (on) => ({
   B: on ? "\x1b[1m" : "",

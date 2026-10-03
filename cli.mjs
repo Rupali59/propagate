@@ -167,7 +167,7 @@ import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_
 import { resolveProvenance, resolveObservedRef, resolveExecution } from "./lib/edges/provenance.mjs";
 import {
   divergedGuard, divergedRefusal, buildEventPayload,
-  orderingBlocks, verifyCommand,
+  orderingBlocks, verifyCommand, REASON_PLACEHOLDER,
 } from "./lib/edges/disposition.mjs";
 import { renderUsage, validateFlags, renderHelp, helpRequest } from "./lib/core/commands.mjs";
 import { appendRun } from "./lib/core/runs.mjs";
@@ -3598,7 +3598,7 @@ async function verifyCmd() {
               })),
               override: "--out-of-order",
               fix_first: [...new Set(offenders.flatMap((o) => o.blockers.map((b) => b.edge_id)))].map((id) =>
-                verifyCommand({ edge: id, disposition: "<disposition>", reason: "<what you checked>" }),
+                verifyCommand({ edge: id, disposition: "<disposition>", reason: REASON_PLACEHOLDER }),
               ),
             },
             null,
@@ -3644,7 +3644,7 @@ async function verifyCmd() {
           if (seenBlockers.has(b.edge_id)) continue;
           seenBlockers.add(b.edge_id);
           console.error(
-            `    ${verifyCommand({ edge: b.edge_id, disposition: "<disposition>", reason: "<what you checked>" })}`,
+            `    ${verifyCommand({ edge: b.edge_id, disposition: "<disposition>", reason: REASON_PLACEHOLDER })}`,
           );
         }
       }

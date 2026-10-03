@@ -231,6 +231,23 @@ sources:
   # documentation does not describe, or documents one nothing enforces -- the
   # promise-in-one-file-another-cannot-keep shape that
   # rule:adversarial-review-reads-the-ledger exists to catch.
+  # Added 2026-10-03. The live ledger's location is decided HERE -- makeWorkspaceRecord
+  # (:356) picks <workspace>/propagation/ledger.{jsonl,md} unless a live ledger sits at a
+  # superseded docs/ or .propagation/ path, which liveLedgerCandidates (:442) lists -- and v3-layout.mjs deliberately leaves the ledger out of
+  # V3_REQUIRED -- so the layout tree in REFERENCE.md had no code side for it and
+  # omitted the live pair. That omission was then read as "the ledger is retired",
+  # and two correct checklists were wrongly closed and wrongly "corrected"
+  # (hub TODOS, 2026-10-03). The edge that would have caught it.
+  lib/core/discovery.mjs:
+    propagates_to:
+      - path: docs/REFERENCE.md
+        why: >-
+          discovery.mjs resolves where a workspace's live ledger lives and which older
+          ledger paths are superseded but still honoured; REFERENCE §"Propagation layout"
+          draws that tree and its superseded-paths paragraph. A ledger path the code
+          resolves and the doc does not draw reads as retired.
+        kind: code
+
   lib/core/v3-layout.mjs:
     propagates_to:
       - path: docs/REFERENCE.md

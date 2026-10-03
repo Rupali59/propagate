@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { makeChain, runCli, storeSnapshot, cleanup } from "../helpers/verify-fixture.mjs";
+import { REASON_PLACEHOLDER, REASON_PLACEHOLDER_BOTH } from "../../lib/edges/disposition.mjs";
 
 const CLI = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
 
@@ -26,9 +27,8 @@ const CLI = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
 function runPrinted(cmd, env, { reason = `it's a "quoted" reason $HOME` } = {}) {
   const quoted = `'${reason.replace(/'/g, `'\\''`)}'`;
   const line = cmd
-    .replace("'<…>'", quoted)
-    .replace("'<what you checked>'", quoted)
-    .replace("'<what you checked on both sides>'", quoted)
+    .replace(`'${REASON_PLACEHOLDER}'`, quoted)
+    .replace(`'${REASON_PLACEHOLDER_BOTH}'`, quoted)
     .replace(/^propagate /, `${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)} `)
     .replace(/ --apply$/, "");
   return spawnSync("sh", ["-c", line], {
