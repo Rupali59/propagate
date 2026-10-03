@@ -26,6 +26,7 @@ import {
   knownGoodPairs,
   shardPathForTs,
   DISPOSITIONS,
+  dryValidateEvent,
 } from "../../lib/edges/events.mjs";
 
 const EVENTS_LIB_PATH = fileURLToPath(new URL("../../lib/edges/events.mjs", import.meta.url));
@@ -331,6 +332,27 @@ test("throws when a deferred event pins content — deferred must not re-pin", a
     assert.match(err.message, /must not pin/);
     return true;
   });
+});
+
+// N119: "decoupled" removes the edge, so nothing ever reads its pin. An UNMATCHED glob
+// has no downstream to hash, and requiring content made its removal unrecordable.
+// dryValidateEvent shares validateEvent and writes nothing, so no store is touched.
+test("decoupled validates with content, and without it (N119)", () => {
+  assert.equal(dryValidateEvent(baseEvent({ disposition: "decoupled" })), null, "with content (a literal edge)");
+  const bare = baseEvent({ disposition: "decoupled" });
+  delete bare.source_content;
+  delete bare.downstream_content;
+  assert.equal(dryValidateEvent(bare), null, "without content (an UNMATCHED glob)");
+  const nulls = baseEvent({ disposition: "decoupled", source_content: null, downstream_content: null });
+  assert.equal(dryValidateEvent(nulls), null, "null content, as a row with no contentId produces");
+});
+
+test("the N119 relaxation is decoupled-only: other pinning dispositions still require content", () => {
+  for (const d of ["propagated", "no-change-needed", "both-reconciled"]) {
+    const ev = baseEvent({ disposition: d });
+    delete ev.downstream_content;
+    assert.match(dryValidateEvent(ev) ?? "", /missing field "downstream_content"/, d);
+  }
 });
 
 test("deferred with no content pinned is accepted", async () => {

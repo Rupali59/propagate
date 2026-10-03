@@ -1,5 +1,9 @@
 # propagate — State
 
+## `decoupled` on an UNMATCHED glob now records its event — 2026-10-03, `v0.15.18`
+
+N119 RESOLVED: `decoupled` no longer requires content hashes (it removes the edge; nothing reads its pin), and `runDecoupled` validates the event BEFORE editing the sidecar, so a refused event never leaves a sidecar edit behind and the dry run predicts the outcome.
+
 ## `exclude:` for glob downstreams, and `decoupled` refused on a glob match — 2026-10-03, `v0.15.17`
 
 A `propagates_to` entry whose `path` is a glob may carry `exclude:` (paths or globs, relative to the sidecar) to drop matches such as

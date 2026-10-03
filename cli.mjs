@@ -162,7 +162,7 @@ import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatt
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
 import { reconcile, STATES, groupRows, inboundRows, edgeIdFor, isGlobPattern, expandDownstream } from "./lib/edges/reconcile.mjs";
-import { appendEvent, readEvents, DISPOSITIONS, edgeId } from "./lib/edges/events.mjs";
+import { appendEvent, readEvents, DISPOSITIONS, edgeId, dryValidateEvent } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
 import { resolveProvenance, resolveObservedRef, resolveExecution } from "./lib/edges/provenance.mjs";
 import {
@@ -3290,16 +3290,47 @@ async function runDecoupled(selected, workspaces, opts) {
     }
     const edit = describeSidecarEdit(loc);
 
+    // Build and VALIDATE the event before anything is written (N119). The
+    // payload used to be built after the sidecar edit, so an event appendEvent
+    // would refuse left the sidecar edited with no ledger record of it — and the
+    // dry run, which never validated, reported success for exactly that write.
+    // Same shared validator runDispositionBatch uses for its preview.
+    //
+    // buildPayload is called TWICE on purpose: once here to validate, and again
+    // after the sidecar edit for the event actually written, because provenance
+    // (observed_dirty) must describe the tree at the moment of the write — and the
+    // sidecar edit is what makes it dirty (tests/cli/verify.test.mjs pins this).
+    // Validation does not depend on provenance VALUES, only on fields being present.
+    const buildPayload = () => {
+      const p = {
+        edge_id: row.edge_id,
+        node_id: row.node_id,
+        disposition: "decoupled",
+        by: process.env.USER || "verify",
+        ...resolveProvenance(row, "human"),
+        ...resolveExecution(),
+        source_content: row.source.contentId,
+        downstream_content: row.downstream.contentId,
+      };
+      if (reason !== undefined) p.reason = reason;
+      return p;
+    };
+    const invalid = dryValidateEvent(buildPayload());
+    if (invalid) {
+      results.push({ edge_id: row.edge_id, node_id: row.node_id, ok: false, applied: false, edit, error: `event would be refused, so the sidecar was not touched: ${invalid}` });
+      continue;
+    }
+
     if (!apply) {
       results.push({ edge_id: row.edge_id, node_id: row.node_id, ok: true, applied: false, edit });
       continue;
     }
 
-    // Sidecar edit first: it is the concrete, visible fact. If the event
-    // write below fails, "the sidecar no longer declares this" is still
-    // true and safe; the reverse order would risk the event claiming
-    // "decoupled" while the sidecar still declares the edge — exactly the
-    // disagreement the plan warns against.
+    // Sidecar edit first: it is the concrete, visible fact. The payload was
+    // validated above, so the event write below can now fail only on I/O; if
+    // it does, "the sidecar no longer declares this" is still true and safe.
+    // The reverse order would risk the event claiming "decoupled" while the
+    // sidecar still declares the edge.
     try {
       await applyDecoupledEdit(loc);
     } catch (err) {
@@ -3308,19 +3339,7 @@ async function runDecoupled(selected, workspaces, opts) {
     }
 
     try {
-      const provenance = resolveProvenance(row, "human");
-      const payload = {
-        edge_id: row.edge_id,
-        node_id: row.node_id,
-        disposition: "decoupled",
-        by: process.env.USER || "verify",
-        ...provenance,
-        ...resolveExecution(),
-        source_content: row.source.contentId,
-        downstream_content: row.downstream.contentId,
-      };
-      if (reason !== undefined) payload.reason = reason;
-      const stamped = await appendEvent(payload);
+      const stamped = await appendEvent(buildPayload());
       results.push({ edge_id: row.edge_id, node_id: row.node_id, ok: true, applied: true, edit, event_id: stamped.event_id });
     } catch (err) {
       results.push({

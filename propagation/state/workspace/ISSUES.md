@@ -5329,7 +5329,7 @@ identity stays decouple-able. Test: `N118: decoupled on a glob-matched edge is r
 in `tests/cli/verify-refusals-and-stamps.test.mjs`. The per-file opt-out is `exclude:` (`expandDownstream`, `lib/edges/reconcile.mjs`).
 
 
-### N119 · `verify --disposition decoupled --apply` on an UNMATCHED glob row edits the sidecar, then fails the event write (exit 1) — **S3** — **OPEN** (`runDecoupled`, cli.mjs; reconcile.mjs UNMATCHED `makeRow` carries no `source.contentId`)
+### N119 · `verify --disposition decoupled --apply` on an UNMATCHED glob row edits the sidecar, then fails the event write (exit 1) — **S3** — **RESOLVED 2026-10-03** (`runDecoupled`, cli.mjs; reconcile.mjs UNMATCHED `makeRow` carries no `source.contentId`)
 Found 2026-10-03 while writing the N118 test for "decoupling an UNMATCHED glob stays allowed". Output:
 `sidecar edit landed but the event write failed: appendEvent: event ... — disposition "decoupled" pins a pair and is missing field "source_content"`.
 The UNMATCHED row is built with `source: { path, ref }` only, so `payload.source_content` is `null` and `validateEvent` refuses it.
@@ -5338,3 +5338,17 @@ ordering comment ("sidecar edit first") says to avoid, in the other direction. P
 discovered, not introduced. Fix shape: resolve the source content for an UNMATCHED row (the source exists even though the glob matches
 nothing) or let `decoupled` carry a content-less event.
 
+**Resolved 2026-10-03 (v0.15.18), and it was two defects, not one.** (1) `validateEvent` required both content
+hashes for every disposition but `deferred`; an UNMATCHED glob has no downstream, so resolving the source (the first fix
+shape above) would only have moved the error to `downstream_content`. `decoupled` removes the edge, so nothing reads its
+pin: content is now recorded when resolvable and not required (lib/edges/events.mjs). (2) `runDecoupled` built the payload
+AFTER the sidecar edit and its dry run never validated — so the preview said 0 for a write that then failed. The payload is
+now built and `dryValidateEvent`-checked before anything is written, in dry run and `--apply` alike.
+The payload is built TWICE: validated before the edit, then rebuilt after it, because provenance must describe the tree
+at the moment of the write (`observed_dirty: true` — the sidecar edit is what dirties it). The first version built it once,
+before the edit, and `tests/cli/verify.test.mjs:787` caught `observed_dirty` flipping to false — a full-suite failure the
+N119 targeted tests could not see.
+Tests: "N118/N119: decoupling an UNMATCHED glob (one that watches nothing) succeeds and is recorded" (exit 0, exactly one
+`decoupled` event); "decoupled validates with content, and without it (N119)"; negative control "the N119 relaxation is
+decoupled-only". Mutations: relaxation reverted -> the dry run reports the refusal; relaxation AND pre-validation reverted ->
+the original bug reproduces (`applied:true`, then the event write fails).

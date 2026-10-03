@@ -227,7 +227,7 @@ test("N118: decoupled on a glob-matched edge is refused and neither the sidecar 
   }
 });
 
-test("N118: decoupling an UNMATCHED glob (one that watches nothing) is still allowed", async () => {
+test("N118/N119: decoupling an UNMATCHED glob (one that watches nothing) succeeds and is recorded", async () => {
   const f = await makeGlobFixture(
     `      - path: "nowhere/*.md"\n        why: "dead glob"\n      - path: lit.md\n        why: "literal pairing"\n`,
   );
@@ -237,12 +237,16 @@ test("N118: decoupling an UNMATCHED glob (one that watches nothing) is still all
     assert.equal(dead.state, "UNMATCHED");
     const dry = runCli(["verify", "--edge", dead.edge_id, "--disposition", "decoupled", "--json"], f.env);
     assert.equal(dry.status, 0, `dry run must not be refused:\n${dry.stdout}\n${dry.stderr}`);
+    const decoupledEvents = () =>
+      storeSnapshot(f.stateDir).split("\n").filter(Boolean).map((l) => JSON.parse(l))
+        .filter((e) => e.disposition === "decoupled" && e.edge_id === dead.edge_id).length;
+    assert.equal(decoupledEvents(), 0, "control: no decoupled event before --apply");
     const r = runCli(["verify", "--edge", dead.edge_id, "--disposition", "decoupled", "--apply", "--reason", "dead glob", "--json"], f.env);
-    // NOT asserting exit 0: today the sidecar edit lands and then the event write fails
-    // (an UNMATCHED row has no source_content to pin) -> exit 1. That is a pre-existing
-    // defect filed as N119, and pinning its exit code here would cement it. What THIS
-    // test owns is that the N118 guard does not refuse it (exit 3) and the edit lands.
-    assert.notEqual(r.status, 3, `the N118 guard must not refuse an UNMATCHED glob:\n${r.stdout}\n${r.stderr}`);
+    // N119: this used to exit 1 — the sidecar edit landed, then appendEvent refused the
+    // event for want of source_content/downstream_content, which an UNMATCHED glob can
+    // never have. The ledger must now record the removal the sidecar shows.
+    assert.equal(r.status, 0, `decoupling an UNMATCHED glob must succeed end to end:\n${r.stdout}\n${r.stderr}`);
+    assert.equal(decoupledEvents(), 1, "exactly one decoupled event is recorded for the removed glob");
     const raw = readFileSync(f.sidecar, "utf8");
     assert.ok(!raw.includes("nowhere/*.md"), "the dead glob declaration is gone");
     assert.ok(raw.includes("lit.md"), "the sibling declaration survives");
