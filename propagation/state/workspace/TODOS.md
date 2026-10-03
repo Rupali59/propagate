@@ -611,6 +611,25 @@ what every test uses.
 
 ---
 
+### PR-034 · `backlog` counts a GitHub-tracked project as 0 open: read the tracker it delegates to
+
+Raised by Rupali 2026-10-03, from obsidian-vk-publish. `propagate backlog` reports that repo's
+register as `delegated, 0 total, 0 open`, while the repo carries 48 open GitHub issues, all now
+on GitHub Project #3 (https://github.com/users/Rupali59/projects/3) with Group (A-K) and Priority
+fields. The `delegated` shape (`lib/report/backlog.mjs`, around line 509: "the work EXISTS and is
+deliberately not here") is honest that the work lives elsewhere, but the tree-wide backlog then
+sums to a number that leaves the project out entirely, and it reads as quiet.
+
+**What would satisfy this:** when a register delegates to a GitHub tracker, `backlog` either
+counts that tracker's open items (issues or project items, via `gh`) or prints the delegated
+project as a separate, named line, with "could not read the tracker" as a distinct outcome from
+"0 open" (`rule:discernment-checks` §2 and §6). SSJK already uses Project #2 the same way, so
+this is the second workspace on the shape, not a one-off.
+
+**Derive the gap:** `node cli.mjs backlog 2>&1 | grep obsidian-vk-publish` (shows `delegated, 0
+total`) against `gh issue list --repo Rupali59/obsidian-vk-publish --state open --limit 300 --json
+number --jq length`.
+
 ## Finished
 
 
