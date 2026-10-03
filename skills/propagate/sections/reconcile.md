@@ -22,7 +22,18 @@ sources:
       - path: <relative path to downstream>
         why: <one-line reason>
         kind: prose  # or "code"
+        # authority: counsel  # optional: counsel | spec | reference
 ```
+
+Those are every key the schema accepts, and it is `additionalProperties: false`
+— any other key rejects the **whole sidecar**, silently. `path` and `why` are
+required. `authority` says the source GOVERNS the downstream, not merely couples
+to it: `counsel` (legal copy, pricing — the edit-time hook BLOCKS a downstream
+edit that rewords it), `spec` (intended behaviour, advisory), `reference`
+(background, advisory); omit it for an ordinary drift edge. A source may also
+carry `concepts:` (section anchor → list of trigger tokens). Each token must
+appear literally in the source's own text — `claims check` reports one that
+does not as a trigger that can never fire.
 
 `path` may be a glob (e.g. `style/pages/**/*.md`) to declare a "this shared
 doc feeds a whole tree" edge without hand-listing every consumer; a glob
