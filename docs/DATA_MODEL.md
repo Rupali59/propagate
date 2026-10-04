@@ -555,9 +555,12 @@ new event, never by editing an old one.
 | `downstream_on_ref` | **yes** | the ref the **downstream** was read at |
 | `downstream_at_commit` / `downstream_on_branch` / `downstream_dirty` | new events | the downstream's git position |
 
-"Pinning" means every disposition except `deferred`, which records that someone
-**looked** and must not re-pin. Note `deferred` still carries both refs: where
-you looked is a fact even when you pinned nothing.
+"Pinning" means every disposition except `deferred` and `decoupled`. `deferred`
+records that someone **looked** and must not re-pin. `decoupled` removes the edge
+from its sidecar, so nothing ever reads its pin: content is recorded when
+resolvable and **not required**. A glob that matches nothing has no downstream to
+hash, and requiring one made that removal unrecordable (N119, v0.15.18). Note both
+still carry both refs: where you looked is a fact even when you pinned nothing.
 
 ### Why the ref is a pair
 
