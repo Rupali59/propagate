@@ -611,7 +611,9 @@ what every test uses.
 
 ---
 
-### PR-034 · `backlog` counts a GitHub-tracked project as 0 open: read the tracker it delegates to
+## Finished
+
+### PR-034 · `backlog` counts a GitHub-tracked project as 0 open: read the tracker it delegates to — **DONE 2026-10-04 (v0.15.19)**
 
 Raised by Rupali 2026-10-03, from obsidian-vk-publish. `propagate backlog` reports that repo's
 register as `delegated, 0 total, 0 open`, while the repo carries 48 open GitHub issues, all now
@@ -630,7 +632,28 @@ this is the second workspace on the shape, not a one-off.
 total`) against `gh issue list --repo Rupali59/obsidian-vk-publish --state open --limit 300 --json
 number --jq length`.
 
-## Finished
+**Closed 2026-10-04, v0.15.19.** Both halves the entry asked for:
+- **Named, always, with no network:** `backlog` prints `delegated  <file> → <tracker>` and "their
+  open work is NOT in the total above (count it: --trackers)". `delegatedTo` had been computed since
+  2026-09-28 and reached only `--json`; that, not the parse, is why the project read as quiet.
+- **Counted on request:** `--trackers` runs `gh issue list` per GitHub-issues tracker. Outcomes are
+  `counted` / `unreadable` (with the reason) / `unsupported`; no unread tracker renders as `+0`,
+  and a full `--limit 1000` page prints as a floor.
+
+**The real path, run once** (tests use a fake gh, so this is the only execution of the production
+call — rule:name-what-no-test-executes): `backlog --trackers` printed obsidian-vk-publish at **45
+open**; an independent `gh issue list … --jq length` minutes earlier gave **45**. The entry's own
+"48" was a stored count, stale within the day.
+
+**Two findings that are not this fix:**
+- **SSJK is not a second instance of this shape.** Its workspace `TODOS.md` is a genuine stub
+  ("None open — see STATE.md 'Pending'") and no SSJK register names Project #2. Its tracker work is
+  invisible to anything that reads registers, and making it visible needs a declaration somewhere
+  — a design call, not built here.
+- **`backlog --brief`, `--verbose` and `--affects` had been REFUSED since 2026-09-26**, because the
+  flag allowlist's sweep read `commands/*.mjs` and backlog lives in `cli.mjs`. Fixed for backlog
+  here; the same derivation gap leaves three other dead flags — ISSUES N120.
+
 
 
 ### PR-033 · Lane worktrees whose work landed by squash are invisible as "done", and `git cherry` cannot see it either

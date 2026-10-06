@@ -5353,6 +5353,29 @@ Tests: "N118/N119: decoupling an UNMATCHED glob (one that watches nothing) succe
 decoupled-only". Mutations: relaxation reverted -> the dry run reports the refusal; relaxation AND pre-validation reverted ->
 the original bug reproduces (`applied:true`, then the event write fails).
 
+### N120 · The flag allowlist was built from `commands/*.mjs`, so commands implemented in `cli.mjs` REFUSE flags their handler reads — **S3** — **OPEN** (3 dead flags remain: `migrate-refs --workspace`, `graph-index --since`, `monitor --install`)
+Found 2026-10-04 while adding `backlog --trackers`: `backlog --brief` exited 2 ("unknown flag
+--brief, known flags: --json"). `--brief` and `--affects` shipped 2026-08-27/28 (`0edd23b`,
+`1de353e`); the allowlist arrived 2026-09-26 (`156d26a`), built by "sweeping what
+`commands/*.mjs` actually reads from argv" (tests/unit/cli-commands.test.mjs). backlog's handler is
+`backlogCmd` in `cli.mjs`, outside that population, so its flags were never seen and every one but
+`--json` was refused for eight days. Fixed for backlog in v0.15.19 (PR-034).
+
+**Measured the same day** by a scan of the 26 `mode === "…"` dispatch branches in `cli.mjs`
+(each handler's body, string-literal `--flags`): 4 handlers read flags their allowlist refuses.
+Three are real, each confirmed through `validateFlags` directly and none run:
+`migrate-refs --workspace` (read at cli.mjs ~1827), `graph-index --since` (~4144),
+`monitor --install` (~4548). The fourth, `check`, is a false positive: `--name-only`,
+`--cached` etc. are arguments to `git`. The scan is a heuristic and misses flags read by a
+helper rather than the handler body.
+
+**Cost:** `backlog --brief` and `--affects` unusable for eight days; nothing silent (exit 2,
+named), which is why it cost little. **Fix shape** (`rule:derive-dont-curate`): a test that DERIVES
+each mode's read flags from its handler in `cli.mjs` as well as `commands/*.mjs`, with a floor on
+the number of handlers scanned, and fails on a read-but-refused flag. Per flag, decide whether it
+is wanted (declare it) or dead (delete the read). Not done here because each of the three is a
+call about that command.
+
 ### N121 · `make-public`'s home-path pattern was case-insensitive, so a GitHub `/users/` URL read as a private macOS path — **S3** — **RESOLVED 2026-10-04** (v0.15.19, `lib/core/public-forbidden.mjs`)
 `FORBIDDEN` in `bin/make-public.mjs` carried `/\/Users\/[a-z]/gi`. A macOS home is `/Users/`, capital U;
 with `i` it also matched `https://github.com/users/<owner>/projects/<n>`. The first such URL in a tracked

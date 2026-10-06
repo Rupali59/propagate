@@ -4176,7 +4176,7 @@ async function journalCmd() {
 }
 
 async function backlogCmd() {
-  const { backlog, repoSegments, filterByAffects, groupForBrief, BRIEF_TRUNC } = await import("./lib/report/backlog.mjs");
+  const { backlog, repoSegments, filterByAffects, groupForBrief, BRIEF_TRUNC, readDelegatedTrackers } = await import("./lib/report/backlog.mjs");
   // HUB_ROOT is used by --brief's path shortener. Imported HERE, not borrowed
   // from capsCmd's scope — `node --check` does not resolve names inside a
   // function body it never calls (G60, third instance today).
@@ -4212,8 +4212,13 @@ async function backlogCmd() {
     affectsStats = filterByAffects(result, hit);
   }
 
+  // PR-034. --trackers is backlog's ONLY network call, so it is opt-in. Without it
+  // a delegated register is still NAMED below, never silently summed as 0.
+  const trackers = process.argv.includes("--trackers") ? readDelegatedTrackers(result.totals.delegated) : null;
+
   if (process.argv.includes("--json")) {
     if (affectsStats) result.affects = affectsStats;
+    if (trackers) result.delegatedTrackers = trackers;
     console.log(JSON.stringify(result, null, 2));
     return;
   }
@@ -4269,6 +4274,42 @@ async function backlogCmd() {
   );
   if (result.totals.unparsedFiles > 0) {
     console.log(`  ${YELLOW}unparsed files never counted as zero — see file list above${RESET}`);
+  }
+  // DELEGATED REGISTERS (PR-034). Their work is real and lives in a tracker, so a
+  // "0 open" from the file is not "nothing to do". Printed whatever --brief says:
+  // before this, the destination reached --json and nobody reading the command, and
+  // the tree total read as complete while missing a whole project's issues.
+  const delegated = result.totals.delegated ?? [];
+  if (delegated.length) {
+    const short = (p) => (HUB_ROOT && p.startsWith(HUB_ROOT + "/") ? p.slice(HUB_ROOT.length + 1) : p);
+    if (trackers) {
+      const counted = trackers.filter((t) => t.status === "counted");
+      const sum = counted.reduce((n, t) => n + t.open, 0);
+      const floor = counted.some((t) => t.capped) ? "≥" : "";
+      const notRead = trackers.length - counted.length;
+      // No "+ 0" header when nothing was counted: an unread tracker must never
+      // render as a zero (rule:discernment-checks §2, §6).
+      if (counted.length) {
+        console.log(`  ${BOLD}+ ${floor}${sum}${RESET} open in ${counted.length} delegated tracker(s), not in the total above`);
+      }
+      if (notRead) {
+        console.log(`  ${YELLOW}${notRead} delegated tracker(s) could not be read — not counted, and not 0${RESET}`);
+      }
+      for (const t of trackers) {
+        const what =
+          t.status === "counted"
+            ? `${GREEN}${t.capped ? "≥" : ""}${t.open} open${RESET}`
+            : t.status === "unreadable"
+              ? `${RED}unreadable${RESET} ${DIM}— ${t.reason}${RESET}`
+              : `${YELLOW}unsupported${RESET} ${DIM}— ${t.reason}${RESET}`;
+        console.log(`    delegated  ${short(t.file)} → ${t.delegatedTo}  ${what}`);
+      }
+    } else {
+      console.log(
+        `  ${YELLOW}${delegated.length} register(s) delegate to an external tracker${RESET} ${DIM}— their open work is NOT in the total above (count it: --trackers)${RESET}`,
+      );
+      for (const d of delegated) console.log(`    delegated  ${short(d.file)} → ${d.delegatedTo}`);
+    }
   }
   if (result.dropped.length) {
     console.log(`  ${YELLOW}${result.dropped.length} path(s) dropped from the discovery walk${RESET} ${DIM}(bounded — see --json)${RESET}`);

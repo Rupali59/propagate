@@ -4,6 +4,10 @@
 
 N122 RESOLVED: `sourcesFor` keyed `state/<child>` on the first directory under the workspace, so `Rupali/Experiments/Vipin/Poker`'s GOTCHAS.md was never delivered. It now also matches each state dir's `.sidecar.yml` `repo_root` (by `path.relative`; absolute or `..` roots ignored).
 
+## `backlog` names delegated trackers, and counts them with `--trackers` — 2026-10-04, `v0.15.19`
+
+PR-034 closed: a register delegating to GitHub issues is printed as its own line naming the tracker, and `--trackers` counts it via `gh` (`counted` / `unreadable` / `unsupported`, never a silent 0). Found on the way: backlog's `--brief`/`--verbose`/`--affects` had been refused by the flag allowlist since 2026-09-26 (fixed); N120 filed for three other commands with the same derivation gap. N121 resolved: make-public treated a GitHub `/users/` URL as a macOS home path (case-insensitive pattern), which had the committed tree red since 7fe37a5.
+
 ## `decoupled` on an UNMATCHED glob now records its event — 2026-10-03, `v0.15.18`
 
 N119 RESOLVED: `decoupled` no longer requires content hashes (it removes the edge; nothing reads its pin), and `runDecoupled` validates the event BEFORE editing the sidecar, so a refused event never leaves a sidecar edit behind and the dry run predicts the outcome.
