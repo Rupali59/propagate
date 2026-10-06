@@ -1,5 +1,9 @@
 # propagate — State
 
+## Gotchas reach projects nested deeper than one level — 2026-10-06, `d772651` (no version bump)
+
+N122 RESOLVED: `sourcesFor` keyed `state/<child>` on the first directory under the workspace, so `Rupali/Experiments/Vipin/Poker`'s GOTCHAS.md was never delivered. It now also matches each state dir's `.sidecar.yml` `repo_root` (by `path.relative`; absolute or `..` roots ignored).
+
 ## `decoupled` on an UNMATCHED glob now records its event — 2026-10-03, `v0.15.18`
 
 N119 RESOLVED: `decoupled` no longer requires content hashes (it removes the edge; nothing reads its pin), and `runDecoupled` validates the event BEFORE editing the sidecar, so a refused event never leaves a sidecar edit behind and the dry run predicts the outcome.
@@ -708,41 +712,7 @@ count 0), and `doctor.duration_ms` spikes of 18–24 min recur.
 Not built: the two remaining lazy divisions have no write paths by design, and
 `rules promote` is still N64.
 
-## The one surface — 2026-09-17, shipped
-
-Eight steps, `15f6ca3f` … `aa71350`. What propagate SHOWS now matches what it collects,
-which the 2026-09-17 design review found it did not: 120k words of hand-written reasons
-displayed nowhere, 96% of the graph never surfaced, and an admin asked for a judgement
-with no evidence offered to make it.
-
-**Derive the current picture, never trust a number here** (`rule:state-and-decisions`:
-a count in a state file rots faster than anything else in it):
-
-```sh
-node cli.mjs surface          # the whole card, as text
-bash widget/collect.sh        # what the desktop widget is handed, ~0.7s
-node cli.mjs doctor --json    # the structured form, 31 sections
-```
-
-| piece | where |
-|---|---|
-| the payload everything renders | `lib/report/surface.mjs` |
-| doctor as data, and composable | `cli.mjs doctor --json`, `lib/report/doctor/structure.mjs` |
-| the 37s cache, on the monitor's existing tick | `lib/report/doctor/snapshot.mjs` |
-| the desktop widget | `widget/propagate-queue.jsx` + `collect.sh` + `open-ui.sh` |
-| the input surface | `commands/ui.mjs` — `/queue`, `/issues`, `/todos` |
-| the only code that edits hand-written prose | `lib/registers/write.mjs` |
-
-**What is NOT built, and the widget says so on each row** rather than offering a dead
-button: `/handovers` (append-only by its own header — resolving must INSERT beneath, a
-different guarantee), `/gotchas` promotion (N64: the judgement is the valuable part),
-and `/health` acknowledgements. Four of nine rows currently read "not built yet".
-
-**Two limits worth knowing before trusting a number on the card.** The gotcha census is
-workspace-roots only and says so — a `GOTCHAS.md` below a root, as propagate's own is,
-is not counted. And `noAction: 610` on the register views is items read that offered no
-mechanical action, mostly because two conventions for issue status live in this tree
-and only one is a marker a write can flip (26 of 54 open issues are closable).
+## The one surface — 2026-09-17, shipped: moved to `archive/STATE-2026-09.md`
 
 ## Open work — as of 2026-08-22 (post plugin rebuild)
 
