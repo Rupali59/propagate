@@ -5352,3 +5352,30 @@ Tests: "N118/N119: decoupling an UNMATCHED glob (one that watches nothing) succe
 `decoupled` event); "decoupled validates with content, and without it (N119)"; negative control "the N119 relaxation is
 decoupled-only". Mutations: relaxation reverted -> the dry run reports the refusal; relaxation AND pre-validation reverted ->
 the original bug reproduces (`applied:true`, then the event write fails).
+
+### N122 · A project nested more than one level under its workspace never gets its gotchas delivered — **S2** — **RESOLVED 2026-10-06** (`lib/gotchas/parse.mjs` `nestedStateDirsFor`)
+`sourcesFor()` keys a workspace's `propagation/state/<project>/` by the CHILD directory the walk came up
+from (`stateDirFor(dir, basename(child))`). That is right for `<ws>/<project>/` and wrong for anything
+deeper. From `Rupali/Experiments/Vipin/Poker` the walk asked the workspace for `state/Experiments/`, so
+`state/Poker/GOTCHAS.md` was never read: `sourcesFor(Poker)` returned only the hub's workspace file and
+the global index. Found by the delivery check after writing Poker's G1 (`npm ci` after a pull): a
+simulated `git pull` in that directory produced no output, and `gotcha-guard --selftest` counted 20
+triggered entries, with Poker's absent.
+
+**Why it was silent:** a gotcha that cannot fire looks exactly like a gotcha that has nothing to say.
+The sidecar already recorded the answer (`repo_root: Experiments/Vipin/Poker`), and its own note warned
+*"Nested two levels under Experiments, deeper than HandReader."* Nothing read it.
+
+**Fix:** step 1b in `sourcesFor` reads each state dir's `.sidecar.yml` `repo_root` and matches the start
+directory by path segment (`path.relative`), never string prefix. A `repo_root` that is absolute or
+contains `..` is ignored. The top-level `repo_root:` line is read with a regex rather than the `yaml`
+package, because this runs on every Bash/Edit/Write.
+
+**Tests** (`tests/unit/gotchas-parse.test.mjs`, 6 new): found from the repo root and from a subdirectory;
+outranks the workspace file; a sibling and a `Poker2` lookalike do NOT match; `../` and absolute
+`repo_root` are ignored; a sidecar with no `repo_root` matches nothing. 4 failed before the fix for the
+stated reason. **Mutations:** a string-prefix match turns only the lookalike test red, and dropping the
+escape guard turns only the escape test red.
+
+**Live:** from Poker, `git pull` now fires G1, `npm test` does not, and a `git pull` in the sibling
+`Experiments/HandReader` does not. `--selftest`: 21 triggered entries, Poker's file listed.

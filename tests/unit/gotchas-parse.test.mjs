@@ -297,3 +297,81 @@ test("N45: real path and command triggers stay QUIET — the check must not fire
   );
   assert.deepEqual(selftestProblems([f]), [], "all three are deliverable subjects");
 });
+
+// ---------------------------------------------------------------------------
+// Projects nested deeper than one level under their workspace
+// ---------------------------------------------------------------------------
+//
+// Found 2026-10-06 on Rupali/Experiments/Vipin/Poker. The walk keys a state dir by
+// the CHILD it came up from, so from <ws>/Experiments/Vipin/Poker it asks for
+// state/Experiments/ at the workspace and never finds state/Poker/. The project's
+// own sidecar already says where it lives (`repo_root: Experiments/Vipin/Poker`).
+// Without this, every entry in that GOTCHAS.md is documented and never delivered.
+
+const NWS = path.join(ROOT, "nested-ws");
+const NPROJ = path.join(NWS, "Experiments", "Vipin", "Poker");
+const NSIB = path.join(NWS, "Experiments", "Vipin", "Other");
+const NFILE = path.join(NWS, "propagation", "state", "Poker", "GOTCHAS.md");
+const NWS_FILE = path.join(NWS, "propagation", "state", "workspace", "GOTCHAS.md");
+await mkdir(path.join(NPROJ, "src"), { recursive: true });
+await mkdir(NSIB, { recursive: true });
+await mkdir(path.dirname(NFILE), { recursive: true });
+await mkdir(path.dirname(NWS_FILE), { recursive: true });
+await writeFile(NFILE, "# poker\n\n### G1 · nested hazard\n**Trigger:** `nestedcmd`\n**Fires on:** `nestedcmd --go`\nbody.\n");
+await writeFile(NWS_FILE, "# ws\n\n### W9 · ws hazard\n**Trigger:** `nwscmd`\n**Fires on:** `nwscmd --go`\nbody.\n");
+await writeFile(
+  path.join(path.dirname(NFILE), ".sidecar.yml"),
+  "# which project\nschema_version: 1\nproject: Poker\nrepo_root: Experiments/Vipin/Poker\nowns:\n  - GOTCHAS.md\n",
+);
+
+test("a project nested two levels deep is found through its sidecar's repo_root", () => {
+  const found = sourcesFor(NPROJ);
+  assert.ok(found.includes(NFILE), `nested project file not found from its repo root: ${JSON.stringify(found)}`);
+});
+
+test("...and from a directory inside that project", () => {
+  const found = sourcesFor(path.join(NPROJ, "src"));
+  assert.ok(found.includes(NFILE), `nested project file not found from a subdirectory: ${JSON.stringify(found)}`);
+});
+
+test("the nested project's file still precedes the workspace's own", () => {
+  const found = sourcesFor(NPROJ);
+  assert.ok(found.includes(NFILE) && found.includes(NWS_FILE), `both must be present first: ${JSON.stringify(found)}`);
+  assert.ok(found.indexOf(NFILE) < found.indexOf(NWS_FILE), `project must outrank workspace: ${JSON.stringify(found)}`);
+});
+
+test("a sibling directory does NOT get the nested project's hazards", () => {
+  // Prefix-matching on strings would hand Experiments/Vipin/Poker2 or a sibling
+  // the wrong project's gotchas; the match must be by path segment.
+  const found = sourcesFor(NSIB);
+  assert.ok(!found.includes(NFILE), `a sibling received another project's gotchas: ${JSON.stringify(found)}`);
+  const lookalike = path.join(NWS, "Experiments", "Vipin", "Poker2");
+  return mkdir(lookalike, { recursive: true }).then(() =>
+    assert.ok(!sourcesFor(lookalike).includes(NFILE), "Poker2 must not match repo_root Poker"),
+  );
+});
+
+test("a repo_root that escapes the workspace or is absolute is ignored", async () => {
+  // A sidecar is data. `..` or an absolute path must never let a state dir claim
+  // a directory outside its own workspace.
+  const evil = path.join(NWS, "propagation", "state", "Evil");
+  await mkdir(evil, { recursive: true });
+  await writeFile(path.join(evil, "GOTCHAS.md"), "# evil\n\n### E1 · x\n**Trigger:** `evil`\n**Fires on:** `evil go`\nbody.\n");
+  await writeFile(path.join(evil, ".sidecar.yml"), `project: Evil\nrepo_root: ../outside\n`);
+  const evil2 = path.join(NWS, "propagation", "state", "Evil2");
+  await mkdir(evil2, { recursive: true });
+  await writeFile(path.join(evil2, "GOTCHAS.md"), "# evil2\n\n### E2 · x\n**Trigger:** `evil2`\n**Fires on:** `evil2 go`\nbody.\n");
+  await writeFile(path.join(evil2, ".sidecar.yml"), `project: Evil2\nrepo_root: ${NPROJ}\n`);
+  const found = sourcesFor(NPROJ);
+  assert.ok(!found.includes(path.join(evil, "GOTCHAS.md")), "a ../ repo_root was honoured");
+  assert.ok(!found.includes(path.join(evil2, "GOTCHAS.md")), "an absolute repo_root was honoured");
+  assert.ok(found.includes(NFILE), "the legitimate nested project must still be found");
+});
+
+test("a sidecar with no repo_root matches nothing by itself", async () => {
+  const bare = path.join(NWS, "propagation", "state", "Bare");
+  await mkdir(bare, { recursive: true });
+  await writeFile(path.join(bare, "GOTCHAS.md"), "# bare\n\n### B1 · x\n**Trigger:** `bare`\n**Fires on:** `bare go`\nbody.\n");
+  await writeFile(path.join(bare, ".sidecar.yml"), "project: Bare\nowns: []\n");
+  assert.ok(!sourcesFor(NPROJ).includes(path.join(bare, "GOTCHAS.md")));
+});
