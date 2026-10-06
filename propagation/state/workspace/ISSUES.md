@@ -5353,6 +5353,23 @@ Tests: "N118/N119: decoupling an UNMATCHED glob (one that watches nothing) succe
 decoupled-only". Mutations: relaxation reverted -> the dry run reports the refusal; relaxation AND pre-validation reverted ->
 the original bug reproduces (`applied:true`, then the event write fails).
 
+### N121 · `make-public`'s home-path pattern was case-insensitive, so a GitHub `/users/` URL read as a private macOS path — **S3** — **RESOLVED 2026-10-04** (v0.15.19, `lib/core/public-forbidden.mjs`)
+`FORBIDDEN` in `bin/make-public.mjs` carried `/\/Users\/[a-z]/gi`. A macOS home is `/Users/`, capital U;
+with `i` it also matched `https://github.com/users/<owner>/projects/<n>`. The first such URL in a tracked
+file was PR-034's link to GitHub Project #3, committed in 7fe37a5, and from that commit three
+`make-public-watchlist` tests were red on the committed tree: "1 FILE(S) STILL CARRY PRIVATE CONTENT …
+`propagation/state/workspace/TODOS.md` (1x absolute macOS home path)". The two real `/Users/rupali.b` lines
+in that file (since 0e20136) were never the hit — the scrubber maps them; the URL survived it.
+
+**How it got onto main:** 7fe37a5 was committed (another session's entry, on its behalf) without a full
+suite run, because it "only touched a register". The register is a tracked file the release check reads.
+Caught by the next full run, for v0.15.19.
+
+**Fix:** the pattern is now case-sensitive (the username pattern keeps `i`), and `FORBIDDEN` moved to
+`lib/core/public-forbidden.mjs` because the script runs on import and its constant could not be tested.
+`tests/portability/public-forbidden.test.mjs` pins both directions. Mutation: restoring `i` turns the new
+test AND the three original watchlist tests red, and nothing else — the flag alone was the cause.
+
 ### N122 · A project nested more than one level under its workspace never gets its gotchas delivered — **S2** — **RESOLVED 2026-10-06** (`lib/gotchas/parse.mjs` `nestedStateDirsFor`)
 `sourcesFor()` keys a workspace's `propagation/state/<project>/` by the CHILD directory the walk came up
 from (`stateDirFor(dir, basename(child))`). That is right for `<ws>/<project>/` and wrong for anything

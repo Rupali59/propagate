@@ -30,6 +30,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { SEARCH_ROOTS } from "../lib/core/config.mjs";
+import { FORBIDDEN } from "../lib/core/public-forbidden.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STATE = process.env.PROPAGATE_STATE_DIR || path.join(os.homedir(), ".propagate");
@@ -47,11 +48,8 @@ const EXCLUDE = [
   { prefix: "docs/AUDIT-", why: "point-in-time audit of a private tree" },
 ];
 
-/** Patterns that must not survive into the public tree, checked after scrubbing. */
-const FORBIDDEN = [
-  { re: /rupali\.b/gi, label: "home-dir username" },
-  { re: /\/Users\/[a-z]/gi, label: "absolute macOS home path" },
-];
+// FORBIDDEN (what must not survive scrubbing) lives in lib/core/public-forbidden.mjs,
+// where it can be tested; this script runs on import.
 
 function sh(args) {
   return execFileSync("git", args, { cwd: REPO, encoding: "utf8", maxBuffer: 1 << 26 });
