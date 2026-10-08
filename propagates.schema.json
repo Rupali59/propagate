@@ -75,7 +75,7 @@
           },
           "concepts": {
             "type": "object",
-            "description": "Forward-compat: per-section concept tags for graph-augment (V2). Keys are section anchors; values are concept candidate lists.",
+            "description": "Per-section trigger tokens. Keys are section anchors; values are tokens that must appear in this SOURCE file. Read today by `claims check` check 5 (`dead-concept-token`): a token found nowhere in the source — matched case-insensitively after NFC normalization, lib/claims/check.mjs — is reported as one that can never fire. Also reserved for graph-augment (V2), which is not built; `status` marks such sources [needs graph-augment]. Until 2026-10-06 this said only \"forward-compat\", while the claims check had been reading it.",
             "additionalProperties": {
               "type": "array",
               "items": {

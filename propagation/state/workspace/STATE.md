@@ -4,6 +4,10 @@
 
 N122 RESOLVED: `sourcesFor` keyed `state/<child>` on the first directory under the workspace, so `Rupali/Experiments/Vipin/Poker`'s GOTCHAS.md was never delivered. It now also matches each state dir's `.sidecar.yml` `repo_root` (by `path.relative`; absolute or `..` roots ignored).
 
+## The flag allowlist is derived, not swept — 2026-10-06, `v0.15.20`
+
+N120 RESOLVED: `tests/unit/cli-flag-parity.test.mjs` derives each mode's read flags from its handler and fails on any the allowlist refuses; `migrate-refs --workspace` and `monitor --install` declared, `graph-index --since` withdrawn as a false positive of the original sweep. N123 RESOLVED: the N121 fix carried the literal username and had `main` red since 85fd8a9 (GOTCHAS G76: a suite run before `git add` cannot see new files). Schema `concepts` description now says the claims check reads it.
+
 ## `backlog` names delegated trackers, and counts them with `--trackers` — 2026-10-04, `v0.15.19`
 
 PR-034 closed: a register delegating to GitHub issues is printed as its own line naming the tracker, and `--trackers` counts it via `gh` (`counted` / `unreadable` / `unsupported`, never a silent 0). Found on the way: backlog's `--brief`/`--verbose`/`--affects` had been refused by the flag allowlist since 2026-09-26 (fixed); N120 filed for three other commands with the same derivation gap. N121 resolved: make-public treated a GitHub `/users/` URL as a macOS home path (case-insensitive pattern), which had the committed tree red since 7fe37a5.

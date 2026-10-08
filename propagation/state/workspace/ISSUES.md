@@ -5353,7 +5353,7 @@ Tests: "N118/N119: decoupling an UNMATCHED glob (one that watches nothing) succe
 decoupled-only". Mutations: relaxation reverted -> the dry run reports the refusal; relaxation AND pre-validation reverted ->
 the original bug reproduces (`applied:true`, then the event write fails).
 
-### N120 · The flag allowlist was built from `commands/*.mjs`, so commands implemented in `cli.mjs` REFUSE flags their handler reads — **S3** — **OPEN** (3 dead flags remain: `migrate-refs --workspace`, `graph-index --since`, `monitor --install`)
+### N120 · The flag allowlist was built from `commands/*.mjs`, so commands implemented in `cli.mjs` REFUSE flags their handler reads — **S3** — **RESOLVED 2026-10-06** (`tests/unit/cli-flag-parity.test.mjs`; 2 flags declared, 1 claim withdrawn)
 Found 2026-10-04 while adding `backlog --trackers`: `backlog --brief` exited 2 ("unknown flag
 --brief, known flags: --json"). `--brief` and `--affects` shipped 2026-08-27/28 (`0edd23b`,
 `1de353e`); the allowlist arrived 2026-09-26 (`156d26a`), built by "sweeping what
@@ -5375,6 +5375,31 @@ each mode's read flags from its handler in `cli.mjs` as well as `commands/*.mjs`
 the number of handlers scanned, and fails on a read-but-refused flag. Per flag, decide whether it
 is wanted (declare it) or dead (delete the read). Not done here because each of the three is a
 call about that command.
+
+**Resolved 2026-10-06 — and this entry's own list was one-third wrong.**
+- `migrate-refs --workspace`: real. The handler accepts it as the alternative to the positional
+  argument, exactly as `migrate` declares. **Declared.**
+- `monitor --install`: real, and the costlier of the two — it is the documented generator of the
+  ARMED `propagate-monitor` agent's plist (docs/SYSTEMS.md, DECISIONS 2026-08-17), so since 2026-09-26
+  nobody could regenerate that plist. **Declared.**
+- `graph-index --since`: **never real.** The scan that produced this list read each handler up to the
+  NEXT top-level function; `graphIndexCmd` is the last one in cli.mjs, so its "body" ran into the
+  dispatch block and picked up `doctor --since`. Withdrawn — a false positive written into the register
+  by the instrument meant to find them (rule:measure-the-claim-not-a-proxy).
+
+**The fix is the derivation, not the three flags.** `tests/unit/cli-flag-parity.test.mjs` derives, for
+every mode in cli.mjs's top-level `if (_invokedDirectly)` dispatch, the handler it calls (in cli.mjs or
+the commands/*.mjs it imports) and the `"--flag"` literals in that handler's body, and fails on any the
+allowlist refuses. Floor: >=20 handlers resolved. Exemptions carry reasons and fail when stale (two kinds:
+an argument to a spawned program — `ui` passes `--html` to `cli.mjs graph`; and a shared handler —
+`skills-promote/-demote` return before `--apply` is read for `skills-reap`).
+
+Building it found two more blind spots in my own probes, each caught by a negative control rather than
+the floor (GOTCHAS G71 — a scan goes blind by matching MORE): `mode === …` inside a handler read as
+dispatch (one branch swallowed eight handlers), and `mode === "a" || mode === "b"` left the first mode
+with no handler, so `skills-promote` was silently unchecked. Both are now pinned by tests.
+Mutation: removing `--install` from monitor's flags fails the parity test naming exactly
+`monitor: --install is read by monitorCmd (cli.mjs) but refused`.
 
 ### N121 · `make-public`'s home-path pattern was case-insensitive, so a GitHub `/users/` URL read as a private macOS path — **S3** — **RESOLVED 2026-10-04** (v0.15.19, `lib/core/public-forbidden.mjs`)
 `FORBIDDEN` in `bin/make-public.mjs` carried `/\/Users\/[a-z]/gi`. A macOS home is `/Users/`, capital U;
@@ -5419,3 +5444,18 @@ escape guard turns only the escape test red.
 
 **Live:** from Poker, `git pull` now fires G1, `npm test` does not, and a `git pull` in the sibling
 `Experiments/HandReader` does not. `--selftest`: 21 triggered entries, Poker's file listed.
+
+### N123 · `lib/core/public-forbidden.mjs` and its test contained the literal username, so committing them turned `main` red again — **S3** — **RESOLVED 2026-10-06**
+The N121 fix (85fd8a9) moved `FORBIDDEN` into `lib/core/public-forbidden.mjs` and added a test. The module's
+comment named the username in backticks, and the test used the literal as its fixture string. Both files are
+tracked from that commit, `make-public` reads every tracked file, and three `make-public-watchlist` tests failed
+with "2 FILE(S) STILL CARRY PRIVATE CONTENT … (1x home-dir username)".
+
+**Why the suite did not catch it:** the full run (2472/2477, green) happened while both files were UNTRACKED,
+and make-public builds its population with `git ls-files`. A green run before `git add` is blind to new files.
+That is the general hazard, now GOTCHAS G76 with a commit-time trigger. Same instrument, same week, as N121 —
+which was itself the hazard of committing without a suite.
+
+**Fix:** the comment now says "the home-dir username"; the test builds the string at runtime
+(`["RUPALI", "B"].join(".")` — split so this line is not itself a match); and the module now warns never to
+write the literal. `make-public --check` against the real tree: "clean — no forbidden pattern survives", exit 0.

@@ -1841,3 +1841,20 @@ headroom work, the count over 145,000 was still in the high thirties, all now na
 what a real session loaded — a mismatch is a finding about the model, never something to tune
 toward. **Guarded by:** `tests/unit/instructions.test.mjs` (two-chain fixture: max picks the
 deeper chain).
+
+
+### G76 · A green suite before `git add` says nothing about NEW files — the release check reads only tracked ones
+**Trigger:** `git\s+commit\b`
+**Fires on:** `git commit -q -F -`
+`bin/make-public.mjs` lists its population with `git ls-files`, and `tests/portability/make-public-watchlist.test.mjs`
+runs it against this repo. So an untracked file is invisible to the suite: it passes, you commit, and the
+committed tree is red the moment the file becomes tracked. Nothing about the run says which files it could
+not see.
+**Signal:** `npm test` green on the working tree; red on the very next run after the commit, with
+"FILE(S) STILL CARRY PRIVATE CONTENT" naming a file the commit added.
+**Cost:** `main` red twice in one week (N121's 7fe37a5, then N123's 85fd8a9 — the second in the FIX for the
+first), each found only by the next full run.
+**Instead:** before the final suite run, mark new files intent-to-add — `git add -N <new files>` — so
+`git ls-files` sees them without staging their content; or run the suite after `git add`, before
+`git commit`. And never write a literal the check refuses into a file the check reads, comments and test
+fixtures included: build it at runtime.
