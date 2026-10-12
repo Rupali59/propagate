@@ -18,6 +18,14 @@ sources:
           never checked because this skill sat outside propagate's searchRoots; a hub
           symlink now fixes that, which is the half that made the drift undetectable.
         kind: code
+      - path: ../../docs/REFERENCE.md
+        why: >-
+          STALENESS here gives each kind its rot rule (append-only, age, declared-state,
+          completeness, none), and REFERENCE.md §"The ten kinds" states the same rule in
+          prose per row. A rule changed here leaves the table telling a reader the wrong
+          way that kind goes stale. Declared 2026-10-12, replacing a hub edge that pointed
+          at STATE_MANAGEMENT.md, which states no staleness rules at all.
+        kind: prose
   lib/link-graph.mjs:
     propagates_to:
       - path: ../../propagation/state/curate-docs/GOTCHAS.md
@@ -31,13 +39,16 @@ sources:
     propagates_to:
       - path: SKILL.md
         why: >-
-          SKILL.md's workflow asserts the read-only posture and the "declare a state, not
-          add a link" verdict. Both are decisions recorded here; if one is superseded, the
-          workflow prose is asserting something no longer true.
+          SKILL.md's workflow asserts the narrow-write posture (writes only under --apply,
+          in pipeline order) and the "declare a state, not add a link" verdict. Both are
+          decisions recorded here; if one is superseded, the workflow prose is asserting
+          something no longer true. Restated 2026-10-12: this said "the read-only posture",
+          which DECISIONS.md:140 ("The tool writes, narrowly…") superseded on 2026-08-19.
         kind: prose
       - path: sections/eng.md
         why: >-
-          The read-only posture and the typed refusals moved here in the 2026-08-21 split.
+          The write posture (--apply-gated, pipeline-ordered; it replaced read-only on
+          2026-08-19) and the typed refusals moved here in the 2026-08-21 split.
           Added as a second downstream rather than by editing the SKILL.md entry above,
           because the edge id derives from the why text too — rewriting it would mint a new
           edge and silently discard the original's verification.

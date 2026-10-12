@@ -387,3 +387,16 @@ sources:
           COVERED, RETIRED or DELIVERED. Entries added or superseded in GOTCHAS
           leave the table describing a corpus that no longer exists.
         kind: prose
+
+  # Declared 2026-10-12. REFERENCE.md §"The ten kinds" is the only prose that specifies the
+  # doc taxonomy; it was coupled to nothing, while a hub edge claimed rules/conventions/
+  # STATE_MANAGEMENT.md specified it (7 of the 10 kinds appear nowhere there). That edge
+  # (a11f834b) was decoupled the same day, with the evidence in its event.
+  lib/report/doc-kind.mjs:
+    propagates_to:
+      - path: docs/REFERENCE.md
+        why: >-
+          KINDS here is the list REFERENCE.md §"The ten kinds" tabulates, one row per
+          kind with what it is for and when to write one. A kind added, renamed or
+          removed here leaves that table describing a taxonomy the code no longer has.
+        kind: prose
