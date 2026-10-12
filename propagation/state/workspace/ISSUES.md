@@ -5459,3 +5459,17 @@ which was itself the hazard of committing without a suite.
 **Fix:** the comment now says "the home-dir username"; the test builds the string at runtime
 (`["RUPALI", "B"].join(".")` — split so this line is not itself a match); and the module now warns never to
 write the literal. `make-public --check` against the real tree: "clean — no forbidden pattern survives", exit 0.
+
+### N124 · `verify --disposition decoupled --apply` re-serialises the WHOLE sidecar, re-wrapping every long string — **S3** — **OPEN** (`applyDecoupledEdit`, cli.mjs: `writeFile(loc.sidecarPath, String(doc))`)
+Found 2026-10-12 retiring one hub edge (e8124882, O12). Removing ONE `propagates_to` item produced a
+170-line diff (+87/−83) in `.propagates.yml`: the `yaml` library's default `lineWidth: 80` re-folded
+every long double-quoted `why:` and every `>` block in the file. Parsed before and after, the VALUES
+were identical (38 → 37 edges, 0 other values changed), so no edge id moved — the cost is review, not
+data: a one-line removal arrives buried in other people's reformatted entries, and every other
+session's open diff on that sidecar now conflicts.
+
+**Cost:** none recorded, because the hub and Vipin sidecars were rebuilt by hand from HEAD's text
+minus the one entry (31 and 18 changed lines), after `decoupled` had written its event.
+**Fix shape:** `String(doc)` → `doc.toString({ lineWidth: 0 })` (and the same anywhere else a sidecar is
+written back), plus a test: decouple one entry from a fixture with a 120-char `why:` elsewhere and
+assert the rest of the file is byte-identical.
