@@ -3200,11 +3200,22 @@ function describeSidecarEdit(loc) {
 
 /**
  * Perform the sidecar edit `decoupled --apply` requires: remove exactly the
- * one `propagates_to` entry the declaration was located at, via `yaml`'s
- * Document API (not parse+reserialize) so comments and formatting elsewhere
- * in the file survive. Drops the whole `sources.<key>` entry when it was the
- * last downstream under that source — an empty `propagates_to: []` left
- * behind is a declaration with nothing to declare.
+ * one `propagates_to` entry the declaration was located at. Drops the whole
+ * `sources.<key>` entry when it was the last downstream under that source — an
+ * empty `propagates_to: []` left behind is a declaration with nothing to declare.
+ *
+ * TEXT SURGERY, NOT RE-SERIALISATION (N124). This used to splice the Document
+ * and write `String(doc)`, under a comment claiming "comments and formatting
+ * elsewhere in the file survive". They did not: the yaml library re-folds every
+ * long scalar at 80 columns, so removing ONE entry from the hub sidecar produced
+ * a 170-line diff (values identical) that buried the real change and conflicted
+ * with every other session's open edit. No `toString` option round-trips these
+ * files (measured 2026-10-12: >300 changed lines on an edit-free round-trip).
+ *
+ * So the Document is used only to FIND the entry's byte range, the raw text is
+ * cut at whole lines, and the result is re-parsed and compared with what the
+ * Document API edit would have produced. Any difference refuses the write — a
+ * surgical edit that removed the wrong bytes must never reach disk.
  */
 async function applyDecoupledEdit(loc) {
   const raw = await readFile(loc.sidecarPath, "utf8");
@@ -3220,11 +3231,40 @@ async function applyDecoupledEdit(loc) {
       `index ${loc.index} out of range for sources.${JSON.stringify(loc.sourceKey)}.propagates_to (${seq.items.length} entries) in ${loc.sidecarPath} — sidecar changed since selection?`,
     );
   }
+  // The byte range to cut: this one entry, or — when it is the last downstream —
+  // the whole `sources.<key>` pair. Widened to whole lines either way.
+  let start;
+  let end;
+  if (seq.items.length === 1) {
+    const pair = doc.get("sources", true).items.find((p) => String(p.key?.value ?? p.key) === loc.sourceKey);
+    start = pair.key.range[0];
+    end = pair.value.range[2];
+  } else {
+    [start, , end] = seq.items[loc.index].range;
+  }
+  const lineStart = raw.lastIndexOf("\n", start - 1) + 1;
+  const lineEnd = raw[end - 1] === "\n" ? end : (raw.indexOf("\n", end) + 1 || raw.length);
+  let next = raw.slice(0, lineStart) + raw.slice(lineEnd);
+  // Cutting the ONLY source leaves a bare `sources:`, which parses as null; the
+  // Document API edit leaves an empty map. Keep the old meaning: `sources: {}`.
+  if (seq.items.length === 1 && doc.get("sources", true).items.length === 1) {
+    next = next.replace(/^sources:[ \t]*$/m, "sources: {}");
+  }
+
+  // What the Document API edit would mean — the semantics this function has always had.
   seq.items.splice(loc.index, 1);
   if (seq.items.length === 0) {
     doc.deleteIn(["sources", loc.sourceKey]);
   }
-  await writeFile(loc.sidecarPath, String(doc), "utf8");
+  const expected = JSON.stringify(doc.toJS());
+  const got = JSON.stringify(YAML.parse(next));
+  if (got !== expected) {
+    throw new Error(
+      `refusing to write ${loc.sidecarPath}: cutting lines ${raw.slice(0, lineStart).split("\n").length}-` +
+        `${raw.slice(0, lineEnd).split("\n").length - 1} left something other than the intended declarations — N124 safety check`,
+    );
+  }
+  await writeFile(loc.sidecarPath, next, "utf8");
 }
 
 /** `verify --disposition decoupled` — print-by-default, `--apply` to write. */

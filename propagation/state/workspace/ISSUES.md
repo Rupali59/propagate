@@ -5460,7 +5460,7 @@ which was itself the hazard of committing without a suite.
 (`["RUPALI", "B"].join(".")` — split so this line is not itself a match); and the module now warns never to
 write the literal. `make-public --check` against the real tree: "clean — no forbidden pattern survives", exit 0.
 
-### N124 · `verify --disposition decoupled --apply` re-serialises the WHOLE sidecar, re-wrapping every long string — **S3** — **OPEN** (`applyDecoupledEdit`, cli.mjs: `writeFile(loc.sidecarPath, String(doc))`)
+### N124 · `verify --disposition decoupled --apply` re-serialises the WHOLE sidecar, re-wrapping every long string — **S3** — **RESOLVED 2026-10-12** (v0.15.21)
 Found 2026-10-12 retiring one hub edge (e8124882, O12). Removing ONE `propagates_to` item produced a
 170-line diff (+87/−83) in `.propagates.yml`: the `yaml` library's default `lineWidth: 80` re-folded
 every long double-quoted `why:` and every `>` block in the file. Parsed before and after, the VALUES
@@ -5473,3 +5473,5 @@ minus the one entry (31 and 18 changed lines), after `decoupled` had written its
 **Fix shape:** `String(doc)` → `doc.toString({ lineWidth: 0 })` (and the same anywhere else a sidecar is
 written back), plus a test: decouple one entry from a fixture with a 120-char `why:` elsewhere and
 assert the rest of the file is byte-identical.
+
+**Resolved 2026-10-12, and not the fix this entry proposed.** `toString({ lineWidth: 0 })` was measured first: NO option round-trips these files (the hub sidecar re-printed with zero edits differs on >300 lines under every setting tried). So `applyDecoupledEdit` no longer re-prints at all: the Document only LOCATES the entry, the raw text is cut at whole lines, and the result is re-parsed and compared with what the Document API edit would mean — a mismatch refuses the write. That check fired once in development, on the one-source case (a bare `sources:` parses as null, not `{}`), before anything reached disk. Test: "N124: decoupled removes ONE entry`s lines and leaves every other byte of the sidecar alone". Mutations: restoring `String(doc)` fails it on the byte comparison; an off-by-one cut fails it too.

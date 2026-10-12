@@ -4,6 +4,10 @@
 
 N122 RESOLVED: `sourcesFor` keyed `state/<child>` on the first directory under the workspace, so `Rupali/Experiments/Vipin/Poker`'s GOTCHAS.md was never delivered. It now also matches each state dir's `.sidecar.yml` `repo_root` (by `path.relative`; absolute or `..` roots ignored).
 
+## `decoupled` edits a sidecar surgically — 2026-10-12, `v0.15.21`
+
+N124 RESOLVED: removing one edge no longer re-prints (and re-wraps) the whole `.propagates.yml`. The entry`s lines are cut from the raw text and the result is checked against the intended declarations before it is written.
+
 ## The flag allowlist is derived, not swept — 2026-10-06, `v0.15.20`
 
 N120 RESOLVED: `tests/unit/cli-flag-parity.test.mjs` derives each mode's read flags from its handler and fails on any the allowlist refuses; `migrate-refs --workspace` and `monitor --install` declared, `graph-index --since` withdrawn as a false positive of the original sweep. N123 RESOLVED: the N121 fix carried the literal username and had `main` red since 85fd8a9 (GOTCHAS G76: a suite run before `git add` cannot see new files). Schema `concepts` description now says the claims check reads it.

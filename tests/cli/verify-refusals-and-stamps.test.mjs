@@ -254,3 +254,31 @@ test("N118/N119: decoupling an UNMATCHED glob (one that watches nothing) succeed
     await cleanup(f.searchRoot, f.stateDir);
   }
 });
+
+test("N124: decoupled removes ONE entry's lines and leaves every other byte of the sidecar alone", async () => {
+  // A long double-quoted why (> 80 columns), a folded `>` block and a comment: exactly what
+  // the old String(doc) write-back re-wrapped. The hub sidecar went to a 170-line diff for a
+  // one-entry removal on 2026-10-12.
+  const LONG = "a why that is deliberately much longer than eighty columns, because the yaml library re-folds those on output";
+  const f = await makeGlobFixture(
+    `      # a comment that must survive untouched\n` +
+      `      - path: lit.md\n        why: "literal pairing"\n        kind: prose\n` +
+      `      - path: stubs/a.md\n        why: "${LONG}"\n        kind: prose\n` +
+      `      - path: stubs/b.md\n        why: >\n          a folded block that spans\n          two source lines\n        kind: prose\n`,
+  );
+  try {
+    const before = readFileSync(f.sidecar, "utf8");
+    const rows = JSON.parse(runCli(["reconcile", "--all", "--json"], f.env).stdout).rows;
+    const lit = rows.find((r) => r.downstream.path && r.downstream.path.endsWith("lit.md"));
+    assert.ok(lit, "control: the literal edge exists");
+    const r = runCli(["verify", "--edge", lit.edge_id, "--disposition", "decoupled", "--apply", "--reason", "n124", "--json"], f.env);
+    assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+    const after = readFileSync(f.sidecar, "utf8");
+    const removed = `      - path: lit.md\n        why: "literal pairing"\n        kind: prose\n`;
+    assert.equal(after, before.replace(removed, ""), "the file is the original minus exactly that entry's three lines");
+    assert.ok(after.includes(`why: "${LONG}"`), "the long why is still on one line");
+    assert.ok(after.includes("        why: >\n          a folded block that spans\n          two source lines\n"), "the folded block is untouched");
+  } finally {
+    await cleanup(f.searchRoot, f.stateDir);
+  }
+});
