@@ -139,3 +139,32 @@ test("the real instance parses as delegated — the file this format was built f
   assert.equal(r.open, 0);
   assert.match(r.delegatedTo, /obsidian-vk-publish\/issues$/);
 });
+
+test("a delegating register that KEEPS its history still parses as delegated, not by its entries", () => {
+  // propagate's own ISSUES.md, 2026-10-12: live entries moved to GitHub, resolved
+  // ones kept, each moved one left a `**MOVED** → #n` heading. With the delegated
+  // check behind the entry parsers, the ID-keyed parser claimed the file first and
+  // reported the moved stubs as open work, and --trackers never read the tracker.
+  // The fixture is a literal on purpose — never build it through another parser.
+  // It is LONGER THAN 40 LINES on purpose too: a shorter file whose headings say
+  // "moved" is a pointer stub by `isPointerStubText`'s bound, which is checked
+  // first and is right to be — that is the boundary, not this case.
+  const history = Array.from({ length: 25 }, (_, i) => [`### N${i + 10} · old entry — **RESOLVED 2026-09-01**`, ""]).flat();
+  const body = [
+    "**Open work lives in [GitHub issues](https://github.com/o/r/issues), not in this file.**",
+    "",
+    "# Issue register",
+    "",
+    "### N1 · a moved entry — **MOVED** → [#5](https://github.com/o/r/issues/5)",
+    "",
+    "### N2 · a finished entry — **RESOLVED 2026-10-01**",
+    "",
+    "- [ ] a stray checkbox in the history",
+    "",
+    ...history,
+  ].join("\n");
+
+  const r = parseTodoLikeFile(body, "/tmp/delegated-ISSUES.md");
+  assert.equal(r.format, "delegated", `parsed as ${r.format} with ${r.open} open — the history claimed the file`);
+  assert.equal(r.delegatedTo, "https://github.com/o/r/issues");
+});

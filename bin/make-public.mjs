@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 
 import { SEARCH_ROOTS } from "../lib/core/config.mjs";
 import { FORBIDDEN } from "../lib/core/public-forbidden.mjs";
+import { normalizeMap, scrub, scrubEntries } from "../lib/core/public-scrub.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STATE = process.env.PROPAGATE_STATE_DIR || path.join(os.homedir(), ".propagate");
@@ -55,25 +56,6 @@ function sh(args) {
   return execFileSync("git", args, { cwd: REPO, encoding: "utf8", maxBuffer: 1 << 26 });
 }
 
-/**
- * The map has two shapes on disk:
- *   - flat legacy:  { "Some Client": "alias", ... }
- *   - current:      { "names": { "Some Client": "alias", ... }, "allow": [...] }
- *
- * A flat object has no "names" key, so that alone distinguishes it — every real
- * client name is a legitimate object key, "names" is not one anyone has chosen.
- * Treating flat-as-{names: flat, allow: []} keeps every map on disk today valid
- * without a migration step.
- */
-function normalizeMap(raw) {
-  if (raw && typeof raw === "object" && !Array.isArray(raw) && Object.prototype.hasOwnProperty.call(raw, "names")) {
-    const names = raw.names && typeof raw.names === "object" ? raw.names : {};
-    const allow = Array.isArray(raw.allow) ? raw.allow : [];
-    return { names, allow };
-  }
-  return { names: raw && typeof raw === "object" ? raw : {}, allow: [] };
-}
-
 function loadMap() {
   if (!existsSync(MAP_PATH)) {
     console.error(`no identity map at ${MAP_PATH}`);
@@ -84,7 +66,7 @@ function loadMap() {
     process.exit(2);
   }
   const { names, allow } = normalizeMap(JSON.parse(readFileSync(MAP_PATH, "utf8")));
-  const entries = Object.entries(names).sort((a, b) => b[0].length - a[0].length); // longest first
+  const entries = scrubEntries(names); // longest first
   if (!entries.length) {
     console.error("identity map is empty — nothing would be scrubbed");
     process.exit(2);
@@ -141,15 +123,6 @@ function checkWatchlistCoverage({ names, allow }) {
 
 function excludedBy(rel) {
   return EXCLUDE.find((e) => rel.startsWith(e.prefix)) || null;
-}
-
-function scrub(text, entries) {
-  let out = text;
-  for (const [real, alias] of entries) {
-    out = out.split(real).join(alias);
-  }
-  out = out.replace(/\/Users\/[A-Za-z0-9._-]+/g, "$HOME");
-  return out;
 }
 
 // ---------------------------------------------------------------------------

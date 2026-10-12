@@ -1,5 +1,18 @@
 # propagate — State
 
+## Open issues live on GitHub now, not in ISSUES.md — 2026-10-12 (no version bump)
+
+Every live entry of `ISSUES.md` is now a GitHub issue on the public tracker, #23-#67, each with its full text, scrubbed by `lib/core/public-scrub.mjs`. That module was extracted from `make-public`, so the two publishers cannot disagree about what is private.
+- **What moved:** the 40 OPEN/BLOCKED `N` entries. Also 5 letter-keyed entries from the 2026-08-13 audit (C1, C2, G2, E1, E2). Those carried no disposition word and surfaced only when the full suite ran.
+- **Triaged instead of moved:** B2 and G3 measured RESOLVED; E3 points at #2, which is the same issue.
+- **What stays in the file:** finished entries, plus one `**MOVED** → #n` heading per moved entry.
+- **Vocabulary:** `MOVED` joined the disposition vocabulary and `registers.mjs`'s finished set.
+- **`backlog` fix:** it now tests for a delegating head BEFORE the entry parsers, so a register that keeps its history reads `delegated`; before this it read `id-keyed` with 47 open.
+- **R4 corpus test:** it admits a parsed → delegated change only when every item HEAD counted open is MOVED or ACCEPTED.
+- **Truncation, fixed:** the first cut truncated N61 and N74 at a heading quoted inside a fence. Both issues were rewritten from the snapshot. This is G77.
+
+Count open work with `propagate backlog --trackers`, never from this file. The issue tables further down this file are history from before the move.
+
 ## Gotchas reach projects nested deeper than one level — 2026-10-06, `d772651` (no version bump)
 
 N122 RESOLVED: `sourcesFor` keyed `state/<child>` on the first directory under the workspace, so `Rupali/Experiments/Vipin/Poker`'s GOTCHAS.md was never delivered. It now also matches each state dir's `.sidecar.yml` `repo_root` (by `path.relative`; absolute or `..` roots ignored).

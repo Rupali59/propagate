@@ -1858,3 +1858,19 @@ first), each found only by the next full run.
 `git ls-files` sees them without staging their content; or run the suite after `git add`, before
 `git commit`. And never write a literal the check refuses into a file the check reads, comments and test
 fixtures included: build it at runtime.
+
+### G77 · Cutting a register into entries at `## ` lines truncates any entry that QUOTES a heading inside a fence
+Registers here quote headings inside fenced blocks: N61 quotes a `## D16 · …` line from a DECISIONS file
+it is diagnosing. A block parser that ends an entry at the next `## ` or `### N` line, without asking
+whether that line is fenced, cuts the entry in two. The front half goes wherever you sent it, and the back
+half is left behind with its opening fence gone, so it now reads as live headings and prose.
+**Signal:** a heading in the register that belongs to no entry (here an orphaned `## D16`), or a parse that
+counts an "open" item nobody filed.
+**Cost:** 2026-10-12, the ISSUES.md → GitHub migration published N61 and N74 truncated (#31 missing 9 lines,
+#38 missing 22). The preservation check said "3510 history lines identical" because it used the **same**
+block boundaries as the cut, so it could not see the error. Found by `backlog-proposed-corpus`'s R4
+comparison, through an orphan HEAD's parser counted as open. Fixed by re-cutting from the pre-migration
+snapshot.
+**Instead:** take boundaries from `scanStructure(text).fenced` (`lib/docs/tokens.mjs`, 1-based) — the scanner
+`registers.mjs` already routes through — and verify by a DIFFERENT route than the one that cut: every kept
+heading keeps its fenced status before and after, and fence delimiters stay balanced.

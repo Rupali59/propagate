@@ -1,3 +1,10 @@
+**Open work lives in [GitHub issues](https://github.com/Rupali59/propagate/issues), not in this file.** On 2026-10-12 every
+OPEN and BLOCKED entry moved there — full text, client names scrubbed by `lib/core/public-scrub.mjs`, the same
+function `make-public` uses, because the repo is public. File new work there. This file keeps the resolved history;
+each moved entry left a `**MOVED** → #n` heading so every `N<k>` citation in the tree still resolves.
+
+> Moved: [N22](https://github.com/Rupali59/propagate/issues/23) → #23 · [N35](https://github.com/Rupali59/propagate/issues/24) → #24 · [N38](https://github.com/Rupali59/propagate/issues/25) → #25 · [N42](https://github.com/Rupali59/propagate/issues/26) → #26 · [N52](https://github.com/Rupali59/propagate/issues/27) → #27 · [N54](https://github.com/Rupali59/propagate/issues/28) → #28 · [N58](https://github.com/Rupali59/propagate/issues/29) → #29 · [N60](https://github.com/Rupali59/propagate/issues/30) → #30 · [N61](https://github.com/Rupali59/propagate/issues/31) → #31 · [N62](https://github.com/Rupali59/propagate/issues/32) → #32 · [N63](https://github.com/Rupali59/propagate/issues/33) → #33 · [N64](https://github.com/Rupali59/propagate/issues/34) → #34 · [N66](https://github.com/Rupali59/propagate/issues/35) → #35 · [N67](https://github.com/Rupali59/propagate/issues/36) → #36 · [N72](https://github.com/Rupali59/propagate/issues/37) → #37 · [N74](https://github.com/Rupali59/propagate/issues/38) → #38 · [N75](https://github.com/Rupali59/propagate/issues/39) → #39 · [N77](https://github.com/Rupali59/propagate/issues/40) → #40 · [N79](https://github.com/Rupali59/propagate/issues/41) → #41 · [N80](https://github.com/Rupali59/propagate/issues/42) → #42 · [N81](https://github.com/Rupali59/propagate/issues/43) → #43 · [N83](https://github.com/Rupali59/propagate/issues/44) → #44 · [N85](https://github.com/Rupali59/propagate/issues/45) → #45 · [N86](https://github.com/Rupali59/propagate/issues/46) → #46 · [N88](https://github.com/Rupali59/propagate/issues/47) → #47 · [N90](https://github.com/Rupali59/propagate/issues/48) → #48 · [N91](https://github.com/Rupali59/propagate/issues/49) → #49 · [N92](https://github.com/Rupali59/propagate/issues/50) → #50 · [N93](https://github.com/Rupali59/propagate/issues/51) → #51 · [N94](https://github.com/Rupali59/propagate/issues/52) → #52 · [N95](https://github.com/Rupali59/propagate/issues/53) → #53 · [N96](https://github.com/Rupali59/propagate/issues/54) → #54 · [N98](https://github.com/Rupali59/propagate/issues/55) → #55 · [N100](https://github.com/Rupali59/propagate/issues/56) → #56 · [N106](https://github.com/Rupali59/propagate/issues/57) → #57 · [N108](https://github.com/Rupali59/propagate/issues/58) → #58 · [N109](https://github.com/Rupali59/propagate/issues/59) → #59 · [N110](https://github.com/Rupali59/propagate/issues/60) → #60 · [N111](https://github.com/Rupali59/propagate/issues/61) → #61 · [N112](https://github.com/Rupali59/propagate/issues/62) → #62 · [C1](https://github.com/Rupali59/propagate/issues/63) → #63 · [C2](https://github.com/Rupali59/propagate/issues/64) → #64 · [G2](https://github.com/Rupali59/propagate/issues/65) → #65 · [E1](https://github.com/Rupali59/propagate/issues/66) → #66 · [E2](https://github.com/Rupali59/propagate/issues/67) → #67 · E3 → #2 (duplicate)
+
 > Entry point: [`../skills/propagate/SKILL.md`](../skills/propagate/SKILL.md) · Index: [`README.md`](./README.md)
 
 # Propagate — issue register
@@ -15,7 +22,7 @@
 >
 > ```sh
 > node -e 'const l=require("fs").readFileSync("propagation/state/workspace/ISSUES.md","utf8").split("\n").filter(t=>/^### N\d+/.test(t));
-> const D=/\*\*(OPEN|RESOLVED|BLOCKED|ACCEPTED|APPLIED, UNVERIFIED|WITHDRAWN|MOOT)\b/;
+> const D=/\*\*(OPEN|RESOLVED|BLOCKED|ACCEPTED|APPLIED, UNVERIFIED|WITHDRAWN|MOOT|MOVED)\b/;
 > console.log(l.length+" headings, "+l.filter(t=>!D.test(t)).length+" undispositioned");'
 > ```
 >
@@ -27,6 +34,7 @@
 > | `APPLIED, UNVERIFIED` | the change was made; the verification is outstanding |
 > | `RESOLVED <date>` | closed, with the measurement or code path that closed it |
 > | `MOOT` | the thing it describes no longer exists to be wrong |
+> | `MOVED` | the entry now lives in a GitHub issue, linked beside it (2026-10-12) |
 >
 > **The vocabulary exists because the count was unmeasurable.** `PR-005` reported 18
 > undispositioned entries using `/\*\*OPEN\*\*/` — so seven that DID carry a disposition
@@ -385,122 +393,13 @@ reported as a census is how the 87% got here.
 history now, reachable and frozen, which `status` already reports as `frozen: 401 v1 event(s) in
 archive/ — history, not a worklist`.
 
-### N22 · Glob expansion correlates states, so raw expanded counts mislead a future drain UI — **S3, design** — **OPEN** (a design question about what a future drain UI should count; no such UI exists yet to be misled)
-Not a v1 defect — a design finding from the v2 spike, recorded here because a finding that lives
-only in a plan file is a finding that is already lost (Phase C of
-`~/.claude/plans/okay-i-dont-think-logical-haven.md`, itself citing R4). Measured in the read-only
-Phase 1 spike (plan §3c): one globbed source matched against ~20 files yields 20 edges all carrying
-that source's state, so a raw per-edge count overstates independent findings — "76 DIVERGED" was
-really a handful of globbed sources times N matches. Showing 76 rows for 4 real decisions is
-precisely the ratio that trained people to ignore v1's queue in the first place (see A2, C1's
-"298 rows became furniture").
-
-*Fix:* not yet built — this is a requirement on v2's `reconcile`/`drain`, not a v1 code change. Any
-UI over expanded glob edges must group by the generating glob (the same way `correlation_id` groups
-worktree-expanded rows today), so one glob decision reads as one queue item, not N.
-
-### A1 · Workspace promotion strands prior rows — **S1**
-Rows written before a directory gained `workspace: true` stay in the parent ledger and are invisible
-to workspace-scoped `status`. **36 such rows** found in the hub, all predating Vipin Kaushik's
-2026-08-10 promotion; they also kept `doctor`'s duplicate check red until drained.
-
-Per `docs/DECISIONS.md` 2026-08-10 the deferred 69 hub rows may only ever be **closed-and-re-emitted,
-never rewritten** — ids are per-file sequential, `source` is workspace-relative, `status_change`
-history must be re-pointed, and N4 makes a half-applied migration invisible.
-
-*Fix:* promotion migrates or `doctor` says "N rows predate this promotion".
-
-### A2 · The same drift can be open in two ledgers at once — **S2**
-`hasOpenDuplicateDrift` is scoped to one file and `source` is workspace-relative. `DECISIONS.md`
-2026-08-10 states plainly that "total open stays 93" was true only at the instant of promotion, not
-a steady-state invariant. `findDuplicateOpenAcrossLedgers` (`cli.mjs:119-120`) was shipped as the
-deferral's **expiry signal** — it has since fired: 28 source paths, measured 2026-08-13 from
-`~/Documents/GitHub/Vipin Kaushik`.
-
-**Root cause, measured (2026-08-13):** all 28 are nested parent+child pairs. Zero are genuinely
-unrelated ledgers. Example: `PanditPawanKaushik/SSJK-mb/server/auth/webauthn.js` is open in both the
-`GitHub` hub ledger and the `SSJK-mb` ledger. This is not an independent defect — it is a
-**symptom of nested workspace attribution**: workspace roots nest (`GitHub` ⊃ `PanditPawanKaushik` ⊃
-`SSJK-mb`), and the watcher attributes a changed file's drift row to *every* workspace whose subtree
-contains it, not just the nearest one. A file under a child workspace gets claimed by the child AND
-every ancestor, and each fires its own row into its own ledger.
-
-The real fix is **attribution at write time**: a file belongs to its nearest (deepest) workspace, and
-only that workspace's ledger should ever receive its rows. **This has not been done.** The
-2026-08-13 doctor-dedup commit (see below) only dedupes *reporting* — the same nested-workspace
-insight applied to `doctor`'s sidecar validation, not to the watcher's ledger writes. Changing where
-the watcher writes is a live behaviour change, and it would leave the 28 existing duplicate rows
-needing a separate decision (migrate? close-and-re-emit, per A1's rule? leave as historical?). Do not
-conflate the two: reporting is deduped as of 2026-08-13; attribution is not, and `watcher.mjs` was
-not touched to produce that fix.
-
-*Consequence for `doctor`:* the sidecar **validation** side of this same nested-root pattern was
-separately measured and fixed 2026-08-13 — `doctor` was running `findSidecars` per workspace root,
-and since `findSidecars` recursively walks a workspace's entire subtree with no awareness of nested
-workspace boundaries, the same `.propagates.yml` was found (and revalidated) by every ancestor
-workspace. Measured before the fix: 43 sidecar scans for 21 unique sidecars (22 wasted, ~51%), 11
-`doctor` problems for 4 real defects. After the sidecar-dedup fix alone: 21 scans (one per unique
-sidecar, exactly), 5 problems (the 5th was `doctor`'s pre-existing habit of emitting both a per-entry
-`check()` failure AND an aggregate "sidecar downstream paths resolve" `check()` failure for the same
-directory-as-downstream defect — a double-count that only became *visible* here because `pathProblems`
-had been declared-but-never-incremented until this same 2026-08-13 session, so before that the
-aggregate could never fail and the double-count could not fire). **RESOLVED same day:** the aggregate
-now prints as an informational summary (count only, `·` marker, not `✗`) whenever per-entry failures
-already fired above it, instead of casting a second vote for the same bug — see `info()` in
-`cli.mjs`'s `doctor()`. Warnings-only runs are unchanged: with zero per-entry failures the aggregate
-still counts as the sole `check()`. Net: 4 problems for 4 real defects, matching one-`✗`-per-defect.
-`assignSidecarsToWorkspaces` (`cli.mjs`) assigns each sidecar, keyed by `fs.realpathSync`, to the
-deepest workspace whose root contains it; `doctor`'s per-workspace loop validates only what it owns.
-This is the reporting-side analogue of the write-time fix described above, and does not substitute
-for it — the ledger duplication (this section) is unchanged.
-
-### A4 · Nested-workspace multiplication is structural, not only a doctor/ledger symptom — **S2**
-Roots nest (`GitHub` ⊃ `PanditPawanKaushik` ⊃ `SSJK-mb`), and every place in the codebase that
-iterates workspaces without deduplicating by nearest-owner inherits the same multiplication A2 and
-the `b6d8972`/`dca09be` commits fixed in two specific spots. Before `dca09be`, one sidecar bug was
-independently scanned and reported **three times** (43 scans for 21 unique sidecars, 11 `doctor`
-problems for 4 real defects) purely because `findSidecars` walked each workspace's full subtree with
-no boundary awareness. `assignSidecarsToWorkspaces` (keyed by `fs.realpathSync`, assigning each
-sidecar to its deepest owning workspace) fixed *sidecar validation* specifically. A2's own root
-cause — the watcher attributing one file's drift row to every ancestor workspace's ledger, not just
-the nearest — is the write-time instance of the same pattern and is explicitly **not** fixed (see
-A2's "Consequence for doctor" note: reporting is deduped, attribution is not).
-
-The two fixes so far are both point fixes for specific call sites, not a general utility. Any new
-code that walks `discoverWorkspacesSync()`'s output and does per-workspace work on overlapping
-subtrees (a future metrics emitter, a new `doctor` check, a v2 `reconcile` pass) needs to either
-reuse `assignSidecarsToWorkspaces`'s realpath-keyed dedup pattern or inherit the same triple-counting
-bug in a new location.
-
-*Fix:* extract the nearest-owner assignment into a shared helper (`lib/discovery.mjs` is the natural
-home, next to `discoverWorkspacesSync`) so future call sites get it by construction rather than by
-remembering to re-derive it, the way `assignSidecarsToWorkspaces` and A2's write-time fix would
-otherwise have to be reinvented a third time.
-
-### A3 · Ledger location is pinned — **S2**
-`makeWorkspaceRecord` resolves to `<root>/docs/PROPAGATION_LEDGER.jsonl` when `docs/` exists, else
-`.propagation/ledger.jsonl`, with a pinning rule for whichever already exists. Moving `docs/` would
-orphan a live ledger — narrowly avoided during the 2026-08-12 reorg.
-
----
+### N22 · Glob expansion correlates states, so raw expanded counts mislead a future drain UI — **S3, design** — **MOVED** → [#23](https://github.com/Rupali59/propagate/issues/23) (2026-10-12; the full entry is there)
 
 ## Coverage
 
-### C1 · Nothing reports what is *not* declared — **S1**
-`VipinKaushik` had **no sidecar at all** while every sibling repo had one; its 31 content specs
-(10,010 lines) could not be sources. Consequence: the 2026-07-15 legal-shell migration dropped two
-privacy disclosures that are live on production and **no row fired**. Fixed for that repo on
-2026-08-13; the *blind spot* is not fixed.
+### C1 · Nothing reports what is *not* declared — **S1** — **MOVED** → [#63](https://github.com/Rupali59/propagate/issues/63) (2026-10-12, triaged live; the full entry is there)
 
-*Fix:* a `doctor` coverage line per repo — sidecar present? sources declared? files in the docs tree
-named nowhere? This would have caught it in seconds.
-
-### C2 · The ledger reads as a forensic record and is not one — **S2**
-Asked "is there anything in the ledger about the legal documents?", the honest answer was two
-incidental rows — because the ledger only knows declared files. Its silence carries no information
-but *looks* like evidence of absence.
-
-*Fix:* when a query matches nothing, say "not declared in any sidecar" rather than returning empty.
+### C2 · The ledger reads as a forensic record and is not one — **S2** — **MOVED** → [#64](https://github.com/Rupali59/propagate/issues/64) (2026-10-12, triaged live; the full entry is there)
 
 ---
 
@@ -511,7 +410,7 @@ propagate coordinates parallel work across branches/worktrees/repos, not doc sta
 premise, branch-blindness is not noise — it is the coupling the tool exists to hold, silently
 failing on exactly the case that matters most.*
 
-### B2 · Squash merges defeat ancestry checks — **S1**
+### B2 · Squash merges defeat ancestry checks — **S1** — **RESOLVED 2026-10-12** (triaged: `lib/refs/snapshot.mjs:103` decides merged refs with `git cherry`, and `rule:absence-claims-need-state-and-branch` documents it)
 *(was S2; re-ranked 2026-08-13 — see note above)*
 
 13 branches read as unmerged by `git branch --merged` while their content was live in production.
@@ -522,23 +421,9 @@ wrong conclusion about lost work, and the skill is the natural place to document
 
 ## The commit-time gate
 
-### G2 · `--changed` is a documented no-op, not a parse failure — **S3** — **corrected 2026-08-13**
-*(Originally filed as S2 "never parsed", implying `check --changed` was broken. That overstated it —
-corrected after re-reading `cli.mjs:907-937` against the actual branching.)*
+### G2 · `--changed` is a documented no-op, not a parse failure — **S3** — **corrected 2026-08-13** — **MOVED** → [#65](https://github.com/Rupali59/propagate/issues/65) (2026-10-12, triaged live; the full entry is there)
 
-`cli.mjs` reads `--strict`, `--staged`, `--range`; `--changed` matches none of them and falls through
-to the `else` branch, which is *exactly* the documented `--changed` behaviour (working tree + staged
-vs `HEAD`, unioned — see the usage comment at the top of `cli.mjs`). So `check --changed` behaves
-correctly and identically to bare `check`; the flag is accepted but has no distinct code path because
-it names the default, not because parsing failed. `check --bogus` also falls through to the same
-default, which is arguably worth a warning someday, but that's unrelated to `--changed` specifically.
-Passing both `--range` and `--staged` does make `--range` win silently (branch order:
-`range` → `staged` → default) — that's the only real (S3, cosmetic) finding here.
-
-*Fix (if ever prioritized):* warn on unrecognized flags; document the `--range`-beats-`--staged`
-precedence in the usage comment. Not a correctness bug — downgraded from S2.
-
-### G3 · The gate is documented but not installed — **S2**
+### G3 · The gate is documented but not installed — **S2** — **RESOLVED 2026-10-12** (triaged: `.githooks/pre-commit` runs `check --staged` via `core.hooksPath`, and doctor checks installed hooks for liveness, `cli.mjs:694`)
 `SKILL.md` describes a pre-push hook. Nothing installs it, and no repo in the workspace has one.
 `check` is read-only, correct, and hook-safe — it is simply unused.
 
@@ -546,23 +431,11 @@ precedence in the usage comment. Not a correctness bug — downgraded from S2.
 
 ## Noise
 
-### E1 · Reorg edits are indistinguishable from content edits — **S2**
-Updating a path reference inside a declared source fires the same row as changing its meaning. The
-2026-08-12 `docs/` reorg produced **11** such rows, all closed by hand with a "path-reference
-housekeeping only" note.
+### E1 · Reorg edits are indistinguishable from content edits — **S2** — **MOVED** → [#66](https://github.com/Rupali59/propagate/issues/66) (2026-10-12, triaged live; the full entry is there)
 
-### E2 · Declare-ahead warnings never expire — **S3**
-Four have stood for weeks (`InboxRail.tsx` ×2, `ephemeris_scheduler.py`, `CHAPTER_LOG.md`).
-Permanent yellow trains readers to skip the warning block — which is how A1's red ✗ went unnoticed.
+### E2 · Declare-ahead warnings never expire — **S3** — **MOVED** → [#67](https://github.com/Rupali59/propagate/issues/67) (2026-10-12, triaged live; the full entry is there)
 
-*Fix:* `expect_by:` on declare-ahead entries; escalate past it.
-
-### E3 · No way to record "deliberately not declared" — **S2**
-`VipinKaushik/docs/content/README.md` argues the spec tree should *not* be declared. That reasoning
-lives in prose the tooling cannot see, so the only states are "declared" and "absent" — and absent
-looks like an oversight. It took a full audit to establish it was a decision.
-
-*Fix:* an `excluded:` block with a `why`, reported by `doctor` as intentional.
+### E3 · No way to record "deliberately not declared" — **S2** — **MOVED** → [#2](https://github.com/Rupali59/propagate/issues/2) (2026-10-12; the same issue, filed there on 2026-08-18)
 
 ---
 
@@ -752,185 +625,9 @@ drift stayed invisible.
 is the one that would have caught it, and it can fail, per G1. (c) Render an absolute
 date, or omit the freshness line from the file and leave it to `status`.
 
-### N35 · `selftest` proves self-match, not wild-match — 7 rules are unexercised — **S2** — **OPEN**
+### N35 · `selftest` proves self-match, not wild-match — 7 rules are unexercised — **S2** — **MOVED** → [#24](https://github.com/Rupali59/propagate/issues/24) (2026-10-12; the full entry is there)
 
-**MEASURED 2026-09-30, and the number this entry wanted is worse than it guessed.** Three sentences
-lifted VERBATIM out of canonical rule bodies fire **zero** of 22 fingerprints — including each
-sentence's own rule. `delegation-criteria.md:94` and `discernment-checks.md:33` both read *"A report
-saying \"verified\" is a claim about verification"*, and neither rule's fingerprint matches it. All
-seven claims from the rule-promotion backlog, written in ordinary English, likewise fire nothing.
-So `rules check`'s "0 silent restatements" means **"nobody copy-pasted a rule uncited"**, never
-"nobody restated one". The seven rules written that day were authored against a held-out corpus of
-real scattered copies instead of their own bodies — see [[n72]] for why the corpus must be claim
-lines rather than headings.
-
-**Filed 2026-08-19**, found while widening `never-commit-unless-asked`.
-
-`selftest` asserts every fingerprint matches **its own rule body**. That body is written
-in the rule's own house style, so the check says nothing about whether the fingerprint
-can fire on how the claim is written **in the wild** — and those differ in exactly the
-way that matters.
-
-**The proven instance.** `never-commit-unless-asked` was `[Nn]ever commit unless`. It
-matched **zero files across 47 CLAUDE.md**, while passing selftest, because the rule
-body bolds the whole sentence (`**Never commit unless explicitly asked.**`) and every
-real restatement bolds only the first half (`- **Never commit** unless explicitly
-asked`). Two `*` characters, and the detector had never fired since it was written.
-`overrideRe` already tolerates exactly this markup, for exactly this reason — the
-tolerance existed and was not applied here.
-
-Fixed for that rule: markup-tolerant, still anchored on `unless|without` so
-`Rupali/Obsidian/CLAUDE.md`'s "Never commit `Scripts/config/…json`" — a project fact
-about one file, not a restatement — stays excluded. 0 files → 2, both converted.
-
-**The open part: 7 of 16 rules are `unexercised`** — fingerprint matches nothing AND
-nothing references them:
-
-`adversarial-review-reads-the-ledger`, `browser-only-when-asked`, `delegation-criteria`,
-`discernment-checks`, `every-project-carries-gotchas`, `model-routing`,
-`no-waiting-on-deploys`, `safety-flag-needs-a-test`.
-
-**This is NOT a claim that those fingerprints are broken.** Several are recent, and a
-rule with genuinely nothing restating it produces the identical output. That is the
-whole problem: **unknown and clean are indistinguishable**, which is the failure this
-skill exists to catch, sitting in its own newest component.
-
-`propagate rules list` now prints restated/referenced/status per rule and names the
-unexercised count, so the unknown is at least visible. Making it *decidable* needs a
-per-rule probe — a known-positive sample of how each claim is actually phrased — which
-is judgment work, one rule at a time, and is what this issue tracks.
-
-**2026-09-15 — Phase 2a judged 15 restatements and this issue is UNCHANGED by it.** That
-is worth writing down, because the plan that built the restate lane asserted it would close
-N35 and the assertion was wrong in a way only measurement caught.
-
-`claims restate`'s corpus is `checkRules`'s `referencedRestatements` — entries that both
-CITE a rule and restate it. An unexercised rule is by definition one with `restated 0,
-referenced 0`. **The two sets are disjoint by construction**, so no amount of work in this
-lane can ever reach the rules this issue is about. All 15 verdicts landed on four rules that
-were already `firing`: `tool-priority` (12 restatements), `secrets-source-of-truth` (3),
-`environment-vocabulary` and `state-and-decisions` (1 each).
-
-The count has moved on its own, and the membership churned — derive it, never trust this
-line (`propagate rules list`). At filing it was 7; on 2026-09-15 it is **5**:
-`adversarial-review-reads-the-ledger`, `browser-only-when-asked`,
-`enforcement-watches-itself`, `no-waiting-on-deploys`, `safety-flag-needs-a-test`.
-Four named at filing have since become adopted or firing — and `enforcement-watches-itself`,
-which was NOT on the original list, has since joined it. A rule about checks that exempt
-themselves, itself unexercised, is the joke writing itself.
-
-What would actually close this is still what the entry already says: a per-rule known-positive
-probe. Phase 2b (the silent set — restates WITHOUT citing) is nearer to it, since it drops the
-citation requirement, but it still cannot see a rule that nothing restates at all.
-
-**Do not "fix" this by widening fingerprints speculatively.** The opposite error is
-already recorded: `nextjs-dev-server-port` matched the helper script's name and produced
-7 false positives (N34). Widen only against a real sample.
-
----
-
-**RE-MEASURED 2026-08-24, and this entry's own list was stale.** Run `propagate rules list`
-rather than trusting the names below:
-
-* **6 unexercised, not 7:** `adversarial-review-reads-the-ledger`, `browser-only-when-asked`,
-  `discernment-checks`, `enforcement-watches-itself`, `every-project-carries-gotchas`,
-  `no-waiting-on-deploys`.
-* `delegation-criteria`, `model-routing` and `safety-flag-needs-a-test` are **no longer**
-  unexercised — they now read adopted or firing. `enforcement-watches-itself` newly is, and
-  is not in the list above. Four of the eight names were wrong within five days, which is the
-  ordinary rot rate for a count in a state file and the reason `rules list` exists.
-
-**A SHARPER DEFECT, found while measuring this one and fixed in the same pass.** `rules
-check` reported **0 restatement(s) across 0 file(s)** while `rules list` reported **25**
-matches — two commands answering one question with 0 and 25.
-
-Cause: `checkRules` carried
-
-```js
-if (raw.includes(`rule:${r.id}`)) continue; // references it — clean
-```
-
-A blanket exemption. Sound in intent — a file pointing at the canonical rule is doing the
-right thing, and a rule id beside a hub-local fact is not a copy — but it excused a file that
-references a rule in one line and keeps a stale copy in another. **That is the most likely
-shape, not a hypothetical:** nobody deletes the copy and adds the pointer in the same edit,
-so "pointer added, copy left behind" is precisely what a half-finished conversion looks like,
-and it is how nine divergent copies of `tool-priority` came to make four mutually exclusive
-claims.
-
-Measured: **19 files restate a rule they also reference** — `tool-priority` 11,
-`secrets-source-of-truth` 6, `safety-flag-needs-a-test` 1, `state-and-decisions` 1. None was
-reported.
-
-They are now **counted and printed, per rule, and still not failed**. Flipping nineteen files
-to failures in one commit is how a gate gets bypassed rather than fixed; the exit code stays
-quiet and the number now exists. `referencedRestatements` is present-and-empty on a clean
-tree, never absent.
-
-**STILL OPEN:** the per-rule known-positive probe this issue was filed for. Nothing here
-proves any of the six unexercised fingerprints can fire on real phrasing — that remains
-judgment work, one rule at a time, against a real sample. What changed is that a second way
-of being blind was closed, and the stale names above were corrected.
-
----
-
-### N38 · The private→public coupling has no watcher — `release --check` step 3 is a procedure, not a check — **S2** — **BLOCKED** (precondition unmet, re-verified 2026-08-24)
-
-Raised while defining release mechanics
-(`~/.claude/plans/status-temporal-plum.md` §4, "named, deferred, not faked"). Recorded
-so a future pass does not read `make-public --check` passing as evidence the two-repo
-coupling is watched — that claim was drafted once already in this plan's first pass
-and caught in adversarial review before it shipped (A3 in the plan file): the draft
-declared `VERSION → docs/RELEASE.md` and called the cross-repo problem closed. That
-edge is within THIS repo; it says nothing about the repo that does not exist yet.
-
-**The actual coupling.** This private working copy (real names, real paths, internal
-docs) and the eventual public release copy (scrubbed, no git history in common) must
-stay in sync by hand, via `bin/make-public.mjs`, run by a person, at a time of their
-choosing. Nothing fires if that scrub goes stale relative to a code change — there is
-no edge, so there is no drift to detect.
-
-**Why it cannot be declared today.** A cross-repo edge is bounded by
-`cross-allow.yml`'s `partner_roots`, which is `[]` by design (empty is the safe
-default: an unconfigured install permits no cross-repo edge). Declaring
-`propagate-skill → propagate` today would need `partner_roots` to name the public
-repo's path — and the public repo does not exist. There is nothing to point at.
-
-**What stands in for it, and why that is weaker than it sounds.**
-`docs/RELEASE.md` step 3 (`node cli.mjs release --check`, gate `make-public-check`)
-runs the real scrub against the real forbidden-pattern list and refuses to report
-success without a complete identity map. That is real coverage of "does the scrub
-produce a clean tree right now" — but it is a thing a human has to remember to run,
-not a thing that fires on the triggering change the way a declared edge would. The
-distinction that matters: a propagate edge tells you a *specific* file moved out of
-sync with a *specific* downstream; `release --check` only tells you "as of this
-invocation, nothing forbidden survives the current scrub of the current tree." A
-change landing between releases produces no signal either way.
-
-**Close condition.** Once the public repo exists and its root is added to
-`cross-allow.yml`'s `partner_roots`, declare the edge for real — plausibly something
-like `cli.mjs`/`lib/**` (or a narrower set, per N37's god-file lesson) →
-the corresponding public-repo paths, `kind: cross-repo`. Until then this entry is the
-honest record that step 3 is a procedure a human runs, not a coupling propagate
-watches, and `release --check` passing must not be read as more than that.
-
-**Re-verified 2026-08-24 — the precondition is still unmet, measured not assumed:**
-
-| | |
-|---|---|
-| `Rupali59/propagate` | `"visibility": "PRIVATE"` |
-| a public propagate repo | absent from `gh repo list --visibility public` (20 repos) |
-| `cross-allow.yml` `partner_roots` | `Motherboard`, `Tathya`, `SSJK-mb` — no public propagate |
-
-**Relabelled OPEN → BLOCKED, and the distinction is the point.** "Open because nobody
-did it" and "open because it cannot be done yet" are different facts, and a register that
-renders them identically is the same conflation this repo keeps paying for. Nothing here
-is waiting on effort. The trigger is external: the public repo coming into existence.
-
-**Do not close this by declaring the edge against a path that does not exist,** and do not
-close it by widening `partner_roots` to make the declaration validate. The entry above
-records that exact draft being caught in adversarial review once already.
-
+### N38 · The private→public coupling has no watcher — `release --check` step 3 is a procedure, not a check — **S2** — **MOVED** → [#25](https://github.com/Rupali59/propagate/issues/25) (2026-10-12; the full entry is there)
 
 ### N39 · A subagent's unscoped `bootstrap --apply` wrote 7 events to the live store — **S2** — **ACCEPTED** (not reverted — an append-only store cannot be edited; the entry says why)
 
@@ -975,61 +672,7 @@ NEVER_VERIFIED, 0 REVERSED**. The 2 formerly-REVERSED edges were resolved by han
 (`d1ae5ac0` both-reconciled, `0775c32e` no-change-needed). The 9 never-verified stay
 blocked on N40.
 
-### N42 · `renderMarkdown` has no live caller, and the file it renders is hand-written — **S2** — **BLOCKED** (on Phase D)
-
-> **DUPLICATE OF N31.** One defect, filed twice, five days apart. This entry carries the
-> decision and the full option analysis; N31 carries the earlier false-lines argument, one
-> half of which has since expired.
-
-**2026-08-21.** `renderMarkdown` (`lib/edges/ledger.mjs`) now groups rows under per-branch
-headings, giving `source_worktree` its first reader. **Nothing calls it.** Its only caller
-is `watcher.mjs`, retired 2026-08-14. So branch nodes exist in the `.jsonl` and are invisible
-in the `.md` a human reads — `docs/GOTCHAS.md` G48 / `rule:enforcement-watches-itself`,
-in freshly-written code.
-
-It cannot simply be wired up. The rendered `.md` files now carry **hand-written prose**:
-`ManavDaehi/docs/PROPAGATION_LEDGER.md` opens by explaining why it is frozen, and both
-`Manav-portfolio`'s and `SSJK-mb`'s carry uncommitted editorial corrections. Regenerating
-would destroy them.
-
-The file is doing two incompatible jobs — machine-rendered table and human explanation —
-which is the conflation `rule:state-and-decisions` names: *"a file that is half
-machine-refreshed and half hand-written reads as one thing."*
-
----
-
-**DEFERRED TO PHASE D, decided 2026-08-24.** Phase D freezes the v1 ledger, and a frozen
-ledger's `.md` is a historical artifact by definition — so D determines the answer.
-Deciding it now risks deciding it twice.
-
-**Re-measured before deferring, so D inherits facts rather than assertions:**
-
-| Claim | Command | Result |
-|---|---|---|
-| emits `Watcher healthy` | `grep -c "Watcher healthy" lib/edges/ledger.mjs` | **0 — expired**, messages rewritten to "drift is derived on demand" |
-| date tripwire | `grep -c daysAgo lib/edges/ledger.mjs` | **7 — live.** Output differs on the passage of time alone |
-| prose at risk | `wc -l ManavDaehi/propagation/ledger.md` | **50 lines, 39 of them prose** explaining why the file is frozen |
-| stale watcher text in the tree | `rg -l "Watcher writes drift rows"` | **9 files, historical** — no code emits it; the six pairs created 2026-08-24 are clean |
-
-So the live objections are **only** the tripwire and the prose. The "it would write
-falsehoods" argument is gone.
-
-**The four options, so D does not re-derive them:**
-
-| | For | Against |
-|---|---|---|
-| **(a)** fix + wire into `drain`/`verify` | `.md` stops rotting; `source_worktree` branch grouping reaches a reader for the first time; the two docs that prescribe it become true | destroys ManavDaehi's 39 lines and the `Manav-portfolio` / `SSJK-mb` corrections unless (c) lands first |
-| **(b)** retire it | removes provably dead code and a documented-but-forbidden path; matches derive-on-demand; where D lands anyway | `.jsonl` becomes the only machine view and nobody reads it by eye; branch grouping stays invisible |
-| **(c)** split machine table from prose | one job per file; regeneration safe by construction | a third artifact per workspace, on a layout standardised 2026-08-24 |
-| **(d)** marked-region render | one file, prose safe, machine part fresh; `collect.sh` precedent | **RULED OUT** — `rule:state-and-decisions` forbids exactly this, and #25 records the marker splice silently no-opping when the markers are absent |
-
-**THE COST OF DEFERRING, stated rather than hidden:** `docs/GOTCHAS.md` G40 and
-`docs/REFERENCE.md:193` continue to prescribe calling a function that must not be called,
-while `SKILL.md` forbids the hand-close they describe. That contradiction stays live for as
-long as this is deferred. It is the price of not deciding twice, not an argument that the
-deferral is free.
-
-**Unresolved and needed before the branch-node view reaches a human.**
+### N42 · `renderMarkdown` has no live caller, and the file it renders is hand-written — **S2** — **MOVED** → [#26](https://github.com/Rupali59/propagate/issues/26) (2026-10-12; the full entry is there)
 
 ### N50 · `inventory.test.mjs` classifies by a 5s git timeout, so its verdict depends on machine load — **RESOLVED 2026-09-29** (`tests/cli/inventory.test.mjs` contains no timeout; the 5s git classification is gone)
 
@@ -1084,56 +727,7 @@ site so a timeout produces an attributable `status`, not a silently different
 classification. Do NOT simply raise the constant — that moves the threshold without removing
 the dependence on load.
 
-### N52 · `migrate-refs`'s markdown renderer prints `undefined` and misplaces paths into the ref column — **S3** — **OPEN**
-
-Found 2026-08-27 while refreshing the branch registry after pruning worktrees. The
-**data layer is correct**; only the human-readable rendering is wrong, which is why this is
-S3 and not S2.
-
-`migrate-refs <workspace>` (dry-run) renders every event with a literal `undefined` as its
-leading field, emits `<project>/null` rows, and puts an absolute filesystem path where a ref
-name belongs:
-
-```
-undefined Motherboard/chore/shared-as-versioned-module
-undefined Motherboard//Users/<user>/Documents/GitHub/Motherboard/.claude/worktrees/hardcore-villani-778ff0
-undefined Rishabh/null
-undefined curate-docs-skill/null
-```
-
-**The same run under `--json` is entirely well-formed**, which is what localises the defect:
-
-```json
-{"type":"worktree-removed","project":"Motherboard","ref":"feature/asset-registration","path":"/Users/.../\.worktrees/feature/asset-registration"}
-{"type":"baseline","project":"Anushka","ref":null,"path":null,"ref_count":1,"detected_by":"snapshot-diff"}
-```
-
-So: the renderer reads a field name the event objects do not carry (hence `undefined` where
-`type` belongs), prints `ref` without handling the documented `null` case that `baseline`
-and workspace-level events legitimately use, and falls back to `path` for
-`worktree-removed`/`worktree-added` events — where `path` is the worktree directory, not a
-ref, and is correct data displayed in the wrong column.
-
-**Why it matters despite being cosmetic.** `rule:discernment-checks` §6 — a reader that
-cannot report failure invents an answer. Three of the four symptoms here are a *correct*
-value in the wrong slot, which reads as corruption and argues against running `--apply`.
-That is the actual cost: a working refresh command looks broken, so the registry does not
-get refreshed, so `doctor`'s `✓ ref registry` count drifts from disk. Measured this session,
-before the refresh: the snapshot still listed a pruned worktree and a `curate-docs-skill`
-project that no longer exists.
-
-**Corrected root cause.** This entry's first draft claimed `buildWorkspaceSnapshot` had a
-single caller (`lib/migrate/workspace.mjs`) and therefore *no refresh path at all*. That was
-wrong, and the error was in the instrument: the search pattern required
-`from "../refs/snapshot"`, while `lib/refs/migrate-refs.mjs:23` imports
-`from "./snapshot.mjs"` — so the second, and decisive, production caller never matched.
-`migrate-refs` **is** the refresh path and it works. Recorded here rather than silently
-edited, per this register's own standard that evidence is not rewritten.
-
-**Fix.** In `migrate-refs`'s renderer: print `e.type`; render `ref ?? "—"`; give
-`worktree-*` events their own line format with the path labelled as a path.
-
----
+### N52 · `migrate-refs`'s markdown renderer prints `undefined` and misplaces paths into the ref column — **S3** — **MOVED** → [#27](https://github.com/Rupali59/propagate/issues/27) (2026-10-12; the full entry is there)
 
 ### N53 · The size-cap check reads `STATE.md` at the pre-move path, so it measures 14-line stubs — **S1** — **RESOLVED 2026-09-10** (fixed in `Vipin Kaushik` `422bc4c`; verified behaviourally 2026-09-30, 0 of 8 measuring a stub)
 
@@ -1251,48 +845,7 @@ trade twice over.
 
 ---
 
-### N54 · The gotchas liveness probe counts pointer stubs as inert files, inflating its own headline — **S3** — **OPEN**
-
-> **Same root cause as N53 and N55** (cross-linked 2026-08-27). N53 was filed independently hours apart by another session, against a different reader of the same stubs — that neither knew of the other is itself the argument for treating this as one relocation-completeness defect.
-
-Found 2026-08-27 while reviewing every `GOTCHAS.md` in the tree. `doctor` reported:
-
-```
-· gotchas  16 GOTCHAS.md of 1372 docs scanned
-· gotchas inert  4 unreadable, 2 with an entry that cannot fire (of 16 file(s))
-```
-
-**Three of those four were 14-line pointer stubs** left by the 2026-08-23 relocation —
-`Motherboard/docs/GOTCHAS.md`, `Tushar/docs/GOTCHAS.md`,
-`Keerti/keerti-job-radar/docs/GOTCHAS.md`. Each says *"This is a pointer stub, not the
-state"* and names its target. They contain no entries **by design**, and the real files
-they point at are separately discovered by `sourcesFor()` and are healthy.
-
-`selftestProblems()` reports each as *"1 source file(s) found but 0 carry a **Trigger:**
-line — the guard would run forever and never fire, which reads as 'no hazards'"*. For a
-stub that sentence is false: the guard does not run forever, it walks on to the target in
-the same `sourcesFor()` pass.
-
-**Why it matters despite being cosmetic.** The headline overstated the problem by 3× and
-buried the two entries that were genuinely broken — `curate-docs` G24 and
-`marketing-intel` G9, both fixed the same day. `rule:discernment-checks` §1's point in
-reverse: a check that fires on things that are fine trains you to skim it, which is how
-the two real ones nearly went unread. Noise is a hiding place — this register's own G23.
-
-**Fix.** In the probe, skip a source whose body is a move-pointer (the stubs are uniform:
-`# GOTCHAS.md — moved` as the first line, `pointer stub` in the body). Count it as
-`redirect`, not `inert`. Distinguishing "0 entries because it is a stub" from "0 entries
-because nobody wrote triggers" is the same
-found-nothing-versus-looked-at-nothing distinction the rest of this tool already honours.
-
-**Not a defect, deliberately left:** the fourth file,
-`PanditPawanKaushik/docs/gemstone-storefront/shopify/GOTCHAS.md`, was a REAL 478-line
-gotchas doc with 0 triggers. That one was correctly flagged, and was moved the same day to
-`PanditPawanKaushik/propagation/state/gemastrology-shopify/GOTCHAS.md` — where the
-`shopify.app.toml` and `shopify app deploy` triggers now fire in the code repo that
-actually holds those files, rather than in a docs directory where nobody runs them.
-
----
+### N54 · The gotchas liveness probe counts pointer stubs as inert files, inflating its own headline — **S3** — **MOVED** → [#28](https://github.com/Rupali59/propagate/issues/28) (2026-10-12; the full entry is there)
 
 ### N55 · The refs registry changed owners on 2026-08-24 and the new owner is wired to nothing — **S1** — **RESOLVED 2026-09-26**
 
@@ -1677,24 +1230,7 @@ absent from the loaded set), not a sentence that may be edited away.
 
 ---
 
-### N58 · A live decision sits untracked at a retired path that `doctor` never reads — **S2** — **OPEN**
-
-`propagate/docs/DECISIONS.md` — 64 lines, **untracked** (`?? docs/DECISIONS.md`), written
-2026-08-29 10:32 by a concurrent session. It holds a real finding: `propagate monitor` at
-2,359 runs over 11.6 days, and **76% of its notifications were an edge already notified,
-re-fired because its bytes changed**.
-
-Two failures compound:
-
-1. `docs/DECISIONS.md` is the path this repo **retired** on 2026-08-23. `git log` shows
-   history there, so the file was deleted and has now been recreated.
-2. `lib/report/doctor/decisions.mjs:50-54` is a first-match-wins `candidates.find(...)` that
-   prefers `propagation/state/workspace/DECISIONS.md` — so **doctor never opens it**, and
-   reported `24 entries, 24 with tokens` while this sat unread.
-
-`git clean` deletes it. Decide: fold into the canonical ledger, or track it where it is.
-
----
+### N58 · A live decision sits untracked at a retired path that `doctor` never reads — **S2** — **MOVED** → [#29](https://github.com/Rupali59/propagate/issues/29) (2026-10-12; the full entry is there)
 
 ### N59 · The graph indexed **zero** decision entries, and the stat meant to expose that counted the project tier instead — **S1** — **RESOLVED 2026-08-29**
 
@@ -1751,250 +1287,15 @@ passes. Mutation-tested: reintroducing both defects turns two tests red with
 
 ---
 
-### N60 · Decision-entry identity is POSITIONAL for 20 of propagate's own 36 entries — **S2** — **OPEN**
+### N60 · Decision-entry identity is POSITIONAL for 20 of propagate's own 36 entries — **S2** — **MOVED** → [#30](https://github.com/Rupali59/propagate/issues/30) (2026-10-12; the full entry is there)
 
-The key is `<date>:sha8(affectsRaw)` (`lib/report/decisions.mjs:74`) with a `#N` suffix
-appended by **file order** on collision (`:76-78`). Measured 2026-08-29 by importing
-`parseDecisions` directly:
+### N61 · Five ledgers parse to 0 entries, and the fix as first designed would have made it silent — **S2** — **MOVED** → [#31](https://github.com/Rupali59/propagate/issues/31) (2026-10-12; the full entry is there)
 
-```
-state/curate-docs   12 entries ->  1 distinct base key (affectsRaw is "" for all 12), 11 positional
-state/workspace     24 entries -> 15 distinct base keys,                                9 positional
-```
+### N62 · `scope:` no longer filters delivery; convert `nextjs-dev-server-port` to native `paths:` — **S3** — **MOVED** → [#32](https://github.com/Rupali59/propagate/issues/32) (2026-10-12; the full entry is there)
 
-Tree-wide, 211 of 503 entries carry a `#N`; 91 have no `Affects:` line at all, so their key
-is `<date>:e3b0c442` — sha8 of the empty string.
+### N63 · `referencedRestatements` is dominated by false positives — the shape N35 asserts was never sampled — **S2** — **MOVED** → [#33](https://github.com/Rupali59/propagate/issues/33) (2026-10-12; the full entry is there)
 
-The `#N` counter correctly stops two entries sharing a key **within one parse**, and by doing
-so makes the key unstable **across** parses: insert or reorder one entry and every key below
-it shifts. It reads as a safety feature and is a stability hazard. Anything that ever
-persists a verdict, a relay row or a graph node id against these keys inherits it —
-`graph-index.mjs:236` already uses the key as a node identity.
-
----
-
-### N61 · Five ledgers parse to 0 entries, and the fix as first designed would have made it silent — **S2** — **OPEN**
-
-`HEADING` at `lib/report/decisions.mjs:12` requires the date immediately after `##`. Five
-ledgers use an id-first form (`## D1 · 2026-08-15 · title`) and report **0 entries** across
-1,222 lines: `Keerti/…/keerti-job-radar` (799), `Divyansh/…/workspace` (247),
-`Keerti/…/workspace` (96), `Divyansh/…/AuroraV3` (40), `Keerti/…/Keerti-mb` (40).
-
-**The trap, and the reason this entry exists rather than a patch.** Widening the regex to
-accept the id-first form fixes 15 of `keerti-job-radar`'s 19 entries and **silently loses
-4**, which put the date at the END:
-
-```
-## D16 · Seniority is scored again, narrowly — entry-level UX is the target (2026-08-17)
-```
-
-Today the file parses to 0 and is loudly wrong. After a naive widening it parses 15 > 0, so
-any `unreadable` predicate goes false and the 4 vanish — and because `decisions.mjs:54-56`
-appends non-heading lines to the current entry, their ~200 lines get absorbed into D15's
-body. **The fix must ship with a per-file assertion that parsed entries equals the count of
-entry-level `##` headings**, or it makes the defect quieter instead of smaller.
-
-### N62 · `scope:` no longer filters delivery; convert `nextjs-dev-server-port` to native `paths:` — **S3** — **OPEN**
-
-Fallout from the 2026-08-29 change that stopped `load-rules.mjs` injecting rule bodies.
-Delivery is now the platform's, and **the native loader has no concept of `scope:`** — that
-key is this tree's invention, read only by `applies(rule, cwd)` in `hooks/load-rules.mjs`.
-
-Measured cost: exactly **one** rule. 16 of the 17 `id:`-bearing rules are `scope: global`
-and would be delivered everywhere anyway. `nextjs-dev-server-port.md` is
-`scope: next-projects` (53 lines) and now reaches every session in every repo, Next.js or
-not. `applies()` still filters what the hook *counts* — this session parsed 16, not 17 — so
-the hook's own number stays honest; it is only delivery that is unfiltered.
-
-**The native replacement is `paths:` frontmatter**, and it is strictly better: it scopes on
-the files being worked with rather than on cwd, so a rule about Next dev servers can fire
-when someone opens `next.config.*` rather than whenever cwd happens to sit inside a repo
-with `next` in its `package.json`.
-
-**Why this is a TODO and not already done.** The 2.1.236 binary confirms the feature —
-*"can be scoped to specific file paths using `paths` frontmatter"* — but does **not** expose
-the accepted YAML shape (string vs array, glob dialect, whether it composes with an unknown
-`scope:` key). A wrong value would make the rule load never, silently, which is precisely
-the failure class this whole thread exists to fix: `rule:discernment-checks` §1, and the
-same shape as the "three legacy `paths:`-format drafts" that were deleted for
-non-conformance with the *wrong* mechanism.
-
-**What would settle it, cheapest first:**
-1. Ask the `claude-code-guide` agent for the `.claude/rules/` frontmatter schema — it is the
-   sanctioned reader for "does Claude Code do X".
-2. Or write a throwaway `~/.claude/rules/zz-probe.md` with a `paths:` value and a unique
-   sentinel string, start one fresh session inside a Next project and one outside, and ask
-   each whether the sentinel is in context. Two sessions, one deletion, definitive.
-
-Do **not** re-add body injection to `load-rules.mjs` to recover `scope:` — that reinstates
-51,112 B/session of duplication to save 53 lines. See the 2026-08-29 DECISIONS entry.
-
-### N63 · `referencedRestatements` is dominated by false positives — the shape N35 asserts was never sampled — **S2** — **OPEN**
-
-**Filed 2026-08-31**, found while answering "how is rule promotion working out".
-
-N35's body introduced this bucket for a sound reason: `checkRules` carried a blanket
-``if (raw.includes(`rule:${r.id}`)) continue;``, so a file that pointed at a rule in one line
-and kept a stale copy in another was excused entirely. Closing that hole was right.
-
-**What is wrong is the claim attached to the number.** N35 states the pointer-plus-stale-copy
-shape "is the most likely shape, not a hypothetical", and the printed label calls each file
-"a pointer and a copy in one file, which is what a half-finished conversion looks like".
-Neither was measured. The bucket has never been sampled.
-
-**Sampled 2026-08-31 — 8 of the 20 entries, and 7 are false positives:**
-
-| Flagged | What the line actually is |
-|---|---|
-| `Tushar/CLAUDE.md:88` | ``See `rule:tool-priority`.`` — a pure pointer |
-| `Tathya/CLAUDE.md:57` | ``Tool priority / freshness-check workflow: `rule:tool-priority`.`` — pure pointer |
-| hub `CLAUDE.md:25` | the Motherboard **repo-map row**, about `go.work` module counts |
-| `Rupali/Obsidian/CLAUDE.md:170` | the heading `## MCP Tools: code-review-graph` |
-| hub `CLAUDE.md:192` | a citation of the `secrets-source-of-truth.md -> CLAUDE.md` **edge** |
-| `Keerti/Keerti-portfolio/CLAUDE.md:82` | pointer + a `kirti-portfolio` Doppler fact — project **compliance** |
-| `PanditPawanKaushik/SSJK-mb/CLAUDE.md:16` | pointer + `dev-up.sh --doppler` mechanics — compliance |
-| `Vipin Kaushik/CLAUDE.md:166` | a docs-table cell, "Append-only… Never edit past entries" — **borderline**, the only arguable one |
-
-Six of the seven are exactly what the conversion was supposed to produce. Two are
-project-specific compliance statements, which `rule:nextjs-dev-server-port` and
-`rule:environment-vocabulary` both explicitly exempt in their own bodies: *"A project
-describing its own config is compliance, not restatement."*
-
-**Why this matters more than a bad count.** The reading it invites is backwards. The bucket
-presents as a 20-item conversion backlog; the conversion is in better shape than that. Acting
-on it means editing files that are already correct, and the most likely edit — deleting the
-"copy" that is actually a compliance fact — removes real project knowledge.
-
-**It is also N35's own defect pointing the other way.** N35 says the fingerprints are too
-NARROW, proven by `never-commit-unless-asked` matching 0 of 47 files while `selftest` passed.
-This says that near a `rule:` pointer they are too BROAD. One root cause: **the fingerprint is
-a proxy for the claim, and `selftest` only ever tests it against the house-style body it was
-derived from.** A check whose only test is self-match cannot detect either error, which is
-`rule:discernment-checks` §1 wearing a green badge.
-
-**UPDATE 2026-09-01 — the same defect was ALSO producing the headline number, and it is
-now zero.** `rules check` reported **1 restatement across 50 files** all session, which reads
-as "almost clean". It was an eighth false positive, from the same cause one level up: the
-fingerprint for `secrets-source-of-truth` carried a bare `|Doppler|` alternative, so ANY
-mention of the vendor anywhere read as restating the rule.
-
-The flagged passage was `Motherboard/CLAUDE.md:379-380` describing Motherboard's OWN
-`environments.json`, in a sentence that explicitly says *"It is DERIVED from
-`rule:environment-vocabulary`, which wins if they disagree"*. Textbook compliance, and
-flagged under the WRONG RULE — the content belongs to `environment-vocabulary`.
-
-Narrowing the fingerprint to require the CLAIM rather than the vendor name
-(`source of truth.{0,60}(env|secret)|vercel-env-(all|audit|sync)`) took the tree to **0
-restatements across 51 files scanned**, and dropped the excused bucket from **20 to 16** —
-`secrets-source-of-truth` went 6 to 2 there. **Five false positives from one regex
-alternative.** `selftest` still passes: the rule body says "Doppler is the source of truth
-for deployed env", which the first alternative matches.
-
-So the true-positive rate of this detector on this tree is now measured at approximately
-**zero**, in both buckets. That does not mean the detector is worthless — it means every
-number it has ever printed was noise, and nobody could tell because the numbers were small
-and plausible. A corpus test is no longer a nice-to-have.
-
-**What would settle it, and the order:**
-1. Sample the remaining 12 and record the true positive rate per rule. Cheap, no code.
-2. Until then, **relabel** the printed line. "restate a rule they also reference" asserts a
-   finding; "fingerprint matched near a reference — unverified" states what is known. Do not
-   delete the bucket: the hole N35 closed is real.
-3. The real fix is N35's own: a **corpus test** asserting each fingerprint against known real
-   restatements AND known correct pointers, rather than against its own prose. That single
-   test closes the narrow case and the broad case together.
-
----
-
-### N64 · `rules promote` is declared in three places and built in none — **S3** — **OPEN**
-
-**Filed 2026-08-31**, same pass as N63.
-
-`cli.mjs`'s `rules` dispatch accepts `promote`, and answers:
-
-```
-not implemented — `rules promote` is declared in the Phase 5 plan and not built.
-```
-
-exit 2. `docs/LIFECYCLE.md` defines PROMOTE, `rules/_TODO.md` describes promotion as the
-mechanism, and the usage string advertises it: `rules <list|check|selftest|promote>`.
-
-**Credit where it is due, because this is the good failure mode.** It exits non-zero, names
-the gap, and tells you to write the rule file by hand and run `selftest`. Its own comment says
-why: *"a command that silently did nothing would be worse than one that admits the gap."* That
-is `rule:discernment-checks` §2 applied correctly, and it is the reason this is S3 and not S2.
-
-**The cost is not the missing automation — the practice works by hand.** Active rules went
-6 → 11 → 13 → 18, and the 2026-08-16 pass is the model: `plan-opus-execute-sonnet` was
-**merged into `model-routing`** rather than promoted to its own rule, "because a second rule
-restating Opus-plans/Sonnet-executes is the exact failure this document is about", and the
-source memories were deleted so it was a move and not another copy. No command would have made
-that judgment.
-
----
-
-**MEASURED 2026-09-17, and the numbers argue for a narrower fix than "build the command".**
-
-An audit of how all 18 rules actually came to exist, plus a full gotcha census, was run to
-answer whether promotion happens at all. It does.
-
-**6-7 of 18 rules (~35%) show direct, dated evidence of promotion** from a project,
-memory, or convention origin — not inferred, but named in commit messages and rule bodies:
-
-| rule | evidence |
-|---|---|
-| `skill-routing`, `state-and-decisions` | first commit: *"rules: **promote** … to canonical"* (2026-08-14) |
-| `enforcement-watches-itself` | first commit: *"**promote** 'an enforcement point that does not watch itself' to a rule"*; G48 records the other end |
-| `safety-flag-needs-a-test` | `_TODO.md`: *"generalises propagate GOTCHAS G22, N27, and G44"* |
-| `browser-only-when-asked`, `no-waiting-on-deploys` | `_TODO.md`: *"Three project-scoped memories promoted 2026-08-16"* |
-| `discernment-checks` §4 | `keerti-job-radar/GOTCHAS.md`: *"Cost: **promoted** to `rule:discernment-checks` §4"* |
-
-Cadence during the active window: **roughly one promotion every 3-4 days** (2026-08-14 …
-2026-08-24), tapering after.
-
-**So the hub `CLAUDE.md`'s line — "a proven local gotcha has no promotion path to
-`rules/gotchas-global.md`" — is accurate about MECHANISM and overstates the PRACTICE.**
-Worth correcting there, because "no path" reads as "never happens" and a third of the rule
-set says otherwise.
-
-**The real defect is LATENCY.** `rules/_TODO.md` has carried 4-5 unwritten rules since
-2026-08-14 (last touched 2026-09-10). `LIFECYCLE.md` already priced one lag: *"the general
-form of the most expensive one sat in `rules/_TODO.md` for three days while its hazard
-fired twice more, for 11 spurious events."* The hand path works; it is just slow, and slow
-is expensive when the thing waiting is a hazard that keeps firing.
-
-**The design Rupali chose 2026-09-17: ASSISTED, human decides.** Surface candidates,
-draft, let a person write and commit. Explicitly NOT mechanical promotion — this entry's
-own 2026-08-16 example (merging `plan-opus-execute-sonnet` into `model-routing` instead of
-creating a second rule) is the judgement no command would have made, and N76 spent a day
-proving machine-authored fingerprints are hard. `LIFECYCLE.md`'s exit criterion already
-demands *"the fingerprint does not punish the behaviour the rule wants"*, which is a
-judgement call by construction.
-
-**The candidate predicate already exists and nothing evaluates it.** `rules/gotchas-global.md`
-states its own admission bar: ***"it has already repeated, or it fired while documented."***
-Both halves are measurable — "repeated" is the same hazard present in ≥2 project
-`GOTCHAS.md` files; "fired while documented" is a guard hit on an entry that already
-existed. A surfacing pass against that bar is the whole of the assisted design, and it
-needs no new vocabulary because the bar was written down a month ago.
-
-**Census backing it** (2026-09-17): **23 `GOTCHAS.md` files**, 4 of them pointer stubs,
-**427 entries / 426 live**, of which **216 (~51%) carry a `**Trigger:**`** — the untriggered
-half is the documented correct default, not debt. Trigger liveness tree-wide:
-`selftestProblems()` reports **0 problems**, so every declared trigger fires. The per-file
-ratio is invisible for a separate reason — see **N80**.
-
-**One real duplication found, and it is not promotion:**
-`propagation/state/curate-docs-skill/GOTCHAS.md` and
-`propagate/propagation/state/curate-docs/GOTCHAS.md` are **byte-identical through line 203**,
-the second carrying two later entries. Two copies of one project's file at two paths, neither
-removed — the restatement failure `every-project-carries-gotchas` warns about, at
-project-to-project scope. Worth its own decision about which path is canonical.
-
-**The cost is that the usage string promises a capability the tool does not have.** Per
-`rule:description-standard`, a thing that announces itself must say when it applies; an
-advertised subcommand that always exits 2 is an announcement with no referent. Either build it
-or drop `promote` from the usage line and leave the stub reachable for anyone who types it.
+### N64 · `rules promote` is declared in three places and built in none — **S3** — **MOVED** → [#34](https://github.com/Rupali59/propagate/issues/34) (2026-10-12; the full entry is there)
 
 ### N65 · The update notice printed to stdout, corrupting every `--json` consumer — **S1** — **RESOLVED 2026-08-31**
 
@@ -2100,42 +1401,7 @@ widens the bound still fails; `checkCrossRepo` reaches the nested sidecar and re
 written FIRST and confirmed red on the old code. Re-mutating the `return` back turns exactly
 the three nesting guards red and leaves the orthogonal `unreadable` one green.
 
-### N67 · `rotted-citation` cannot tell a live citation from a recorded supersede — **S3** — **OPEN**
-
-Found 2026-09-10 while fixing the very thing it reports, in `Vipin Kaushik`.
-
-`findDeadBranchCitations` fires on any literal occurrence of an absent branch name. It has no
-way to distinguish **"cited as if the branch still exists"** from **"explicitly recorded as
-gone, and here is where the work landed"** — and a supersede note *must* name the branch, or
-a reader cannot tell what was superseded.
-
-Measured: three `rotted-citation` findings on `docs/constitution/VIPIN.md` and
-`docs/design/DESIGN.md`. Fixing all three — rewriting each citation to say the branch is gone
-and to name the merge commit that carries the work (`b0ce3fc`, `df63c32`/PR #185) — moved the
-count **4 → 3**. Only the self-line citation cleared. The three dead-branch findings survive
-their own fix, because the fixed text still contains the branch name.
-
-**The perverse incentive is the point.** The only way to satisfy this check is to delete the
-branch name, which destroys the information the supersede note exists to carry. A checker
-that rewards making a record less useful will be ignored, and then it protects nothing.
-
-**Suggested:** treat a citation as settled when the branch name is adjacent to a supersede
-marker — a merge SHA, "no longer exists", "superseded", "landed in". Narrow is fine; the
-current behaviour has a 100% false-positive rate on correctly-superseded citations.
-
-**A second defect in the same check, found in the same pass.** For
-`DESIGN.md:1000` → `feat/hero-v4-rebuild`, `resolveRepo` resolved the CITING file to the
-workspace repo (`repoRoot: Vipin Kaushik`, branches: `main` only) and checked there — but that
-branch only ever existed in `VipinKaushik/`. The verdict came out right **by luck, not by
-mechanism**. The latent form: a workspace doc citing any live sibling-repo branch — including
-`` `production` ``, which does not exist in the workspace repo — reports as dead. This is the
-citation-side analogue of G13, "`check --changed` only sees the repo it runs from".
-
-**Related, cosmetic but easy to trip over.** `asQuestions` (`lib/claims/judge.mjs:105`) emits
-`kind_hint` from the *structural* block kind — `prose` / `list-item`. A verdict's `kind` wants
-a CLAIM kind (`fact` / `policy` / `quote` / `impression` / `aspiration`). Passing the hint
-straight through is rejected by `validateClaim`, which is the good outcome; the bad one is a
-reader assuming the tool has pre-classified the claim. Two vocabularies, one field name.
+### N67 · `rotted-citation` cannot tell a live citation from a recorded supersede — **S3** — **MOVED** → [#36](https://github.com/Rupali59/propagate/issues/36) (2026-10-12; the full entry is there)
 
 ## Rotated to archive
 
@@ -2174,55 +1440,7 @@ One line each so an id stays findable from here.
 - N46 · ~~S3~~ · **RESOLVED 2026-08-24** · `watchPathsFor()` hardcoded `docs/`, and stale watch paths were undetectable
 - N51 · `parseHandovers` reads fenced examples as real sections — **S2** — **RESOLVED 2026-08-26**
 
-### N66 · `make-public` refuses because its watchlist does not recognise propagate's own directories — **S2** — **OPEN**
-
-**Found 2026-09-01**, while checking whether the publishable tree could be rebuilt before
-pushing the claims lane. `bin/make-public.mjs --out <tmp> --check` never reaches the scrub:
-
-```
-3 WATCHLIST DIRECTORIES ARE UNMAPPED:
-   Divyansh
-   propagate
-   propagation
-```
-
-Two of those three **are this tool's own directories.** The watchlist source is every
-depth-1 directory under `SEARCH_ROOTS` — chosen deliberately, and correctly, over workspace
-discovery, because real client names leak into docs without carrying a `.propagates.yml`
-marker (`tests/portability/make-public-watchlist.test.mjs` states that reasoning). But the
-hub root holds `propagate/` and `propagation/`, which are the plugin and its ledger, not
-identities. So the check demands they be mapped to pseudonyms or allow-listed, and until
-someone does that by hand on each machine the release path cannot run at all.
-
-`Divyansh` is a genuine gap of the intended kind — a workspace added after the map was
-last written, which is exactly what the watchlist exists to catch. The other two are the
-mechanism failing to exempt itself.
-
-**Why S2 and not S3.** `rule:enforcement-watches-itself` names this shape directly: *"a
-mechanism that enforces a property on others and is exempt from it reports success
-forever"* — here it is the mirror, a mechanism that cannot complete because it does not
-recognise itself, which is the same missing question. And the consequence is not cosmetic:
-the scrub is the only thing standing between the private working copy and a public
-distribution, so a scrub that never runs is a scrub nobody notices is absent. The CI job
-asserts `make-public` exits 2 *without* an identity map; it does not assert that it exits
-**0 with one**, so a green suite is compatible with a release path that has never
-completed on any machine.
-
-**The fix is mechanical, not data.** Adding `propagate` and `propagation` to a per-machine
-`allow` array works and is wrong — it must be re-done on every clone, and a per-machine
-data edit is invisible to the next reader. The tool knows its own repo root (`REPO`) and
-its ledger directory; both should be exempt by construction, with `Divyansh` left to fail
-loudly as designed. Then assert it: a test that runs `--check` against a harness root
-containing a directory named like the tool's own and expects exit 0.
-
-**Note the scope this does NOT cover.** `origin` for this working copy IS the public repo
-(`Rupali59/propagate`, verified PUBLIC via `gh repo view` 2026-09-01) — there is no second,
-scrubbed remote. So `make-public` builds a distribution that has never been the thing
-anyone pulls, and 66 files on `origin/main` already carry workspace and client names. That
-is a larger question than this entry: **is the intended posture "the repo is public and the
-names are acceptable", or "the repo should have been the scrubbed copy all along"?** The
-two answers imply very different work and the tree currently asserts both. Filed separately
-rather than resolved here, because it is a decision, not a defect.
+### N66 · `make-public` refuses because its watchlist does not recognise propagate's own directories — **S2** — **MOVED** → [#35](https://github.com/Rupali59/propagate/issues/35) (2026-10-12; the full entry is there)
 
 ### N69 · `verify` silently discards unknown flags, so a justification can be written to nothing — **S1** — **RESOLVED 2026-09-26**
 
@@ -2466,67 +1684,7 @@ from this entry.
 The second is the one this entry's own text argued was unnecessary. Reading the guard at the
 call site, rather than the sentence describing it, is what found it.
 
-### N72 · The restatement pairer anchors on the heading, so real restatements are never examined — **S2** — **OPEN**
-
-**MEASURED 2026-09-30 on the rule that DEFINES the discipline.** `discernment-checks`'s own
-fingerprint matches 7 lines of its own body, and the first four are all `## ` headings:
-
-```
-HEADING  ## 1 · A check that cannot fail is worse than no check
-HEADING  ## 2 · Absence must be attributable
-HEADING  ## 3 · Verify the work, not the report
-HEADING  ## 4 · Verify the instrument before believing a surprising number
-```
-
-Its selftest is green because it matched structure. The claim two lines under §3 is invisible to it —
-which is this entry's defect, in the rule that names it.
-
-**One distinction this measurement forced, worth recording before the fix:** a heading whose text IS
-the claim verbatim (`delegation-criteria.md:92`) is CORRECT to match. The harm is anchoring on a
-heading that states nothing, because then the pairer returns UNPAIRED and the claim below is never
-read. A fix that suppresses all heading matches would lose real detections.
-
-Found 2026-09-15, while judging the 15 entries Phase 2a handed over.
-
-`checkRules` reports the line where a rule's fingerprint matched. For the `tool-priority`
-fingerprint that line is very often a section title — `## MCP: code-review-graph` — or the
-HTML comment above it. `splitBlocks` correctly classes both as structure rather than a
-claim, so `findClaimBlock` returns no block and the entry is reported UNPAIRED.
-
-That reporting is honest. The problem is what it hides.
-
-```
-15 corpus entries
-   5  paired and judged
-  10  unpaired  ← 9 anchored on a heading or comment, 1 a genuine filename false positive
-```
-
-**Two of those ten carry a real restatement in the paragraph directly below the anchor**,
-which the lane never read:
-
-| file | what sits 2 lines under the anchor |
-|---|---|
-| `Rupali/Obsidian/CLAUDE.md` | "this repo has the `code-review-graph` **pre-commit** git hook installed, so its graph refreshes on commit — not on file change, and never for uncommitted work" |
-| `Vipin Kaushik/VipinKaushik/CLAUDE.md` | "run `code-review-graph status` to check the built commit is an ancestor of HEAD before trusting it" |
-
-Both restate the rule, both are accurate, and both were ruled `consistent` **only because a
-human read the file**. Effective automated coverage of this corpus is 5 of 15, and nothing
-in the output distinguishes "the anchor was structure" from "this file does not restate the
-rule" — which is the same two-states-worn-as-one shape as N71 and N68
-(`rule:discernment-checks` §2), now in the pairer.
-
-The severity is in the direction of the error. An unpairable entry is reported and visible;
-a real restatement sitting under it is **invisible**, and would stay invisible through any
-future drift.
-
-**Fix.** `findClaimBlock` should walk forward from a structure anchor to the next judgeable
-block rather than giving up — a heading is a *label for* the prose beneath it, so that prose
-is the natural claim candidate. Bound the walk (one or two blocks) so it cannot drag in an
-unrelated section.
-
-**Test it can fail:** a fixture whose `## Heading <fingerprint>` is followed by a paragraph
-that restates the rule; assert it PAIRS and that the paired block is the paragraph, not the
-heading. Then mutate the walk away and confirm it goes back to unpaired.
+### N72 · The restatement pairer anchors on the heading, so real restatements are never examined — **S2** — **MOVED** → [#37](https://github.com/Rupali59/propagate/issues/37) (2026-10-12; the full entry is there)
 
 ### N73 · A verdict written for an unpairable entry was inert — **S2** — **RESOLVED 2026-09-15**
 
@@ -2560,66 +1718,9 @@ the same entry with an EMPTY store stays awaiting (so the first test measures so
 fact-less entry is undispositionable rather than awaiting. Mutation-checked — disabling the
 lookup fails exactly one test with the stated message, and the revert is byte-identical.
 
-### N74 · The restatement walk pairs the FIRST judgeable block, which is often the citation — **S3** — **OPEN**
+### N74 · The restatement walk pairs the FIRST judgeable block, which is often the citation — **S3** — **MOVED** → [#38](https://github.com/Rupali59/propagate/issues/38) (2026-10-12; the full entry is there)
 
-Found 2026-09-16, immediately after N72's fix landed, by judging what it produced.
-
-N72 made `findClaimBlock` walk forward from a structure anchor to the next judgeable
-block. That raised coverage from 5 of 15 to 8 of 15. But it takes the FIRST judgeable
-block, and in this corpus the first block under a `## MCP: code-review-graph` heading
-is very often a pointer line rather than the restatement.
-
-Worked example, `Rupali/Obsidian/CLAUDE.md`:
-
-```
-## MCP Tools: code-review-graph          <- anchor (structure)
-See `rule:tool-priority` for general …   <- block the walk pairs: a CITATION
-Local: this repo has the `code-review-   <- the actual restatement, one block further
-graph` **pre-commit** git hook installed …
-```
-
-So the entry pairs, gets judged `unrelated` — correctly, *for that block* — and the
-real restatement below it remains unexamined. The verdict is not wrong; it is about
-the wrong text. That is a subtler failure than N72's, because the lane now reports
-the file as handled.
-
-**Not worth widening the bound.** Walking further would pair headings with
-arbitrary later prose, which N72's own fixture deliberately guards against. The fix
-is candidate SELECTION, not distance: among judgeable blocks within the bound,
-prefer the one whose text actually matches the rule's fingerprint most strongly,
-rather than the first one encountered. A bare `See rule:x.` line matches a
-fingerprint only incidentally.
-
-**Test it can fail:** a heading followed by a pointer line and THEN a restating
-paragraph must pair the paragraph. That fixture does not exist today — N72's
-fixtures all place the restatement first.
-
-### N75 · `plans --check` counts subagent plan-mode artifacts as authored plans — **S2** — **OPEN**
-
-Found 2026-09-16, the day `plans --check` was built, by running it on the real corpus.
-
-Of 11 post-template plans it flagged, **5 are `*-agent-<id>.md`** — files written
-automatically when a subagent inherits plan mode and drafts a plan it never executes.
-One more is a design doc that merely lives in `plans/`. Only a handful were authored
-by a person as plans.
-
-Those artifacts will never carry an arrival condition and should not. Worse, the
-count rises every time a subagent enters plan mode — **eight times in the session
-that built this checker**. That is exactly the shape prior learning
-`count-ratchet-over-growing-population` names: *"a raw COUNT over a population that
-grows with authorship measures output, not debt — it trips when you write, not when
-quality drops."* The lane was built specifically to avoid that trap via the
-2026-09-14 date gate, and then walked into it through a different door.
-
-**Fix.** Classify `*-agent-<id>.md` as its own kind and report it as a separate
-count, never folded into the conformance total. Do NOT simply exclude it silently —
-"0 flagged because we stopped looking at half the corpus" is the failure this repo
-keeps paying for. Report it as `N agent-generated (not graded — not authored plans)`,
-the same way the lane already reports what doc-kind excluded and why.
-
-**Note the naming is a convention, not a guarantee.** The `-agent-<hex>` suffix is
-produced by the harness; a future change to it would silently re-merge the two
-populations. Assert the pattern in a test so the drift is visible.
+### N75 · `plans --check` counts subagent plan-mode artifacts as authored plans — **S2** — **MOVED** → [#39](https://github.com/Rupali59/propagate/issues/39) (2026-10-12; the full entry is there)
 
 ### N82 · The workspace census cannot tell "looked and found nothing" from "looked at nothing" — two empty directories pass, one real repo is invisible — **S1** — **RESOLVED 2026-09-26**
 
@@ -2737,68 +1838,9 @@ attributing it to this one. Filed separately as N100.
 2 present but EMPTY — Khushboo's state/ holds no state; … The directory exists, so this reads
 as migrated and is not.` Two clauses because they are two different repairs.
 
-### N100 · Git worktree copies are counted as workspaces, so the same tree is graded twice — **S3** — **OPEN**
+### N100 · Git worktree copies are counted as workspaces, so the same tree is graded twice — **S3** — **MOVED** → [#56](https://github.com/Rupali59/propagate/issues/56) (2026-10-12; the full entry is there)
 
-Found 2026-09-26, while measuring a stricter conformance predicate for N82.
-
-`ownerCandidates()` enumerates 23 workspace candidates, and two of them are worktrees:
-
-```
-calibration-sampler-52226 -> worktrees/calibration-sampler-52226
-ubersicht-widget-52226    -> worktrees/ubersicht-widget-52226
-```
-
-A worktree is a checkout of a repo already in the census, not a workspace of its own. Each
-carries its own conformance verdict, its own row, and its own contribution to the denominator —
-so the same tree is measured twice and the ratio is quietly wrong in both directions.
-
-**Why S3 rather than S2.** Both currently CONFORM, so nothing is misreported today; the count is
-inflated and that is all. It becomes sharper the moment any predicate tightens — under N82's
-rejected option B these two were 2 of the 5 extra failures, which is how they were found.
-
-**Not a silent exclusion.** `rule:discernment-checks` §2: dropping them without a word would make
-the census smaller for an unstated reason, which is the shape N82 was filed about. A worktree
-should be *named and excluded*, with the repo it belongs to, the same way `notStarted` names what
-it is not grading.
-
-**Derive, do not trust the two above:** `git worktree list` per repo, or `ownerCandidates()`
-filtered on a `worktrees/` path segment. The `-NNNNN` name suffix is a convention of
-`scripts/worktree-new.sh`, not a guarantee — asserting on it alone would go blind if that script
-changed.
-
-**Derive, do not trust the counts above** — `propagate rollup --check`, plus a `node` walk
-of `*/propagation/state/workspace/`. Not `grep`: the ugrep shim honours the hub's `/*`
-`.gitignore` and returns false zeros, measured again during this very census (a reference
-search returned 1 file by `grep -rl` and 41 by `find | xargs grep`).
-
----
-
-### N83 · Hub `CLAUDE.md` currency is enforced for 4 of 16 workspaces — the other nine can rot invisibly — **S3** — **OPEN**
-
-Found 2026-09-17. The hub's repo map describes every workspace. Only four workspaces
-declare an edge that would notice when their row goes stale.
-
-**Declared `<workspace>/CLAUDE.md -> CLAUDE.md`:** Divyansh, Keerti (×3), Motherboard.
-**Not declared:** Vipin Kaushik, Tathya, PanditPawanKaushik, Rupali, Tushar, Anushka,
-ManavDaehi, and the rest.
-
-This is exactly the failure the `Rupali/.propagates-cross.yml` edge was added to close on
-2026-09-14 — after `claude-usage-sample` ran unregistered for four days — and the closure
-was never generalised beyond the one workspace that had just been bitten.
-
-**Evidence the rot is real, not theoretical.** The hub `CLAUDE.md`'s own `Rupali/` row
-carries a note that it *"was wrong about presence in both directions"* — three projects
-listed as live and absent, two listed as gone and present — and says why that is worse than
-being merely stale: **neither error is detectable by reading it.**
-
-**Not recommending the sweep.** Generalising means nine new declarations across nine repos
-with independent branch lines and pre-existing uncommitted work — the convention rollout
-declined on 2026-09-17. Filed so the exposure is visible and the decision is deliberate.
-
-**Test it can fail:** edit a workspace's `CLAUDE.md` identity section and assert
-`check --changed` names the hub `CLAUDE.md`. True for four workspaces today, false for nine.
-
----
+### N83 · Hub `CLAUDE.md` currency is enforced for 4 of 16 workspaces — the other nine can rot invisibly — **S3** — **MOVED** → [#44](https://github.com/Rupali59/propagate/issues/44) (2026-10-12; the full entry is there)
 
 ### N84 · Every in-tree ledger is empty and all 2839 events live outside every git remote — undecided, undocumented — **S3, and the severity was wrong** — **RESOLVED 2026-09-30** (decided and recorded in DECISIONS.md; store mirrored to the private hub; recurring refresh is [[n107]])
 
@@ -2873,241 +1915,11 @@ If machine-local is intended, say so and name what a second machine is expected 
 the ledgers should carry rows, they have been empty since at least the v2 cutover and that
 is a real gap.
 
-### N81 · Five more files colocate a machine-parsed grammar with append-only churn — N77's shape, before it bites — **S3** — **OPEN**
+### N81 · Five more files colocate a machine-parsed grammar with append-only churn — N77's shape, before it bites — **S3** — **MOVED** → [#43](https://github.com/Rupali59/propagate/issues/43) (2026-10-12; the full entry is there)
 
-Found 2026-09-17 by a census run to answer whether N77 is one bad edge or a pattern. It is
-a pattern, and the useful part is that **four of the five are not yet costing anything.**
+### N80 · `readGotchas` computes the trigger count and `row()` drops it, so gotcha LIVENESS reaches no reader — **S3** — **MOVED** → [#42](https://github.com/Rupali59/propagate/issues/42) (2026-10-12; the full entry is there)
 
-**The discriminator.** A file is an instance only if BOTH hold: the spec region is
-materially more stable than the file around it, AND something mechanically depends on the
-spec. A long file with a header nothing parses is just a long file.
-
-| file | lines | spec region | spec last moved | file / 60d commits | parsed by | declared edge? |
-|---|---|---|---|---|---|---|
-| `HANDOVERS.md` | 2374 | close protocol, L1–97 | 2026-08-28 | 2026-09-16 / **46** | `lib/report/handovers.mjs` | **yes — this is N77** |
-| `propagate/…/workspace/DECISIONS.md` | 1183 | `What/Why/Affects/Refs`, L3–7 | 2026-08-10, never since | 2026-08-31 / 19 | `lib/report/decisions.mjs`, `graph-index.mjs` | no — latent |
-| `Vipin Kaushik/…/sanskrit-texts/GOTCHAS.md` | 1769 | `**Trigger:**` grammar, L1–4 | 2026-08-24, never since | **2026-09-17** / **50** | `hooks/gotcha-guard.mjs` | no — latent |
-| `Vipin Kaushik/…/marketing-intel/GOTCHAS.md` | 846 | L1–7 | 2026-08-24, never since | 2026-09-02 / 21 | same | no — latent |
-| `Vipin Kaushik/…/workspace/GOTCHAS.md` | 491 | L1–9 | 2026-08-24 | 2026-09-14 / 8 | same | no — latent |
-| `Motherboard/…/workspace/GOTCHAS.md` | 413 | L1–11 | 2026-08-21 | 2026-08-30 / 7 | same | edge exists but scoped to the G-list, not the header |
-
-**The finding that changes the fix: none of the five has a declared `kind: code` edge on
-the header.** So none is currently manufacturing `no-change-needed` dispositions the way
-N77's does. This is *"fix it before someone declares an edge"*, not *"six live N77s"*. The
-day anyone declares one to keep a header honest, it starts firing on every `### G-n` append.
-
-**What the five GOTCHAS.md files actually did.** They independently restated the
-`### heading` / `**Trigger:**` / `**Fires on:**` grammar that `gotcha-guard.mjs` depends on,
-inline, at the top of their own append-only file. That grammar is already canonical in
-`rule:every-project-carries-gotchas`. So this is the restatement failure that rule exists to
-prevent, committed inside the files the rule governs.
-
-**And the correct pattern already exists in the same tree, which is why this is cheap.**
-`Vipin Kaushik`'s three `DECISIONS.md` files carry **no** grammar paragraph — they point at
-`rules/conventions/STATE_MANAGEMENT.md`, where the contract lives beside `decisions-check.sh`
-that enforces it. `propagate`'s own `DECISIONS.md` restates it inline instead. The model and
-the defect are both in this repo's tree; the fix is to copy the model.
-
-**Recommended, per file, one line each:**
-
-- `HANDOVERS.md` — N77's own recommendation; move the ~31-line protocol out, leave a pointer.
-- `propagate/…/DECISIONS.md` — move the `What/Why/Affects/Refs` grammar to `docs/` beside the
-  `decisions-check.sh` contract; leave a one-line pointer. Copy what Vipin Kaushik does.
-- The five GOTCHAS.md headers — **delete the restated grammar, cite
-  `rule:every-project-carries-gotchas`.** Nothing to relocate; the canonical text already
-  exists. This is the cheapest of the three and removes five future N77s.
-
-**Rejections are part of the result.** `ISSUES.md` (including the file this entry lives in)
-FAILS the discriminator — `lib/report/backlog.mjs` parses individual `### N81 ·` entries
-structurally, and nothing parses the header or severity legend. `ECOSYSTEM.md` fails by
-construction: it is regenerated wholesale, so header and body always move together and a
-hand-edit is refused by the footer hash. `NORTH_STAR.md` is not an instance — it is the
-TARGET pattern, a stable spec correctly kept out of a churning file. The hub `CLAUDE.md`
-placement test has the stability gap but nothing parses it, so it is prose, not a contract.
-
-**One claim from the census was checked and REJECTED.** It reported that
-`.propagates.yml`'s `NORTH_STAR.md -> CLAUDE.md` edge cites a section, *"§The client
-boundary"*, that no longer exists. It does exist — `## The client boundary` is in
-`NORTH_STAR.md`, which is what the `why` means by *"**its** §The client boundary"*. The
-check had been run against `CLAUDE.md`. Recorded because a phantom "declared edge cites a
-dead section" finding would have sent someone editing a correct sidecar.
-
-**Test it can fail:** for each file above, assert the spec region's last-changed commit is
-older than the file's, and that the region is reachable by the parser that depends on it.
-When a file stops satisfying the first, it has stopped being an instance.
-
-### N80 · `readGotchas` computes the trigger count and `row()` drops it, so gotcha LIVENESS reaches no reader — **S3** — **OPEN**
-
-Found 2026-09-17 during a promotion/liveness audit. A three-line defect sitting directly
-beneath a docstring about this exact class of mistake.
-
-**The mechanism.** `lib/report/registers.mjs:244` computes it:
-
-```js
-const triggered = parseEntries(file).entries.length;
-return row({ kind: "gotchas", file, lines, entries: heads.length, …, triggered });
-```
-
-`row()` at :122 destructures
-`{ kind, file, lines, entries, live, finished, rotatable, reason, unread, error }` and
-returns exactly those. **`triggered` is not among them.** It is computed, passed, and
-discarded — no consumer can ever see it.
-
-**Why it matters, and why it is not cosmetic.** `every-project-carries-gotchas` makes the
-whole argument that presence is easy and LIVENESS is what counts: *"a `GOTCHAS.md` can be
-present, current and correctly reconciled while delivering nothing, because its entries
-carry executable triggers and a trigger that cannot fire is a hazard documented but not
-delivered."* The per-file triggered/total ratio is the number that distinguishes those two
-states, and it is the one field that does not survive the row.
-
-Measured tree-wide today: **427 entries across 23 files, of which 216 (~51%) carry a
-`**Trigger:**`.** The spread per file is enormous and invisible —
-`Divyansh/…/AuroraV3` is 29 of 33 triggered, while
-`PanditPawanKaushik/…/gemastrology-shopify` is 4 of 29 and
-`propagate`'s own is 16 of 69. Nothing surfaces that.
-
-**The irony is local.** The comment immediately above `row()` explains that `reason` is
-load-bearing because *"0 rotatable because every entry is live"* and *"0 rotatable because
-this file did not parse"* are different facts (`rule:discernment-checks` §2). The author
-was thinking about exactly this hazard in the function where the drop happens.
-
-**Two things this issue explicitly does NOT claim:**
-
-- **The 49% without a trigger are not a defect.** `LIFECYCLE.md` makes untriggered the
-  correct default — *"most gotchas have no mechanical trigger and inventing one makes
-  noise."* The ratio is worth SEEING, not worth driving to 100%.
-- **Trigger liveness itself is currently healthy.** `selftestProblems()` run across all 20
-  content files plus the global one reports **0 problems** — every entry declaring a
-  `**Trigger:**` also declares a `**Fires on:**` literal that its own regex matches. So the
-  inert entries N45 found have since been fixed.
-
-  **`cli.mjs:1073` is NOT stale and must not be "corrected".** The audit that produced this
-  issue recommended editing it; that recommendation was wrong and is recorded here because
-  the distinction matters. The comment reads *"N45 measured 3 of 10 inert while --selftest
-  reported green"* — past tense, attributing a historical measurement to explain **why the
-  check exists**. A justification-by-history is not a claim about the present, and deleting
-  it would remove the only record of why anyone bothered to tally liveness at all. The same
-  reason the hub `CLAUDE.md` preserves its 2026-06-28 cleanup note. Leave it.
-
-**Test it can fail:** assert `row()`'s return carries `triggered` for a gotchas file, and
-that a file with 10 entries and 2 triggers renders differently from one with 10 entries and
-10 triggers. Today both render identically.
-
-**Related but separate:** `doctor`'s `86 live gotcha(s)` is **cwd-scoped**, not tree-wide —
-`lib/report/doctor/registers.mjs` deliberately uses `sourcesFor(process.cwd())`, i.e. "what
-would fire HERE" (propagate's 69 + hub workspace 2 + global 15 = 86). The tree-wide figure
-is **426 live**. Both are legitimate answers to different questions; the label does not say
-which question it answered.
-
-### N79 · `rules list` reports a RELEVANCE verdict from a scan of one file type, and calls the three most-cited rules in the tree `unexercised` — **S2** — **OPEN**
-
-**MEASURED 2026-09-30, and it is worse than "one file type" suggests — but the obvious fix is wrong.**
-
-Ran all 30 fingerprints over every markdown file in the tree (4,105 files, node walk not grep — the
-ugrep shim's `--ignore-files` has produced a confident zero twice):
-
-```
-532 (rule, file) hits across the tree
- 20   4%  CLAUDE.md  <- all rules check can see
-512  96%  invisible to it: STATE/DECISIONS/TODOS 82 · other RULE files 73 · docs 70
-          · GOTCHAS 47 · plan docs 39 · ISSUES 17 · other 184
-```
-
-**And it falsified the premise the work was proposed on.** I had expected many of the 22 pre-existing
-fingerprints to be effectively dead — self-quoting, unable to fire on real prose. **0 of 30 fire only
-on their own body.** Every one fires on between 2 and 107 other files. So [[n35]]'s worry about
-self-quotation is largely answered by measurement: the fingerprints work. The defect is the corpus.
-
-**But widening the corpus naively would flood the output, and a 12-hit sample of the invisible 96%
-says why.** Judged individually rather than counted — because "does the fingerprint fire" is a proxy
-for "does this file restate the rule", which is [[n26]]'s error and now
-`rule:measure-the-claim-not-a-proxy`:
-
-| verdict | n | example |
-|---|---|---|
-| legitimate citation or project compliance | 6 | `NORTH_STAR.md:108` cites `rule:delegation-criteria` §2 and quotes it |
-| **real finding** | 3 | `SSJK-mb/docs/DEPLOY.md:26` *"Doppler is the single source of truth"* — uncited |
-| worktree duplicate | 1 | the same `propagation/INDEX.md` counted twice ([[n100]], [[n88]]) |
-| false positive | 1 | `Rupali/Obsidian/Calendar/2026/September/19-09-2026.md` — a daily journal note |
-
-So roughly a quarter of the invisible hits are actionable, and the rest are noise of three distinct
-kinds. **The fix is a considered corpus, not more files:** decide which file KINDS carry a
-restatement worth converting. `docs/` and `GOTCHAS.md` plainly do — one of the three real findings is
-in each. A personal calendar note plainly does not. A worktree copy is the same file twice.
-
-**One result worth keeping as validation of the authoring method.** `measure-the-claim-not-a-proxy`,
-written hours earlier against a held-out corpus, fired on
-`Rupali/Experiments/HandReader/DESIGN.md:1470` — *"The pipeline work was right; it answered a
-different question."* Someone else's words, in a design doc, predating the rule. That is the property
-a self-quoting fingerprint does not have, demonstrated on prose nobody wrote for the test.
-
-Found 2026-09-17 while answering "how do we keep the hub and the workspaces relevant to
-each other". The answer had to start by admitting the instrument that reports hub
-relevance is measuring the wrong population.
-
-**What it prints.** `rules list` gives every rule a `status` and closes with
-`5 rule(s) unexercised`, explained as *"fingerprint matched nothing and nothing references
-them."*
-
-**What is actually true.** `rules check` — which `rules list` derives that column from —
-scans files literally named `CLAUDE.md`, 53 of them. Citations counted tree-wide instead
-(`node` walk over `.md`/`.mjs`/`.yml`/`.sh`/`.json`, excluding `rules/` itself):
-
-| rule | files citing it | of which `CLAUDE.md` | `rules list` says |
-|---|---|---|---|
-| `discernment-checks` | **256** | 2 | adopted |
-| `state-and-decisions` | 118 | 10 | firing |
-| `safety-flag-needs-a-test` | **77** | **0** | **unexercised** |
-| `enforcement-watches-itself` | **68** | **0** | **unexercised** |
-| `adversarial-review-reads-the-ledger` | **55** | **0** | **unexercised** |
-| `model-routing` | 12 | 0 | firing |
-| `browser-only-when-asked` | 2 | **0** | **unexercised** |
-| `no-waiting-on-deploys` | **0** | 0 | **unexercised** |
-
-**Six rules have zero `CLAUDE.md` footprint and 215 citations between them.** Exactly ONE
-of the five reported unexercised is genuinely unused, and the report cannot tell it apart
-from the three most-cited rules in the tree. For `safety-flag-needs-a-test` the 77 break
-down as **32 code files**, 12 `DECISIONS.md`, 5 `GOTCHAS.md`, 3 plans, 2 `ISSUES.md` — it
-is cited in source comments and tests, which is the most load-bearing place a rule can be
-cited and the one place this scan will never look.
-
-**The irony is load-bearing, not decorative.** `docs/LIFECYCLE.md` names
-`rules/safety-flag-needs-a-test.md` as *"a mechanism produced by PROMOTE"* — the one
-worked example of the promotion path succeeding. The tool reports that success as
-unexercised.
-
-**The scan is not the defect.** `CLAUDE.md` is the right corpus for the question
-`rules check` exists to answer: which instruction files RESTATE a rule instead of citing
-it, because that is where divergence causes harm (measured 2026-08-14: 9 inline copies of
-tool-priority making 4 mutually exclusive claims). The defect is that `rules list`
-overloads that one narrow scan into a **relevance verdict**, and then states it in words
-the scan cannot support. `nothing references them` is a claim about the whole tree made
-from a sample of one filename.
-
-**Two candidate fixes; they are not equivalent and this issue does not choose.**
-
-1. **Widen the scan corpus.** Tempting and probably wrong. Restatement in a `DECISIONS.md`
-   or a code comment is not the same failure as restatement in a `CLAUDE.md` — the latter
-   is an instruction another agent will follow. Widening would also flood
-   `referencedRestatements`, and N35 already records the cost of a fingerprint wide enough
-   to flag 8 files to find 1.
-2. **Keep the scan, fix the vocabulary.** `unexercised` becomes something that says what
-   was measured — `no CLAUDE.md footprint` — and the summary sentence stops asserting
-   "nothing references them", because it does not know that. Optionally print the tree-wide
-   citation count beside it as a separate, separately-derived number.
-
-**Recommended: the second.** It is honest, it is cheap, and it does not change what
-`rules check` means. `rule:discernment-checks` §2 — absence must be attributable, and
-"no hits in the corpus I scanned" and "nothing references this" are different facts.
-
-**Test it can fail:** assert that a rule cited in a non-`CLAUDE.md` file and in no
-`CLAUDE.md` is NOT reported with wording that claims nothing references it.
-`safety-flag-needs-a-test` is the live fixture — 77 files, 0 of them `CLAUDE.md`.
-
-**Derive the numbers, never trust the ones above** (`rule:state-and-decisions`): a `node`
-walk counting `rule:<id>` per file, split by whether the basename is `CLAUDE.md`. Do NOT
-use `grep` — the ugrep shim honours the hub's `/*` `.gitignore` and returns false zeros;
-that flaw has now fired four times in this tree.
+### N79 · `rules list` reports a RELEVANCE verdict from a scan of one file type, and calls the three most-cited rules in the tree `unexercised` — **S2** — **MOVED** → [#41](https://github.com/Rupali59/propagate/issues/41) (2026-10-12; the full entry is there)
 
 ### N78 · A code-only merge is undeliverable — both delivery mechanisms gate on VERSION, and only `doctor` reads content — **S2** — **RESOLVED 2026-09-24**
 
@@ -3355,278 +2167,11 @@ for a file with 0 rows.
 the `# Workspace:` headings against `ECOSYSTEM.md`'s `### ` headings. Do not trust the
 numbers in this entry — they are a snapshot of a report that changes daily.
 
-### N86 · The DECISIONS.md gate is a CONTRACT living in two client workspaces, forked, with cutoff dates five weeks apart — **S2** — **OPEN**
+### N86 · The DECISIONS.md gate is a CONTRACT living in two client workspaces, forked, with cutoff dates five weeks apart — **S2** — **MOVED** → [#46](https://github.com/Rupali59/propagate/issues/46) (2026-10-12; the full entry is there)
 
-Found 2026-09-17 by the adversarial review of the hub↔workspace diagnosis, which had
-missed it. It is the cleanest instance of that diagnosis's own thesis, and it was invisible
-to the diagnosis because the diagnosis read files while this is a property of the **edges**.
-`rule:adversarial-review-reads-the-ledger`, doing exactly what it claims to do.
+### N85 · 83% of edges with ENOUGH history to have a ratio are majority `no-change-needed` — N77 is not an outlier — **S2** — **MOVED** → [#45](https://github.com/Rupali59/propagate/issues/45) (2026-10-12; the full entry is there)
 
-**The measurement.** Two copies on disk, both inside client workspaces, none at the hub:
-
-| fork | bytes | lines | cutoff date | control flow |
-|---|---|---|---|---|
-| `Vipin Kaushik/scripts/decisions-check.sh` | 7235 | 180 | **2026-06-09** | differs |
-| `PanditPawanKaushik/scripts/decisions-check.sh` | 3856 | 107 | **2026-07-16** | differs |
-
-Different sizes, different hashes, different control flow, and **enforcement cutoffs five
-weeks apart** — so a `DECISIONS.md` entry that passes under one fork may fail under the
-other, depending purely on which workspace's copy a reader happens to invoke.
-
-**Who depends on it: 54 files across 6 workspaces** — PanditPawanKaushik (12),
-`Vipin Kaushik` (26), Rupali (6), Tushar (3), **propagate (6)**, and **`rules/` (1)**.
-
-**`propagate`'s own `DECISIONS.md` header names the PanditPawanKaushik copy explicitly:**
-
-> `**Affects:**` is machine-read — it drives cross-repo relay rows and is enforced as a
-> pre-commit gate by `PanditPawanKaushik/scripts/decisions-check.sh`.
-
-So the tool that defines the propagation standard has its own decision-record format
-enforced by a script owned by a client workspace, in the shorter of two divergent forks.
-
-**Why this is the thesis and not just duplication.** The hub owns contracts; workspaces own
-instances. A *format gate* is a contract by definition — it decides what a valid entry is,
-for six workspaces. It lives in two instances. `rule:state-and-decisions` already records
-this exact shape one level over: *"two carried a `scripts/hygiene/` stack forked between
-them — 5 of 8 shared libs diverged. Every divergence was individually reasonable. Together
-they meant no check could be written once."*
-
-**What makes it S2 rather than S3.** A forked linter is an annoyance. A forked **gate**
-with different cutoff dates means the tree has **two different definitions of a valid
-DECISIONS.md entry** and no way to tell which one any given file was validated against.
-That is not drift between a doc and its code — it is drift between two enforcers, which no
-declared edge in the tree currently watches.
-
-**Not proposing the fix here.** Moving it to the hub is the obvious move and is not free:
-54 citations across six workspaces would need repointing, and the two forks must first be
-reconciled — which requires deciding whose cutoff is right, a judgement, not a merge.
-Note also that a hub-owned gate does not automatically get invoked; `rule:enforcement-watches-itself`
-records a drift gate installed in seven repos and not in the one that authored it.
-
-**Test it can fail:** hash every `decisions-check.sh` in the tree and assert there is at
-most one distinct implementation. Today there are two.
-
-**Derive it, do not trust the table:**
-`find ~/Documents/GitHub -name decisions-check.sh -not -path '*/node_modules/*'` then
-`md5` each. Not `grep` — the ugrep shim honours the hub's `/*` `.gitignore` and this
-script lives inside workspaces it would skip.
-
-### N85 · 83% of edges with ENOUGH history to have a ratio are majority `no-change-needed` — N77 is not an outlier — **S2** — **OPEN**
-
-Measured 2026-09-17 by parsing all 2844 events over 1564 distinct edge ids, to answer
-whether N77 was one bad edge. **It is not.** This supersedes N77's framing while leaving
-N77's own diagnosis intact.
-
-**The number.** Of the **125 edges with ≥4 recorded dispositions**, **104 (83%)** are
-≥50% `no-change-needed`. They span **46 distinct source files across 14 workspaces**.
-**31 edges are at 100%** — every judgement ever made on them was "nothing needed to
-happen". The worst cluster is a single source, `Vipin Kaushik:docs/measurement/MEASUREMENT.md`,
-carrying **12** noisy edges.
-
-N77's own edge sits at 70%, which puts it **mid-table**, not at the extreme.
-
-**MIND THE DENOMINATOR — corrected 2026-09-17 on adversarial review.** This entry's first
-title read *"83% of edges with any history"*, which is false and is the exact
-`rule:discernment-checks` §5 error the entry is about. **1564** edges have at least one
-disposition; only **125** have ≥4, which is the minimum to have a meaningful ratio at all.
-The 83% is of those 125. As a share of every edge with any history, the noisy set is
-**6.6%**. Both numbers are real and they answer different questions: *"among edges we have
-judged repeatedly, how often was the answer no?"* (83%) versus *"how much of the graph is
-noisy?"* (6.6%). The first is the one that matters for reviewer attention; say which one
-you mean.
-
-**THE HYPOTHESIS IN N77 IS REFUTED, and the strong evidence is the same-source spread —
-not the aggregate.** N77 said the cause was a high-churn source.
-
-**The disproof, which holds churn constant by construction.** One file, six declared edges:
-
-```
-sanskrit-texts:docs/INVENTORY.md   (49 commits/60d)
-  e82c6e94  0.75      a9d43537  0.63      e377000b  0.18
-  fa432c23  0.75      91daecfb  0.10
-  2cb348a4  0.75
-texts:docs/INVENTORY.md            0.78, 0.78, 0.33
-```
-
-Same source, same commit history, **a 7.5× spread in noise ratio across its own
-downstreams.** Source churn cannot explain a variable it is constant across. Whatever
-drives the ratio is on the downstream side.
-
-**The aggregate comparison points the same way and is much weaker evidence — stated
-second on purpose.** Noisy-edge sources average **7.3** commits/60d against **12.7** for
-non-noisy ones, i.e. noisy sources churn *less*. But the non-noisy group is only **15**
-sources, and both groups are defined by the very outcome under test, so this is
-suggestive, not probative. **Do not cite the means without the same-source spread** — an
-earlier draft of this entry led with them, which is the shape of an argument that looks
-statistical and is not.
-
-**So the predictor is not how often the source changes. It is WHICH SLICE of the source
-the downstream actually depends on.** A downstream that tracks a *stable derived fact* —
-a pointer line, a count, a format grammar, a canon list — gets a re-check on every
-unrelated edit to the file that happens to contain it. That is N77's real mechanism,
-stated correctly and generalised: **granularity mismatch between the declaration and the
-dependency**, of which "header inside an append-only file" is one special case.
-
-**Six causes, classified with evidence:**
-
-| cause | example | why it is noisy |
-|---|---|---|
-| stable pointer inside a hub file | 7 clusters → `CLAUDE.md`, 24 edges | the edge asserts a one-line pointer stays consistent; most edits don't touch it |
-| stable slice of a churning catalog | `INVENTORY.md` → canon tracker | new texts change the catalog, not the canon list |
-| shared constant | `Makefile`/`go.work` → `CLAUDE.md` | doc restates a *count* (14 targets); targets change, count rarely |
-| aggregate restated in a rule | `mongo.yml` → `secrets-source-of-truth.md` | rule repeats one four-project figure |
-| glob broadcast | `gotchas-global.md` → `*/docs/GOTCHAS.md` | one rule edit, N per-project obligations, few real changes |
-| **stale declaration (new)** | `Motherboard:docs/{HISTORY,GOTCHAS}.md` | source migrated to `propagation/state/workspace/` in the v3 layout move; the old edge_id's history remains and **can never close** |
-
-**Repeated reasons are widespread, not a tell of one edge.** 51 of 125 edges (41%) carry
-at least one pair of dispositions whose reason text shares ≥50% of its wording — 46 of
-those 51 are in the noisy set. One 2026-08-19 batch wrote near-identical reasoning across
-**15+ unrelated edges within hours**. N77 spotted this on one edge and read it as
-significant; it is the house style of a bulk disposition pass.
-
-**Why this is S2 while N77 is S3.** A single noisy edge wastes a little attention. A
-ledger where 83% of judged edges are majority-no-op **trains the reader to answer "no"
-without looking**, and the eighth time is the one where the header actually moved. It also
-makes `actionable` a poor priority signal, which is the number the monitor reports.
-
-**What this does NOT say.** It does not say those 104 edges are wrong to exist — most
-assert a real coupling. It says the declaration is coarser than the dependency. And the
-fix is NOT the region-scoped edge rejected in N77 finding 4: that was rejected on
-architecture (git-blob whole-file identity), and 104 edges does not change that argument,
-it raises the stakes on finding a different answer.
-
-**Candidate directions, none chosen:**
-
-- **Declare the derived fact, not the file.** Where a downstream depends on a count or a
-  pointer, the honest source is often a smaller generated artifact, not the big doc.
-- **Let a disposition express "and expect this again".** A `no-change-needed` that records
-  *why re-firing is expected* could suppress the next N identical prompts without hiding
-  a real change — closer to a calibration than a silence.
-- **Reap stale declarations.** The orphaned `Motherboard:docs/*` edges can never close and
-  should be retired outright; that is pure noise with no coupling behind it.
-
-**Test it can fail:** recompute the ratio table; assert no edge with ≥4 dispositions is
-≥90% `no-change-needed` without a recorded justification for why re-firing is expected.
-31 edges are at 100% today.
-
-**Derive, never trust the table above:** parse `~/.propagate/events/*.jsonl` with `node`
-(never `grep -c` — it counts lines, and a disposition word inside reason prose is not an
-event; that exact error produced N77's wrong denominator). Exclude
-`events/archive/` — it is frozen v1 history, not a worklist.
-
-### N77 · A `kind: code` edge fires on the whole file while coupling only a HEADER — 7 of 10 dispositions on one edge are `no-change-needed` — **S3** — **OPEN**
-
-Found 2026-09-16 while disposing `HANDOVERS.md -> propagate/lib/report/handovers.mjs`
-(`4e8d1c1c`) after the N76 work.
-
-**The measurement — CORRECTED 2026-09-17.** Every disposition ever recorded against that
-edge, counted by parsing the event store rather than by grepping `why --all`:
-
-| disposition | count |
-|---|---|
-| `no-change-needed` | **7** |
-| `baselined` | 1 |
-| `propagated` | 1 |
-| `source-corrected` | 1 |
-| **total** | **10** |
-
-**70% of the judgements on this edge are "nothing needed to happen", and the last three in
-a row are.**
-
-> **The original filing said "7 of 12" and the denominator was wrong.** It came from
-> `why 4e8d1c1c --all | grep -oE '<disposition names>' | sort | uniq -c`, which counts
-> every occurrence of a disposition WORD in the rendered output — including words appearing
-> inside the reason prose — not events. The real count is 10.
-> `rule:discernment-checks` §4: when a number is surprising, suspect the ruler. The ratio
-> got *worse* under re-measurement (58% → 70%), so the finding stands; the arithmetic
-> behind it did not. Two of those three carry near-identical hand-written reasons,
-independently arrived at weeks apart — 2026-09-10 said *"This edge governs the HEADER
-… None of that was touched"*, and today's said the same thing after re-deriving it
-from scratch.
-
-**Why.** The sidecar declares the source as `HANDOVERS.md` — the whole file — while
-the `why:` it carries scopes the coupling precisely:
-
-> HANDOVERS.md's header is the prose spec of the close protocol this module parses.
-> Changing the marker spelling, the placement rule or MARKER_WINDOW here must be
-> reflected in the header, and vice versa.
-
-`HANDOVERS.md` is append-only by design: its own header says *"add dated sections,
-never edit past ones"*. So the file changes often and the header almost never does.
-The edge fires on every entry append and the answer is nearly always the same.
-
-**This is the shape `rule:delegation-criteria` §2 names** — the 60-second watcher that
-ran 4,420 times and found nothing in 4,384 of them. Same defect one level up: not a
-component polling too often, but a *declaration* whose granularity does not match the
-coupling it asserts, so a human is asked to judge something that could not have
-changed. Manufacturing dispositions is the opposite of what the ledger is for, and it
-erodes the signal: an edge whose answer is "no" seven times trains the reader to
-answer "no" the eighth time without looking — which is the time the header moves.
-
-**ESTABLISHED 2026-09-17 — region scoping does not exist, and it is not cheap.** The
-previous version of this issue left this open and said so; here is the answer.
-
-**1 · The edge schema admits exactly four keys.** `propagates.schema.json`:
-`path`, `why`, `kind`, `authority` — with `additionalProperties: false` at all three
-levels (root, source object, edge object). There is no anchor, heading or line-range
-selector, and an undeclared key is rejected rather than ignored.
-
-**2 · Section anchors exist in the schema and nothing resolves them.** `concepts:` —
-a sibling of `propagates_to` — is documented as *"per-section concept tags … Keys are
-section anchors"*, and it is live: `lib/claims/check.mjs` reads it, 5 of 43 sidecars
-declare it. But `findDeadConceptTokens` **never locates the section**. It lowercases
-the WHOLE source file and substring-matches each token against all of it; the `section`
-key is carried into the finding as a reporting label only. So the vocabulary for
-addressing a region is present and the machinery is not.
-
-**3 · Content identity is whole-file by construction, and that is the expensive part.**
-`contentId(absPath)` hashes a file, and `batchTrackedBlobs` / `batchRefBlobs` take
-identity from **git blob hashes**, batched through one `git ls-tree` per repo. A slice
-of a file has no git blob hash. Scoping an edge to a region therefore means writing an
-anchor resolver AND dropping those edges off the batch fast path the whole module is
-built around — hashing a computed range per edge, per run.
-
-**So the three options, now costed:**
-
-| option | cost | effect |
-|---|---|---|
-| Scope the edge to the header | New anchor resolver + those edges leave the git-blob fast path | Correct, and the most machinery |
-| Keep paying the tax, documented | One sidecar comment | Noise continues; the 8th disposition still gets derived from scratch |
-| **Move the close-protocol spec out of the churning file** | ~31 lines relocated | **Makes the existing whole-file edge correct rather than working around it** |
-
-**Recommended: the third.** `HANDOVERS.md` is 2374 lines, of which the header —
-`## Two markers, and the difference matters` plus the preamble — is about 31. That
-section is the entire coupled surface. Move it to a file that does not receive dated
-appends, point the edge at that file, and leave `HANDOVERS.md`'s header as a pointer to
-it. The edge then fires when the protocol changes, which is what it was declared to
-watch, and stops firing on entries, which it was never about.
-
-It also needs no new propagate machinery, which matters: the alternative buys precision
-by making the tool's fastest path slower for everyone, to fix one edge's granularity.
-
-**Do not just delete the edge.** It was declared 2026-08-26 *"after the two ends
-disagreed for as long as both existed and nothing could see it"*, and one of its 12
-dispositions is a real `propagated` and one a real `source-corrected` — so it has
-caught genuine drift twice. The defect is the noise ratio, not the coupling.
-
-**Test it can fail:** append a dated entry to `HANDOVERS.md` that touches no header
-line, and assert the edge does NOT enter an actionable state. Today that assertion
-fails, which is the issue.
-
-**SUPERSEDED IN SCOPE 2026-09-17 — see N85.** A full census of the event store found
-**104 edges (83% of all with ≥4 dispositions)** are majority `no-change-needed`, and
-**refuted this entry's stated cause**: noisy sources churn LESS than non-noisy ones
-(mean 7.3 vs 12.7 commits/60d). The real predictor is which SLICE of the source the
-downstream depends on, not how often the source changes. This edge's diagnosis
-(header vs whole file) is correct and is one special case of that. Read N85 first.
-
-**GENERALISED 2026-09-17 — see N81.** A census found **five more files** with the same
-shape: a machine-parsed grammar colocated with append-only churn. The important
-difference is that **none of the five has a declared `kind: code` edge on its header**, so
-none is costing review cycles yet — this edge is the only live instance. Four of the five
-restate the `**Trigger:**`/`**Fires on:**` grammar that is already canonical in
-`rule:every-project-carries-gotchas`, so their fix is a deletion and a citation, not a
-relocation.
+### N77 · A `kind: code` edge fires on the whole file while coupling only a HEADER — 7 of 10 dispositions on one edge are `no-change-needed` — **S3** — **MOVED** → [#40](https://github.com/Rupali59/propagate/issues/40) (2026-10-12; the full entry is there)
 
 ### N76 · The rule fingerprints are self-quotations, so `rules check` detects COPY-PASTE, not restatement — **S2** — **RESOLVED 2026-09-16**
 
@@ -3750,43 +2295,7 @@ as recorded on N35 itself. What this changes is that a rule reporting `restated 
 means something — the detector has been shown to fire on paraphrase — where before it
 meant only that nobody copy-pasted.
 
-### N88 · Discovery counts abandoned git worktrees as workspaces, and their warnings are indistinguishable from real ones — **S3** — **OPEN**
-
-Found 2026-09-17 while building the widget's HEALTH rows, which is the point: the
-defect was invisible in doctor's own output and obvious the moment the same data was
-rendered as a list of workspaces.
-
-`doctor` reports **16** workspace sections. Two of them are not workspaces:
-
-```
-Workspace: calibration-sampler-52226   → ~/Documents/GitHub/worktrees/calibration-sampler-52226
-Workspace: ubersicht-widget-52226      → ~/Documents/GitHub/worktrees/ubersicht-widget-52226
-```
-
-Both are real git worktrees created 10 Sep on branches `spec/calibration-sampler-52226`
-and `spec/ubersicht-widget-52226`, abandoned a week ago, and still carrying a `.git`
-file that discovery treats exactly like a repository root.
-
-**What it costs.** 14 of the 350 workspace warnings come from these two, and a reader
-has no way to tell them from the other 336. The denominator is wrong in the same
-direction everywhere it is used: "0 of 16 clean" is really 0 of 14, and any future
-adoption ratio computed against 16 is quietly off by 14%. This is the
-`rule:discernment-checks` §5 shape — the population is not what the claim is about.
-
-**Why it is S3 rather than S2.** Nothing is lost and no write is affected; the count
-is merely wrong. But it is the class of wrong that gets published, because 16 is a
-plausible number and nothing about the output invites checking it.
-
-**The fix is not "filter out `worktrees/`".** That path is a convention of one
-machine's layout, not a property of a worktree. A worktree's `.git` is a FILE
-containing `gitdir: …`, where a real repository's is a directory — so discovery can
-tell them apart structurally, on any layout. Whether to then EXCLUDE them or label
-them is a separate question worth asking: a long-lived worktree with its own
-propagation state might legitimately want a section, and `scripts/worktree-new.sh`
-makes them routinely.
-
-Two abandoned worktrees are also their own small finding — `worktree-rm.sh` exists and
-was not run.
+### N88 · Discovery counts abandoned git worktrees as workspaces, and their warnings are indistinguishable from real ones — **S3** — **MOVED** → [#47](https://github.com/Rupali59/propagate/issues/47) (2026-10-12; the full entry is there)
 
 ### N89 · `fixOrder`'s within-layer sort orders by name, and it already disagrees with `STATE_SEVERITY` today — not only as a future risk — **S2** — **RESOLVED 2026-09-21 — STATE_SEVERITY moved to lib/graph/graph.mjs and fixOrder sorts by severityRank; graph-html.mjs now imports the one ranking instead of holding the only copy. Mutation-gated in tests/unit/queue-order.test.mjs.**
 
@@ -3844,295 +2353,19 @@ and sort on `STATE_SEVERITY.indexOf(a.state) - STATE_SEVERITY.indexOf(b.state)` 
 reverse), so the array likely needs to move to `graph.mjs` and be imported by
 `graph-html.mjs`, not the other way around, to avoid inverting that dependency.
 
-### N90 · `duplicatePairs` has no disposition path — a finding the tool can name but never let a human close — **S3** — **OPEN**
+### N90 · `duplicatePairs` has no disposition path — a finding the tool can name but never let a human close — **S3** — **MOVED** → [#48](https://github.com/Rupali59/propagate/issues/48) (2026-10-12; the full entry is there)
 
-Filed from the same follow-ups list. `lib/graph/graph.mjs:329-350` builds `duplicatePairs`
-from the edge index — two declarations of the same `(from, to)` with different `why`
-strings — and says plainly in its own comment: *"which of the two `why` strings is right is
-a human's call."* It is reported through `status` (`cli.mjs:1222-1224`), the graph JSON
-(`cli.mjs:4460`), and `doctor`'s summary count (`cli.mjs:4488-4490`), but nowhere does the
-tool offer a verb to resolve one — no `verify --disposition`, no `drain --close`, nothing.
+### N91 · `doctor.duration_ms` spikes recur at 18-24 minutes, most recently in the last 24 hours — **S2** — **MOVED** → [#49](https://github.com/Rupali59/propagate/issues/49) (2026-10-12; the full entry is there)
 
-**Verified live count today: 0.** `node cli.mjs graph --json` reports `stats.duplicatePairs:
-0` and an empty `duplicatePairs` array — so this is **latent, not active**, exactly as
-flagged going in. Nothing is currently sitting unresolved.
+### N92 · The plugin-file pathspec answers two different questions with one list, so a docs-only commit counts toward the release bound — **S3** — **MOVED** → [#50](https://github.com/Rupali59/propagate/issues/50) (2026-10-12; the full entry is there)
 
-**Why it is a real gap even at zero.** Every other actionable graph state (DIVERGED,
-DRIFTED, REVERSED, UNMATCHED) flows through one lifecycle: `fixOrder` surfaces it, `verify
---disposition` records a decision, the event store closes it. A duplicate pair has no
-state at all in that model — `fixOrder` never emits it, because it isn't an edge state, so
-it cannot reach the new UI's READY worklist even in principle. The only way to make the
-`doctor`/`status` count change is to find the sidecar declaring the second `(from, to)` pair
-and hand-edit it out — with no record anywhere that doing so was a resolution to this
-specific finding, as opposed to an unrelated edit that happened to remove a row.
+### N93 · `docs/SYSTEMS.md`'s `gotcha-guard` probe cannot run, and its row makes three false claims about a component that is alive — **S2** — **MOVED** → [#51](https://github.com/Rupali59/propagate/issues/51) (2026-10-12; the full entry is there)
 
-**The signal, if it recurs.** The code comment cites a real historical instance, measured
-2026-08-17: 711 edge records over 710 distinct pairs — one genuine duplicate. At that
-count it would have sat in every subsequent `doctor`/`status` run as an unchanging "1
-duplicate declaration(s)" line until someone stumbled on it by hand; there is no mechanism
-by which the count would ever self-correct or by which a person could mark it seen-and-
-accepted.
+### N94 · A gotcha trigger matches command text inside a commit message, so writing about a hazard fires it — **S3** — **MOVED** → [#52](https://github.com/Rupali59/propagate/issues/52) (2026-10-12; the full entry is there)
 
-**Cost, stated honestly since it's zero today:** currently nothing, because nothing is
-duplicated. If it recurs, the cost is a permanently-open, permanently-unactionable finding
-sitting in every health check indefinitely — the same shape as this register's own `E2`
-(declare-ahead warnings that never expire) and `C1` (nothing reports what is not declared):
-a real finding with no closing mechanism eventually gets read as noise and stops being
-checked at all.
+### N95 · `fs.existsSync` gets a non-string somewhere in the digest path, and the source is unlocated — **S3** — **MOVED** → [#53](https://github.com/Rupali59/propagate/issues/53) (2026-10-12; the full entry is there)
 
-**Fix direction, not built:** either fold a duplicate pair into `verify` as a pseudo-edge
-state that a disposition can target (closest to the existing lifecycle), or give `drain`/
-`doctor` a narrower "acknowledge duplicate — kept `<edge_id>`, discarded `<edge_id>`" verb
-that edits the sidecar and records why. Not attempted here — this entry only establishes
-that the gap is real and currently harmless.
-
-### N91 · `doctor.duration_ms` spikes recur at 18-24 minutes, most recently in the last 24 hours — **S2** — **OPEN**
-
-**CALIBRATED 2026-09-30 (PR-029): `doctor.duration_ms < 30 min` is asserted on every run**, which
-makes this the first thing in the codebase that can fail on N91. Deliberately NOT the design's
-p95 < 5s target — 95.8% of 1,092 runs exceed 5s, so asserting it would be permanently red and
-therefore ignored. 30 min sits ~5x above p99 (367s) and below all four real outliers.
-
-**RE-MEASURED 2026-09-30 with `doctor --since 7d` — the first thing that command was used for —
-and the range is far wider than this heading says:**
-
-```
-doctor.duration_ms   92842 -> 105043   (+12201)   min 32940   max 11272497
-                     uncalibrated - target is p95 < 5s (docs/OBSERVABILITY.md)
-```
-
-**Max 11,272,497 ms = 188 minutes**, across 207 runs in seven days — not 18-24. The median run is
-also ~100s against a stated target of **5s**, so the ordinary case is 20x over and the worst 2,254x.
-The heading's range came from a narrower window and should not be trusted as the bound.
-
-Two things this changes. The entry is no longer "spikes recur" — the whole distribution sits far
-above target, with occasional three-hour outliers. And it is the natural first item for PR-029 (six
-metrics carry no expectation): `doctor.duration_ms` is the one where a target already exists in the
-design doc and nothing asserts it.
-
-Filed from the same follow-ups list, which flagged the metric's all-time max
-(1,446,450 ms / 24m6s) as "unexplained." Re-measured against `~/.propagate/metrics.jsonl`
-directly (841 rows, `metrics["doctor.duration_ms"]` is a dotted key nested one level under
-`metrics`, not a top-level field — worth noting since a shallow read of the JSON looks like
-the field doesn't exist). **The plan's numbers check out exactly:** max 1,446,450 ms at
-`2026-09-17T15:23:32.496Z` (run `b2e7a71b…`), min 280 ms (`2026-08-13T19:44:32.487Z`).
-
-**What the plan did not have yet: this is not a one-off, and it is not four days old.**
-17 of 841 runs (2%) exceed 100 seconds, clustered in bursts rather than spread evenly:
-
-| when | runs >100s | range |
-|---|---|---|
-| 2026-08-20, ~90 min window | 4 | 109,753 – 143,527 ms |
-| 2026-09-01, ~2 hr window | 5 | 104,661 – 223,998 ms |
-| 2026-08-29 / 2026-08-31 | 1 each | 114,801 / 219,535 ms |
-| **2026-09-17T15:23** | 1 | **1,446,450 ms** (the plan's outlier) |
-| 2026-09-20T09:23 | 1 | 109,601 ms |
-| **2026-09-20T15:27** | 1 | **1,082,398 ms** (18m) |
-| **2026-09-21T00:53** | 1 | **1,155,574 ms** (19.3m) |
-| 2026-09-21T03:14 | 1 | 130,256 ms |
-
-The three worst runs — 24.1m, 19.3m, 18.0m — are the three most recent minutes-long spikes
-in the file, landing 2026-09-17, 2026-09-20, and **last night (2026-09-21, today)**. This is
-a live, recurring hazard, not a historical curiosity from four days ago.
-
-**A shared trait across the three worst runs:** all three post-date the workspace census
-growing to 16-18 discovered workspaces / 43-44 loaded sidecars, roughly double the 7
-workspaces / 21 sidecars in place when this metric was first captured (2026-08-13) — so the
-absolute amount of per-workspace work `doctor` does today is larger than when the metric
-baseline was established.
-
-**A candidate mechanism, offered as a lead and not confirmed by reproduction.** `doctor`
-still shells out to at least two external processes with no timeout:
-`execSync("launchctl list", { encoding: "utf8" })` (`lib/report/doctor/environment.mjs:129`)
-and, once per discovered workspace, `execFileSync("git", ["-C", ws.root, "remote"], ...)`
-(`lib/report/doctor/workspaces.mjs:79`) — 18 calls on today's tree. This is the identical
-shape this register's own **N16** found and fixed for a different call (`claude mcp list`,
-measured at 17,793 ms / 94% of a run, bounded to a 2s timeout with a 1hr cache): *"an
-unbounded subprocess inside a health check is a liveness risk... a hung binary would hang
-`doctor` itself, indefinitely, with no distinguishing signal."* Neither of these two call
-sites has that protection. Separately, **N50** measured this exact machine under concurrent
-`node --test` load producing "load average: 33.6, mostly I/O wait" and real `git` calls
-taking 27.4s where they normally take under 1s — the same failure mode (slow `git` under
-load), recurring inside `doctor`'s unbounded call across an 18-workspace fan-out, would
-produce spikes of exactly this shape and size. Per `rule:discernment-checks` §4, this is
-correlation, not a confirmed cause — nobody has caught a spike live with a subprocess
-timer attached.
-
-**Cost.** `doctor` is the health check both a human and the new UI/widget lean on for "is
-the system fine" (per STATE.md: "the 37s cache, on the monitor's existing tick"). An
-18-24 minute run is long enough to exceed any reasonable caller's patience; invoked from
-anything with its own timeout — a hook, a pre-push gate, CI — it would read as a failure
-indistinguishable from a real one. It also means the widget's "last checked" data can be
-stale by tens of minutes with no visible explanation, which is exactly the kind of silent
-staleness `rule:discernment-checks` §2 says a check must never produce.
-
-**Fix direction, not built:** bound both call sites the way N16 bounds `claude mcp list` —
-an explicit `timeout` plus a distinct `status: "timeout"` outcome that is never read as a
-pass — and instrument `doctor`'s own phases so the next spike names which subprocess it was
-waiting on, rather than only a total.
-
-### N92 · The plugin-file pathspec answers two different questions with one list, so a docs-only commit counts toward the release bound — **S3** — **OPEN**
-
-Filed 2026-09-24 from the plugin-delivery work, immediately after landing it. `shippedPathspec()`
-(`lib/report/doctor/delivery.mjs`) excludes exactly `tests/**`, `docs/**` and `propagation/**`, which
-means every repo-root markdown file is inside the shipped set:
-
-```sh
-node --input-type=module -e 'import("./lib/report/doctor/delivery.mjs").then(m=>console.log(m.shippedPathspec()))'
-git ls-files | grep -E '^[^/]+\.md$'      # DESIGN.md  README.md  SKILL.md
-```
-
-`SKILL.md` belongs there — it is the plugin's skill entry and a change to it genuinely changes what
-the plugin does. `README.md` and `DESIGN.md` do not.
-
-**Why that is a defect and not a quibble.** The same list is used for two different questions:
-
-| question | consumer | is `README.md` a correct member? |
-|---|---|---|
-| what does the plugin SHIP, so a served copy can be compared? | `treeDigest`, and the `missing` set | **yes** — it is copied into the served tree, so its absence is a real difference |
-| what counts as a RELEASE-worthy change, for the staleness bound? | `deliveryLag`'s `git rev-list … -- <pathspec>` | **no** — the 2026-08-27 decision is that a doc-only addition is not a release |
-
-So eleven commits touching only `README.md` would push `commitsBehind` past `deliveryMaxCommits` and
-fail `doctor`, for a reason the bound was explicitly designed to exclude. That is a false positive in
-a gate, and `lib/report/doctor/delivery.mjs`'s own header names the consequence: *"A health check
-that goes red during ordinary development trains people to ignore it."*
-
-**S3 rather than S2 because reaching it takes a run of 11+ commits touching only those two files**,
-which has not happened; the day this was filed the count was 37 and every contributing commit touched
-real code. It is a latent false positive, not a live one.
-
-**A hazard met while filing this, worth recording next to it.** This entry's own heading originally
-read "The shipped pathspec …" and the backlog reader counted it CLOSED — because `shipped` is in
-`CLOSING_WORDS` (`lib/docs/tokens.mjs`), and the incidental word beat the explicit `**OPEN**` marker
-in the same heading. Measured after rewording: 0 of the 30 currently-`**OPEN**` headings carry a
-closing word, so this is latent rather than live, but the word collides badly with the vocabulary of
-a repo about shipping. Check a new heading with `hasClosingWord()` before filing, not after the count
-looks wrong.
-
-**Not fixed on filing, deliberately.** D12 of the delivery review made this ONE exported definition
-precisely so CI and `doctor` could not disagree, and splitting it into "ships" and "release-worthy"
-partly revisits that. Whoever takes this should decide whether the second question deserves its own
-derived list (`shippedPathspec()` minus non-functional root docs) or whether the bound should simply
-not count `.md` outside `SKILL.md`. Do not solve it by adding a second hand-maintained list — that is
-N78's and [[PR-012]]'s shape.
-
-### N93 · `docs/SYSTEMS.md`'s `gotcha-guard` probe cannot run, and its row makes three false claims about a component that is alive — **S2** — **OPEN**
-
-Found 2026-09-24 while exploring for the plugin-delivery review. `docs/SYSTEMS.md:51` registers
-`gotcha-guard` with an artifacts field naming `~/.claude/hooks/gotcha-guard.mjs` and a
-`liveness_probe` of three commands it says are **all** needed. Measured:
-
-| the row claims | actually |
-|---|---|
-| artifact `~/.claude/hooks/gotcha-guard.mjs` | **absent.** `~/.claude/hooks/` exists but holds only `obsidian-commit-log.py` and `stop-context-check.sh` |
-| "registered in `~/.claude/settings.json`" | **not there.** No `gotcha-guard` string in that file; it is registered by the plugin's own `hooks/hooks.json` |
-| probe 1 `node --test ~/.claude/hooks/` | **throws** a module-loader error — there is nothing there to test |
-| probe 2 `node ~/.claude/hooks/gotcha-guard.mjs --selftest` | cannot run — that path does not exist |
-| probe 3 `tail ~/.claude/gotcha-guard.log` | **works**, and shows the component is fine |
-
-**The component is alive.** `~/.claude/gotcha-guard.log` is 4.5 MB and its last line the day this was
-filed reads `2026-09-24T11:29:15.786Z tool=Bash sources=4 entries=34 bad=0 hits=0`. So this is not a
-dead hook — it is a live hook whose registered way of proving it is alive is itself dead. An auditor
-running the documented probe concludes the opposite of the truth.
-
-**This is the twelfth referrer of the 2026-08-22 plugin cutover**, and [[N43]] is the eleven. The file
-moved into the plugin that day, is served from
-`~/.claude/plugins/cache/tathya/propagate/<version>/hooks/gotcha-guard.mjs`, and this row still names
-the pre-cutover path. N43's own text says `docs/SYSTEMS.md` is *where a liveness probe per background
-component is supposed to live*, and asks whether "these entries have no probe, or the probe has never
-run." For this row the answer is now measured: the probe exists and has never run, because it cannot.
-
-**The fix is not simply repointing the path.** G63 is explicit that a `--selftest` run from the source
-repo proves nothing about production, because Claude Code serves a COPY — so the probe must target the
-served tree, which is version-keyed and therefore not a fixed path. That makes this a real design
-question rather than a typo: derive the served path (the delivery work added `activeInstallPath()` in
-`lib/report/doctor/delivery.mjs`, which answers exactly this) or accept that the probe can only ever
-check the log. `rule:enforcement-watches-itself` — the register built to make components verifiable
-contains an unverifiable entry for the component its own text calls "the one most likely to become
-decorative."
-
-### N94 · A gotcha trigger matches command text inside a commit message, so writing about a hazard fires it — **S3** — **OPEN**
-
-Found 2026-09-25 while promoting G-P. `hooks/gotcha-guard.mjs` matches a `**Trigger:**` regex
-against the Bash call's whole command string, which includes heredoc bodies. A commit message
-*quoting* a hazardous command therefore fires the entry about it: writing the G-P commit — whose
-body quotes `git checkout -- <file>` — triggered both G-O and G-P at once.
-
-Harmless in itself, and the cost of a good trigger rather than a bad one: narrowing to "the
-command as executed" means parsing shell, and a guard that tries to be clever about quoting will
-miss the real thing. But it is worth knowing before anyone widens a trigger, because the noise
-scales with how often the hazard is discussed, and the entries most discussed are the ones most
-recently paid for.
-
-The honest options are to accept it, or to skip matching inside a heredoc body specifically —
-which is a narrow, testable rule rather than general shell parsing.
-
-### N95 · `fs.existsSync` gets a non-string somewhere in the digest path, and the source is unlocated — **S3** — **OPEN**
-
-`~/.propagate/digest.stderr.log` carries, on every recent run:
-
-```
-(node:48423) [DEP0187] DeprecationWarning: Passing invalid argument types to fs.existsSync is deprecated
-```
-
-Something calls `existsSync` with a value that is not a string or URL — most likely `null` or
-`undefined` from a config field that is legitimately unset on this machine, of which
-`INTEGRATIONS.marketplaceDir` is the known example (PR-016). `lib/skills/skills-scan.mjs:464`
-guards its own call with `!marketplaceDir ||` first, so it is not that one.
-
-**Not reproduced.** `node --trace-deprecation cli.mjs inventory` does not surface it, so the call
-sits on a path `inventory` does not reach. Recorded rather than guessed, because a plausible
-attribution here would be exactly the "reader invents an answer" failure `rule:discernment-checks`
-§6 describes. The next person should run the digest itself under `--trace-deprecation`.
-
-Latent rather than harmful today: Node has deprecated the coercion, so a future major turns this
-into a throw on a path nobody has identified.
-
-### N96 · The three components that deliver and verify rules each compute the rules directory independently — **S2** — **OPEN**
-
-Measured 2026-09-25. `lib/core/config.mjs` already exports 37 symbols including `RULES_DIR`,
-`STATE_DIR`, `SKILL_DIR`, `HUB_ROOT` and an `INTEGRATIONS` record — so the config module is not
-missing, it is **bypassed**. 62 path literals sit outside it across 29 files.
-
-Counted by path, `config.mjs` against everywhere else:
-
-| path | in config | elsewhere | files |
-|---|---|---|---|
-| `~/.claude/rules` | 1 | **3** | 3 |
-| `~/.propagate` | 4 | **10** | 9 |
-| `~/.claude/CLAUDE.md` | 0 | 4 | 3 |
-| `~/.claude/plugins` | 0 | 3 | 2 |
-| `~/.claude/settings.json` | 0 | 2 | 2 |
-| `~/.claude/skills` | 1 | 2 | 2 |
-| `~/.claude` (bare) | 0 | 2 | 1 |
-| `~/.agents` | 0 | 1 | 1 |
-
-**The first row is the defect, not the tally.** The three files that recompute
-`~/.claude/rules` are `lib/report/doctor/discovery.mjs:531`, `hooks/load-rules.mjs` and
-`hooks/rule-guard.mjs:66` — the check that verifies rules, the hook that reports them at session
-start, and the hook that pushes them at tool time. Each decides for itself where rules live. They
-agree today by coincidence, and the failure mode if one ever drifts is silent and total: rules
-load from one directory while the checker reads another, and both report success.
-
-That is `rule:tool-priority`'s own history — nine divergent copies making four mutually exclusive
-claims — reproduced in code rather than prose, inside the tool built to detect it.
-
-**Paths that exist in no config at all**, each defined where it is used:
-`gotchas-global.md` and `gotcha-guard.log` (`lib/gotchas/parse.mjs:43-44`), `rule-guard.log`
-(`hooks/rule-guard.mjs:67`), `skills-registry.off` (`lib/skills/skills-lifecycle.mjs:87`),
-`~/.claude/skills` and `~/.agents/.skill-lock.json` and `~/.claude/projects`
-(`lib/skills/skills-scan.mjs:47-53`), `~/.claude/plugins/cache` and `installed_plugins.json`
-(`lib/report/doctor/delivery.mjs:277,312`), `DAILY.md` (`lib/report/inventory.mjs:76`).
-
-**Why this matters beyond tidiness.** Two of this session's findings were path-location failures
-that a single registry would have made structural rather than accidental: the hub's task list was
-invisible because `lib/report/backlog.mjs:117` matches the filename `TODOS.md` literally
-(landed 2026-09-25), and `gateVersionManifests` had to grow a cross-repo path by hand for the
-fifth manifest (PR-016). Both were "a path decided at the point of use".
-
-The fix is a registry that grows by declaration — add a name, not a `path.join` — and a test
-asserting no path literal for a known root appears outside it. Without that assertion the
-registry becomes the 39th symbol nobody reaches for, which is the same failure one level up.
+### N96 · The three components that deliver and verify rules each compute the rules directory independently — **S2** — **MOVED** → [#54](https://github.com/Rupali59/propagate/issues/54) (2026-10-12; the full entry is there)
 
 ### N97 · Seven declared colour pairs sat under 4.5:1 in the light theme, and the guard could not see any of them — **S2** — **RESOLVED 2026-09-25**
 
@@ -4210,31 +2443,7 @@ the next 0.1 lands the same way.
 **Fix order:** widen the check before fixing the value. A number corrected by hand under a guard
 that still cannot see it is the same defect with a fresh timestamp.
 
-### N98 · `GOALS.md` is the one register with no update mechanism — every goal reports `open` forever, and nothing can say a goal's premise rotted or that a project has none — **S2** — **OPEN**
-
-**The three-state parse has no state for "I checked."** `lib/report/handovers.mjs:129`:
-
-```js
-status = resolved ? "closed" : doneWhen ? "open" : "unknown"
-```
-
-`open` means *"this entry has a `Done when:` line"*. It does **not** mean the condition is unmet —
-nothing ever evaluates the condition. `closed` requires a human to hand-write `Resolved:`. So the
-header line `15 goal(s) — 15 open · 0 closed · 0 unknown` is a statement about **markup present in
-three files**, and it reads as a statement about work outstanding.
-
-**`Derived by:` commands are never executed.** The report says so in its own header —
-*"(read-only; `Derived by:` commands are printed, never run)"* — and it is true: no `execSync`,
-`spawnSync` or `exec(` in `lib/report/goals.mjs` or `commands/goals.mjs`. Every entry names a
-runnable check and nothing runs any of them. **11 of 15 goals name a command. Zero have ever been
-run by the tool that collects them.**
-
-**And `doctor` does not read goals at all.** The only reference to goals under `lib/report/doctor/`
-is `delivery.mjs` naming `commands/goals.mjs` as a *file that must be served* — the 2026-09-16
-incident. Nothing checks goal health. `goals` is a standalone report a human must remember to run.
-
-**`goals.mjs` has no notion of staleness, coverage, project, or when an entry was last looked at.**
-Grepped for all four; the only hits on `project` are in unrelated path handling.
+### N98 · `GOALS.md` is the one register with no update mechanism — every goal reports `open` forever, and nothing can say a goal's premise rotted or that a project has none — **S2** — **MOVED** → [#55](https://github.com/Rupali59/propagate/issues/55) (2026-10-12; the full entry is there)
 
 ## The two failures this produced, both found by hand on 2026-09-25
 
@@ -4466,65 +2675,9 @@ promised *"print, write NO state"* while `lifecycleSweep()` called `reap(…, {a
 unconditionally. **`dryRun` must be threaded and proven inert by snapshotting the mirror's bytes,
 not by reading stdout.**
 
-### N108 · The leftover-cache check names the first stale tree it finds, not the population — **S3** — **OPEN**
-Found 2026-09-30, immediately after `claude plugin update propagate@tathya` took the served plugin
-from 0.15.0 to 0.15.5. Doctor reported **one** leftover cache tree:
+### N108 · The leftover-cache check names the first stale tree it finds, not the population — **S3** — **MOVED** → [#58](https://github.com/Rupali59/propagate/issues/58) (2026-10-12; the full entry is there)
 
-```
-! served plugin has a LEFTOVER cache tree  tathya/propagate 0.5.0 at
-  ~/.claude/plugins/cache/tathya/propagate/0.5.0 is not the served install
-```
-
-There are **six** version-keyed directories under `~/.claude/plugins/cache/tathya/propagate/` —
-`0.5.0`, `0.6.1`, `0.6.2`, `0.6.3`, `0.15.0`, `0.15.5` — each with a `package.json` declaring its
-own version. Five are stale, and the update just created the fifth. The check reports a single
-example where it should report a count, which is the same defect shape as the `head -4` read as a
-total earlier this week: an instrument answering a narrower question than the one asked
-(`rule:discernment-checks` §4).
-
-Harmless in itself — a stale cache tree is inert, and the check's own text says so. It matters
-because **a warning that names one instance trains the reader to fix one instance**, and the pile
-grows by one on every update.
-
-### N109 · `digest.mjs`'s `GITHUB_ROOT` is `SEARCH_ROOTS[0]`, which is not the hub — the disk section measures 12% of the tree — **S2** — **OPEN**
-Found 2026-09-30 while wiring [[n107]], which needed a hub path and therefore had to establish which
-constant actually holds one.
-
-```
-digest.mjs:83   const GITHUB_ROOT = SEARCH_ROOTS[0];
-
-SEARCH_ROOTS[0] = …/Documents/GitHub/Rupali/Experiments
-HUB_ROOT        = …/Documents/GitHub
-equal?          false
-```
-
-`SEARCH_ROOTS` is an ORDERED list of roots and nothing promises the hub is first. On this machine it
-is second, because `Rupali/Experiments` is a nested search root and sorts ahead. The only consumer is
-`discoverProjectDirs()` (`digest.mjs:188`), which shells out to
-`find "$GITHUB_ROOT" -maxdepth 4 -name package.json`, so the digest's disk section enumerates:
-
-| root scanned | package.json dirs found |
-|---|---|
-| `SEARCH_ROOTS[0]` — `Rupali/Experiments` (what it uses) | **6** |
-| `HUB_ROOT` — the hub (what it means) | **49** |
-
-So the disk report covers 12% of the tree and reads as complete. This is the same class as
-[[n26]] and [[n16]] earlier today — an instrument answering a narrower question than the one asked —
-but arriving through a new door: not a bad query, a **plausible-looking index into an ordered list
-whose order is not part of its contract**.
-
-**Why it is not fixed here.** `HUB_ROOT` is the obvious substitution and it changes what the digest
-REPORTS — 6 project dirs becoming 49 will move the disk section's numbers and may trip its
-thresholds. That is a deliberate change to a daily report's content, not a typo fix, and it belongs
-with a look at whether the section wants the hub or genuinely wants every search root (the honest
-answer is probably `SEARCH_ROOTS` entire, not either single root). `GITHUB_ROOT` was left untouched by
-N107, which derives its own destination from `HUB_ROOT` directly.
-
-**The general form, which is the part worth keeping:** `SEARCH_ROOTS[0]` appears to name the hub and
-does not. Any `[0]` into a configured list is an assumption about ordering that the config never
-made — and `lib/core/release.mjs:135` already records the same lesson in the same repo, warning that
-the hub marketplace's propagate entry is *"never `.plugins[0]`, which on this hub is `quarantine`"*.
-That comment exists because someone already paid for this once.
+### N109 · `digest.mjs`'s `GITHUB_ROOT` is `SEARCH_ROOTS[0]`, which is not the hub — the disk section measures 12% of the tree — **S2** — **MOVED** → [#59](https://github.com/Rupali59/propagate/issues/59) (2026-10-12; the full entry is there)
 
 ### N113 · A Next.js bracket path was classified as a glob, so an existing file read as "matched 0 files" — **S2** — **RESOLVED 2026-09-30**
 Found 2026-09-30 by RUNNING the new sidecar-source check against the real tree rather than reviewing
@@ -4715,55 +2868,9 @@ baseline, if anything did.
 measuring a deleted artifact is invisible by construction, so the general check is *"does each
 gauge's subject still exist"* — and nothing asks it.
 
-### N110 · `supersedes:` is frontmatter that no code reads — every rule declares it and nothing acts on it — **S3** — **OPEN**
-Found 2026-09-30 while planning the rule-promotion pass. All 22 rules at the time carried a
-`supersedes:` key in frontmatter. `grep -n supersedes lib/rules/rules-check.mjs` returns **nothing** —
-the loader does not read it, `checkRules` does not consult it, `selftest` does not assert on it.
+### N110 · `supersedes:` is frontmatter that no code reads — every rule declares it and nothing acts on it — **S3** — **MOVED** → [#60](https://github.com/Rupali59/propagate/issues/60) (2026-10-12; the full entry is there)
 
-**Why it matters rather than being cosmetic.** A promotion is exactly the moment the field would earn
-its place: `verify-work-not-report` took a claim that three other rules stated, and a reader asking
-"which rule superseded that clause" has no machine-readable answer. Worse, the field's presence
-implies the question was answered. `rule:enforcement-watches-itself` names the shape — a declaration
-that looks machine-checked and is not.
-
-**Not fixed here, and the reason is a real design question rather than effort.** Superseding is not
-rule-to-rule in this tree; it is clause-to-rule. `verify-work-not-report` did not supersede
-`discernment-checks` — it took over one section's claim while that rule kept its sentence and gained a
-pointer. A field whose only honest value is `[]` for every promotion so far should either express
-clauses or be removed, and both are decisions.
-
-### N111 · `selftest` PASSES a rule with no probes, so its headline result is weaker than the line beside it — **S2** — **OPEN**
-Found 2026-09-30 while reviewing the rule-promotion plan, and then reproduced accidentally the same
-day, which is the useful part.
-
-`lib/rules/rules-check.mjs`:
-
-```js
-const probe = probes[r.id];
-if (!probe) {
-  checks.push({ kind: "probe", id: r.id, pass: true, unprobed: true });
-  continue;
-}
-```
-
-So **`selftest PASS` is satisfiable with zero probes on every rule.** The only signal is a separate
-count line, and it is easy to read past:
-
-```
-selftest PASS — every fingerprint can fire; … 25 of 26 rules probed, 1 UNPROBED
-```
-
-That output is real: it is what `absence-claims-need-state-and-branch` produced between its rule file
-landing and its probes being written. The word PASS is doing the opposite of its job — and the probe
-mechanism exists precisely because self-match was too weak a test (N76 / propagate#18), so a PASS that
-does not require probes reintroduces the gap the probes were built to close.
-
-**The right fix is arguable and that is why this is filed rather than patched.** Failing on an
-unprobed rule makes adding a rule a two-file atomic change, which is defensible but a behaviour
-change for anyone mid-authoring. The minimum honest fix is that `PASS` becomes `PASS (N unprobed)` in
-the headline itself, so the caveat cannot be read past. **Until then: the acceptance criterion is
-`N of N rules probed`, never `selftest PASS`.** The seven rules written 2026-09-30 were gated on the
-count line for this reason.
+### N111 · `selftest` PASSES a rule with no probes, so its headline result is weaker than the line beside it — **S2** — **MOVED** → [#61](https://github.com/Rupali59/propagate/issues/61) (2026-10-12; the full entry is there)
 
 ### N117 · The cross-repo ledger resolved inside a nested search root, so its rows were ownerless and a `--cross` write would have landed in a gitignored directory — **S2** — **RESOLVED 2026-09-30**
 Found 2026-09-30 by following `doctor`'s "1 ledger file(s) on disk that no workspace owns" to its cause
@@ -4912,65 +3019,9 @@ measurement is the worst carrier for a proxy, because the assertion is what stop
 checking. This entry and the corrected rule are the only counterweight.
 
 
-### N112 · `description-standard`'s fingerprint matches its body but no single LINE, so a real restatement would report line 0 — **S3** — **OPEN**
-Found 2026-09-30 while establishing how `checkRules` matches, before authoring seven fingerprints.
+### N112 · `description-standard`'s fingerprint matches its body but no single LINE, so a real restatement would report line 0 — **S3** — **MOVED** → [#62](https://github.com/Rupali59/propagate/issues/62) (2026-10-12; the full entry is there)
 
-The two are different by design and it is not documented anywhere:
-
-| step | scope | code |
-|---|---|---|
-| the GATE — is this file a restatement | **whole file** | `if (!re.test(raw)) continue;` |
-| the REPORT — which line | **per line** | `raw.split(/\r?\n/).findIndex((l) => re.test(l)) + 1` |
-
-So a fingerprint that only matches ACROSS a newline fires the gate and then `findIndex` returns `-1`,
-making the reported line `0`. Swept all rules for it: **1 of 22** is in that state,
-`description-standard`. It has never surfaced because nothing has restated that rule, which is the
-same unknown-versus-clean problem N35 is about.
-
-**The general form, which is the part worth keeping:** a matcher used for two purposes at two scopes
-will disagree with itself at the boundary, and the disagreement surfaces as a plausible value (`0`)
-rather than an error. The seven fingerprints authored this day were each tested per-line for exactly
-this reason, and one of them — `derive-dont-curate` — needed an extra alternation because the claim it
-targets wraps mid-sentence in its source.
-
-### N106 · A v1 ledger frozen under its ORIGINAL name would be indexed as live rows — containment rests on naming, not structure — **S3** — **OPEN** (0 instances tree-wide today; the invariant is a convention with no check)
-Found 2026-09-30 while closing GitHub propagate#3, and the finding is that my own close was one step
-short. That issue tracked an ambiguous append-only row in a workspace's v1 ledger. I closed it as
-*contained*, on the evidence that every live reader resolves a ledger by exact path
-(`lib/core/discovery.mjs:362`) or by basename **with a parent directory named** `propagation` /
-`.propagation` (`lib/skills/index-db.mjs:79-87`), and a file at
-`propagation/archive/ledger-v1-<date>.jsonl` satisfies neither.
-
-**That is true, and it is true because of how the file was NAMED.** `sweepFilesystem`'s
-`EXCLUDE_DIR_NAMES` contains `_archive` and **not** `archive`, and its `LEDGER_FILENAMES` set matches
-`PROPAGATION_LEDGER.jsonl` and `PROPAGATION_CROSS_LEDGER.jsonl` **by basename anywhere in the tree**.
-So a v1 ledger frozen under its original name inside `archive/` would be swept — and its rows
-inserted into `ledger_row` unconditionally, because the insert loop runs BEFORE the reachability
-test at `index-db.mjs:481`. It would also be flagged `found-by-sweep-not-discovery`, so it is
-attributable — but attributable and inert are different, and only the second is what "contained"
-claims.
-
-**Measured across the tree: 0 instances.** Every frozen artifact in all seven `propagation/archive/`
-directories carries a version-or-date suffix — `ledger-v1-2026-08-24.jsonl`,
-`PROPAGATION_CROSS_LEDGER-v1-2026-08-24.jsonl`, `STATE-marketing-intel-2026-09.md`,
-`STATE_2026-09-14-drain.md`, `ISSUES-2026-08.md`. The discipline is real and universal. It is also
-written down nowhere and enforced by nothing.
-
-**The obvious fix is wrong, and that is why this is filed rather than patched.** Adding `archive` to
-`EXCLUDE_DIR_NAMES` would make the containment structural — and would break the reason
-`sweepFilesystem` exists. Its own header states it: *"This sweep walks the raw tree directly, so its
-result can be diffed against discovery to catch the next blind spot instead of trusting the same
-function that caused the last one."* The sweep is deliberately WIDER than discovery so that a ledger
-discovery cannot reach surfaces as a coverage gap. Narrowing it would convert
-`found-by-sweep-not-discovery` — a gap a human reads — into silence, which is the exact trade
-`rule:discernment-checks` §2 exists to forbid. **Do not "fix" this by excluding the directory.**
-
-**So the remedy is a check on the naming convention, not on the walker**: assert that no file matching
-a live-ledger name sits under an `archive/` directory, derived over the real roots rather than a
-fixture, and stated as the invariant it is. Left open because writing it is a doctor check rather
-than a line, and because the population is currently empty — which is exactly when a guard is cheap
-and exactly when nobody writes one (G70).
-
+### N106 · A v1 ledger frozen under its ORIGINAL name would be indexed as live rows — containment rests on naming, not structure — **S3** — **MOVED** → [#57](https://github.com/Rupali59/propagate/issues/57) (2026-10-12; the full entry is there)
 
 ### N105 · The guard that keeps junk out of an append-only log had no test, and a pointer comment said it did — **S2** — **RESOLVED 2026-09-28**
 

@@ -227,6 +227,23 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
         // classifier change and the test update separately. That is a real
         // limitation of comparing against HEAD, not a property of the change.
         recognised.push({ file, to: after.format });
+      } else if (
+        after.format === "delegated" &&
+        before.items.filter((i) => !i.closed).every((i) => /\*\*(MOVED|ACCEPTED)\*\*/.test(i.text))
+      ) {
+        // A PARSED register that moved its open work to a tracker. Exempt only
+        // when NOTHING open is lost: every item HEAD counted as open must be a
+        // `**MOVED** → #n` stub, so the work is counted at the tracker instead.
+        // One non-work shape HEAD's parser also counts open is admitted, and only
+        // it: `**ACCEPTED**` (the register's vocabulary: "the cost was taken
+        // deliberately and will not be reverted"). The first run of this
+        // exemption also caught the migration itself cutting N61 and N74 at a
+        // `## ` line QUOTED inside a fence -- the orphaned tail read as open work.
+        // Added 2026-10-12 with propagate's own ISSUES.md move -- and it did NOT
+        // pass on first run: nine letter-keyed audit entries (C1..E3, D16) with no
+        // disposition were open to HEAD's parser and would have vanished from
+        // every count. One open item that is not MOVED and this is a regression.
+        recognised.push({ file, to: after.format });
       } else {
         const field = ["format", "open", "closed", "items"].find(
           (k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]),
