@@ -39,7 +39,7 @@
  */
 
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { queuePayload } from "../lib/report/queue.mjs";
@@ -245,9 +245,27 @@ export async function applyBatchDispose({ body, members, rows, appendEvent, buil
 }
 
 
+// The stylesheet, as the browser receives it: every commands/ui/css/*.css, in NAME order,
+// joined. The numeric prefix IS the cascade order — 10-tokens first, 90-responsive last, so
+// the media overrides still win. Split out of one 453-line ui.css on 2026-10-08.
+//
+// DERIVED, not listed: a new fragment is picked up by being in the folder, so it cannot be
+// forgotten (rule:derive-dont-curate). The floor is the other half: a folder that reads as
+// empty or half-empty must fail loudly, never serve an unstyled page that looks like a
+// working one. Tests read THIS, not a file, so they check what is actually served.
+const CSS_DIR = new URL("./ui/css/", import.meta.url);
+const CSS_FLOOR = 5;
+export function stylesheet() {
+  const files = readdirSync(CSS_DIR).filter((f) => f.endsWith(".css")).sort();
+  if (files.length < CSS_FLOOR) {
+    throw new Error(`commands/ui/css holds ${files.length} stylesheet(s), expected at least ${CSS_FLOOR} — the page would render unstyled`);
+  }
+  return files.map((f) => `/* ── commands/ui/css/${f} ── */\n` + readFileSync(new URL(f, CSS_DIR), "utf8")).join("");
+}
+
 export function page(token) {
   // THE TEMPLATE LITERAL IS NOW A SHELL, not a program. The CSS and the client
-  // script live in commands/ui.css and commands/ui.client.js and are INLINED
+  // script live in commands/ui/css/*.css (joined by stylesheet()) and commands/ui.client.js and are INLINED
   // here at serve time -- still one self-contained page, no build step, no
   // second request.
   //
@@ -273,7 +291,7 @@ export function page(token) {
     '<!doctype html><html lang="en"><head><meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     "<title>propagate</title>",
-    "<style>", read("ui.css"), "</style></head>",
+    "<style>", stylesheet(), "</style></head>",
     "<body data-token=", JSON.stringify(token), ">",
     '<div id="app"></div>',
     ...vendor.flatMap((v) => ["<script>", v, "</script>"]),

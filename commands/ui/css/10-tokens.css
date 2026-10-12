@@ -1,0 +1,172 @@
+/* commands/ui/css — the input surface. (One file, ui.css, until 2026-10-08; now five,
+   joined in name order by stylesheet() in commands/ui.mjs. This one comes first.)
+ *
+ * WHY THIS IS A FILE AND NOT A TEMPLATE LITERAL. It used to live inside page()'s
+ * backtick string, where every escape is consumed twice and a stray backtick
+ * closes the whole page. That produced four dead-page bugs in one session (G65),
+ * each invisible: 200 on every request, nothing in any log. A plain file has
+ * nothing to escape. The page inlines it at serve time — no build, no second
+ * request.
+ *
+ * ── THE SYSTEM ────────────────────────────────────────────────────────────
+ * Authored in OKLCH. Lightness and chroma are separable there, which matters
+ * because the previous fix scaled hex toward black to gain contrast and dragged
+ * chroma down with it — that is what made this surface brown. Every state is
+ * DERIVED with relative colour, so ~30 hand-picked values collapse to the seven
+ * definitions below plus rules. Requires Chrome 119 / Safari 16.4; verified
+ * Chrome 153 / Safari 27 on this machine.
+ *
+ * The full system, including what is deliberately NOT in it, is DESIGN.md.
+ * lib/report/color.mjs resolves this notation for the tests.
+ */
+
+:root {
+  /* ── THE WHEEL ──────────────────────────────────────────────────────────
+     One number per role, IDENTICAL in both themes — measured delta 0. Only
+     lightness moves between light and dark, which is the whole reason to
+     author in OKLCH rather than hex.
+
+     TWO FAMILIES, AND THEY OCCUPY OPPOSITE HALVES ON PURPOSE.
+     STATUS is ordinal — how bad — so it keeps green -> amber -> red, a ramp
+     people already read. EDGE STATE is categorical — which side moved — so
+     borrowing severity hues for it is a semantic error, not just a visual one.
+
+     The palette that shipped had FIVE of seven inside a 43-degree arc, with
+     --st-accent and --edge-drift 2 degrees apart across those two families.
+     Worst gap is now 35 degrees, asserted by a test. */
+  --h-warn:     28;    /* status  ── */
+  --h-caution:  80;    /* status  ── warm arc, ordinal */
+  --h-ok:      145;    /* status  ── */
+  --h-drift:   195;    /* edge    ── */
+  --h-accent:  250;    /* chrome  ── cool arc, categorical */
+  --h-reverse: 285;    /* edge    ── */
+  --h-diverge: 340;    /* edge    ── */
+
+  /* ── SEMANTIC COLOUR, LIGHT ─────────────────────────────────────────────
+     Lightness is PER TOKEN, not uniform, and that is deliberate. A uniform
+     L=.545 was measured: green falls to 4.50 contrast with no headroom while
+     caution and drift clip the sRGB gamut. Solved per hue, all seven land
+     4.62-4.69 inside a 0.038 lightness spread — already near-uniform
+     perceptually, without paying for it in headroom or chroma. */
+  --st-ok:        oklch(.535 .129 var(--h-ok));
+  --st-caution:   oklch(.555 .115 var(--h-caution));
+  --st-warn:      oklch(.567 .150 var(--h-warn));
+  --st-accent:    oklch(.551 .130 var(--h-accent));
+  --edge-drift:   oklch(.541 .090 var(--h-drift));
+  --edge-reverse: oklch(.564 .160 var(--h-reverse));
+  --edge-diverge: oklch(.573 .170 var(--h-diverge));
+
+  /* ── NEUTRALS ───────────────────────────────────────────────────────────
+     Tinted toward the accent hue at chroma .008, not pure grey. Dead grey
+     beside a full-spectrum palette is what reads as unfinished, and it was
+     half of the original complaint. --bg keeps its warm cast: swapping the
+     ground wholesale trades brown for blue. */
+  --bg:    #fbfaf8;
+  --card:  #ffffff;
+  --field: oklch(.962 .006 85);
+  --line:  oklch(.895 .006 var(--h-accent));
+  /* .546 -> .490 (N97): at .546 this cleared --bg and --card but sat at 4.40 on
+     --field and 3.60 on --line, and FOUR rules put it on one of those two.
+     Derived, not nudged: .495 is the threshold against --line, .490 keeps a
+     little headroom. Now 4.57 (line) to 6.24 (card). Dark is unaffected. */
+  --dim:   oklch(.490 .008 var(--h-accent));
+  --fg:    oklch(.217 .002 var(--h-accent));
+  --on-fill: #ffffff;
+
+  /* ── DERIVED STATES ─────────────────────────────────────────────────────
+     Never hand-picked. A hover that is a separate hex is free to drift from
+     its base; one derived with calc() cannot. */
+  --accent-hover:  oklch(from var(--st-accent) calc(l - .06) c h);
+  --accent-active: oklch(from var(--st-accent) calc(l - .10) c h);
+  --accent-quiet:  oklch(from var(--st-accent) calc(l + .38) calc(c * .30) h);
+  /* warn/ok carry +.44 rather than accent's +.38 (N97): these two are the only
+     quiet tints used as a GROUND for their own full-strength colour, in
+     .vin-unresolved and .vin-resolved, and at +.38 that pairing measured 4.00
+     and 3.85. Thresholds are .433 and .432; +.44 lands 4.58 and 4.60. */
+  --warn-quiet:    oklch(from var(--st-warn)   calc(l + .44) calc(c * .30) h);
+  --ok-quiet:      oklch(from var(--st-ok)     calc(l + .44) calc(c * .30) h);
+
+  /* ── SPACE ──────────────────────────────────────────────────────────────
+     The widget keeps its own tighter 3/6/9/12/15 scale: its ground is a 300px
+     card on a desktop, not a three-column page. A shared scale would be
+     over-unification, and DESIGN.md records that as a deviation with a reason
+     rather than an accident. */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --r1: 3px; --r2: 6px; --r3: 10px;
+
+  /* ── ELEVATION ──────────────────────────────────────────────────────────
+     Offset plus soft blur, tinted to the ground. A zero-offset coloured halo
+     is decoration, not depth. */
+  --lift-1: 0 1px 2px oklch(.40 .01 var(--h-accent) / .10);
+  --lift-2: 0 4px 14px oklch(.40 .01 var(--h-accent) / .16);
+
+  /* ── MOTION ─────────────────────────────────────────────────────────────
+     Seven moments, each answering a question a static frame cannot. Nothing
+     here is decorative: this is a worklist someone uses for 83 minutes, and
+     motion you wait through is the kind users reliably hate. */
+  --t-fast: 140ms;   /* evidence arriving */
+  --t-base: 160ms;   /* division switch */
+  --t-row:  180ms;   /* a judged row collapsing — WHERE it left from */
+  --t-slow: 220ms;   /* a count pulsing because it changed */
+  --t-draw: 420ms;   /* a chart series drawing in */
+  --t-undo: 5000ms;  /* the undo window; the ring IS the clock */
+  --ease: cubic-bezier(.22, .61, .36, 1);
+}
+
+:root:not([data-theme="light"]) { color-scheme: light dark; }
+
+/* DARK. Only lightness and a little chroma move; every hue is the same number.
+   Two blocks on purpose — the media query for automatic, the attribute for an
+   explicit toggle — and a token present in only one is broken in exactly one
+   path, silently. A test asserts both are complete. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --st-ok:        oklch(.779 .130 var(--h-ok));
+    --st-caution:   oklch(.780 .130 var(--h-caution));
+    --st-warn:      oklch(.779 .125 var(--h-warn));
+    --st-accent:    oklch(.781 .114 var(--h-accent));
+    --edge-drift:   oklch(.779 .110 var(--h-drift));
+    --edge-reverse: oklch(.781 .114 var(--h-reverse));
+    --edge-diverge: oklch(.780 .170 var(--h-diverge));
+
+    --bg:    oklch(.205 .006 271);
+    --card:  oklch(.243 .008 264);
+    --field: oklch(.184 .015 253);
+    --line:  oklch(.284 .009 256);
+    --dim:   oklch(.655 .008 var(--h-accent));
+    --fg:    oklch(.925 .007 89);
+    --on-fill: oklch(.205 .006 271);
+
+    --accent-quiet: oklch(from var(--st-accent) calc(l - .52) calc(c * .55) h);
+    --warn-quiet:   oklch(from var(--st-warn)   calc(l - .52) calc(c * .55) h);
+    --ok-quiet:     oklch(from var(--st-ok)     calc(l - .52) calc(c * .55) h);
+
+    --lift-1: 0 1px 2px oklch(0 0 0 / .40);
+    --lift-2: 0 4px 14px oklch(0 0 0 / .55);
+  }
+}
+:root[data-theme="dark"] {
+  --st-ok:        oklch(.779 .130 var(--h-ok));
+  --st-caution:   oklch(.780 .130 var(--h-caution));
+  --st-warn:      oklch(.779 .125 var(--h-warn));
+  --st-accent:    oklch(.781 .114 var(--h-accent));
+  --edge-drift:   oklch(.779 .110 var(--h-drift));
+  --edge-reverse: oklch(.781 .114 var(--h-reverse));
+  --edge-diverge: oklch(.780 .170 var(--h-diverge));
+
+  --bg:    oklch(.205 .006 271);
+  --card:  oklch(.243 .008 264);
+  --field: oklch(.184 .015 253);
+  --line:  oklch(.284 .009 256);
+  --dim:   oklch(.655 .008 var(--h-accent));
+  --fg:    oklch(.925 .007 89);
+  --on-fill: oklch(.205 .006 271);
+
+  --accent-quiet: oklch(from var(--st-accent) calc(l - .52) calc(c * .55) h);
+  --warn-quiet:   oklch(from var(--st-warn)   calc(l - .52) calc(c * .55) h);
+  --ok-quiet:     oklch(from var(--st-ok)     calc(l - .52) calc(c * .55) h);
+
+  --lift-1: 0 1px 2px oklch(0 0 0 / .40);
+  --lift-2: 0 4px 14px oklch(0 0 0 / .55);
+}
+

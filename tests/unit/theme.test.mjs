@@ -25,6 +25,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+// The stylesheet AS SERVED: commands/ui/css/*.css joined in cascade order (2026-10-08 split).
+// Reading one fragment would let every check below pass over a fraction of the rules.
+import { stylesheet } from "../../commands/ui.mjs";
 
 import {
   contrast, deuteranope, rgbDistance, resolveColor, rgbToOklch,
@@ -88,8 +91,8 @@ function themes(css, darkStarts) {
 
 const SURFACES = [
   {
-    name: "commands/ui.css",
-    css: read("commands/ui.css"),
+    name: "commands/ui/css (joined)",
+    css: stylesheet(),
     darkStarts: ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]'],
     ground: { light: "--bg", dark: "--bg" },
     onFill: "--on-fill",
@@ -241,7 +244,7 @@ test("all three surfaces resolve the wheel to the SAME colours", () => {
   // They render the same data side by side and the widget links to the graph
   // page. Two near-identical palettes generated against two slightly different
   // grounds is exactly the bug this caught once already.
-  const ui = themes(read("commands/ui.css"), ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);
+  const ui = themes(stylesheet(), ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);
   const wi = themes(SURFACES[1].css, ["@media (prefers-color-scheme: dark)"]);
   const graph = read("lib/graph/graph-html.mjs");
   const graphName = { "--edge-drift": "--drift", "--edge-reverse": "--reverse", "--edge-diverge": "--diverge" };
@@ -263,7 +266,7 @@ test("all three surfaces resolve the wheel to the SAME colours", () => {
 // ── motion ─────────────────────────────────────────────────────────────────
 
 test("ui.css honours prefers-reduced-motion, and the rule is not toothless", () => {
-  const css = read("commands/ui.css");
+  const css = stylesheet();
   const i = css.indexOf("@media (prefers-reduced-motion: reduce)");
   assert.notEqual(i, -1, "no reduced-motion block — animation without one is an accessibility defect");
   const block = css.slice(i, css.indexOf("}", css.indexOf("}", i) + 1) + 1);
@@ -275,7 +278,7 @@ test("ui.css honours prefers-reduced-motion, and the rule is not toothless", () 
 test("every animation and transition uses a declared duration token", () => {
   // A hardcoded 300ms cannot be turned off by the reduced-motion block's
   // override of a token, and it is invisible in the system.
-  const css = read("commands/ui.css");
+  const css = stylesheet();
   const body = css.slice(css.indexOf("* { box-sizing"));
   const hard = [...body.matchAll(/(?:animation|transition)(?:-duration)?:\s*[^;]*?(\d+m?s)/g)]
     .map((m) => m[0].trim())
@@ -287,7 +290,7 @@ test("the undo ring degrades to something that still tells the time", () => {
   // The ring IS the clock. Hiding it under reduced motion without a fallback
   // removes the information, not just the animation — the client renders a
   // numeric countdown, and .secs is where it lands.
-  const css = read("commands/ui.css");
+  const css = stylesheet();
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.ring \{ display: none/);
   assert.match(css, /\.undo \.secs/, "a numeric fallback must exist for the ring to degrade to");
 });
@@ -302,7 +305,7 @@ test("a runtime-set token is supplied by whatever uses it, or has a fallback", (
   // means something without it. What is forbidden is a bare var(--x) that
   // nothing supplies.
   const client = read("commands/ui.client.js");
-  const css = read("commands/ui.css");
+  const css = stylesheet();
   const bare = [];
   for (const tok of RUNTIME_SET) {
     if (client.includes(tok)) continue;                       // supplied
@@ -339,7 +342,7 @@ test("ui.css styles every edge state the graph can emit", () => {
   const states = [...m[1].matchAll(/"([A-Z_]+)"/g)].map((x) => x[1]);
   assert.ok(states.length >= 4, `expected the actionable states, found ${states.length}`);
 
-  const css = read("commands/ui.css");
+  const css = stylesheet();
   const unstyled = states.filter((st) => !new RegExp(`\\.badge\\.${st}\\s*\\{`).test(css));
   assert.deepEqual(unstyled, [],
     `the graph can emit these states and ui.css gives their badge no background: ${unstyled.join(", ")}`);
@@ -390,7 +393,7 @@ test("ui.css styles every held disposition the reminders lane can emit", () => {
   assert.ok(dispositions.length >= 8,
     `expected at least 8 held dispositions across both modules, found ${dispositions.length}: ${dispositions.join(", ")}`);
 
-  const css = read("commands/ui.css");
+  const css = stylesheet();
   const unstyled = dispositions.filter((d) => !new RegExp(`\\.badge\\.${d}\\b`).test(css));
   assert.deepEqual(unstyled, [],
     `the reminders lane can emit these and ui.css gives their badge no background: ${unstyled.join(", ")}`);
@@ -401,7 +404,7 @@ test("ui.css styles every held disposition the reminders lane can emit", () => {
 });
 
 test("every colour/background pair ui.css DECLARES clears 4.5:1, both themes", () => {
-  const css = read("commands/ui.css");
+  const css = stylesheet();
   const t = themes(css, ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);
 
   const pairs = [];
@@ -431,4 +434,17 @@ test("every colour/background pair ui.css DECLARES clears 4.5:1, both themes", (
   }
   assert.deepEqual(fails, [],
     `${pairs.length} pairs checked in 2 themes; under 4.5:1:\n  ${fails.join("\n  ")}`);
+});
+
+test("the responsive overrides load AFTER the base rules they override (cascade order of commands/ui/css)", () => {
+  // stylesheet() joins commands/ui/css/*.css in NAME order. If the responsive file sorted
+  // first, every `@media (max-width …) { .rail { … } }` would be overridden by the base
+  // `.rail` rule that follows it, and the narrow layout would silently stop applying. A
+  // rename (90- -> 05-) went green against every other test on 2026-10-08; this is the one
+  // that notices.
+  const css = stylesheet();
+  const base = css.indexOf("\n.rail {");
+  const narrow = css.indexOf("@media (max-width: 1100px)");
+  assert.ok(base > -1 && narrow > -1, "control: both the base .rail rule and the 1100px override exist");
+  assert.ok(narrow > base, "the max-width overrides must come after the base .rail rule, or they never win");
 });

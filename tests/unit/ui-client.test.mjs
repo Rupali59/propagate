@@ -305,7 +305,8 @@ test("the undo window is five seconds and is not a compensating event", async ()
 test("under reduced motion the ring is replaced by a NUMBER, not removed", async () => {
   // The ring IS the clock. Hiding it without a fallback removes the
   // information rather than the animation.
-  const css = read("commands/ui.css");
+  const { stylesheet } = await import("../../commands/ui.mjs"); // the CSS as served (commands/ui/css/*.css, joined)
+  const css = stylesheet();
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.ring \{ display: none/);
   assert.match(read("commands/ui.client.js"), /reduced \? left \+ "s" : ""/);
 });

@@ -1,0 +1,38 @@
+/* ── REDUCED MOTION ───────────────────────────────────────────────────────
+   Not optional, and asserted by a test. The undo ring degrades to a numeric
+   countdown elsewhere in the client rather than vanishing — the INFORMATION
+   survives when the animation does not, which is the whole point. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── BROWSER SURFACES ─────────────────────────────────────────────────────
+   Selection, caret, scrollbars and focus rings ship with browser defaults that
+   belong to no design system here. The focus ring is not polish: this surface
+   is driven by j/k plus four disposition keys and shipped with no :focus rule
+   at all, so a keyboard user could not see where they were. */
+:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 2px; border-radius: var(--r1); }
+.item:focus-visible { outline-offset: -2px; }
+::selection { background: var(--st-accent); color: var(--on-fill); }
+:root { caret-color: var(--st-accent); scrollbar-color: var(--line) transparent; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: var(--r2); border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); border-radius: var(--r2); border: 3px solid transparent; background-clip: content-box; }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  display: flex; flex-direction: column;
+  font-variant-numeric: tabular-nums;
+}
+
