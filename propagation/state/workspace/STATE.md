@@ -1,5 +1,9 @@
 # propagate — State
 
+## The installed plugin catches up 18 days — 2026-10-13, `v0.15.22`
+
+Doctor's Delivery check was red: the served plugin was built from `2beba1b` (0.15.16), 47 shipped-path commits behind, while every in-repo manifest read 0.15.21. The cause was the fifth manifest. The hub's `skills-marketplace/.claude-plugin/marketplace.json` is the one `claude plugin update` reads, and releases 0.15.17-0.15.21 never bumped it. `release --check` already reads it (PR-011) and would have blocked each of those releases; it was not run. `docs/RELEASE.md` step 1 still said "three manifests" and now names all five. No code change: this release ships the existing `public-scrub.mjs` and delegated-first `backlog` work to sessions.
+
 ## Open issues live on GitHub now, not in ISSUES.md — 2026-10-12 (no version bump)
 
 Every live entry of `ISSUES.md` is now a GitHub issue on the public tracker, #23-#67, each with its full text, scrubbed by `lib/core/public-scrub.mjs`. That module was extracted from `make-public`, so the two publishers cannot disagree about what is private.

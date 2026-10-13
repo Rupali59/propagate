@@ -11,7 +11,7 @@ flag" below.
 ## The five steps
 
 ```
-1. VERSION bumped           → check names all three manifests (the declared fan-out)
+1. VERSION bumped           → check names all five manifests (four in-repo + the hub's)
 2. suite green on the floor → CI matrix; node 20 is the below-floor probe, expected to fail
 3. make-public --check      → scrub complete, watchlist satisfied, else refuse
 4. stranger install         → HOME=$(mktemp -d): setup → bootstrap → doctor clean
@@ -25,7 +25,10 @@ on purpose.
 
 `VERSION` is the single fact; `.propagates.yml` declares its fan-out to three
 manifests that must agree with it: `package.json`, `.claude-plugin/plugin.json`,
-`.claude-plugin/marketplace.json`. A bump that misses one ships a plugin whose
+`.claude-plugin/marketplace.json`. A fifth lives in the HUB repo,
+`skills-marketplace/.claude-plugin/marketplace.json`, and it is the one `claude plugin
+update` reads: bump it in the same release, in its own repo. Releases 0.15.17-0.15.21
+skipped it and the installed plugin stayed on 0.15.16 for 18 days (2026-10-13). A bump that misses one ships a plugin whose
 manifest version does not match its code, or a marketplace listing that lags
 what a stranger actually receives. `release --check` reads all four files
 directly and reports the exact values when they disagree — it does not defer
