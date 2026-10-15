@@ -43,8 +43,8 @@ function fullPayload() {
   return buildSurface({
     queue: {
       items: [
-        { edge_id: "e1", state: "DRIFTED", sourceShort: "a/b.md", downstreamShort: "c/d.md", noiseRatio: 0.5, last: { ts: "2026-09-01T00:00:00.000Z" } },
-        { edge_id: "e2", state: "REVERSED", sourceShort: "e/f.md", downstreamShort: "g/h.md", noiseRatio: null, last: null },
+        { edge_id: "e1", state: "DRIFTED", sourceShort: "a/b.md", downstreamShort: "c/d.md", noiseRatio: 0.5, last: { ts: "2026-09-01T00:00:00.000Z" }, blocked: false, blockedBy: [] },
+        { edge_id: "e2", state: "REVERSED", sourceShort: "e/f.md", downstreamShort: "g/h.md", noiseRatio: null, last: null, blocked: true, blockedBy: [{ edge_id: "e1", from: "/r/a/b.md", to: "/r/c/d.md", state: "DRIFTED" }] },
       ],
       summary: { total: 2, byState: { DRIFTED: 1, REVERSED: 1 }, neverJudged: 1, judged: 1, highNoise: 1 },
       declared: 493,
@@ -58,13 +58,27 @@ function fullPayload() {
         generatedAt: "2026-09-17T06:00:00.000Z",
         sections: [
           { name: "Delivery", pass: 0, warn: 3, fail: 0, info: 0, note: 0, entries: [] },
-          { name: "Workspace: A", pass: 5, warn: 1, fail: 0, info: 0, note: 0, entries: [] },
+          { name: "Workspace: A", pass: 5, warn: 1, fail: 0, info: 0, note: 0, accepted: 1, entries: [] },
+          {
+            name: "Instruction budget", pass: 1, warn: 0, fail: 0, info: 1, note: 0, accepted: 0,
+            entries: [{ kind: "info", label: "instruction budget", detail: "worst unexcepted: A/B 144,765 / 145,000 (235 headroom)" }],
+          },
         ],
       },
     },
     registers: { totals: { hot: { issues: 86, handovers: 38, todos: 205 }, rotatable: { issues: 30, handovers: 31, todos: 89 } } },
     gotchas: { files: 11, entries: 158, triggered: 79, scope: "workspace roots + cwd" },
     changed: { summary: { total: 5, open: 2, closed: 3 } },
+    analytics: {
+      charts: {
+        dispositionsByDay: {
+          error: null, windowDays: 14, events: 4, noChangeEvents: 3, noChangeShareOfEvents: 0.75,
+          days: [{ day: "2026-09-17", total: 4, noChange: 3, changed: 1 }],
+        },
+      },
+    },
+    runs: [{ ts: "2026-09-17T08:00:00.000Z", command: "verify", outcome: "ok", origin: "interactive" }],
+    now: Date.parse("2026-09-17T12:00:00.000Z"),
   });
 }
 
@@ -117,6 +131,21 @@ test("the nested fields the widget names are present too", () => {
   for (const k of ["declared", "expanded"]) assert.ok(k in d.edges, `edges must carry ${k}`);
   for (const k of ["value", "label", "tone"]) assert.ok(k in d.headline, `headline must carry ${k}`);
   for (const k of ["value", "label", "tone"]) assert.ok(k in d.changed, `changed must carry ${k}, same shape as headline`);
+
+  // The locked widget's pure-data sections (W4). Geometry is the widget's own (D4).
+  assert.equal(d.health.ok, true);
+  for (const k of ["key", "label", "status", "fail", "accepted", "pass"]) assert.ok(k in d.health.sections[0], `health sections must carry ${k}`);
+  for (const k of ["toJudge", "byState", "total", "calendar", "never"]) assert.ok(k in d.worklist, `worklist must carry ${k}`);
+  for (const k of ["DRIFTED", "REVERSED", "DIVERGED", "UNMATCHED"]) assert.ok(k in d.worklist.byState, `worklist.byState must carry ${k}`);
+  for (const k of ["day", "count"]) assert.ok(k in d.worklist.calendar[0], `calendar days must carry ${k}`);
+  for (const k of ["blocked", "needAllRoots", "roots", "bottleneck"]) assert.ok(k in d.leverage, `leverage must carry ${k}`);
+  for (const k of ["edge_id", "source", "downstream", "freesNow", "upstreamOf"]) assert.ok(k in d.leverage.roots[0], `leverage roots must carry ${k}`);
+  assert.equal(d.velocity.status, "ok");
+  for (const k of ["day", "total", "noChange", "changed"]) assert.ok(k in d.velocity.days[0], `velocity days must carry ${k}`);
+  assert.ok("noChangeShareOfEvents" in d.velocity);
+  assert.equal(d.usage.status, "ok");
+  for (const k of ["days", "top", "total", "failures", "refusals", "origins"]) assert.ok(k in d.usage, `usage must carry ${k}`);
+  for (const k of ["directory", "headroom", "thin"]) assert.ok(k in d.headroom, `headroom must carry ${k}`);
 });
 
 test("a row is only clickable when its view is actually served", () => {
@@ -315,10 +344,13 @@ test("the card width is derived, never asserted (G9)", () => {
   // failing against a card that was already right — rule:discernment-checks §4.
   assert.doesNotMatch(card[2], /(?<![-\w])width:\s*\d+px/, "a fixed card width is the rotted claim");
 
-  // A max-width is a weaker claim than a fixed width, but still a claim. It is
-  // only safe because the cells WRAP rather than running off the edge, so no
-  // count can push content past the corner. Assert the wrap, not the number.
-  assert.match(code, /\.cells\s*\{[^}]*flex-wrap:\s*wrap/, "cells must wrap, or a large state redraws G9 exactly");
+  // NO max-width EITHER. The 2026-10-15 redesign dropped the old 560px cap along
+  // with the wrapping `.cells` grid it protected: every chart is now an SVG of
+  // intrinsic size, so the card is as wide as its widest panel and a cap would
+  // only clip a panel instead of widening the card. Long wrapping text (.err,
+  // .gate) opts out of contributing width with `contain: inline-size`.
+  assert.doesNotMatch(card[2], /max-width:/, "a max-width on the card is a claim about the content width");
+  assert.match(code, /\.(err|gate)[^{]*\{[^}]*contain:\s*inline-size/, "wrapping messages must not set the card's width");
 });
 
 test("every updateState branch spreads ...prev (G11)", () => {
@@ -484,63 +516,196 @@ test("every updateState branch spreads ...prev (G11)", () => {
   assert.deepEqual(bare, [], `these branches drop previous state:\n  ${bare.join("\n  ")}`);
 });
 
-test("the widget's judge path goes through judge.sh, never a built command string", () => {
-  // The reason is free text somebody just typed. Concatenating it into a shell
-  // string puts it one quote away from the shell; judge.sh takes argv.
-  const src = readFileSync(WIDGET, "utf8");
-  assert.match(src, /judge\.sh/, "the write path must be the script");
-  assert.doesNotMatch(src, /run\([^)]*cli\.mjs/, "the widget must not invoke the CLI directly");
-
-  // THE GATE, asserted as a BEHAVIOUR rather than a spelling. An earlier
-  // version of this line pinned `arm === dp ? confirmJudge` and failed
-  // because the code uses an if-statement — the check was testing how the
-  // guard was written, not that it exists. This repo has the same lesson
-  // recorded for the hash-normalising regex in ui-page.test.mjs.
-  const click = src.slice(src.indexOf("onClick={() => {"), src.indexOf("close</span>"));
-  assert.ok(/arm === dp/.test(click), "the confirm step must compare against the armed disposition");
-  assert.ok(click.indexOf("dispatch({ type: 'ARM'") > click.indexOf("confirmJudge"),
-    "the FIRST click must arm and only a second may write");
-  assert.ok(/reason\.trim\(\)\.length < 12/.test(click), "a short reason must not even arm");
+// RETIRED 2026-10-15: "the widget's judge path goes through judge.sh, never a built
+// command string" asserted the arm-then-confirm write path of the desktop judge
+// panel. Desktop judging was REMOVED by decision D15 — the highest-consequence
+// action on the surface was offered on a layer that may not take clicks — so the
+// panel and widget/judge.sh are gone and the CTAs open /ready and /blocked
+// instead. What replaces it is the assertion below: nothing in the widget can
+// write a verdict.
+test("the widget cannot write a verdict: no judge script, no CLI call, no ledger write (D15)", () => {
+  assert.doesNotMatch(code, /judge\.sh|confirmJudge|<Judge\b|\bDISPS\b/, "the judge panel and judge.sh were removed by D15; they should not be back");
+  assert.doesNotMatch(code, /run\([^)]*cli\.mjs/, "the widget must not invoke the CLI directly");
+  assert.doesNotMatch(code, /--apply|confirmJudge|disposition/i, "a write path crept back in");
+  const scripts = [...code.matchAll(/widget\/([a-z-]+\.sh)/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(scripts)].sort(), ["collect.sh", "open-ui.sh"], "the widget may only run its two read/open scripts");
 });
 
-test("every tone toneFor can emit has a fill rule in the widget", () => {
-  // HOW SIX OF TEN BARS WENT GREY. toneFor emits five values; the widget
-  // styled four. Rows with tone "none" -- which is the MAJORITY, because most
-  // registers are a normal proportion rather than a condition -- fell through
-  // to the bare track colour, so their fill and their empty space were the
-  // same grey and the bar stopped reading as a bar.
-  //
-  // Nothing caught it because a missing CSS rule is not an error: the element
-  // renders, it is just invisible. Same family as a var() nothing defines.
-  const src = readFileSync(WIDGET, "utf8");
+// RETIRED 2026-10-15: "every tone toneFor can emit has a fill rule" and "a neutral
+// fill is NOT the same colour as the empty track" guarded the nine ratio-bar
+// rows (`.fil.<tone>`), which the locked variant-A redesign removed. The same
+// failure class — a value the code can emit that the stylesheet has no rule for —
+// now lives in the health pills, so the replacement derives its population from
+// the payload builder instead of a list (G67, rule:derive-dont-curate).
+test("every health status buildHealthSections can emit has a pill rule and a glyph", () => {
   const surface = readFileSync(
     path.join(import.meta.dirname, "../../lib/report/surface.mjs"), "utf8");
+  const fn = surface.slice(surface.indexOf("export function buildHealthSections"));
+  const line = /const status = [^;]+;/.exec(fn.slice(0, fn.indexOf("\n}")));
+  assert.ok(line, "could not find the status expression in buildHealthSections - this check has gone blind");
+  const statuses = new Set([...line[0].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]));
+  assert.ok(statuses.size >= 4, `buildHealthSections emits four statuses; found ${statuses.size} (${[...statuses].join(", ")}) - gone blind`);
 
-  // Derive the tone vocabulary from toneFor itself rather than restating it,
-  // so a new tone cannot be added without this going red (G67).
-  const body = surface.slice(surface.indexOf("export function toneFor"));
-  // EVERY quoted string in the function body, not just `return "x"`. The
-  // first version missed the last line — `return value === 0 ? "ok" : "none"`
-  // — and reported three tones instead of five. The blindness guard below is
-  // what caught it, which is the only reason this comment exists.
-  const tones = new Set(
-    [...body.slice(0, body.indexOf("\n}")).matchAll(/"([a-z]+)"/g)].map((m) => m[1]),
-  );
-  assert.ok(tones.size >= 5,
-    `toneFor emits five tones; this extractor found ${tones.size} (${[...tones].join(", ")}) — it has gone blind`);
-
-  const unstyled = [...tones].filter((t) => !new RegExp(`\\.fil\\.${t}\\s*\\{`).test(src));
-  assert.deepEqual(unstyled, [],
-    `toneFor can emit these and the widget gives them no fill: ${unstyled.join(", ")}`);
+  const unstyled = [...statuses].filter((st) => !new RegExp(`\\.pill\\.${st}\\s+\\.ps\\s*\\{`).test(src));
+  assert.deepEqual(unstyled, [], `the payload can emit these and the pill gives them no status colour: ${unstyled.join(", ")}`);
+  // Colour is never alone: every status also has a differently-SHAPED glyph.
+  const glyphs = [...src.matchAll(/(?:^|\n)\s*(?:'([a-z-]+)'|([a-z]+)):\s*\{\s*icon:\s*'([a-z-]+)'\s*\}/g)];
+  const byStatus = new Map(glyphs.map((m) => [m[1] || m[2], m[3]]));
+  const unglyphed = [...statuses].filter((st) => !byStatus.has(st));
+  assert.deepEqual(unglyphed, [], `these statuses have no glyph, so they would be colour alone: ${unglyphed.join(", ")}`);
+  assert.equal(new Set([...statuses].map((st) => byStatus.get(st))).size, statuses.size, "two statuses share one glyph, so they differ by colour alone");
 });
 
-test("a neutral fill is NOT the same colour as the empty track it sits in", () => {
-  // The distinction the previous test's fix rests on: neutral means "this is a
-  // measurement, not a condition", which still has to be visible. If the fill
-  // resolves to the track colour the bar conveys nothing at any value.
-  const src = readFileSync(WIDGET, "utf8");
-  const fill = /\.fil\.none\s*\{[^}]*background:\s*var\((--[a-z-]+)\)/.exec(src);
-  assert.ok(fill, ".fil.none must set a background from a token");
-  assert.notEqual(fill[1], "--track", "a neutral fill must not be the track colour");
-  assert.notEqual(fill[1], "--dim", "nor the same grey as secondary text");
+// ── the locked widget: sections, aliases, and Übersicht's own compiler ──────
+
+test("every <alias>.<field> the widget reads off a payload SECTION exists on the real payload (nested too)", () => {
+  // The top-level test above sees only `d.<section>`. The redesign reads fields
+  // two and three levels down, through one alias per section that the widget
+  // keeps consistent (see the note above the components). A renamed
+  // `leverage.roots[].freesNow` would otherwise render `undefined` on a desktop
+  // with no console. ALIASES ARE A POPULATION WE DERIVE FROM: each must be found
+  // in the widget and must resolve to a real object, so a rename of the alias
+  // shows up as "gone blind" rather than as a clean sweep of nothing.
+  const d = fullPayload();
+  const ALIASES = {
+    wl: d.worklist,
+    lev: d.leverage,
+    vel: d.velocity,
+    use: d.usage,
+    hr: d.headroom,
+    hl: d.health,
+    rt: d.leverage.roots[0],
+    cmd: d.usage.top[0],
+  };
+  const FLOOR = { wl: 4, lev: 4, vel: 3, use: 5, hr: 2, hl: 2, rt: 4, cmd: 1 };
+  for (const [alias, obj] of Object.entries(ALIASES)) {
+    assert.ok(obj && typeof obj === "object", `fixture has no object for ${alias} - this check has gone blind`);
+    const fields = new Set([...code.matchAll(new RegExp(`(?<![\\w.$])${alias}\\.([A-Za-z_$][\\w$]*)(?:\\.([A-Za-z_$][\\w$]*))?`, "g"))].map((m) => m[1] + (m[2] ? `.${m[2]}` : "")));
+    assert.ok(fields.size >= FLOOR[alias], `only ${fields.size} reads of ${alias}.* found, expected at least ${FLOOR[alias]} - the alias was renamed or this extraction is blind`);
+    for (const f of fields) {
+      const [first, second] = f.split(".");
+      if (["length", "map", "filter", "reduce", "slice"].includes(first)) continue;
+      assert.ok(first in obj, `widget reads ${alias}.${first}, which the payload does not carry (${Object.keys(obj).join(", ")})`);
+      const inner = obj[first];
+      if (second && inner && typeof inner === "object" && !Array.isArray(inner)) {
+        assert.ok(second in inner, `widget reads ${alias}.${first}.${second}, which the payload does not carry`);
+      }
+    }
+  }
+});
+
+test("the widget imports ONLY from 'uebersicht'", () => {
+  const specs = [...code.matchAll(/^\s*import\s+[\s\S]*?from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
+  assert.deepEqual([...new Set(specs)], ["uebersicht"], "any other import fails silently on the desktop layer (G60); icons are vendored, not imported");
+  assert.doesNotMatch(code, /\brequire\(|\bimport\(/, "no dynamic module loading either");
+});
+
+test("no :hover state carries information, and nothing shipped depends on one", () => {
+  // :hover never fires on the desktop layer. The redesign has no hover rules at
+  // all; a future one must not hold a fact. Asserted on the className literal.
+  const open = src.indexOf("export const className = `") + "export const className = `".length;
+  const css = src.slice(open, src.indexOf("`", open));
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /:hover/, "a :hover rule - hover never fires on the desktop layer");
+  assert.doesNotMatch(code, /<title>|onMouseEnter|onMouseOver/, "a tooltip or hover handler would hold information nobody can reach");
+});
+
+test("every font-size in the stylesheet is at least 11px (Apple HIG widgets)", () => {
+  const open = src.indexOf("export const className = `") + "export const className = `".length;
+  const css = src.slice(open, src.indexOf("`", open)).replace(/\/\*[\s\S]*?\*\//g, "");
+  const sizes = [...css.matchAll(/font(?:-size)?:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1]));
+  assert.ok(sizes.length >= 8, `only ${sizes.length} font sizes found - the extraction has gone blind`);
+  const small = sizes.filter((n) => n < 11);
+  assert.deepEqual(small, [], `text under 11px: ${small.join(", ")}`);
+});
+
+test("chart fills are classes over tokens: no hex literal in an SVG attribute or a fill/stroke rule", () => {
+  // Theme coverage (tests/unit/theme.test.mjs) derives its token population from
+  // the var() uses in the className literal, so a chart colour written as a hex
+  // attribute is invisible to it (G70).
+  assert.doesNotMatch(code, /(?:fill|stroke)=["']#/, "a hex SVG attribute escapes the theme test");
+  assert.doesNotMatch(code, /(?:fill|stroke)=["'](?!none|currentColor)[a-z]/, "a named colour SVG attribute escapes the theme test");
+  const open = src.indexOf("export const className = `") + "export const className = `".length;
+  const css = src.slice(open, src.indexOf("`", open));
+  const rules = [...css.matchAll(/(?:^|[\s;{])(?:fill|stroke):\s*([^;}]+)/g)].map((m) => m[1].trim());
+  assert.ok(rules.length >= 10, `only ${rules.length} fill/stroke declarations found - the extraction has gone blind`);
+  const bad = rules.filter((v) => !/^(none|var\(--[a-z-]+\))$/.test(v));
+  assert.deepEqual(bad, [], `a chart fill that is not a token: ${bad.join(" | ")}`);
+});
+
+test("every run() has a .catch that dispatches an attributable error", () => {
+  // run() REJECTS on a non-zero exit, and open-ui.sh exits 1 with its reason on
+  // stderr. A promise with no catch is a click that did nothing and said nothing.
+  const runs = [...code.matchAll(/\brun\(/g)].length;
+  assert.ok(runs >= 2, `expected at least two run() calls (open + refresh), saw ${runs}`);
+  const catches = [...code.matchAll(/\.catch\(\(e\) => dispatch\(\{ type: 'RUN_ERROR'/g)].length;
+  assert.equal(catches, runs, "every run() needs its own .catch dispatching RUN_ERROR");
+  assert.match(code, /event\.type === 'RUN_ERROR'/, "updateState must handle RUN_ERROR");
+  assert.match(code, /\{note \?/, "and the card must render the note, or the error is stored and never seen");
+});
+
+test("every section's unknown / none-recorded / missing state renders as can't tell, never as 0", () => {
+  // Each panel branches on whyNot() (or the health reason) before it draws.
+  for (const panel of ["VelocityPanel", "CommandsPanel", "HeadroomLine"]) {
+    const body = code.slice(code.indexOf(`const ${panel}`));
+    assert.match(body.slice(0, body.indexOf("\n};") + 3), /whyNot\(/, `${panel} must ask why it cannot be drawn before drawing`);
+  }
+  assert.match(code, /can&#8217;t tell/, "the can't-tell wording is the attributable absence");
+  for (const panel of ["WorklistPanel", "LeveragePanel"]) {
+    const body = code.slice(code.indexOf(`const ${panel}`));
+    assert.match(body.slice(0, body.indexOf("\n};") + 3), /if \(!(wl|lev)\)/, `${panel} must handle a missing section`);
+  }
+});
+
+test("each section's click opens its route through open-ui.sh (CTA per metric)", () => {
+  const routes = { WorklistPanel: "/ready", LeveragePanel: "/blocked", VelocityPanel: "/analytics", CommandsPanel: "/analytics", HealthPanel: "/reference" };
+  for (const [panel, route] of Object.entries(routes)) {
+    const body = code.slice(code.indexOf(`const ${panel}`));
+    assert.match(body.slice(0, body.indexOf("\n};") + 3), new RegExp(`openView\\('${route}'`), `${panel} must open ${route}`);
+  }
+  assert.match(code, /openView\('\/stream'/, "the new pill opens /stream");
+  for (const r of Object.values(routes).concat(["/stream"])) {
+    assert.ok(SERVED_VIEWS.includes(r), `${r} is not a served view - the CTA would be dead`);
+  }
+});
+
+test("the widget compiles with Übersicht's OWN babel (preset-react, pragma 'html')", (t) => {
+  // The same transform server.js applies: @babel/preset-react with
+  // {pragma: 'html'} (then preset-env). A JSX construct that parses can still
+  // fail to compile — the fragment case, G8 — and the result on the desktop is a
+  // blank card. Skipped, attributably, on a machine without Übersicht.
+  const BASE = "/Applications/Übersicht.app/Contents/Resources/node_modules";
+  const req = createRequire(import.meta.url);
+  let babel, react;
+  try {
+    babel = req(`${BASE}/@babel/core`);
+    react = req(`${BASE}/@babel/preset-react`);
+  } catch {
+    t_skip("Übersicht's @babel/core or @babel/preset-react is not at /Applications - the widget's COMPILE is unverified here");
+    return;
+  }
+  let out;
+  try {
+    out = babel.transformSync(src, { babelrc: false, configFile: false, comments: false, presets: [[react, { pragma: "html" }]] });
+  } catch (err) {
+    assert.fail(`Übersicht's babel cannot compile the widget - it would render a BLANK CARD.\n${err.message}`);
+  }
+  assert.ok(out.code.includes("html("), "the transform did not apply the html pragma - the check is not testing what it claims");
+  assert.ok(!out.code.includes("React.Fragment"), "a fragment slipped through");
+});
+
+test("the calendar's width budget agrees with the stylesheet's .stack width", () => {
+  // CARD_INNER (script) is the panel's content width: .stack (640px) less the
+  // panel's 11px padding twice. If one moves without the other the calendar
+  // draws a grid for a width the card does not have.
+  const stack = src.match(/\.stack\s*\{[^}]*?width:\s*(\d+)px/);
+  const inner = src.match(/const CARD_INNER = (\d+);/);
+  assert.ok(stack && inner, "the .stack width or CARD_INNER was not found - this check has gone blind");
+  assert.equal(Number(stack[1]) - 22, Number(inner[1]), "CARD_INNER must be the .stack width less 2 x 11px of panel padding");
+});
+
+test("a leverage root's label elides directories only (compactPath), never CSS-truncates a filename", () => {
+  assert.match(code, /compactPath\(rt\.source/, "root labels go through compactPath");
+  const rn = src.match(/\.rn\s*\{([^}]*)\}/);
+  assert.ok(rn, "no .rn rule found");
+  assert.doesNotMatch(rn[1], /text-overflow|overflow:\s*hidden|max-width/, "CSS truncation would cut a filename");
 });

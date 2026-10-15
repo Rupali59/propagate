@@ -102,5 +102,5 @@ test("totals sum every section, and sectionCount matches", () => {
 test("empty input yields zero sections, never a throw", () => {
   const d = buildDoctorJson([], { problems: 0, generatedAt: "T" });
   assert.equal(d.sectionCount, 0);
-  assert.deepEqual(d.totals, { pass: 0, warn: 0, fail: 0, info: 0, note: 0 });
+  assert.deepEqual(d.totals, { pass: 0, warn: 0, fail: 0, info: 0, note: 0, accepted: 0 });
 });

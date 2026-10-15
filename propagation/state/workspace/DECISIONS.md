@@ -1427,3 +1427,50 @@ at each event's commits.
 
 **Refs:** plan `budget-3-propagate-settle.md` D1–D5, G74 (`--glob` is not a pattern — why
 `settle` prints `--edge`), `rule:safety-flag-needs-a-test`.
+
+## 2026-10-15: command usage gets a recorder after all; and the desktop no longer writes verdicts
+
+**Every CLI run now appends one record** (`{ts, command, outcome ok|refused|error, duration_ms,
+origin, kind:"command"}`) to the existing runs store from a synchronous `process.on('exit')`
+handler. It feeds `lib/report/usage.mjs`, which existed since f056763 (2026-09-24) as a pure
+aggregator that nothing fed. The runs store held only `reconcile` records with no command or outcome.
+
+**Why this does not contradict PR-030** (2026-09-30, which superseded `events/telemetry.jsonl`):
+PR-030 rejected eight *events* designed against defects that had since closed. It asked that a new
+event be "specified against a defect that is open". This is not an event and the gap is open: Rupali
+asked "what happened to the command telemetry?" on 2026-10-13, and no record of command use existed.
+Deriving it instead (`rule:delegation-criteria` §2) was measured and is insufficient on three counts:
+- transcripts see only Claude-session Bash calls: 1,255 over 14 days, but no terminal, git hook or
+  launchd runs;
+- one tool call can chain several commands;
+- a scan reads ~2 GB of private transcripts (3.4 s), too much for a 5-minute widget refresh.
+
+The transcript derivation survives as a one-time, dry-run-by-default `usage --backfill`.
+
+**Guards, each tested** (`tests/cli/usage-recorder.test.mjs`):
+- argv is never stored (privacy);
+- writes go under `PROPAGATE_STATE_DIR`;
+- the recorder is skipped entirely under `NODE_TEST_CONTEXT` (G56). Mutating that guard turns the
+  store-snapshot test red;
+- write failures are swallowed and never change the exit code;
+- exit 3 counts as `refused`, not as a failure.
+
+`origin` (`interactive` / `widget` / `monitor` / `hook` / `backfill`) exists because the widget alone
+calls `surface` 288 times a day. Without it the chart would show the widget measuring itself.
+
+Rejected:
+- a separate `usage/<month>.jsonl` store (a second store beside one built for this);
+- daily transcript derivation (it misses non-Claude runs, and reads private files every day);
+- recording without backfill (an empty chart for two weeks).
+
+**Desktop judging is retired** (D15). The widget's judge panel and `widget/judge.sh` are removed;
+its CTAs open `/ready` and `/blocked` in the web UI. A verdict is an append-only event. Übersicht
+delivers clicks only while the interaction shortcut is held. A permanent write belongs where both
+files can be read first, not on a glance surface whose only review step was a second click.
+Rejected: keeping the panel inside the redesigned card, which would mean a permanent write from a
+layer that may not take clicks.
+
+**Affects:** propagate
+
+**Refs:** plan `ticklish-gathering-brook.md` (eng review D13, D15, outside-voice findings), PR-030,
+G56, `rule:delegation-criteria` §2, `rule:safety-flag-needs-a-test`.

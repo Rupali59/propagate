@@ -84,3 +84,27 @@ test("surfaceCmd: --json mode is untouched by this change — one JSON line, cha
   const payload = JSON.parse(io.lines[0]);
   if (rc === 0) assert.ok("changed" in payload, "the field this whole fix is about must still be in --json");
 });
+
+// ---------------------------------------------------------------------------
+// widgetLines — the text form of the widget sections stays in step (W4)
+// ---------------------------------------------------------------------------
+
+import { widgetLines } from "../../commands/surface.mjs";
+
+test("widgetLines: every absent section says WHY, and none prints a bare zero for 'not measured'", () => {
+  const lines = widgetLines({
+    worklist: { toJudge: 1, total: 4, byState: { DRIFTED: 2, REVERSED: 0, DIVERGED: 2, UNMATCHED: 0 }, calendar: [], never: 0 },
+    leverage: { blocked: 0, needAllRoots: 0, roots: [], bottleneck: null, bottleneckReason: "nothing is blocked" },
+    velocity: { status: "unknown", reason: "disk gone" },
+    usage: { status: "none-recorded", reason: "no command records" },
+    health: { ok: false, reason: "no snapshot" },
+    headroom: { status: "ok", directory: "A/B", headroom: 235, thin: true },
+  });
+  const text = lines.join("\n");
+  assert.match(text, /to judge 1 of 4/);
+  assert.match(text, /bottleneck: nothing is blocked/);
+  assert.match(text, /velocity: unknown — disk gone/);
+  assert.match(text, /usage: none-recorded — no command records/);
+  assert.match(text, /health sections: unknown — no snapshot/);
+  assert.match(text, /A\/B 235 chars \(thin\)/);
+});

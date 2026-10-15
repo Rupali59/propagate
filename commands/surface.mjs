@@ -60,6 +60,57 @@ export function changedLine(changed) {
     : `${TONE_MARK[changed.tone] ?? "·"} ${changed.value} ${changed.label} since last look`;
 }
 
+/**
+ * Concise lines for the widget-facing sections (worklist, leverage, velocity,
+ * usage, health, headroom). Every absent section says WHY it is absent
+ * (rule:discernment-checks §2); none prints a bare zero for "not measured".
+ */
+export function widgetLines(s) {
+  const out = [];
+  const w = s.worklist;
+  if (w) {
+    const st = w.byState;
+    out.push(
+      `to judge ${w.toJudge ?? "?"} of ${w.total}  ·  ${st.DRIFTED} drifted · ${st.REVERSED} reversed · ${st.DIVERGED} diverged · ${st.UNMATCHED} unmatched`
+        + `  ·  ${w.calendar.length} day(s) with a last check, ${w.never} never`,
+    );
+  }
+  const l = s.leverage;
+  if (l) {
+    const top = l.roots.map((r) => `${r.edge_id} frees ${r.freesNow}, upstream of ${r.upstreamOf}`).join("; ");
+    out.push(`leverage: ${l.blocked} blocked · ${l.needAllRoots} need several roots settled${top ? ` · ${top}` : ""}`
+      + (l.bottleneck ? ` · bottleneck ${l.bottleneck.file} (${l.bottleneck.blockedEdges})` : ` · bottleneck: ${l.bottleneckReason}`));
+  }
+  const v = s.velocity;
+  if (v) {
+    out.push(v.status === "ok"
+      ? `velocity: ${v.events} judgement(s) in ${v.windowDays} days · ${v.noChangeShareOfEvents == null ? "no share (no events)" : `${Math.round(v.noChangeShareOfEvents * 100)}% of events were no-change`}`
+      : `velocity: unknown — ${v.reason}`);
+  }
+  const u = s.usage;
+  if (u) {
+    out.push(u.status === "ok"
+      ? `usage (${u.origin}): ${u.total} command(s) in ${u.windowDays} days · ${u.failures} failed · ${u.refusals} refused · top ${u.top.map((t) => `${t.command} ${t.count}`).join(", ") || "none"} · origins ${Object.entries(u.origins).map(([k, n]) => `${k} ${n}`).join(", ") || "none"}`
+      : `usage: ${u.status} — ${u.reason}`);
+  }
+  const h = s.health;
+  if (h) {
+    if (!h.ok) out.push(`health sections: unknown — ${h.reason}`);
+    else {
+      const f = h.sections.filter((x) => x.status === "fail").map((x) => x.label);
+      const a = h.sections.filter((x) => x.status === "accepted-only").map((x) => x.label);
+      out.push(`health sections: ${h.sections.length} · failing ${f.length}${f.length ? ` (${f.join(", ")})` : ""} · accepted-only ${a.length}${a.length ? ` (${a.join(", ")})` : ""}`);
+    }
+  }
+  const r = s.headroom;
+  if (r) {
+    out.push(r.status === "ok"
+      ? `headroom: ${r.directory} ${r.headroom} chars${r.thin ? " (thin)" : ""}`
+      : `headroom: unknown — ${r.reason}`);
+  }
+  return out;
+}
+
 export async function surfaceCmd(argv = [], io = console) {
   const asJson = argv.includes("--json");
   const root = path.join(process.env.HOME ?? "", "Documents/GitHub/");
@@ -106,6 +157,9 @@ export async function surfaceCmd(argv = [], io = console) {
     io.log("");
     io.log(s.grid.map((g) => `${g.state.toLowerCase()} ${g.count}`).join("      "));
   }
+
+  const wl = widgetLines(s);
+  if (wl.length) { io.log(""); for (const l of wl) io.log(l); }
 
   // The snapshot's age is stated on EVERY run, including the healthy one. A
   // staleness warning that only appears when something is wrong trains a reader

@@ -11,7 +11,7 @@ they have diverged before.
 
 ```sh
 node -e 'import("./lib/report/color.mjs").then(async({declarations,resolveColor,contrast,rgbToOklch})=>{
-  const c=require("fs").readFileSync("commands/ui.css","utf8");
+  const c=require("fs").readFileSync("commands/ui/css/10-tokens.css","utf8");
   const l=declarations(c.slice(0,c.indexOf("@media (prefers-color-scheme: dark)")));
   for(const t of ["--st-ok","--st-caution","--st-warn","--st-accent","--edge-drift","--edge-reverse","--edge-diverge"])
     console.log(t, resolveColor(l.get(t),l), contrast(resolveColor(l.get(t),l),"#fbfaf8").toFixed(2));
@@ -28,7 +28,7 @@ the details. It is not a landing page and must not acquire the manners of one.
 
 ## 1 · Colour
 
-Authored in **OKLCH with relative derivation** (`commands/ui.css`). Lightness and
+Authored in **OKLCH with relative derivation** (`commands/ui/css/10-tokens.css`). Lightness and
 chroma are separable there, which is the entire reason: an earlier fix scaled hex
 toward black to gain contrast and dragged chroma down with it, which is what made
 these surfaces brown.
@@ -68,7 +68,7 @@ exists to prevent.
 
 **Refusal kinds are that third set, and they spend every hue but one.** Six
 kebab-case dispositions, six hues, and `--st-ok` is deliberately never among
-them: green means *this is fine* everywhere else in `commands/ui.css`, so putting
+them: green means *this is fine* everywhere else in `commands/ui/css/`, so putting
 a refusal on it inverts the one association a reader has without being taught.
 What frees that hue is muting `already-inserted` — the single row in the panel
 that is **not** a failure takes `--dim` rather than a colour, so the hue that
@@ -79,7 +79,7 @@ peers, which is why it needed deciding rather than assuming.
 
 **Two things keep this honest, because prose cannot.** `tests/unit/theme.test.mjs`
 derives the disposition list from `lib/reminders/sync.mjs` and
-`lib/reminders/reconcile.mjs` and asserts `ui.css` styles each one — a
+`lib/reminders/reconcile.mjs` and asserts the stylesheet (`commands/ui/css/*.css`, joined) styles each one — a
 disposition with no rule renders as ink on no background, which is invisible
 rather than wrong. And the same file's both-themes check reads every `var()` the
 stylesheet uses, so these rules were covered the moment they were written. The
@@ -134,7 +134,7 @@ and this one is between two *foregrounds*.
 
 ## 2 · Space, radius, elevation
 
-`--s1`…`--s6` (4–32px) and `--r1`…`--r3` (3/6/10px) in `commands/ui.css`.
+`--s1`…`--s6` (4–32px) and `--r1`…`--r3` (3/6/10px) in `commands/ui/css/10-tokens.css`.
 
 **The widget keeps its own tighter 3/6/9/12/15 scale.** Its ground is a 300px
 card on a desktop, not a three-column page; sharing one scale would be
@@ -202,6 +202,10 @@ Keyboard: every shortcut has a visible control. Disposition keys are built from
 - **Uniform semantic lightness.** Measured; costs headroom and chroma for a
   spread already perceptually near-uniform.
 - **A shared space scale with the widget.** Different ground, different scale.
+- **An icon library, except in the widget.** The widget vendors a small Lucide subset
+  (`lucide` 1.55.0, ISC, React-free node data) into a generated block, because Übersicht
+  resolves no relative import and the marketplace install runs no `npm install`. Charts stay
+  hand-drawn SVG on every surface. Decided 2026-10-13 (widget redesign, D3/D9).
 
 ---
 

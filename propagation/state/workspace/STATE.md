@@ -1,5 +1,35 @@
 # propagate — State
 
+## The widget is redesigned around what needs you, and command use is recorded — 2026-10-15, `v0.15.23`
+
+The Übersicht widget was rebuilt to locked variant A after a design and engineering review (plan
+`ticklish-gathering-brook.md`; decisions D1-D15 in its ledger). It reads Übersicht's own source, not
+just its README: commands get no timeout, and any stderr turns the response into a 500.
+
+**What it shows, top to bottom** (each section's click opens its web-UI view):
+- health icon pills, where accepted findings are distinct from fixable ones;
+- the worklist as a state donut plus a calendar of when each edge was last checked;
+- leverage as "frees N now · upstream of M" (never "unblocks");
+- 14-day settle velocity with the no-change share of events;
+- interactive command usage;
+- headroom, only when thin.
+
+Every unknown or empty section says "can't tell — <reason>", never 0.
+
+**What changed underneath:**
+- `cli.mjs` records each run to the runs store at exit (DECISIONS 2026-10-15).
+- `usage --backfill` derives history from transcripts once, dry-run by default.
+- `scripts/execution/health-exceptions.yml` lets doctor report permanent reds as accepted (E6).
+- `collect.sh` is bounded at 30s and can never write to stderr (E1).
+- `open-ui.sh` replaces a stale UI and refuses to kill a process it cannot identify (E2).
+- Desktop judging is retired (D15).
+
+**Still open:**
+- the live light and dark renders, Rupali's acceptance;
+- the stale UI on :4599 (3 Oct, no recorded pid) needs one manual stop before CTAs work;
+- `usage --backfill --apply` has not been run on real transcripts;
+- the monitor plist must be regenerated to tag `origin=monitor`.
+
 ## The installed plugin catches up 18 days — 2026-10-13, `v0.15.22`
 
 Doctor's Delivery check was red: the served plugin was built from `2beba1b` (0.15.16), 47 shipped-path commits behind, while every in-repo manifest read 0.15.21. The cause was the fifth manifest. The hub's `skills-marketplace/.claude-plugin/marketplace.json` is the one `claude plugin update` reads, and releases 0.15.17-0.15.21 never bumped it. `release --check` already reads it (PR-011) and would have blocked each of those releases; it was not run. `docs/RELEASE.md` step 1 still said "three manifests" and now names all five. No code change: this release ships the existing `public-scrub.mjs` and delegated-first `backlog` work to sessions.

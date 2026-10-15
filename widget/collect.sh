@@ -16,13 +16,25 @@
 # makes the widget render "unreadable output" — true, but it does not say WHY.
 # `{"error": "..."}` renders the actual reason on the desktop
 # (rule:discernment-checks §2).
+#
+# TWO ÜBERSICHT FACTS THIS FILE IS SHAPED BY (read 2026-10-13 from
+# felixhageloh/uebersicht, server/src/command_server.coffee):
+#   1. THERE IS NO TIMEOUT. The command is `spawn('bash')` with the command
+#      written to stdin and nothing ever kills it, so a hung `surface` hangs the
+#      widget until someone notices. Hence the 30s alarm below.
+#   2. ANY BYTE ON STDERR MAKES THE RESPONSE A 500: the first stream to write
+#      sets the status (`setStatusOnce`), so one warning line turns valid JSON
+#      into an error. Hence `exec 2>/dev/null` first, so not even bash's own
+#      job-control or signal messages ("Alarm clock: 14") can reach stderr.
+#      Failure is reported as JSON on stdout, which is the only channel that works.
 
+exec 2>/dev/null
 set -uo pipefail
 
 CLI="$HOME/Documents/GitHub/propagate/cli.mjs"
 
-NODE=""
-for c in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node "$HOME/.nvm/versions/node/current/bin/node"; do
+NODE="${PROPAGATE_NODE:-}"   # test seam; unset in production
+[ -z "$NODE" ] && for c in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node "$HOME/.nvm/versions/node/current/bin/node"; do
   [ -x "$c" ] && { NODE="$c"; break; }
 done
 [ -z "$NODE" ] && NODE="$(command -v node 2>/dev/null || true)"
@@ -45,8 +57,30 @@ fi
 # The snapshot half is a READ of a file the monitor already wrote; nothing in
 # this path ever runs doctor, which costs 37s and would blow the refresh budget
 # by a factor of thirty. Measured end to end: ~0.7s.
-OUT="$("$NODE" "$CLI" surface --json 2>/dev/null)"
+export PROPAGATE_ORIGIN=widget
+
+# BOUNDED, WITH NO NEW DEPENDENCY. perl ships with macOS; `alarm` then `exec`
+# makes SIGALRM kill the node process itself, which the shell sees as 142.
+# Output goes to a FILE, not a pipe: a `$(...)` substitution waits for EOF on the
+# pipe, so any grandchild that outlived the alarm would still hold the widget
+# open past the bound. PROPAGATE_COLLECT_TIMEOUT exists for the test only.
+LIMIT="${PROPAGATE_COLLECT_TIMEOUT:-30}"
+TMP="$(mktemp "${TMPDIR:-/tmp}/propagate-collect.XXXXXX")" || {
+  printf '{"error":"could not create a temp file for the collector"}\n'
+  exit 0
+}
+trap '/bin/rm -f "$TMP"' EXIT
+if command -v perl >/dev/null 2>&1; then
+  perl -e 'alarm shift; exec @ARGV' "$LIMIT" "$NODE" "$CLI" surface --json >"$TMP"
+else
+  "$NODE" "$CLI" surface --json >"$TMP"
+fi
 RC=$?
+OUT="$(cat "$TMP")"
+if [ $RC -eq 142 ]; then
+  printf '{"error":"timed out after %ss"}\n' "$LIMIT"
+  exit 0
+fi
 if [ $RC -ne 0 ] || [ -z "$OUT" ]; then
   # Capture the child's status immediately (G-C: a wrapper's exit code is not
   # its child's) and report it rather than letting an empty string read as calm.

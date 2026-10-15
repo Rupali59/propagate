@@ -169,8 +169,9 @@ import {
   divergedGuard, divergedRefusal, buildEventPayload,
   orderingBlocks, verifyCommand, REASON_PLACEHOLDER,
 } from "./lib/edges/disposition.mjs";
-import { renderUsage, validateFlags, renderHelp, helpRequest } from "./lib/core/commands.mjs";
-import { appendRun } from "./lib/core/runs.mjs";
+import { renderUsage, validateFlags, renderHelp, helpRequest, resolveCommand } from "./lib/core/commands.mjs";
+import { appendRun, appendRunSync } from "./lib/core/runs.mjs";
+import { buildCommandRecord } from "./lib/report/usage.mjs";
 import { describeWhy } from "./lib/edges/why.mjs";
 import {
   METRICS_PATH,
@@ -4980,7 +4981,151 @@ async function graphIndexCmd() {
   }
 }
 
+/**
+ * usage -- which propagate commands are run, how often, and how often they fail.
+ *
+ * Plain `usage` aggregates the runs store (lib/report/usage.mjs), default view
+ * origin=interactive. `--backfill` derives HISTORY from Claude transcripts, once:
+ * it counts Bash tool calls that ran `cli.mjs <command>` for commands in the
+ * registry, and stores COUNTS ONLY -- never the command text. Dry-run unless
+ * `--apply` (G-B: a flag that previews must not write). Re-running is safe: each
+ * tool call is recorded once, keyed by its tool_use id.
+ *
+ * `transcriptWindow` (inventory.mjs) only measures the span of the transcripts; it
+ * reads no content. The content read here is a plain file walk over the same
+ * PROJECTS_DIR, so the window it reports and the files it reads are the same set.
+ */
+async function usageCmd(args) {
+  const asJson = args.includes("--json");
+  const oi = args.indexOf("--origin");
+  const origin = oi !== -1 ? args[oi + 1] : undefined;
+  const { COMMANDS } = await import("./lib/core/commands.mjs");
+  const { usageReport, countCommandCalls, ORIGINS } = await import("./lib/report/usage.mjs");
+  const { readRuns } = await import("./lib/core/runs.mjs");
+  const allCommands = Object.keys(COMMANDS);
+
+  if (origin !== undefined && origin !== "all" && !ORIGINS.includes(origin)) {
+    console.error(`${RED}error:${RESET} usage: --origin must be one of ${[...ORIGINS, "all"].join("|")} (got ${JSON.stringify(origin)})`);
+    return 2;
+  }
+
+  if (args.includes("--backfill")) {
+    const apply = args.includes("--apply");
+    const { transcriptWindow } = await import("./lib/report/inventory.mjs");
+    const { PROJECTS_DIR } = await import("./lib/skills/skills-scan.mjs");
+    const win = transcriptWindow();
+    if (win.error || !win.scanned) {
+      // Absence must be attributable: no transcripts is not "no usage".
+      console.error(`${RED}error:${RESET} usage --backfill: no transcripts to read (${win.error ?? "0 files"} at ${PROJECTS_DIR})`);
+      return 1;
+    }
+    const files = [];
+    const walk = (dir, depth) => {
+      if (depth > 8) return;
+      let ents;
+      try {
+        ents = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of ents) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full, depth + 1);
+        else if (e.isFile() && e.name.endsWith(".jsonl")) files.push(full);
+      }
+    };
+    walk(PROJECTS_DIR, 0);
+    const { resolveCommand: resolveCmd } = await import("./lib/core/commands.mjs");
+    const found = [];
+    let unreadable = 0;
+    for (const f of files) {
+      let text;
+      try {
+        text = readFileSync(f, "utf8");
+      } catch {
+        unreadable++;
+        continue;
+      }
+      found.push(...countCommandCalls(text, resolveCmd));
+    }
+    const { runs } = await readRuns();
+    const have = new Set(runs.filter((r) => r.origin === "backfill" && typeof r.source_id === "string").map((r) => r.source_id));
+    const fresh = found.filter((c) => c.ts && !have.has(c.id));
+    const byCommand = {};
+    for (const c of fresh) byCommand[c.command] = (byCommand[c.command] ?? 0) + 1;
+    if (apply) {
+      for (const c of fresh) {
+        appendRunSync({ ts: c.ts, command: c.command, outcome: null, duration_ms: null, origin: "backfill", kind: "command", source_id: c.id });
+      }
+    }
+    const summary = {
+      apply,
+      transcriptFiles: files.length,
+      unreadable,
+      window: { start: win.start, end: win.end },
+      found: found.length,
+      alreadyRecorded: found.filter((c) => c.ts && have.has(c.id)).length,
+      noTimestamp: found.filter((c) => !c.ts).length,
+      written: apply ? fresh.length : 0,
+      wouldWrite: apply ? 0 : fresh.length,
+      byCommand,
+    };
+    if (asJson) console.log(JSON.stringify(summary, null, 2));
+    else {
+      console.log(`${BOLD}usage --backfill${RESET} ${DIM}${apply ? "APPLIED" : "dry run -- nothing written; pass --apply to record"}${RESET}`);
+      console.log(`  ${files.length} transcript files (${win.start ?? "?"}..${win.end ?? "?"}), ${found.length} cli.mjs calls found, ${summary.alreadyRecorded} already recorded`);
+      for (const [c, n] of Object.entries(byCommand).sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(5)}  ${c}`);
+      console.log(`  ${apply ? "wrote" : "would write"} ${fresh.length} count record(s), origin=backfill, outcome unknown`);
+    }
+    return 0;
+  }
+
+  const { runs, malformed } = await readRuns();
+  // Every command is instrumented since the exit hook (D13); records predating it
+  // are still attributed by usageReport's own legacy handling.
+  const rep = usageReport(runs, allCommands, { instrumented: allCommands, origin });
+  if (asJson) {
+    console.log(JSON.stringify({ ...rep, malformed }, null, 2));
+    return 0;
+  }
+  console.log(`${BOLD}usage${RESET} ${DIM}origin=${rep.origin}, ${rep.totalRuns} of ${rep.totalBeforeFilter} runs${RESET}`);
+  for (const [c, b] of Object.entries(rep.byCommand).sort((x, y) => y[1].invocations - x[1].invocations)) {
+    const fr = b.failureRate === null ? "n/a" : `${Math.round(b.failureRate * 100)}%`;
+    console.log(`  ${String(b.invocations).padStart(5)}  ${c.padEnd(18)} fail ${fr}${b.unrecorded ? `  ${DIM}(${b.unrecorded} counted, outcome unknown)${RESET}` : ""}`);
+  }
+  if (rep.legacyOrigin) console.log(`  ${DIM}${rep.legacyOrigin} record(s) predate the origin field; counted as interactive${RESET}`);
+  if (malformed) console.log(`  ${YELLOW}${malformed} malformed line(s) skipped${RESET}`);
+  return 0;
+}
+
 if (_invokedDirectly) {
+  // COMMAND-USAGE RECORDER (D13). cli.mjs calls process.exit() in ~80 places, so
+  // code after main() never runs and only a SYNCHRONOUS `exit` listener sees every
+  // exit -- including an uncaught exception (code 1) and process.exitCode. One line,
+  // {ts, command, outcome, duration_ms, origin, kind}; NEVER argv, which carries
+  // reasons and notes. Guards (D11): skipped under `node --test` (NODE_TEST_CONTEXT
+  // is inherited by every child a test spawns, so a suite would otherwise write
+  // thousands of rows into the real store), written under PROPAGATE_STATE_DIR, and
+  // wrapped so a recorder failure can neither throw nor change the exit code.
+  if (!process.env.NODE_TEST_CONTEXT) {
+    const _argv = process.argv.slice(2);
+    process.on("exit", (code) => {
+      try {
+        const rec = buildCommandRecord({
+          argv: _argv,
+          exitCode: code,
+          durationMs: Math.round(performance.now()),
+          origin: process.env.PROPAGATE_ORIGIN,
+          resolve: resolveCommand,
+          isHelp: helpRequest(_argv) !== null,
+        });
+        appendRunSync(rec);
+      } catch {
+        /* a recorder must never change what the command did */
+      }
+    });
+  }
+
   const mode = process.argv[2] || "status";
 
   // HELP ROUTES FIRST, above the flag check, so `verify --help` is answered rather
@@ -5257,6 +5402,8 @@ if (_invokedDirectly) {
     await graphIndexCmd();
   } else if (mode === "monitor") {
     await monitorCmd();
+  } else if (mode === "usage") {
+    process.exitCode = await usageCmd(process.argv.slice(3));
   } else if (mode === "rollup") {
     // Dynamic, like manifest/registers/docs (D5): a static import would pull
     // the commands layer into every `propagate status` / `check` invocation.

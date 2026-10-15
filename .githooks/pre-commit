@@ -11,7 +11,7 @@
 # Warn-only, exit 0: a declared coupling is information, and the answer is often
 # "no change needed". Bypass: PROPAGATE_SKIP=1 git commit ...
 if [ -z "${PROPAGATE_SKIP:-}" ]; then
-  node "$(git rev-parse --show-toplevel)/cli.mjs" check --staged || true
+  PROPAGATE_ORIGIN=hook node "$(git rev-parse --show-toplevel)/cli.mjs" check --staged || true
 fi
 
 # --- caps ratchet (added 2026-08-28, plan T3) --------------------------------
@@ -35,6 +35,6 @@ fi
 #
 # Bypass (logged by the workspace guards, and it disables every other hook too):
 #   GSTACK_HYGIENE_BYPASS=1 git commit ...
-node "$(git rev-parse --show-toplevel)/cli.mjs" caps --gate || exit 1
+PROPAGATE_ORIGIN=hook node "$(git rev-parse --show-toplevel)/cli.mjs" caps --gate || exit 1
 
 exit 0

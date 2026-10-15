@@ -55,8 +55,10 @@ sources:
     propagates_to:
       - path: widget/propagate-queue.jsx
         why: >-
-          surface.mjs IS the widget's data contract — the widget derives nothing and reads
-          ~20 fields off this payload. A renamed field prints `undefined` on the desktop
+          surface.mjs IS the widget's data contract — the widget reads its fields off this
+          payload and derives no NUMBER; since the 2026-10-15 redesign (D4) it does compute
+          chart GEOMETRY (donut arcs, calendar cells, bar heights) from them, in a vm-tested
+          pure block. A renamed field prints `undefined` on the desktop
           layer, where there is no console, no error and no test run. That is exactly the
           silent class this repo keeps paying for, so the edge is declared even though
           tests/unit/widget-contract.test.mjs also checks it mechanically: the test proves

@@ -28,7 +28,16 @@ import {
   buildSurface,
   buildChangedSummary,
   gotchaCensus,
+  localDay,
+  lastLocalDays,
+  buildHealthSections,
+  buildWorklist,
+  buildLeverage,
+  buildVelocity,
+  buildUsage,
+  buildHeadroom,
 } from "../../lib/report/surface.mjs";
+import { dispositionByDay } from "../../lib/report/analytics.mjs";
 
 const NOW = Date.parse("2026-09-17T12:00:00.000Z");
 const DAY = 86_400_000;
@@ -539,4 +548,226 @@ test("buildSurface wires changed at the TOP LEVEL, beside headline, not as a fou
 
   const noChanges = buildSurface({ queue: queueOf([]), now: NOW });
   assert.equal(noChanges.changed.tone, "unknown", "buildSurface must never silently omit the field when the caller passes nothing");
+});
+
+// ── widget data sections (W4): pure data, no geometry ──────────────────────
+
+/** Run `fn` with the process time zone forced, restoring it after. */
+function withTZ(tz, fn) {
+  const prev = process.env.TZ;
+  process.env.TZ = tz;
+  try { return fn(); } finally { if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev; }
+}
+
+const blockedItem = (id, state, blockers, o = {}) => ({
+  edge_id: id, state, sourceShort: `${id}-src`, downstreamShort: `${id}-dst`, noiseRatio: null,
+  last: o.ts ? { ts: o.ts } : null,
+  blocked: blockers.length > 0,
+  blockedBy: blockers.map((b) => ({ edge_id: b, from: `/r/${b}-from.md`, to: `/r/${b}-to.md`, state: "DRIFTED" })),
+});
+
+test("toJudge counts a DIVERGED+blocked edge ONCE, from item flags (not ready - blocked)", () => {
+  // 4 edges: A free DRIFTED, B free DIVERGED, C blocked DRIFTED, D blocked DIVERGED.
+  // ready = 2 (A, B), blocked = 2 (C, D). The old formula `ready - blocked` = 0.
+  // Correct: only A is unblocked AND not DIVERGED -> 1. D is both blocked and
+  // DIVERGED and must be subtracted once, by whichever predicate catches it first.
+  const items = [
+    blockedItem("A", "DRIFTED", []),
+    blockedItem("B", "DIVERGED", []),
+    blockedItem("C", "DRIFTED", ["A"]),
+    blockedItem("D", "DIVERGED", ["A"]),
+  ];
+  const w = buildWorklist(items);
+  assert.equal(w.toJudge, 1);
+  assert.deepEqual(w.byState, { DRIFTED: 2, REVERSED: 0, DIVERGED: 2, UNMATCHED: 0, other: 0 });
+  assert.equal(w.total, 4);
+  // The same through buildSurface, so the wiring is covered and not just the helper.
+  assert.equal(buildSurface({ queue: queueOf(items), now: NOW }).worklist.toJudge, 1);
+});
+
+test("toJudge is null with a reason when the fix-order join is missing", () => {
+  const w = buildWorklist([{ ...item(), blocked: null }]);
+  assert.equal(w.toJudge, null, "an unjoined set cannot tell unblocked from blocked");
+  assert.match(w.toJudgeReason, /join/);
+});
+
+test("calendar buckets last.ts by LOCAL day: 2026-10-12T20:00Z is 10-13 in Asia/Kolkata", () => {
+  const items = [
+    blockedItem("a", "DRIFTED", [], { ts: "2026-10-12T20:00:00Z" }),
+    blockedItem("b", "DRIFTED", [], { ts: "2026-10-13T01:00:00Z" }),
+    blockedItem("c", "DRIFTED", [], { ts: "2026-10-12T05:00:00Z" }),
+    blockedItem("d", "DRIFTED", []),
+  ];
+  const ist = withTZ("Asia/Kolkata", () => buildWorklist(items));
+  assert.deepEqual(ist.calendar, [{ day: "2026-10-12", count: 1 }, { day: "2026-10-13", count: 2 }]);
+  assert.equal(ist.never, 1, "an item with no last.ts is counted as never, not dropped");
+  // The same instants in UTC land differently, so the test can tell local from UTC.
+  const utc = withTZ("UTC", () => buildWorklist(items));
+  assert.deepEqual(utc.calendar, [{ day: "2026-10-12", count: 2 }, { day: "2026-10-13", count: 1 }]);
+  assert.equal(withTZ("Asia/Kolkata", () => localDay("2026-10-12T20:00:00Z")), "2026-10-13");
+  assert.equal(localDay("not a date"), null);
+});
+
+test("velocity buckets events by local day and reports the share over EVENTS", () => {
+  const ev = (ts, disposition) => ({ ts, disposition });
+  const events = [
+    ev("2026-10-12T20:00:00Z", "no-change-needed"), // 10-13 IST
+    ev("2026-10-12T20:30:00Z", "propagated"),       // 10-13 IST
+    ev("2026-10-13T02:00:00Z", "no-change-needed"), // 10-13 IST
+    ev("2026-10-12T10:00:00Z", "no-change-needed"), // 10-12 IST
+    ev("2026-01-01T00:00:00Z", "propagated"),       // outside the window
+  ];
+  const now = Date.parse("2026-10-13T06:00:00Z"); // 11:30 IST on 10-13
+  const v = withTZ("Asia/Kolkata", () => dispositionByDay(events, { days: 14, now }));
+  assert.equal(v.days.length, 14);
+  assert.equal(v.days.at(-1).day, "2026-10-13");
+  assert.deepEqual(v.days.at(-1), { day: "2026-10-13", total: 3, noChange: 2, changed: 1 });
+  assert.deepEqual(v.days.at(-2), { day: "2026-10-12", total: 1, noChange: 1, changed: 0 });
+  assert.equal(v.events, 4);
+  assert.equal(v.noChangeShareOfEvents, 3 / 4);
+  assert.equal(v.outsideWindow, 1);
+  assert.equal(dispositionByDay([], { now }).noChangeShareOfEvents, null, "no events is null, not 0%");
+
+  const surfaced = buildVelocity({ charts: { dispositionsByDay: { ...v, error: null } } });
+  assert.equal(surfaced.status, "ok");
+  assert.equal(surfaced.noChangeShareOfEvents, 3 / 4);
+  assert.equal(buildVelocity({ charts: { dispositionsByDay: { error: "disk" } } }).status, "unknown");
+  assert.equal(buildVelocity(undefined).status, "unknown");
+});
+
+test("lastLocalDays is 14 distinct consecutive local days ending today", () => {
+  const d = withTZ("Asia/Kolkata", () => lastLocalDays(14, Date.parse("2026-10-12T20:00:00Z")));
+  assert.equal(d.length, 14);
+  assert.equal(d.at(-1), "2026-10-13");
+  assert.equal(d[0], "2026-09-30");
+  assert.equal(new Set(d).size, 14);
+});
+
+test("leverage: sole vs shared blockers decide freesNow; needAllRoots counts multi-blocker edges", () => {
+  const items = [
+    blockedItem("R1", "DRIFTED", []),                 // root, in the queue
+    blockedItem("X1", "DRIFTED", ["R1"]),             // sole blocker R1
+    blockedItem("X2", "DRIFTED", ["R1"]),             // sole blocker R1
+    blockedItem("X3", "DRIFTED", ["R1", "OUT"]),      // shared: R1 + an out-of-queue root
+    blockedItem("X4", "REVERSED", ["OUT", "OUT"]),    // duplicate listing of ONE blocker = still sole
+    blockedItem("X5", "DIVERGED", ["OUT", "R1"]),     // shared
+  ];
+  const l = buildLeverage(items, { root: "/r/" });
+  assert.equal(l.blocked, 5);
+  assert.equal(l.needAllRoots, 2, "X3 and X5 have two distinct blockers; X4's duplicate is one");
+  assert.equal(l.rootsTotal, 2);
+  const r1 = l.roots.find((r) => r.edge_id === "R1");
+  const out = l.roots.find((r) => r.edge_id === "OUT");
+  assert.equal(r1.freesNow, 2, "R1 is the ONLY blocker of X1 and X2");
+  assert.equal(r1.upstreamOf, 4, "R1 is listed by X1, X2, X3, X5");
+  assert.equal(r1.inQueue, true);
+  assert.equal(r1.source, "R1-src", "an in-queue root uses the queue's own short labels");
+  assert.equal(out.freesNow, 1, "OUT is the only blocker of X4 alone");
+  assert.equal(out.upstreamOf, 3);
+  assert.equal(out.inQueue, false);
+  assert.equal(out.source, "OUT-from.md", "an outside-queue root is labelled from its own path, with its edge_id");
+  assert.deepEqual(l.roots.map((r) => r.edge_id), ["R1", "OUT"], "sorted by freesNow desc");
+  assert.equal(l.bottleneck.file, "R1-to.md");
+  assert.equal(l.bottleneck.blockedEdges, 4);
+});
+
+test("leverage: nothing blocked gives zeros AND a reason for the missing bottleneck", () => {
+  const l = buildLeverage([blockedItem("A", "DRIFTED", [])]);
+  assert.equal(l.blocked, 0);
+  assert.deepEqual(l.roots, []);
+  assert.equal(l.bottleneck, null);
+  assert.equal(l.bottleneckReason, "nothing is blocked");
+});
+
+test("leverage keeps only the top 3 roots", () => {
+  const items = ["a", "b", "c", "d"].flatMap((r) => [blockedItem(`x${r}`, "DRIFTED", [r])]);
+  assert.equal(buildLeverage(items).roots.length, 3);
+  assert.equal(buildLeverage(items).rootsTotal, 4);
+});
+
+test("usage: no command records is none-recorded with a reason, never zeros", () => {
+  // The 330+ legacy records carry no `command`; they are not usage.
+  const legacy = [{ run_id: "x", ts: "2026-10-01T00:00:00Z", durationMs: 5 }];
+  const u = buildUsage(legacy, { now: NOW });
+  assert.equal(u.status, "none-recorded");
+  assert.match(u.reason, /1 legacy record/);
+  assert.equal("days" in u, false, "no day series that could read as 'nobody used it'");
+  assert.equal(buildUsage([], { now: NOW }).status, "none-recorded");
+  assert.equal(buildUsage(null, { now: NOW }).status, "unknown", "an unreadable store is not 'none recorded'");
+});
+
+test("usage: interactive by default, top 5, failures/refusals, origins shown separately", () => {
+  const r = (command, o = {}) => ({ ts: ago(o.d ?? 0), command, outcome: o.outcome ?? "ok", origin: o.origin ?? "interactive" });
+  const runs = [
+    r("verify"), r("verify"), r("verify", { outcome: "refused" }), r("doctor", { outcome: "error" }),
+    r("queue"), r("status"), r("graph"), r("rollup", { d: 1 }),
+    r("surface", { origin: "widget" }), r("surface", { origin: "widget" }), r("doctor", { origin: "monitor" }),
+    r("old", { d: 40 }),                      // outside the 14-day window
+    { ts: ago(0), run_id: "legacy" },         // legacy: not usage
+  ];
+  const u = buildUsage(runs, { now: NOW });
+  assert.equal(u.status, "ok");
+  assert.equal(u.origin, "interactive");
+  assert.equal(u.total, 8, "widget, monitor and out-of-window records are not interactive usage");
+  assert.deepEqual(u.top[0], { command: "verify", count: 3 });
+  assert.equal(u.top.length, 5);
+  assert.equal(u.failures, 1);
+  assert.equal(u.refusals, 1);
+  assert.deepEqual(u.origins, { interactive: 8, widget: 2, monitor: 1 });
+  assert.equal(u.days.length, 14);
+  assert.equal(u.days.reduce((n, d) => n + d.count, 0), 8);
+  assert.equal(buildUsage(runs, { now: NOW, origin: "all" }).total, 11);
+});
+
+test("health: an accepted finding is NOT a failure; unknown stays unknown", () => {
+  const snap = {
+    ok: true,
+    payload: {
+      sections: [
+        { name: "Metrics", pass: 3, warn: 0, fail: 0, accepted: 2 },
+        { name: "Discovery", pass: 4, warn: 0, fail: 1, accepted: 1 },
+        { name: "Clean", pass: 5, warn: 1, fail: 0 },           // no `accepted` field at all (old snapshot)
+        { name: "Notes only", pass: 0, warn: 0, fail: 0, info: 4 },
+      ],
+    },
+  };
+  const h = buildHealthSections(snap);
+  const by = Object.fromEntries(h.sections.map((x) => [x.key, x]));
+  assert.equal(by.Metrics.status, "accepted-only");
+  assert.equal(by.Metrics.fail, 0, "accepted findings are not failures");
+  assert.equal(by.Metrics.accepted, 2);
+  assert.equal(by.Discovery.status, "fail", "a real failure wins over an accepted one");
+  assert.equal(by.Clean.status, "ok");
+  assert.equal(by.Clean.accepted, 0, "defaulted when the snapshot lacks it");
+  assert.equal(by["Notes only"].status, "unknown", "nothing counted is not green (N87)");
+  assert.deepEqual(Object.keys(by.Metrics), ["key", "label", "status", "fail", "accepted", "pass"]);
+  const none = buildHealthSections({ ok: false, reason: "no snapshot yet" });
+  assert.equal(none.ok, false);
+  assert.equal(none.reason, "no snapshot yet");
+});
+
+test("headroom: read from the snapshot's instruction-budget line; thin only under 1,000", () => {
+  const snapOf = (detail) => ({
+    ok: true,
+    payload: { sections: [{ name: "Instruction budget", entries: [{ kind: "info", label: "instruction budget", detail }] }] },
+  });
+  const thin = buildHeadroom(snapOf("worst unexcepted: Vipin Kaushik/VipinKaushik 144,765 / 145,000 (235 headroom) · biggest in chain: x"));
+  assert.deepEqual(thin, { status: "ok", reason: null, directory: "Vipin Kaushik/VipinKaushik", total: 144765, limit: 145000, headroom: 235, thin: true });
+  const roomy = buildHeadroom(snapOf("worst unexcepted: A/B 100,000 / 145,000 (45,000 headroom)"));
+  assert.equal(roomy.thin, false);
+  const over = buildHeadroom(snapOf("worst unexcepted: A/B 146,000 / 145,000 (+1,000 OVER)"));
+  assert.equal(over.headroom, -1000);
+  assert.equal(over.thin, true);
+  assert.equal(buildHeadroom(snapOf("something else")).status, "unknown", "an unreadable line is unknown, not a guess");
+  assert.equal(buildHeadroom({ ok: true, payload: { sections: [] } }).status, "unknown");
+  assert.equal(buildHeadroom({ ok: false, reason: "no snapshot" }).reason, "no snapshot");
+});
+
+test("buildSurface carries every widget section alongside the existing fields", () => {
+  const s = buildSurface({ queue: queueOf([]), now: NOW });
+  for (const k of ["health", "worklist", "leverage", "velocity", "usage", "headroom", "groups", "grid", "headline", "changed", "snapshot", "edges"]) {
+    assert.ok(k in s, `surface must carry ${k}`);
+  }
+  assert.equal(s.usage.status, "unknown", "no runs supplied is unknown, not zeros");
+  assert.equal(s.velocity.status, "unknown");
 });
