@@ -23,8 +23,13 @@
 // a 0 (rule:discernment-checks §2, §6). A bare 0 on this card would be
 // indistinguishable from a clean tree.
 //
-// THE CARD MUST MAKE SENSE WITH ZERO CLICKS. Übersicht delivers clicks only
-// while the interaction shortcut is held (README), so nothing is hidden behind
+// THE CARD MUST MAKE SENSE WITH ZERO CLICKS. Übersicht 1.6 (read from its source
+// 2026-10-15): with enableInteraction on (the default), a widget in the FOREGROUND
+// window (inBackground absent = foreground) gets the mouse only after its page JS
+// posts widgetEnter on hover (server/src/detectWidgetHover.js); that window sits at
+// kCGNormalWindowLevel-1, so any app window over the card swallows the click; and
+// the README requires Accessibility access. There is no API to ask whether any of
+// that holds, so nothing is hidden behind
 // one: every colour is paired with an icon or a label (Apple HIG: convey
 // meaning without relying on colour), and the clicks are only shortcuts —
 // worklist /judge, leverage /unblock, velocity and commands /activity, health
@@ -743,6 +748,10 @@ function openView(route, dispatch) {
 // FORCED REFRESH. refreshFrequency is five minutes; run() resolves with stdout,
 // so the same collector the schedule uses can be driven by hand.
 function forceRefresh(dispatch) {
+  // A click that reached this handler IS the evidence interaction works. Without
+  // this the ↻ button refreshed the card while "not clicked yet" stayed up — only
+  // section clicks (openView) cleared it (2026-10-15, found from a screenshot).
+  dispatch({ type: 'CLICKED' });
   dispatch({ type: 'BUSY' });
   run('bash "$HOME/Documents/GitHub/propagate/widget/collect.sh"')
     .then((out) => dispatch({ type: 'REFRESHED', output: out }))
@@ -1147,9 +1156,9 @@ export const render = (state, dispatch) => {
     ? null
     : (
       <div className="gate">
-        <b>clicks do nothing yet</b> — turn on Übersicht&#8217;s Interaction toggle
-        (menu bar icon &#8250; Interaction), or run
-        <b> defaults write tracesOf.Uebersicht enableInteraction -bool true</b> and restart it
+        <b>not clicked yet</b> — clicks need Übersicht allowed in System Settings
+        &#8250; Privacy &amp; Security &#8250; <b>Accessibility</b>, and work only where no
+        app window covers the card. This line goes after the first click lands.
       </div>
     );
 
