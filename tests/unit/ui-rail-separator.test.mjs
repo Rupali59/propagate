@@ -29,43 +29,65 @@ function divisions() {
   const m = src.match(/const DIVISIONS\s*=\s*\[([\s\S]*?)\];/);
   assert.ok(m, "DIVISIONS not found in ui.client.js — this check has gone blind");
   const rows = [...m[1].matchAll(/\{[^}]*key:\s*"([^"]+)"[^}]*\}/g)]
-    .map((x) => ({ key: x[1], act: /act:\s*true/.test(x[0]) }));
+    .map((x) => ({ key: x[1], explore: /explore:\s*true/.test(x[0]) }));
   assert.ok(rows.length >= 6, `only ${rows.length} divisions parsed — the extraction has gone blind`);
   return rows;
 }
 
-test("the rail separator is derived from actionability, never from a position", () => {
+/* REWRITTEN 2026-10-15 (plan F11), deliberately. The rule the separator stands for
+   changed with the redesign: it used to divide "actionable" from "reference" and
+   was pinned at index 4 (`analytics`). It now divides the four task views from the
+   Explore set, and is pinned at 4 again -- but on `registers`, and derived from
+   `explore: true` rather than from `act`. Health and Activity are not actionable
+   and sit ABOVE the line, which is exactly why reusing `act` would have been wrong. */
+
+test("the rail separator is derived from the Explore flag, never from a position", () => {
   // The literal is what PR-025 removed. If it comes back, so does the defect.
   assert.doesNotMatch(
     src,
     /\$\{i === \d+ \?/,
     "the rail separator compares i against a number again — derive it from the data instead",
   );
-  assert.match(src, /const FIRST_REFERENCE = DIVISIONS\.findIndex\(/);
-  assert.match(src, /\$\{i === FIRST_REFERENCE \?/);
+  assert.match(src, /const FIRST_EXPLORE = DIVISIONS\.findIndex\(/);
+  assert.match(src, /\$\{i === FIRST_EXPLORE \?/);
 });
 
-test("the derived boundary still lands where the hardcoded 4 did", () => {
+test("the derived boundary lands on the first Explore view, with every task view above it", () => {
   const d = divisions();
-  const first = d.findIndex((x) => !x.act);
-  assert.equal(first, 4, `expected the first non-actionable division at 4, got ${first} (${d[first]?.key})`);
-  assert.equal(d[first].key, "analytics");
-  // Everything before it is actionable; that is what the separator divides.
-  assert.deepEqual(d.slice(0, first).map((x) => x.act), [true, true, true, true]);
+  const first = d.findIndex((x) => x.explore);
+  assert.equal(first, 4, `expected the first Explore view at 4, got ${first} (${d[first]?.key})`);
+  assert.equal(d[first].key, "registers");
+  assert.deepEqual(d.slice(0, first).map((x) => x.key), ["judge", "unblock", "health", "activity"]);
+  assert.ok(d.slice(0, first).every((x) => !x.explore), "a task view carries the Explore flag");
+  assert.ok(d.slice(first).every((x) => x.explore), "an Explore view is missing the flag, so it would render above the line");
 });
 
-test("inserting a division above the boundary MOVES it — which a literal 4 could not do", () => {
+test("inserting a view above the boundary MOVES it — which a literal 4 could not do", () => {
   const d = divisions();
-  const before = d.findIndex((x) => !x.act);
+  const before = d.findIndex((x) => x.explore);
 
-  // The exact edit that would have broken the old code: a non-actionable
-  // division added above the existing boundary.
-  const mutated = [...d.slice(0, 2), { key: "injected", act: false }, ...d.slice(2)];
-  const after = mutated.findIndex((x) => !x.act);
+  // The exact edit that would have broken the old code: an Explore view added above
+  // the existing boundary.
+  const mutated = [...d.slice(0, 2), { key: "injected", explore: true }, ...d.slice(2)];
+  const after = mutated.findIndex((x) => x.explore);
 
   assert.equal(after, 2, "the derived boundary must follow the data");
   assert.notEqual(after, before, "if it did not move, this test proves nothing");
-  // And the label would still precede the first reference-side division,
-  // which under `i === 4` it would not have.
   assert.equal(mutated[after].key, "injected");
+});
+
+test("the rail the client actually renders puts its label before the first Explore view", async () => {
+  // The three above read SOURCE TEXT. This one renders, because a regex that still
+  // matches a line the template no longer executes would pass over a wrong rail.
+  const { mountClient } = await import("../helpers/mount-client.mjs");
+  const { byClass, byTag, textOf } = await import("../helpers/minidom.mjs");
+  const { app, ui } = await mountClient({ inbox: { fatal: "x", divisions: null }, hash: "#/judge",
+    routes: { "/api/surface": {}, "/api/seen-edges": { ok: true, status: "ok", triples: [] } } });
+  const nav = byTag(app, "nav")[0];
+  const kids = nav.childNodes.map((n) => (n.nodeType === 1 ? (n.localName === "hr" ? "|" : byClass(n, "lbl").length || /\blbl\b/.test(n.getAttribute("class") || "") ? "LBL:" + textOf(n) : "B:" + textOf(n)) : "")).filter(Boolean);
+  const at = kids.indexOf("LBL:explore");
+  assert.ok(at > 0, `no explore label in the rail: ${JSON.stringify(kids)}`);
+  assert.equal(kids[at - 1], "|", "the rule sits directly above the label");
+  assert.match(kids[at + 1], /REGISTERS/, "and the first Explore view directly below it");
+  assert.equal(ui.FIRST_EXPLORE, 4);
 });

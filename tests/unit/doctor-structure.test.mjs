@@ -104,3 +104,50 @@ test("empty input yields zero sections, never a throw", () => {
   assert.equal(d.sectionCount, 0);
   assert.deepEqual(d.totals, { pass: 0, warn: 0, fail: 0, info: 0, note: 0, accepted: 0 });
 });
+
+// ── E5: an entry's `action` survives the text boundary ─────────────────────
+
+test("an entry's action is rendered by the REAL renderer and parsed back into the snapshot (E5)", async () => {
+  // The snapshot is parsed from stdout, so an `action` kept only on the Reporter
+  // entry would be dropped at exactly the seam this module guards. Driven through
+  // cli.mjs's renderDoctorEntries rather than a hand-written line: a test that
+  // writes the marker itself proves the parser and not the pipeline.
+  const { renderDoctorEntries } = await import("../../cli.mjs");
+  const { Reporter } = await import("../../lib/report/doctor/reporter.mjs");
+  const r = new Reporter();
+  r.header("Rules");
+  r.check("CLAUDE.md restates rule:x", false, "3 findings", { kind: "open", target: "/Users/u/Documents/GitHub/CLAUDE.md" });
+  r.check("layout conforms", false, "", { kind: "link", target: "docs/REFERENCE.md#propagation-layout" });
+  r.accepted("a.md restates rule:y", "since 2026-10-01 — reason with  two spaces", { kind: "command", target: "propagate rules check" });
+  r.check("plain", true, "no action here");
+
+  const out = [];
+  const real = console.log;
+  console.log = (...a) => { out.push(a.join(" ")); };
+  try { renderDoctorEntries(r.drain()); } finally { console.log = real; }
+
+  const [rules] = toSections(out);
+  const byLabel = Object.fromEntries(rules.entries.map((e) => [e.label, e]));
+  assert.deepEqual(byLabel["CLAUDE.md restates rule:x"].action, { kind: "open", target: "/Users/u/Documents/GitHub/CLAUDE.md" });
+  assert.equal(byLabel["CLAUDE.md restates rule:x"].detail, "3 findings", "the action is not left glued to the detail");
+  assert.deepEqual(byLabel["layout conforms"].action, { kind: "link", target: "docs/REFERENCE.md#propagation-layout" });
+  assert.equal(byLabel["layout conforms"].detail, "", "an action with no detail must not become the detail");
+  const acc = byLabel["a.md restates rule:y"];
+  assert.equal(acc.kind, "accepted");
+  assert.deepEqual(acc.action, { kind: "command", target: "propagate rules check" });
+  assert.equal(acc.detail, "since 2026-10-01 — reason with  two spaces");
+  assert.equal("action" in byLabel.plain, false, "an entry with no action must not grow the key");
+  assert.match(out.join("\n"), /\u21d2 open: \/Users\/u\/Documents\/GitHub\/CLAUDE\.md/, "and the line stays human-readable");
+});
+
+test("a detail that merely contains an arrow is not read as an action", () => {
+  const e = classifyLine("  ! heads up  see \u21d2 open: nowhere in the middle of a sentence");
+  assert.equal("action" in e, false, "the marker is anchored at the end and needs one of the three kinds");
+  assert.equal(classifyLine("  ! x  y  \u21d2 teleport: /a").action, undefined, "an unknown kind is not an action");
+});
+
+test("actionSuffix refuses a multi-line target instead of corrupting the next line", async () => {
+  const { actionSuffix } = await import("../../lib/report/doctor/structure.mjs");
+  assert.throws(() => actionSuffix({ kind: "command", target: "a\nb" }), /one line/);
+  assert.equal(actionSuffix(undefined), "");
+});

@@ -227,6 +227,7 @@ import { freezeLedgerV1 } from "./lib/edges/freeze-ledger.mjs";
 // Colour constants live in the layer that prints — commands/ansi.mjs — so there
 // is ONE definition rather than a copy here and a copy per command module.
 import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./commands/ansi.mjs";
+import { actionSuffix } from "./lib/report/doctor/structure.mjs";
 
 
 /**
@@ -238,13 +239,17 @@ import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./commands/ansi.mjs";
  * being re-derived per module. Modules under lib/ collect entries and print
  * nothing; no module there contains an ANSI escape, and this keeps it that way.
  */
-function renderDoctorEntries(entries) {
+export function renderDoctorEntries(entries) {
   for (const e of entries) {
     const d = e.detail;
+    // E5. An entry's optional action is appended to its line in the form
+    // structure.mjs parses back (ACTION_MARK), so /api/health can offer it. Dim,
+    // after the detail: a person reads "what to do" at the end of the row.
+    const act = e.action ? DIM + actionSuffix(e.action) + RESET : "";
     if (e.kind === "pass") {
-      console.log(`  ${GREEN}\u2713${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+      console.log(`  ${GREEN}\u2713${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}${act}`);
     } else if (e.kind === "fail") {
-      console.log(`  ${RED}\u2717${RESET} ${e.label}${d ? "  " + RED + d + RESET : ""}`);
+      console.log(`  ${RED}\u2717${RESET} ${e.label}${d ? "  " + RED + d + RESET : ""}${act}`);
     } else if (e.kind === "inconclusive") {
       // A THIRD marker, deliberately its own glyph. This votes like a failure
       // (the run cannot exit 0 unmeasured) but reads differently, because
@@ -252,16 +257,16 @@ function renderDoctorEntries(entries) {
       // dim "·" default with `info` is the exact defect this entry kind exists
       // to fix: GOTCHAS G68, where a check that examined nothing rendered as a
       // green tick.
-      console.log(`  ${YELLOW}?${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+      console.log(`  ${YELLOW}?${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}${act}`);
     } else if (e.kind === "warn") {
-      console.log(`  ${YELLOW}!${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+      console.log(`  ${YELLOW}!${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}${act}`);
     } else if (e.kind === "header") {
       console.log(`${e.leadingBlank ? "\n" : ""}${BOLD}${e.label}${RESET}`);
     } else if (e.kind === "note") {
       // Marker-less dim line — context about a check that could NOT run.
       console.log(`  ${DIM}${e.label}${RESET}`);
     } else if (e.kind === "info") {
-      console.log(`  ${DIM}\u00b7${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}`);
+      console.log(`  ${DIM}\u00b7${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}${act}`);
     } else {
       // AN UNKNOWN KIND, rendered LOUDLY. This branch used to be where `info`
       // landed, so it was doing two jobs: rendering a known kind, and silently

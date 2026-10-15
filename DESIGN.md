@@ -105,9 +105,24 @@ already near-uniform perceptually, without paying for it.
 
 ### Derived, never hand-picked
 
-`-hover` (−.06 L) · `-active` (−.10 L) · `-quiet` (a pale tint for backgrounds).
-A hover that is its own hex is free to drift from its base; one built with
-`calc()` cannot. Roughly thirty values collapse to seven definitions plus rules.
+`-hover` (−.06 L) · `-active` (−.10 L) · `-quiet` (a pale tint for backgrounds) ·
+`--seg-quiet` (the quiet half of a two-part bar). A hover that is its own hex is free
+to drift from its base; one built with `calc()` cannot. Roughly thirty values
+collapse to seven definitions plus rules.
+
+**No `color-mix()`, anywhere (2026-10-15, F1).** The redesign's first mockup built its
+"no change needed" bar segment as an in-oklch `color-mix` of the accent and the field,
+and the light render came out sage green: that interpolation takes the *short way
+round the hue wheel* (250° toward 85°, through green). A relative derivation keeps the
+hue fixed and moves only lightness and chroma, which is what "the same colour, quieter"
+means. For a translucent tint, use `oklch(from var(--token) l c h / .22)`.
+`tests/unit/theme.test.mjs` bans the function (comments stripped, with a floor on the
+derivations it did find, so an emptied stylesheet cannot pass).
+
+**A token derived *upward* in lightness (`calc(l + …)`) must be redefined *downward* in
+both dark blocks.** Inherited into dark, where the base is already light, it clips to
+white — and the both-themes test cannot see it, because an inherited token "resolves".
+That is asserted by deriving the set from the light block, not by listing it.
 
 ### Neutrals
 
@@ -161,6 +176,7 @@ and motion you have to wait through is the kind people reliably hate.
 | batch expand | `--t-slow` | the group has members |
 | evidence arrive | `--t-fast` 140ms | the pane filled rather than failed |
 | chart draw-in | `--t-draw` 420ms | the series has a direction |
+| verdict bar height | `--t-slow` | a day's total changed, not just its number |
 
 Skeleton shimmer is the one loop, at 1200ms: *waiting*, not *empty*.
 
@@ -180,16 +196,74 @@ information survives; the movement does not.
 
 ## 4 · Interaction states
 
-Every division specifies **loading · empty · error · success · partial**. Empty
-states name what remains elsewhere — *"nothing to judge; 18 in BLOCKED are
-waiting on edges you just settled"* — because an empty division is not an empty
-system. `"Nothing matches this filter"` and `"Nothing in this division"` stay
-distinct strings.
+Every view specifies **loading · empty · error · success · partial**, and the table
+that makes that a requirement rather than an intention is the plan's *Interaction
+states* (ticklish-gathering-brook, F5). The client holds to it with one transport
+(`api()` in `commands/ui.client.js`): a 401, a non-2xx, a rejected fetch and a
+non-JSON body each end in a sentence on screen. None leaves a skeleton — the old
+wrapper was `fetch().then(r => r.json())`, and each way it could fail was a
+different silent defect.
+
+**Empty states name what remains elsewhere** — *"Nothing to judge (N edges checked).
+K edges are blocked on M roots → Unblock"* — because an empty view is not an empty
+system. `"Nothing matches this filter"` and `"Nothing in this view"` stay distinct
+strings. **"Unknown" is never zero:** a velocity that could not be read says
+`unknown: <reason>`, never fourteen empty bars; a day with no verdicts is drawn as a
+*gap*, not as a bar of zero height.
+
+**Views (2026-10-15).** Four task views and an Explore set, built for what a person
+does rather than where the data came from: **Judge** (the edges you can write a verdict
+on now), **Unblock** (which root holds the most back), **Health** (fail and accepted
+rows, each with its one action), **Activity** (trends only). Explore holds Registers
+(read-only), Graph and Reminders. The rail's separator is derived from the `explore`
+flag on a division, never from a position.
+
+**One count definition.** The unit is an edge. The Judge badge is the widget's own
+`worklist.toJudge`, computed over the same items the list renders, so the two cannot
+disagree; the page prints no number of its own.
 
 Keyboard: every shortcut has a visible control. Disposition keys are built from
 `item.allowed`, so the UI cannot offer one the write path will refuse.
 
----
+| key | does |
+|---|---|
+| `j` `k` | move through the edges |
+| `x` | tick the current row (a native checkbox with a label, so a mouse and a screen reader reach it too) |
+| `⇧J` | one verdict for every ticked edge — only the dispositions **all** of them allow |
+| `n` `p` `d` `r` | no-change-needed · propagated · deferred · both-reconciled |
+| `u` | undo the held verdict (five seconds, then it is written) |
+| `Esc` | clear the selection |
+
+**Nothing is ever preselected.** An earlier idea auto-picked the edges whose downstream
+diff was empty as "no-op likely". It was inverted: a source that moved under an
+unchanged downstream *is* drift. Bulk is now an explicit choice, row by row, with one
+shared reason.
+
+### Components added with the redesign
+
+All reuse an existing token or class; none is a new visual language.
+
+| component | what it is | note |
+|---|---|---|
+| `.badge.fail` `.badge.accepted` `.badge.NEVER_VERIFIED` | modifiers of the existing badge | **no `.pill`.** A value the client can emit and the stylesheet has no rule for renders as ink on no background; a test renders every view and checks each class it saw |
+| `.chip` | the Judge filter (To judge · Both sides moved · Parked · Never verified) | a toggle button with `aria-pressed`, not tabs |
+| `.ghead` `.nhead` | workspace, then source node, headers over the rows | the server's order holds inside a node |
+| `.newdot` | an edge that entered the queue since it was last marked seen | keyed on the edge **and both content ids**, so a re-drift shows again |
+| `.evgrid` `.evbox` | source and downstream evidence side by side | stacks below 1100px; each needs about 480px to stay readable |
+| `.kpis` `.kpi` | Unblock's stat row | there is no `.stat`; `.bar` keeps its one meaning |
+| `.root` `.fgroup` | a root to settle, and the joint blockers grouped by the file they flow into | |
+| `.hline` `.hrow` | Health's single summary line and its fail-then-accepted list | warn stays collapsed per section |
+| `.vel` `.vcol` `.vseg-*` | verdicts per day as a stacked bar | the quiet segment is `--seg-quiet` |
+| `.cmdrow` `.cmd` | a command the reader pastes, with a copy button | the text is always visible, so a blocked clipboard leaves something to select |
+| `.sr` | the visually hidden `aria-live="polite"` region | announces verdicts, undo and bulk results, including refusals |
+
+### Accessibility and layout (F3, F4)
+
+The rail is `<nav aria-label="views">` with `aria-current="page"` on the open view.
+The focus ring is 2px `--st-accent` at a 2px offset on every control. 44px touch
+targets stay out (§5). The two-column views reuse the existing breakpoints: below
+1100px the rail becomes a top strip and the evidence diffs stack; below 860px the
+list sits above the detail.
 
 ## 5 · Deliberately not in the system
 
@@ -218,6 +292,9 @@ Keyboard: every shortcut has a visible control. Disposition keys are built from
 | one wheel across all three surfaces | `tests/unit/theme.test.mjs` |
 | reduced motion, duration tokens, ring degradation | `tests/unit/theme.test.mjs` |
 | the emitted page parses in a browser | `tests/unit/ui-page.test.mjs` (G65) |
+| no `color-mix`, upward derivations redefined in dark, badge modifiers, focus ring, narrow stacking | `tests/unit/theme.test.mjs` |
+| every view's four states, the per-edge reason, nothing preselected, the Judge badge equal to the rendered rows, the transport's failures | `tests/unit/ui-client.test.mjs` |
+| no entity text in the emitted page | `tests/unit/ui-page.test.mjs` |
 
 **A property worth stating here is worth an acceptance criterion.** The sibling
 widget's theming has not rotted precisely because one test asserts it; this

@@ -657,13 +657,16 @@ test("every section's unknown / none-recorded / missing state renders as can't t
 });
 
 test("each section's click opens its route through open-ui.sh (CTA per metric)", () => {
-  const routes = { WorklistPanel: "/ready", LeveragePanel: "/blocked", VelocityPanel: "/analytics", CommandsPanel: "/analytics", HealthPanel: "/reference" };
+  // ROUTE RENAME 2026-10-15 (plan F11): ready->judge, blocked->unblock,
+  // analytics->activity, reference->health, stream->activity. These literals were
+  // rewritten DELIBERATELY with the table in surface.mjs, not drifted into.
+  const routes = { WorklistPanel: "/judge", LeveragePanel: "/unblock", VelocityPanel: "/activity", CommandsPanel: "/activity", HealthPanel: "/health" };
   for (const [panel, route] of Object.entries(routes)) {
     const body = code.slice(code.indexOf(`const ${panel}`));
     assert.match(body.slice(0, body.indexOf("\n};") + 3), new RegExp(`openView\\('${route}'`), `${panel} must open ${route}`);
   }
-  assert.match(code, /openView\('\/stream'/, "the new pill opens /stream");
-  for (const r of Object.values(routes).concat(["/stream"])) {
+  assert.match(code, /chg [^\n]*openView\('\/activity'/, "the new pill opens /activity (was /stream)");
+  for (const r of Object.values(routes)) {
     assert.ok(SERVED_VIEWS.includes(r), `${r} is not a served view - the CTA would be dead`);
   }
 });

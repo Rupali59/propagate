@@ -41,6 +41,14 @@ class MiniNode {
       set(t, k, v) { t[k] = v; t._props.set(String(k).replace(/[A-Z]/g, (m) => "-" + m.toLowerCase()), String(v)); return true; },
     });
     this.listeners = new Map();
+    // THE IDL PROPERTIES A REAL FORM CONTROL HAS. Preact writes `value`, `checked`
+    // and `disabled` as properties only when `name in dom`; on a bare node it falls
+    // back to setAttribute, so the property a test reads stayed undefined while the
+    // page, in a browser, would have had it set. Declared (as undefined) rather than
+    // given values, so `in` answers yes and nothing else changes.
+    this.value = undefined;
+    this.checked = undefined;
+    this.disabled = undefined;
     this.__id = nextId += 1;
   }
 
@@ -84,7 +92,18 @@ class MiniNode {
   dispatchEvent(ev) {
     ev.target = ev.target || this;
     ev.currentTarget = this;
-    for (const fn of this.listeners.get(ev.type) ?? []) fn(ev);
+    // CASE-INSENSITIVE ON THE TYPE, and the reason is Preact's. For `onClick` it
+    // asks `"onclick" in dom`; this node has no such property, so it falls back to
+    // `name.slice(2)` and registers the listener as "Click". A real element answers
+    // yes and registers "click". Dispatching "click" at this stub therefore reached
+    // nothing, and every handler test would have passed by never running one.
+    // The event handed to the listener carries the type it was REGISTERED under,
+    // because Preact's proxy looks its handler up by that exact string.
+    for (const [type, fns] of this.listeners) {
+      if (type.toLowerCase() !== String(ev.type).toLowerCase()) continue;
+      // `.call(this, …)`: the proxy reads the element's handler table from `this`.
+      for (const fn of [...fns]) fn.call(this, Object.assign(ev, { type }));
+    }
     return true;
   }
 

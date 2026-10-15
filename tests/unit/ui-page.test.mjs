@@ -96,47 +96,45 @@ test("every view the page routes is reachable from both fragment spellings", () 
   // widget/propagate-queue.jsx, whose className is still a literal, and
   // widget-contract.test.mjs guards that one.
   // Named against the DIVISIONS, not the tabs they replaced. This listed
-  // queue/issues/todos and went red the moment the page stopped having them —
+  // queue/issues/todos and went red the moment the page stopped having them --
   // which is the check working, not the check being brittle.
-  for (const v of ["ready", "blocked", "parked", "gap", "analytics", "reference", "stream"]) {
-    assert.ok(script.includes(`"${v}"`), `the page must route the ${v} division`);
+  //
+  // REWRITTEN 2026-10-15 (plan F11), deliberately and not patched: the nine
+  // data-source views became judge / unblock / health / activity plus the Explore
+  // set. The first loop is the VIEWS the page renders; the second is every hash an
+  // older widget build or a bookmark can still send, which must keep resolving so
+  // a stale click never lands on a blank page.
+  for (const v of ["judge", "unblock", "health", "activity", "registers", "reminders", "graph"]) {
+    assert.ok(script.includes(`"${v}"`), `the page must route the ${v} view`);
+  }
+  for (const old of ["ready", "blocked", "parked", "gap", "analytics", "reference", "stream", "conflicts"]) {
+    assert.match(script, new RegExp(`\\b${old}:\\s*"[a-z]+"`), `the old #${old} hash must still redirect to a view`);
   }
 });
 
-/* -- the stream division (Surface 1 of the event-stream plan) ------------- */
-
-test("all three downstream_on_ref vintages have their own, distinguishable branch", () => {
-  // lib/report/stream.mjs's refVintage() returns "absent" | "unresolved" |
-  // "resolved" and is explicit that collapsing any two together mislabels
-  // most of the store (absent is ~two thirds of history, pre-2026-08-22).
-  // Checked as three SEPARATE literal branches, not just "the word appears
-  // somewhere" -- a single `status || "unresolved"` fallback would also
-  // contain the substring "unresolved" while actually collapsing absent
-  // into it, so each is asserted as its own comparison against the vintage
-  // status.
-  assert.match(script, /status === "absent"/, "the client must special-case the absent vintage, not just print it");
-  assert.match(script, /status === "unresolved"/, "the client must special-case the unresolved vintage, not just print it");
-  assert.match(script, /return "resolved"/, "resolved must be its own branch, not a shared default");
-  // The three CSS hooks the client constructs at render time (`"vin-" + status`)
-  // -- proves ui.css has a rule for each, not just for the ones someone
-  // thought to style (the UNMATCHED-badge shape recorded in STATE.md).
-  assert.match(script, /"vin vin-"/, "the vintage badge class must be built from the status, not hardcoded to one value");
+test("the emitted page has no HTML-entity text in any rendered string (#70.2, plan test 7)", () => {
+  // The old list drew its caret as the literal six characters ampersand-hash-9656,
+  // because htm text is not HTML: nothing decodes an entity, so the page printed the
+  // entity's SOURCE. Asserted on the EMITTED script, the thing the browser runs.
+  const entity = /&#\d+;|&#x[0-9a-f]+;|&(?:amp|lt|gt|quot|nbsp|rarr|middot|mdash);/i;
+  assert.doesNotMatch(script, entity, "an entity is written as text; use the character itself");
+  // The negative control: the same pattern DOES flag the defect it exists for, so a
+  // pattern that stopped matching would not read as a clean page.
+  assert.match("<span class=\"caret\">&#9656;</span>", entity, "the guard has gone blind to the very defect it names");
+  assert.match("a &rarr; b", entity);
 });
 
-test("sinceSource is rendered as a label, not silently dropped", () => {
-  // A 7-day default must never read as "this is everything since you last
-  // looked" (rule:discernment-checks §2). All three sinceSource values from
-  // streamPayload get their own copy, not a generic fallback.
-  assert.match(script, /"given"/, "the given-since case must be labelled");
-  assert.match(script, /"invalid-given-defaulted"/, "the invalid-given case must be labelled, not silently defaulted");
-  assert.match(script, /last 7 days/, "the default-7d case must say so explicitly");
+test("the page carries the id of the build it was read from (F5)", () => {
+  assert.match(page("tok", "0123456789abcdef"), /data-build="0123456789abcdef"/);
+  assert.match(html, /data-token="deadbeef"/);
 });
 
-test("judgedCount null is distinguished from judgedCount 0", () => {
-  // stream.mjs: "Null (not 0) when the edge has no other history beyond
-  // this window's own event... different facts". A `c.judgedCount ? … :
-  // 'never judged'` truthy check would collapse 0 into the same branch as
-  // null; this asserts the explicit nullish comparison survives in the
-  // emitted script.
-  assert.match(script, /judgedCount == null/, "judgedCount must be compared against null explicitly, not by truthiness");
-});
+/* RETIRED 2026-10-15 (plan D5): the three cases that stood here asserted the
+   changed-since STREAM view -- its three downstream_on_ref vintage branches, its
+   sinceSource labels, and its judgedCount null-versus-zero comparison. D5 removed
+   that view: the feed was an echo (148 rows, all by the same author, none open),
+   and "new" now lives as a dot on Judge rows. The plan's "Tests retired: none"
+   predates D5 and is wrong about this; the properties those cases protected
+   (never collapsing "absent" into "unresolved", never printing a 7-day default as
+   "everything since you looked") have no surface left to protect. /api/stream and
+   /api/seen remain on the server for the CLI and the widget. */

@@ -40,6 +40,22 @@
 # Messages go to stderr like the script's other failures; Übersicht's run()
 # rejects on them and the widget shows the text.
 #
+# A SERVER BEHIND ITS FILES IS STALE TOO (2026-10-15, outside review F5). The page
+# is read from disk on every request, but the server's own code is whatever it was
+# started with, so after an edit an old server serves a NEW page that talks to OLD
+# endpoints: 200 on every request and a client that fails in ways nothing logs. A
+# live server is therefore also asked GET /api/version and its build id compared
+# with the id of the files on disk; a difference makes it stale, and the stale
+# path below replaces it (with the same pid-verification, so it kills nothing it
+# cannot identify). A server old enough to have NO /api/version answers
+# "no such endpoint" and is stale by that fact. Anything else unreadable is
+# "cannot tell" and is left alone: a restart that cannot be justified is how a
+# healthy UI gets replaced on every click.
+#
+# The disk id is `cat <files> | shasum | cut`, with no node, because the tests stub
+# node with a script that sleeps. lib/report/ui-build.mjs states the same
+# algorithm and tests/unit/ui-server-support.test.mjs asserts the two agree.
+#
 # TEST SEAMS (env, defaults are the real thing): PROPAGATE_NODE, PROPAGATE_CLI,
 # PROPAGATE_OPEN. curl / lsof / ps are resolved from PATH so a test can stub them.
 
@@ -70,13 +86,42 @@ port_holder() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -n1; }
 PORT=4599   # commands/ui.mjs default; overridden by the remembered URL
 [ -s "$URL_FILE" ] && { p="$(port_of_url "$(cat "$URL_FILE")")"; [ -n "$p" ] && PORT="$p"; }
 
+# The build id of the files on disk, or empty when they cannot be read (cannot tell).
+disk_build() {
+  local c; c="$(dirname "$CLI")/commands"
+  [ -f "$c/ui.mjs" ] && [ -f "$c/ui.client.js" ] && ls "$c"/ui/css/*.css >/dev/null 2>&1 || return 0
+  ( export LC_ALL=C; cat "$c/ui.mjs" "$c/ui.client.js" "$c"/ui/css/*.css | shasum -a 256 | cut -c1-16 ) 2>/dev/null
+}
+
+# echoes: behind | current | unknown. Only asked of a server that answered the page.
+version_state() {
+  local base token body build want
+  base="$(sed -n 's#^\(http://127\.0\.0\.1:[0-9]*\)/.*#\1#p' "$URL_FILE")"
+  token="$(sed -n 's#.*[?&]token=\([a-f0-9]*\).*#\1#p' "$URL_FILE")"
+  want="$(disk_build)"
+  { [ -n "$base" ] && [ -n "$token" ] && [ -n "$want" ]; } || { echo unknown; return; }
+  body="$(curl -sS -m 2 "$base/api/version?token=$token" 2>/dev/null || true)"
+  build="$(printf '%s' "$body" | sed -n 's#.*"build":"\([0-9a-f]*\)".*#\1#p')"
+  if [ -n "$build" ]; then
+    [ "$build" = "$want" ] && echo current || echo behind
+  elif printf '%s' "$body" | grep -q 'no such endpoint'; then
+    echo behind
+  else
+    echo unknown
+  fi
+}
+
 classify() {
   local code=000
   if [ -s "$URL_FILE" ]; then
     code="$(curl -sS -m 2 -o /dev/null -w '%{http_code}' "$(cat "$URL_FILE")" 2>/dev/null || true)"
   fi
   case "$code" in
-    2??|3??) echo live; return ;;
+    2??|3??)
+      # `behind` is stale for a different reason than a refused token; classify runs
+      # in a subshell, so the reason travels in the word it echoes.
+      [ "$(version_state)" = behind ] && { echo behind; return; }
+      echo live; return ;;
   esac
   # Not a good answer. Dead only if nothing is listening; a 404/403, or a port
   # that is held but did not answer, is a server we cannot talk to: stale.
@@ -117,6 +162,11 @@ start_ui() {
 }
 
 STATUS="$(classify)"
+STALE_WHY="its token is not accepted"
+if [ "$STATUS" = behind ]; then
+  STALE_WHY="it is running older code than the files on disk (its /api/version build differs)"
+  STATUS=stale
+fi
 if [ "$STATUS" = stale ]; then
   RECORDED=""
   [ -s "$PID_FILE" ] && RECORDED="$(tr -dc '0-9' < "$PID_FILE")"
@@ -138,7 +188,7 @@ if [ "$STATUS" = stale ]; then
       ;;
     *)
       HOLDER="$(port_holder "$PORT")"
-      echo "port $PORT is held by pid ${HOLDER:-unknown} ($( [ -n "$HOLDER" ] && ps -o command= -p "$HOLDER" 2>/dev/null || echo unknown)) and its token is not accepted; it is not a propagate ui this script started (recorded pid: ${RECORDED:-none}), so it was left running and no second server was started — stop it yourself, then click again" >&2
+      echo "port $PORT is held by pid ${HOLDER:-unknown} ($( [ -n "$HOLDER" ] && ps -o command= -p "$HOLDER" 2>/dev/null || echo unknown)) and ${STALE_WHY}; it is not a propagate ui this script started (recorded pid: ${RECORDED:-none}), so it was left running and no second server was started — stop it yourself, then click again" >&2
       exit 1
       ;;
   esac

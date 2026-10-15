@@ -27,6 +27,13 @@
    unnoticed. Third instance of this shape today; the other two were the
    widget's six grey bars and the chart --len token. */
 .badge.UNMATCHED { background: var(--dim); }
+/* F2 (2026-10-15): the redesign's FAIL / ACCEPTED / NEVER-VERIFIED are .badge
+   modifiers, not a new pill component. Each is a value the client can emit and so
+   each needs a rule (the UNMATCHED lesson above). FAIL is status ("how bad"), the
+   other two are "not a verdict": quiet, never a colour. */
+.badge.fail { background: var(--st-warn); }
+.badge.accepted { background: var(--dim); }
+.badge.NEVER_VERIFIED { background: var(--dim); }
 
 /* ── stream: "what changed since I last looked" ──────────────────────────
    Three ref-vintage states get three rules, deliberately -- collapsing
@@ -131,7 +138,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .disp button { display: flex; align-items: center; gap: 6px; }
 kbd { font-family: ui-monospace, Menlo, monospace; font-size: 10px; background: var(--field);
       border: 1px solid var(--line); border-radius: var(--r1); padding: 1px 4px; color: var(--dim); }
-button kbd { background: color-mix(in oklch, var(--on-fill) 22%, transparent); border-color: transparent; color: var(--on-fill); }
+/* F1: a translucent key cap on a filled button, by relative colour with an alpha.
+   It was a colour-mix, which interpolates hue the short way round the wheel (see
+   --seg-quiet in 10-tokens.css); a fixed hue at 22% alpha is what was meant. */
+button kbd { background: oklch(from var(--on-fill) l c h / .22); border-color: transparent; color: var(--on-fill); }
 
 /* ── the undo ring: the one moment where motion IS the information ────────── */
 .undo { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3);
@@ -176,3 +186,84 @@ button kbd { background: color-mix(in oklch, var(--on-fill) 22%, transparent); b
    nothing ran asserts a measurement that was never taken. */
 .chart .gap { stroke-dasharray: 2 3; opacity: .45; }
 
+
+
+/* ── the redesign (2026-10-15): Judge, Unblock, Health, Activity ──────────────
+   Everything below reuses an existing token or component; the only new tokens are
+   --seg-quiet and the rules for names the client now emits. */
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--dim); }
+header button.ghost { padding: 3px 9px; font-size: 12px; }
+input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15px; margin: 2px 0 0; padding: 0; flex: 0 0 auto; cursor: pointer; }
+
+/* filter chips over the Judge list */
+.chips { display: flex; flex-wrap: wrap; gap: var(--s1); padding: var(--s2) 14px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 1; }
+.chip { background: transparent; border: 1px solid var(--line); color: var(--dim); font-weight: 500; font-size: 12px; padding: 3px 9px; border-radius: 999px; }
+.chip b { color: var(--fg); font-weight: 600; margin-left: 3px; }
+.chip.on { background: var(--accent-quiet); border-color: var(--st-accent); color: var(--fg); }
+.chip:hover:not(:disabled) { background: var(--field); }
+.chip.on:hover:not(:disabled) { background: var(--accent-quiet); }
+.chip-seen { margin-left: auto; padding: 3px 9px; font-size: 12px; }
+
+/* workspace, then node, then the edge */
+.ghead { padding: var(--s2) 14px 2px; font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); background: var(--bg); }
+.nhead { padding: 2px 14px 3px; font-size: 11px; color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; border-bottom: 1px solid var(--line); word-break: break-all; }
+.gn { font-weight: 500; letter-spacing: 0; color: var(--dim); }
+.item.ticked { background: var(--accent-quiet); }
+.tick { margin-top: 3px; }
+.newdot { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 0 5px; border-radius: 999px; background: var(--accent-quiet); color: var(--fg); border: 1px solid var(--st-accent); vertical-align: 1px; }
+.note { font-size: 12px; color: var(--st-caution); margin: var(--s2) 14px; }
+.detail .note { margin-left: 0; margin-right: 0; }
+
+/* evidence: source and downstream side by side; stacked below 1100px (90-responsive) */
+.evgrid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); align-items: start; margin-top: var(--s3); }
+.evbox { min-width: 0; }
+.evbox .sec { margin-top: 0; }
+.evbox .ev { max-height: 38vh; }
+.evbox .ev.skeleton { padding: 0; min-height: 70px; }
+.why { margin-top: 6px; }
+.reasonbox { margin-top: var(--s2); }
+.rlabel { display: block; font-size: 11.5px; color: var(--dim); margin-bottom: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+.bulkstrip { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; padding: var(--s2) var(--s3); margin-bottom: var(--s3); background: var(--accent-quiet); border-radius: var(--r2); font-size: 12.5px; }
+.bulklist { margin: var(--s2) 0; padding-left: 18px; font-size: 12px; }
+.bulklist li { margin: 2px 0; }
+
+/* a command the reader pastes */
+.cmdrow { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-top: var(--s2); }
+.cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: var(--field); border: 1px solid var(--line); border-radius: var(--r1); padding: 3px 7px; word-break: break-all; user-select: all; }
+
+/* the stat row and the root rows (Unblock) */
+.kpis { display: flex; flex-wrap: wrap; gap: var(--s5); margin: var(--s3) 0 var(--s2); }
+.kpi { display: flex; flex-direction: column; }
+.kpi b { font-size: 26px; font-weight: 600; line-height: 1.1; }
+.kpi span { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.root { display: flex; gap: var(--s3); align-items: flex-start; padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+.root .itxt { flex: 1 1 auto; }
+.root > button { flex: 0 0 auto; }
+.fgroup { border: 1px solid var(--line); border-radius: var(--r2); padding: 0 var(--s3); margin-bottom: var(--s3); background: var(--card); }
+.fgroup .root:last-child { border-bottom: 0; }
+.fhead { padding: var(--s2) 0 0; font-size: 12.5px; }
+
+/* Health: one line, then one list */
+.hline { font-size: 13px; margin: var(--s2) 0 var(--s4); display: flex; flex-wrap: wrap; gap: var(--s1); align-items: center; }
+.hline.okline { color: var(--st-ok); }
+.hrow { display: flex; gap: var(--s2); padding: var(--s3) 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
+.hrow .itxt { flex: 1 1 auto; }
+.wsec { border-bottom: 1px solid var(--line); padding: var(--s2) 0; }
+.wsec summary { cursor: pointer; font-size: 12.5px; }
+
+/* Activity: verdicts per day as a stacked bar, quiet segment beside the changed one */
+.vel { display: flex; align-items: flex-end; gap: 3px; height: 132px; border-bottom: 1px solid var(--line); }
+.vcol { flex: 1 1 0; height: 100%; display: flex; align-items: flex-end; min-width: 0; }
+.vcol.vgap { border-bottom: 2px dashed var(--line); }
+.vstack { width: 100%; display: flex; flex-direction: column; min-height: 2px; transition: height var(--t-slow) var(--ease); }
+.vseg-changed { background: var(--st-accent); min-height: 0; }
+.vseg-quiet { background: var(--seg-quiet); min-height: 0; }
+.vleg { font-size: 11px; color: var(--dim); margin-top: var(--s2); display: flex; align-items: center; gap: var(--s1); flex-wrap: wrap; }
+.key { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-left: var(--s2); }
+.key-changed { background: var(--st-accent); }
+.key-quiet { background: var(--seg-quiet); }
+
+.rgroup .sitem { padding: var(--s2) 0; }
+.detail.wide { grid-column: 2 / -1; }
+.frame { display: block; }

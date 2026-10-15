@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { validateBatchWrite } from "../../commands/ui.mjs";
+import { validateBatchWrite, validateEdgesBatch, observedRefusal } from "../../commands/ui.mjs";
 
 const UI_URL = pathToFileURL(fileURLToPath(new URL("../../commands/ui.mjs", import.meta.url))).href;
 const EVENTS_URL = pathToFileURL(fileURLToPath(new URL("../../lib/edges/events.mjs", import.meta.url))).href;
@@ -228,5 +228,247 @@ test("a member that moved state between the two reconciles is refused individual
     assert.equal(byId.e1.ok, true);
     assert.equal(byId.e2.ok, false);
     assert.match(byId.e2.error, /moved to REVERSED/);
+  });
+});
+
+
+// ── the cross-node shape: {edges:[{edge_id,state,observed?}], disposition, reason} ──
+//
+// D9 + F2 + F1 (plan: Eng review 2026-10-15). Each guard below has a test whose
+// assertion is on the STORE, not on the response, and each was mutated once to
+// confirm it goes red for the stated reason (see the report that accompanied this
+// change for the mutation list).
+
+/** The real two-step sequence the edges route runs, against an isolated store. */
+function runEdgesDispose(stateDir, scenario) {
+  const code = `
+    import { validateEdgesBatch, applyBatchDispose } from ${JSON.stringify(UI_URL)};
+    import { appendEvent } from ${JSON.stringify(EVENTS_URL)};
+    import { buildEventPayload, divergedGuard } from ${JSON.stringify(DISPOSITION_URL)};
+    const { body, pool, rows } = ${JSON.stringify(scenario)};
+    const v = validateEdgesBatch(body, pool);
+    if (v.fatal) {
+      process.stdout.write(JSON.stringify({ fatal: v.fatal }));
+    } else {
+      const written = await applyBatchDispose({ body, members: v.members, rows, appendEvent, buildEventPayload, divergedGuard, by: "test (ui)" });
+      process.stdout.write(JSON.stringify({ fatal: null, refused: v.refused, written }));
+    }
+  `;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+    encoding: "utf8",
+    env: { ...process.env, PROPAGATE_STATE_DIR: stateDir },
+  });
+  if (r.status !== 0) throw new Error(`edges-dispose runner failed (exit ${r.status}):\n${r.stdout}\n${r.stderr}`);
+  return JSON.parse(r.stdout.trim());
+}
+
+const poolItem = (id, state, allowed = ALLOWED) => ({ edge_id: id, node_id: "/n/" + id, state, allowed });
+const eventLines = async (stateDir) => (await storeSnapshot(stateDir)).trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+const EDGES_BODY = (edges, over = {}) => ({ edges, disposition: "no-change-needed", reason: REASON, ...over });
+
+test("edges shape: a MIXED-state selection across two nodes writes both, each against its own state", async () => {
+  await withStateDir("ui-edges-mixed-", async (stateDir) => {
+    const pool = { items: [poolItem("e1", "DRIFTED"), poolItem("e2", "REVERSED")] };
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "REVERSED", "d2.md")];
+    rows[0].node_id = "/n/e1"; rows[1].node_id = "/n/e2";
+    const out = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([{ edge_id: "e1", state: "DRIFTED" }, { edge_id: "e2", state: "REVERSED" }]),
+      pool, rows,
+    });
+    assert.equal(out.fatal, null);
+    assert.equal(out.written.ok, true, JSON.stringify(out.written));
+    const lines = await eventLines(stateDir);
+    assert.deepEqual(new Set(lines.map((l) => l.edge_id)), new Set(["e1", "e2"]));
+    for (const l of lines) assert.equal(l.reason, REASON);
+  });
+});
+
+test("edges shape: an id that is not in the queue is refused per edge and NOTHING is appended for it", async () => {
+  await withStateDir("ui-edges-foreign-", async (stateDir) => {
+    const pool = { items: [poolItem("e1", "DRIFTED"), poolItem("e2", "DRIFTED")] };
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "DRIFTED", "d2.md"), row("alien", "DRIFTED", "da.md")];
+    const before = await storeSnapshot(stateDir);
+    const out = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([{ edge_id: "alien", state: "DRIFTED" }]),
+      pool, rows,
+    });
+    assert.equal(out.fatal, null);
+    assert.equal(out.refused.length, 1);
+    assert.equal(out.refused[0].edge_id, "alien");
+    assert.equal(out.refused[0].code, 409);
+    assert.match(out.refused[0].error, /not actionable/);
+    // `alien` EXISTS in the fresh rows -- the only thing keeping it out of the store is that
+    // it is not one of the server's own queue items. That is the property under test.
+    assert.equal(await storeSnapshot(stateDir), before, "a foreign id must not reach the store");
+  });
+});
+
+test("edges shape: a member whose state moved since selection is refused at validation, store unchanged", async () => {
+  await withStateDir("ui-edges-moved-", async (stateDir) => {
+    const pool = { items: [poolItem("e1", "REVERSED")] };
+    const rows = [row("e1", "REVERSED", "d1.md")];
+    const before = await storeSnapshot(stateDir);
+    const out = runEdgesDispose(stateDir, { body: EDGES_BODY([{ edge_id: "e1", state: "DRIFTED" }]), pool, rows });
+    assert.equal(out.refused[0].code, 409);
+    assert.match(out.refused[0].error, /moved to REVERSED/);
+    assert.equal(await storeSnapshot(stateDir), before);
+  });
+});
+
+test("edges shape: a member that moves BETWEEN validation and write is refused by its own expected state", async () => {
+  // Validation saw DRIFTED (the pool); the fresh row reads REVERSED. Only the PER-MEMBER
+  // expected state in applyBatchDispose can catch this -- body.state does not exist here.
+  await withStateDir("ui-edges-race-", async (stateDir) => {
+    const pool = { items: [poolItem("e1", "DRIFTED"), poolItem("e2", "DRIFTED")] };
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "REVERSED", "d2.md")];
+    const out = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([{ edge_id: "e1", state: "DRIFTED" }, { edge_id: "e2", state: "DRIFTED" }]),
+      pool, rows,
+    });
+    const byId = Object.fromEntries(out.written.results.map((r) => [r.edge_id, r]));
+    assert.equal(byId.e1.ok, true);
+    assert.equal(byId.e2.ok, false);
+    assert.match(byId.e2.error, /moved to REVERSED/);
+    assert.deepEqual((await eventLines(stateDir)).map((l) => l.edge_id), ["e1"]);
+  });
+});
+
+test("edges shape: one bad member leaves the others written (the 207 case)", async () => {
+  await withStateDir("ui-edges-207-", async (stateDir) => {
+    const pool = { items: [poolItem("e1", "DRIFTED"), poolItem("e2", "DRIFTED")] };
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "DRIFTED", "d2.md")];
+    const out = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([{ edge_id: "e1", state: "DRIFTED" }, { edge_id: "ghost", state: "DRIFTED" }]),
+      pool, rows,
+    });
+    assert.equal(out.refused.length, 1);
+    assert.equal(out.written.ok, true, "the member that was valid is written");
+    assert.deepEqual((await eventLines(stateDir)).map((l) => l.edge_id), ["e1"]);
+  });
+});
+
+test("edges shape F2: edges:[] is refused, not a vacuous success", async () => {
+  await withStateDir("ui-edges-empty-", async (stateDir) => {
+    const before = await storeSnapshot(stateDir);
+    for (const edges of [[], undefined, "e1", {}, null]) {
+      const out = runEdgesDispose(stateDir, { body: { edges, disposition: "no-change-needed", reason: REASON }, pool: { items: [poolItem("e1", "DRIFTED")] }, rows: [] });
+      assert.equal(out.fatal?.code, 400, `edges=${JSON.stringify(edges)}`);
+    }
+    assert.equal(await storeSnapshot(stateDir), before);
+  });
+});
+
+test("edges shape F2: a short reason is refused before any member is considered", async () => {
+  await withStateDir("ui-edges-reason-", async (stateDir) => {
+    const before = await storeSnapshot(stateDir);
+    const out = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([{ edge_id: "e1", state: "DRIFTED" }], { reason: "  ok  " }),
+      pool: { items: [poolItem("e1", "DRIFTED")] }, rows: [row("e1", "DRIFTED", "d1.md")],
+    });
+    assert.equal(out.fatal.code, 400);
+    assert.match(out.fatal.error, /12 characters/);
+    assert.equal(await storeSnapshot(stateDir), before);
+  });
+});
+
+test("edges shape F2: `allowed` is checked PER MEMBER -- a DIVERGED member refuses no-change-needed, its DRIFTED sibling still lands", async () => {
+  await withStateDir("ui-edges-allowed-", async (stateDir) => {
+    const pool = { items: [poolItem("e1", "DRIFTED"), poolItem("e2", "DIVERGED", ["both-reconciled"])] };
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "DIVERGED", "d2.md")];
+    const out = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([{ edge_id: "e1", state: "DRIFTED" }, { edge_id: "e2", state: "DIVERGED" }]),
+      pool, rows,
+    });
+    assert.equal(out.refused.length, 1);
+    assert.equal(out.refused[0].edge_id, "e2");
+    assert.equal(out.refused[0].code, 400);
+    assert.match(out.refused[0].error, /both-reconciled/);
+    assert.deepEqual((await eventLines(stateDir)).map((l) => l.edge_id), ["e1"]);
+  });
+});
+
+test("edges shape F2: duplicate ids and more ids than the queue holds are refused wholesale", async () => {
+  await withStateDir("ui-edges-dup-", async (stateDir) => {
+    const before = await storeSnapshot(stateDir);
+    const pool = { items: [poolItem("e1", "DRIFTED"), poolItem("e2", "DRIFTED")] };
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "DRIFTED", "d2.md")];
+    const dup = runEdgesDispose(stateDir, { body: EDGES_BODY([{ edge_id: "e1", state: "DRIFTED" }, { edge_id: "e1", state: "DRIFTED" }]), pool, rows });
+    assert.equal(dup.fatal.code, 400);
+    assert.match(dup.fatal.error, /twice/);
+    // 3 ids against a queue of 2: e1 and e2 are VALID, so only the length bound stops them.
+    const many = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([{ edge_id: "e1", state: "DRIFTED" }, { edge_id: "e2", state: "DRIFTED" }, { edge_id: "e3", state: "DRIFTED" }]),
+      pool, rows,
+    });
+    assert.equal(many.fatal.code, 400);
+    assert.match(many.fatal.error, /only 2 can be acted on/);
+    assert.equal(await storeSnapshot(stateDir), before);
+  });
+});
+
+test("edges shape F2: a malformed entry is refused wholesale", () => {
+  const pool = { items: [poolItem("e1", "DRIFTED")] };
+  for (const bad of [{ edge_id: "e1" }, { state: "DRIFTED" }, "e1", null, { edge_id: 7, state: "DRIFTED" }]) {
+    assert.equal(validateEdgesBatch(EDGES_BODY([bad]), pool).fatal?.code, 400, JSON.stringify(bad));
+  }
+});
+
+test("edges shape F1: an observed pair that no longer matches the fresh row is refused 409 and the store is unchanged", async () => {
+  await withStateDir("ui-edges-observed-", async (stateDir) => {
+    const pool = { items: [poolItem("e1", "DRIFTED"), poolItem("e2", "DRIFTED")] };
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "DRIFTED", "d2.md")];
+    const before = await storeSnapshot(stateDir);
+    const out = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([
+        { edge_id: "e1", state: "DRIFTED", observed: { source: "src-e1", downstream: "STALE" } },
+        { edge_id: "e2", state: "DRIFTED", observed: { source: "STALE", downstream: "dst-e2" } },
+      ]),
+      pool, rows,
+    });
+    assert.equal(out.written.ok, false);
+    assert.deepEqual(out.written.results.map((r) => r.code), [409, 409]);
+    assert.match(out.written.results[0].error, /downstream changed/);
+    assert.match(out.written.results[1].error, /source changed/);
+    assert.equal(await storeSnapshot(stateDir), before, "a verdict on unread bytes must not be written");
+  });
+});
+
+test("edges shape F1: a MATCHING observed pair writes; absent observed is back-compat and writes", async () => {
+  await withStateDir("ui-edges-observed-ok-", async (stateDir) => {
+    const pool = { items: [poolItem("e1", "DRIFTED"), poolItem("e2", "DRIFTED")] };
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "DRIFTED", "d2.md")];
+    const out = runEdgesDispose(stateDir, {
+      body: EDGES_BODY([
+        { edge_id: "e1", state: "DRIFTED", observed: { source: "src-e1", downstream: "dst-e1" } },
+        { edge_id: "e2", state: "DRIFTED" },
+      ]),
+      pool, rows,
+    });
+    assert.equal(out.written.ok, true, JSON.stringify(out.written));
+    assert.equal((await eventLines(stateDir)).length, 2);
+  });
+});
+
+test("observedRefusal: malformed observed is 400, null contents compare equal to null, absent is allowed", () => {
+  const r = { source: { contentId: "s" }, downstream: { contentId: null } };
+  assert.equal(observedRefusal(undefined, r), null);
+  assert.equal(observedRefusal({ source: "s", downstream: null }, r), null);
+  assert.equal(observedRefusal({ source: "s" }, r).code, 400);
+  assert.equal(observedRefusal("s", r).code, 400);
+  assert.equal(observedRefusal({ source: "s", downstream: "x" }, r).code, 409);
+});
+
+test("node_id shape F1: applyBatchDispose honours a per-member observed pair too", async () => {
+  await withStateDir("ui-batch-observed-", async (stateDir) => {
+    const members = [{ ...member("e1", "DRIFTED", ALLOWED), observed: { source: "src-e1", downstream: "STALE" } }, member("e2", "DRIFTED", ALLOWED)];
+    const rows = [row("e1", "DRIFTED", "d1.md"), row("e2", "DRIFTED", "d2.md")];
+    const out = runBatchDispose(stateDir, {
+      body: { node_id: "/n/src.md", state: "DRIFTED", disposition: "no-change-needed", reason: REASON },
+      members, rows,
+    });
+    const byId = Object.fromEntries(out.result.results.map((r) => [r.edge_id, r]));
+    assert.equal(byId.e1.code, 409);
+    assert.equal(byId.e2.ok, true);
+    assert.deepEqual((await eventLines(stateDir)).map((l) => l.edge_id), ["e2"]);
   });
 });

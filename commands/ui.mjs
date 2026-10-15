@@ -36,17 +36,41 @@
  * application is never expressible through this endpoint; `applyBatchDispose`
  * then re-checks each member against freshly reconciled rows and writes one
  * event per member, all carrying the one reason supplied.
+ *
+ * AND A SECOND BATCH SHAPE, for selections that cross nodes (D9, 2026-10-15):
+ * {edges: [{edge_id, state, observed?}], disposition, reason}. The server
+ * resolves each id against ITS OWN queue (plus the parked set, D11) -- the
+ * client never supplies a path -- and every member is checked against its own
+ * expected state, not one shared `state`. See `validateEdgesBatch`.
+ *
+ * `observed:{source,downstream}` (F1) is the content pair the reviewer actually
+ * read. `buildEventPayload` pins `row.source.contentId` from the reconcile run at
+ * WRITE time, so without it a verdict silently pins bytes that changed after the
+ * diff was drawn. A mismatch is refused per edge with 409.
  */
 
 import { createServer } from "node:http";
 import { readFileSync, readdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { queuePayload } from "../lib/report/queue.mjs";
+import { queuePayload, buildQueue, orderFor, historyByEdge } from "../lib/report/queue.mjs";
 import { streamPayload, readCursor, writeCursor } from "../lib/report/stream.mjs";
+import { readSeen, addSeen, validateTriples } from "../lib/report/seen-edges.mjs";
+import { buildId } from "../lib/report/ui-build.mjs";
 import { CLAUDE_GLOBAL_CLAUDE_MD, stateDir } from "../lib/core/paths.mjs";
 
+export { buildId };
+
 const TOKEN = randomBytes(24).toString("hex");
+
+/**
+ * The one refusal that is 401, not 403 (F9). A bad token means "you are not
+ * authenticated" and the client can act on it ("token expired, reopen from the
+ * widget"); a Host or Origin refusal means "this request should not be made at
+ * all" and stays 403. Both used to be 403, so the client could not tell an
+ * expired tab from an attack and rendered a crash for the first.
+ */
+export const TOKEN_REFUSAL = "bad or missing token";
 
 /** Same-origin / loopback gate. Returns a refusal string, or null when allowed. */
 export function guardRequest(req, token, port) {
@@ -63,7 +87,7 @@ export function guardRequest(req, token, port) {
     if (!ok) return "cross-origin request";
   }
   const url = new URL(req.url, `http://${host}`);
-  if (url.searchParams.get("token") !== token) return "bad or missing token";
+  if (url.searchParams.get("token") !== token) return TOKEN_REFUSAL;
   return null;
 }
 
@@ -170,6 +194,121 @@ export function validateBatchWrite({ node_id, state, disposition, reason }, memb
   return null;
 }
 
+const REASON_TOO_SHORT =
+  "a reason of at least 12 characters is required — this UI is stricter than the CLI on purpose; a one-click write with no reason is how an append-only store fills with judgements nobody can audit";
+
+/**
+ * Validate a CROSS-NODE batch -- {edges:[{edge_id, state, observed?}], disposition,
+ * reason} -- BEFORE anything is written (D9, with F2 from the outside review).
+ *
+ * WHY THIS IS NOT validateBatchWrite. That gate's unit is one (node_id, state)
+ * and it refuses a mixed group wholesale. A selection that crosses nodes has no
+ * single node and no single state, so the uniformity gate cannot apply, and the
+ * first sketch of this path inherited NONE of the other gates either: the
+ * disposition was never checked against `allowed`, the reason was never measured,
+ * and `edges: []` was vacuously fine (an empty loop is a success). F2 found all
+ * three. Each is a refusal here, and each has a mutation test.
+ *
+ * TWO LEVELS OF REFUSAL, kept apart on purpose:
+ *   - BATCH-LEVEL (`fatal`): the request itself is malformed or abusive -- no
+ *     edges, duplicate ids, more ids than the queue could hold, no disposition,
+ *     a short reason. Nothing is written for anyone.
+ *   - PER-EDGE (`refused`): one id is unknown, has moved, or cannot take this
+ *     disposition. The other members still proceed -- that is what 207 is for.
+ *     A foreign id is "not actionable", never a path lookup: members are the
+ *     server's own items, filtered by the ids sent.
+ *
+ * DUPLICATES ARE REFUSED, NOT SILENTLY MERGED. Two entries for one edge would
+ * write two events with one reason; a client that sends them has a bug, and
+ * quietly deduping would hide it.
+ *
+ * @param {{edges?: unknown, disposition?: string, reason?: string}} body
+ * @param {{items: Array<{edge_id: string, node_id?: string, state: string, allowed: string[]}>,
+ *          parked?: Array<{edge_id: string, node_id?: string, state: string, allowed: string[]}>}} pool
+ *   the server's queue items, plus the parked set (D11). Queue wins on a shared id.
+ * @returns {{fatal: {code: number, error: string}|null,
+ *            members: Array<object>,
+ *            refused: Array<{edge_id: string, ok: false, code: number, error: string}>}}
+ */
+export function validateEdgesBatch(body, pool) {
+  const none = (code, error) => ({ fatal: { code, error }, members: [], refused: [] });
+  const edges = body?.edges;
+  if (!Array.isArray(edges) || edges.length === 0) {
+    return none(400, "edges must be a non-empty array of {edge_id, state} — an empty selection is not a successful batch");
+  }
+  const byId = new Map();
+  for (const m of pool?.parked ?? []) byId.set(m.edge_id, { ...m, parked: true });
+  for (const m of pool?.items ?? []) byId.set(m.edge_id, m);
+  if (edges.length > byId.size) {
+    return none(400, `${edges.length} edges sent but only ${byId.size} can be acted on right now — reload`);
+  }
+  if (!body.disposition) return none(400, "disposition is required");
+  if (String(body.reason ?? "").trim().length < 12) return none(400, REASON_TOO_SHORT);
+
+  const seen = new Set();
+  for (const e of edges) {
+    if (!e || typeof e !== "object" || typeof e.edge_id !== "string" || !e.edge_id || typeof e.state !== "string" || !e.state) {
+      return none(400, `every entry of edges must be {edge_id, state}, got ${JSON.stringify(e)?.slice(0, 120)}`);
+    }
+    if (seen.has(e.edge_id)) return none(400, `edge ${e.edge_id} appears twice in edges — one verdict per edge`);
+    seen.add(e.edge_id);
+  }
+
+  const members = [];
+  const refused = [];
+  for (const e of edges) {
+    const item = byId.get(e.edge_id);
+    if (!item) {
+      refused.push({ edge_id: e.edge_id, ok: false, code: 409, error: `not actionable — ${e.edge_id} is not in the queue or the parked set; it may have been disposed in another window. reload` });
+      continue;
+    }
+    if (item.state !== e.state) {
+      refused.push({ edge_id: e.edge_id, ok: false, code: 409, error: `edge moved to ${item.state} since selection (you saw ${e.state}) — reload` });
+      continue;
+    }
+    if (!item.allowed.includes(body.disposition)) {
+      refused.push({ edge_id: e.edge_id, ok: false, code: 400, error: `${item.state} edges do not accept "${body.disposition}" — allowed: ${item.allowed.join(", ")}` });
+      continue;
+    }
+    members.push({ ...item, expectedState: e.state, observed: e.observed });
+  }
+  return { fatal: null, members, refused };
+}
+
+/**
+ * F1. Did the reviewer read the bytes the verdict is about to pin?
+ *
+ * `buildEventPayload` takes `source_content` and `downstream_content` from the
+ * reconcile run at WRITE time, not from what was on screen. So an edit made
+ * between drawing the diff and clicking would be pinned as "judged" without
+ * anyone having seen it. `observed` is the pair /api/evidence returned for the
+ * diff the reviewer saw; the write is refused when the row no longer says the
+ * same.
+ *
+ * ABSENT `observed` is allowed (null) -- the CLI-shaped callers and every
+ * pre-redesign client omit it, and refusing them would break working writes. The
+ * redesigned client always sends it. PRESENT-BUT-MALFORMED is refused as 400, not
+ * waved through: a half-checked pin is the failure this exists to prevent.
+ *
+ * @returns {{code: number, error: string}|null}
+ */
+export function observedRefusal(observed, row) {
+  if (observed === undefined) return null;
+  if (!observed || typeof observed !== "object" || !("source" in observed) || !("downstream" in observed)) {
+    return { code: 400, error: "observed must carry both source and downstream content ids (the pair /api/evidence returned)" };
+  }
+  const nowSource = row?.source?.contentId ?? null;
+  const nowDownstream = row?.downstream?.contentId ?? null;
+  const sideSrc = (observed.source ?? null) !== nowSource;
+  const sideDst = (observed.downstream ?? null) !== nowDownstream;
+  if (!sideSrc && !sideDst) return null;
+  const which = [sideSrc && "source", sideDst && "downstream"].filter(Boolean).join(" and ");
+  return {
+    code: 409,
+    error: `the ${which} changed since you read the diff, so this verdict would pin content you did not see — reload and read it again`,
+  };
+}
+
 /**
  * The refusal for a disposition outside `allowedDispositions(...).allowed`, or
  * null. Only the ORDERING half is reported here -- the DIVERGED pairing has its
@@ -211,16 +350,26 @@ export async function applyBatchDispose({ body, members, rows, appendEvent, buil
   for (const m of members) {
     const row = byEdgeId.get(m.edge_id);
     if (!row) {
-      results.push({ edge_id: m.edge_id, ok: false, error: "edge vanished between render and write — reload" });
+      results.push({ edge_id: m.edge_id, ok: false, code: 409, error: "edge vanished between render and write — reload" });
       continue;
     }
-    if (row.state !== body.state) {
-      results.push({ edge_id: m.edge_id, ok: false, error: `edge moved to ${row.state} since selection — reload` });
+    // PER-MEMBER expected state (D9). The node_id shape has one shared
+    // `body.state`; the edges shape carries each member's own, because a
+    // cross-node selection mixes DRIFTED with REVERSED. `m.expectedState` wins
+    // when present, and the old shape (no expectedState) behaves exactly as before.
+    const expected = m.expectedState ?? body.state;
+    if (row.state !== expected) {
+      results.push({ edge_id: m.edge_id, ok: false, code: 409, error: `edge moved to ${row.state} since selection — reload` });
+      continue;
+    }
+    const seen = observedRefusal(m.observed, row);
+    if (seen) {
+      results.push({ edge_id: m.edge_id, ok: false, code: seen.code, error: seen.error });
       continue;
     }
     const guard = divergedGuard(row.state, body.disposition);
     if (guard) {
-      results.push({ edge_id: m.edge_id, ok: false, error: guard });
+      results.push({ edge_id: m.edge_id, ok: false, code: 409, error: guard });
       continue;
     }
     // THE ORDERING GUARD, which this write path never had. `verify` refuses to
@@ -231,14 +380,14 @@ export async function applyBatchDispose({ body, members, rows, appendEvent, buil
     // visibly unguarded rather than silently guarded by a stub.
     const ordering = orderingRefusal(allowedFor?.(row), body.disposition);
     if (ordering) {
-      results.push({ edge_id: m.edge_id, ok: false, error: ordering });
+      results.push({ edge_id: m.edge_id, ok: false, code: 409, error: ordering });
       continue;
     }
     try {
       const stamped = await appendEvent(buildEventPayload(row, body.disposition, reason, by));
       results.push({ edge_id: m.edge_id, ok: true, event_id: stamped.event_id });
     } catch (err) {
-      results.push({ edge_id: m.edge_id, ok: false, error: String(err?.message ?? err) });
+      results.push({ edge_id: m.edge_id, ok: false, code: 400, error: String(err?.message ?? err) });
     }
   }
   return { ok: results.every((r) => r.ok), results };
@@ -263,7 +412,7 @@ export function stylesheet() {
   return files.map((f) => `/* ── commands/ui/css/${f} ── */\n` + readFileSync(new URL(f, CSS_DIR), "utf8")).join("");
 }
 
-export function page(token) {
+export function page(token, build = buildId()) {
   // THE TEMPLATE LITERAL IS NOW A SHELL, not a program. The CSS and the client
   // script live in commands/ui/css/*.css (joined by stylesheet()) and commands/ui.client.js and are INLINED
   // here at serve time -- still one self-contained page, no build step, no
@@ -277,11 +426,17 @@ export function page(token) {
   // console nothing reads. A plain file has nothing to escape, and
   // `node --check` can parse it directly.
   //
-  // THE TOKEN IS THE ONLY INTERPOLATION, and it goes on a data attribute rather
-  // than into the script, so ui.client.js contains no substitution point at all.
-  // It is JSON-encoded, and it is 48 hex characters minted by randomBytes -- but
-  // the encoding is what makes that a property of the value rather than a thing
-  // to remember.
+  // THE TOKEN AND THE BUILD ID ARE THE ONLY INTERPOLATIONS, and both go on data
+  // attributes rather than into the script, so ui.client.js contains no
+  // substitution point at all. Each is JSON-encoded. The token is 48 hex
+  // characters minted by randomBytes and the build id is 16 hex characters of a
+  // sha256 -- but the encoding is what makes that a property of the value rather
+  // than a thing to remember, and the build id is added the SAME way as the token
+  // on purpose: a second interpolation done differently is how G65 started.
+  //
+  // `data-build` is the id of the files THIS call just read from disk. /api/version
+  // answers with the id the RUNNING SERVER was started from. A client that sees
+  // the two differ is talking to a server older than its own page (F5).
   const read = (f) => readFileSync(new URL("./" + f, import.meta.url), "utf8");
   // Three vendored globals BEFORE the client, in their own script tags. Separate
   // tags rather than one concatenation so a syntax error in one cannot silently
@@ -292,7 +447,7 @@ export function page(token) {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     "<title>propagate</title>",
     "<style>", stylesheet(), "</style></head>",
-    "<body data-token=", JSON.stringify(token), ">",
+    "<body data-token=", JSON.stringify(token), " data-build=", JSON.stringify(build), ">",
     '<div id="app"></div>',
     ...vendor.flatMap((v) => ["<script>", v, "</script>"]),
     "<script>", read("ui.client.js"), "</script></body></html>",
@@ -300,17 +455,31 @@ export function page(token) {
 }
 
 
-export async function uiCmd(argv = [], io = console) {
+/**
+ * @param {string[]} argv
+ * @param {Console} io
+ * @param {object} [overrides] TEST SEAMS ONLY. The real defaults are used when a
+ *   key is absent, and tests/cli/ui-server.test.mjs also runs once with none, so
+ *   the production construction path is exercised (rule:name-what-no-test-executes:
+ *   an injection seam is exactly what lets the real arm ship unrun).
+ *   Keys: deps, inboxDeps, appendEvent, evidenceFor, readSnapshot, surfacePayload, root.
+ */
+export async function uiCmd(argv = [], io = console, overrides = {}) {
   const portArg = argv.indexOf("--port");
   const port = portArg >= 0 ? Number(argv[portArg + 1]) : 4599;
-  const root = path.join(process.env.HOME ?? "", "Documents/GitHub/");
+  const root = overrides.root ?? path.join(process.env.HOME ?? "", "Documents/GitHub/");
 
-  const { appendEvent } = await import("../lib/edges/events.mjs");
+  const appendEvent = overrides.appendEvent ?? (await import("../lib/edges/events.mjs")).appendEvent;
   const { registerQueue } = await import("../lib/registers/queue.mjs");
   const { planEdit, applyEdit } = await import("../lib/registers/write.mjs");
   const { backlog } = await import("../lib/report/backlog.mjs");
-  const { evidenceFor } = await import("../lib/report/evidence.mjs");
-  const { readSnapshot } = await import("../lib/report/doctor/snapshot.mjs");
+  const evidenceFor = overrides.evidenceFor ?? (await import("../lib/report/evidence.mjs")).evidenceFor;
+  const readSnapshot = overrides.readSnapshot ?? (await import("../lib/report/doctor/snapshot.mjs")).readSnapshot;
+  const surfacePayload = overrides.surfacePayload ?? (await import("../lib/report/surface.mjs")).surfacePayload;
+  // F5. The id of the code this process was STARTED from. page() recomputes from
+  // disk on every request; the two differ exactly when files changed under a
+  // running server, which is the stale-server case.
+  const BUILD = buildId();
   const { divergedGuard, buildEventPayload, allowedDispositions } = await import("../lib/edges/disposition.mjs");
   const { buildGraph, blockedBy } = await import("../lib/graph/graph.mjs");
   // Blockers for the rows the write path just re-derived (NOT the browser's
@@ -327,16 +496,68 @@ export async function uiCmd(argv = [], io = console) {
   // injects its own deps and therefore never exercises either default.
   const inbox = await import("../lib/report/inbox.mjs");
   const { inboxPayload, referencePayload, baselineBuckets } = inbox;
-  const inboxDeps = await inbox.defaultDeps();
+  const inboxDeps = overrides.inboxDeps ?? (await inbox.defaultDeps());
   const { analyticsPayload } = await import("../lib/report/analytics.mjs");
-  const deps = await defaultDeps();
+  const deps = overrides.deps ?? (await defaultDeps());
 
-  const server = createServer(async (req, res) => {
+  /**
+   * ONE read for every write-path decision: the reconciled rows, the queue built
+   * from them, and the parked set (D11). Items and rows come from the SAME
+   * reconcile, so validation and the write cannot disagree about what an edge is.
+   *
+   * It replaces queuePayload + a second reconcile. The second one existed because
+   * a batch row can be seconds old by the time it is clicked; but queuePayload is
+   * itself read at REQUEST time, so the second reconcile only narrowed a window of
+   * milliseconds. The real staleness (the human's) is handled by `state` moved
+   * checks and by `observed` (F1), which compare against these rows.
+   *
+   * THE PARKED SET (D11) is NEVER_VERIFIED rows carrying a `deferred` flag. They
+   * read as NEVER_VERIFIED, which `isActionable` drops, so they are in no queue;
+   * someone examined each and parked it, and judging one is legitimate. They go
+   * through the SAME divergedGuard / ordering / allowedDispositions as queue
+   * items (`allowedFor`). A NEVER_VERIFIED edge that is NOT parked is deliberately
+   * absent here: giving it a verdict is a baseline, a different operation.
+   */
+  const readWorld = async () => {
+    const workspaces = await deps.loadWorkspaces();
+    const { rows } = await deps.reconcile(workspaces, {});
+    const history = await historyByEdge();
+    const order = orderFor(rows);
+    const items = buildQueue(rows, history, { root, order });
+    const allowedFor = allowedForRows(rows);
+    const parked = rows
+      .filter((r) => r.deferred && r.state === "NEVER_VERIFIED")
+      .map((r) => {
+        const a = allowedFor(r);
+        return {
+          edge_id: r.edge_id,
+          node_id: r.node_id,
+          state: r.state,
+          parked: true,
+          source: r.source?.path ?? null,
+          downstream: r.downstream?.path ?? null,
+          lastVerified: history.get(r.edge_id)?.lastVerified ?? null,
+          allowed: a.allowed,
+          viaOutOfOrder: a.viaOutOfOrder,
+        };
+      });
+    return { rows, items, parked, allowedFor };
+  };
+
+  const handle = async (req, res) => {
     const send = (code, body, type = "application/json") => {
       res.writeHead(code, { "content-type": type, "cache-control": "no-store" });
       res.end(typeof body === "string" ? body : JSON.stringify(body));
     };
     const url = new URL(req.url, `http://${req.headers.host ?? "127.0.0.1"}`);
+    // A refusal from guardRequest, as a response: 401 for the token (F9), 403 for
+    // Host / Origin. `error:"token"` is the stable word a client keys on; the
+    // prose refusal for the others stays human-readable.
+    const refuse = (refusal, asText = false) => {
+      const code = refusal === TOKEN_REFUSAL ? 401 : 403;
+      if (asText) return send(code, refusal, "text/plain");
+      return send(code, { ok: false, error: refusal === TOKEN_REFUSAL ? "token" : refusal });
+    };
 
     if (url.pathname === "/" && url.searchParams.get("token") === TOKEN) {
       return send(200, page(TOKEN), "text/html; charset=utf-8");
@@ -347,7 +568,7 @@ export async function uiCmd(argv = [], io = console) {
     // one page holds everything and every link lands on it.
     if (url.pathname === "/graph") {
       const refusal = guardRequest(req, TOKEN, port);
-      if (refusal) return send(403, refusal, "text/plain");
+      if (refusal) return refuse(refusal, true);
       try {
         const { execFile } = await import("node:child_process");
         const { promisify } = await import("node:util");
@@ -361,7 +582,36 @@ export async function uiCmd(argv = [], io = console) {
 
     if (url.pathname.startsWith("/api/")) {
       const refusal = guardRequest(req, TOKEN, port);
-      if (refusal) return send(403, { ok: false, error: refusal });
+      if (refusal) return refuse(refusal);
+
+      // F5. What build this PROCESS was started from. Read-only, behind the same
+      // guard. The client compares it with its own page's data-build.
+      if (url.pathname === "/api/version") return send(200, { ok: true, build: BUILD });
+
+      // The widget's exact payload (D8, narrowed by D10): the browser reads
+      // Health, velocity and usage from it. The badges do NOT -- those come from
+      // /api/inbox, over the rows the list renders. Read-only; loads after first
+      // paint because it costs more than the inbox.
+      if (url.pathname === "/api/surface") {
+        try { return send(200, await surfacePayload({ root })); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
+      // D12. The content-keyed seen-set. GET returns it; POST adds the triples
+      // the client actually rendered. Its own file: writeCursor's is untouched.
+      if (url.pathname === "/api/seen-edges") {
+        if (req.method === "POST") {
+          let raw = "";
+          for await (const c of req) raw += c;
+          let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
+          const v = validateTriples(body?.triples);
+          if (!v.ok) return send(400, { ok: false, error: v.error });
+          try { return send(200, { ok: true, ...(await addSeen(v.triples)) }); }
+          catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+        }
+        try { return send(200, { ok: true, ...(await readSeen()) }); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
 
       /* ── THE FIVE DIVISIONS ────────────────────────────────────────────
          Three endpoints, split by COST rather than by topic. Measured:
@@ -469,64 +719,101 @@ export async function uiCmd(argv = [], io = console) {
         for await (const c of req) raw += c;
         let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
 
-        // BATCH: {node_id, state, disposition, reason}. Checked on node_id's
-        // presence, BEFORE the single-edge path, so a batch body (which has
-        // no edge_id of its own) is never misread as an incomplete
-        // single-edge request.
-        if (body.node_id !== undefined) {
-          const payloadNow = await queuePayload({ root, deps });
-          // EVERY actionable edge currently sharing node_id, at WHATEVER
-          // state each one reads — never pre-filtered to body.state, or a
-          // mixed-state group would be silently narrowed instead of refused.
-          const members = payloadNow.items.filter((i) => i.node_id === body.node_id);
-          const invalid = validateBatchWrite(body, members);
-          if (invalid) return send(invalid.code, { ok: false, error: invalid.error });
-
-          // Re-derive AGAIN right before writing, same discipline as the
-          // single-edge path below: payloadNow is itself fresh, but a human
-          // reading a batch row and clicking is seconds behind even that.
-          const workspaces = await deps.loadWorkspaces();
-          const { rows } = await deps.reconcile(workspaces, {});
-          const result = await applyBatchDispose({
-            body,
-            members,
-            rows,
-            appendEvent,
-            buildEventPayload,
-            divergedGuard,
-            by: `${process.env.USER || "ui"} (ui)`,
-            allowedFor: allowedForRows(rows),
-          });
-          // 200 only when every member landed. A partial failure still
-          // returns 200-shaped JSON with ok:false plus the per-edge_id
-          // array — never a bare {ok:true} that hides which member failed —
-          // so 207 (Multi-Status) marks the mixed case at the transport
-          // level too, for a client that only checks the status code.
-          return send(result.ok ? 200 : 207, result);
-        }
-
-        const payloadNow = await queuePayload({ root, deps });
-        const item = payloadNow.items.find((i) => i.edge_id === body.edge_id);
-        const invalid = validateWrite(body, item);
-        if (invalid) return send(400, { ok: false, error: invalid });
-
-        // Re-derive the row, then re-run the SAME guard verify uses. The queue
-        // snapshot the browser holds may be seconds old; the guard must run
-        // against state read now, not against what the page was rendered from.
-        const workspaces = await deps.loadWorkspaces();
-        const { rows } = await deps.reconcile(workspaces, {});
-        const row = rows.find((r) => r.edge_id === body.edge_id);
-        if (!row) return send(409, { ok: false, error: "edge vanished between render and write — reload" });
-        const guard = divergedGuard(row.state, body.disposition);
-        if (guard) return send(409, { ok: false, error: guard });
-        const ordering = orderingRefusal(allowedForRows(rows)(row), body.disposition);
-        if (ordering) return send(409, { ok: false, error: ordering });
-
+        // F12. These reads used to be unwrapped: a throw in reconcile or the
+        // queue build escaped the async handler, which Node treats as an
+        // unhandled rejection, and the process died together with any held write.
+        // Every dependency call below sits behind one catch that answers JSON.
+        let world;
+        const by = `${process.env.USER || "ui"} (ui)`;
         try {
-          const stamped = await appendEvent(buildEventPayload(row, body.disposition, String(body.reason).trim(), `${process.env.USER || "ui"} (ui)`));
-          return send(200, { ok: true, event_id: stamped.event_id });
+          // THE CROSS-NODE BATCH (D9): {edges:[{edge_id,state,observed?}], disposition, reason}.
+          // Checked FIRST on `edges` being present, so it is never misread as an
+          // incomplete single-edge or node batch.
+          if (body.edges !== undefined) {
+            world = await readWorld();
+            const v = validateEdgesBatch(body, { items: world.items, parked: world.parked });
+            if (v.fatal) return send(v.fatal.code, { ok: false, error: v.fatal.error });
+            const written = await applyBatchDispose({
+              body,
+              members: v.members,
+              rows: world.rows,
+              appendEvent,
+              buildEventPayload,
+              divergedGuard,
+              by,
+              allowedFor: world.allowedFor,
+            });
+            // Results in the order the client sent them, whichever stage refused.
+            const byId = new Map([...v.refused, ...written.results].map((r) => [r.edge_id, r]));
+            const results = body.edges.map((e) => byId.get(e.edge_id));
+            const ok = results.every((r) => r.ok);
+            return send(ok ? 200 : 207, { ok, results });
+          }
+
+          // BATCH: {node_id, state, disposition, reason}. Checked on node_id's
+          // presence, BEFORE the single-edge path, so a batch body (which has
+          // no edge_id of its own) is never misread as an incomplete
+          // single-edge request.
+          if (body.node_id !== undefined) {
+            // `observed`, when sent, is a map edge_id -> {source, downstream}.
+            if (body.observed !== undefined && (!body.observed || typeof body.observed !== "object" || Array.isArray(body.observed))) {
+              return send(400, { ok: false, error: "observed must be an object mapping edge_id to {source, downstream}" });
+            }
+            world = await readWorld();
+            // EVERY actionable edge currently sharing node_id, at WHATEVER
+            // state each one reads — never pre-filtered to body.state, or a
+            // mixed-state group would be silently narrowed instead of refused.
+            const members = world.items
+              .filter((i) => i.node_id === body.node_id)
+              .map((i) => ({ ...i, observed: body.observed?.[i.edge_id] }));
+            const invalid = validateBatchWrite(body, members);
+            if (invalid) return send(invalid.code, { ok: false, error: invalid.error });
+
+            const result = await applyBatchDispose({
+              body,
+              members,
+              rows: world.rows,
+              appendEvent,
+              buildEventPayload,
+              divergedGuard,
+              by,
+              allowedFor: world.allowedFor,
+            });
+            // 200 only when every member landed. A partial failure still
+            // returns 200-shaped JSON with ok:false plus the per-edge_id
+            // array — never a bare {ok:true} that hides which member failed —
+            // so 207 (Multi-Status) marks the mixed case at the transport
+            // level too, for a client that only checks the status code.
+            return send(result.ok ? 200 : 207, result);
+          }
+
+          world = await readWorld();
+          // D11: a parked edge is judgeable here too; the queue wins on a shared id.
+          const item = world.items.find((i) => i.edge_id === body.edge_id) ?? world.parked.find((i) => i.edge_id === body.edge_id);
+          const invalid = validateWrite(body, item);
+          if (invalid) return send(400, { ok: false, error: invalid });
+
+          // The row comes from the SAME reconcile as the item, then runs the SAME
+          // guards verify uses. The browser's snapshot may be seconds old; these
+          // are checked against rows read now, not against what the page was
+          // rendered from.
+          const row = world.rows.find((r) => r.edge_id === body.edge_id);
+          if (!row) return send(409, { ok: false, error: "edge vanished between render and write — reload" });
+          const seen = observedRefusal(body.observed, row);
+          if (seen) return send(seen.code, { ok: false, error: seen.error });
+          const guard = divergedGuard(row.state, body.disposition);
+          if (guard) return send(409, { ok: false, error: guard });
+          const ordering = orderingRefusal(world.allowedFor(row), body.disposition);
+          if (ordering) return send(409, { ok: false, error: ordering });
+
+          try {
+            const stamped = await appendEvent(buildEventPayload(row, body.disposition, String(body.reason).trim(), by));
+            return send(200, { ok: true, event_id: stamped.event_id });
+          } catch (err) {
+            return send(400, { ok: false, error: String(err?.message ?? err) });
+          }
         } catch (err) {
-          return send(400, { ok: false, error: String(err?.message ?? err) });
+          return send(500, { ok: false, error: String(err?.message ?? err) });
         }
       }
       // EVIDENCE — read-only, and behind the SAME path allowlist as the write
@@ -539,38 +826,59 @@ export async function uiCmd(argv = [], io = console) {
         for await (const c of req) raw += c;
         let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
 
-        let allowed = false;
-        if (body.kind === "edge") {
-          const q = await queuePayload({ root, deps });
-          const item = q.items.find((i) => i.edge_id === body.edge_id);
-          if (!item) return send(404, { ok: false, error: "no such actionable edge — reload" });
-          // The path and the commit come from the LEDGER, never from the
-          // browser, so neither can be pointed somewhere else.
-          body.file = item.source;
-          body.sinceCommit = item.lastVerified?.commit ?? null;
-          body.dirty = !!item.lastVerified?.dirty;
-          body.downstreamFile = item.downstream;
-          body.downstreamSinceCommit = item.lastVerified?.downstreamCommit ?? null;
-          body.downstreamDirty = item.lastVerified?.downstreamDirty ?? null;
-          allowed = true;
-        } else {
-          const known = registerQueue({ backlogFn: backlog });
-          const set = new Set([...(known.issues ?? []), ...(known.todos ?? [])].map((i) => i.file));
-          allowed = set.has(body.file);
-        }
-        if (!allowed) return send(403, { ok: false, error: `${body.file} is not a file this surface reads` });
+        // F12: see /api/dispose. A throw from the queue read, the register walk
+        // or the diff reader answers {ok:false,error} with 500; it never kills
+        // the process.
+        try {
+          let allowed = false;
+          let contentIds = null;
+          if (body.kind === "edge") {
+            const world = await readWorld();
+            // D11: a parked edge has evidence too, labelled "no earlier verdict".
+            const item = world.items.find((i) => i.edge_id === body.edge_id) ?? world.parked.find((i) => i.edge_id === body.edge_id);
+            if (!item) return send(404, { ok: false, error: "no such actionable edge — reload" });
+            // The path and the commit come from the LEDGER, never from the
+            // browser, so neither can be pointed somewhere else.
+            body.file = item.source;
+            body.sinceCommit = item.lastVerified?.commit ?? null;
+            body.dirty = !!item.lastVerified?.dirty;
+            body.downstreamFile = item.downstream;
+            body.downstreamSinceCommit = item.lastVerified?.downstreamCommit ?? null;
+            body.downstreamDirty = item.lastVerified?.downstreamDirty ?? null;
+            body.showCurrentWhenNoVerdict = item.parked === true;
+            // F1. The content pair of the SAME rows this item came from. The
+            // client echoes it back as `observed` on the verdict; the write is
+            // refused if the row no longer says this. The diff is read AFTER
+            // these ids were taken, so an edit in between leaves the ids OLDER
+            // than the diff -- the refusal fires, which is the safe direction.
+            const row = world.rows.find((r) => r.edge_id === body.edge_id);
+            contentIds = { source: row?.source?.contentId ?? null, downstream: row?.downstream?.contentId ?? null };
+            allowed = true;
+          } else {
+            const known = registerQueue({ backlogFn: backlog });
+            const set = new Set([...(known.issues ?? []), ...(known.todos ?? [])].map((i) => i.file));
+            allowed = set.has(body.file);
+          }
+          if (!allowed) return send(403, { ok: false, error: `${body.file} is not a file this surface reads` });
 
-        const ev = await evidenceFor(body);
-        return send(200, ev);
+          const ev = await evidenceFor(body);
+          return send(200, contentIds ? { ...ev, contentIds } : ev);
+        } catch (err) {
+          return send(500, { ok: false, error: String(err?.message ?? err) });
+        }
       }
 
       // HEALTH — doctor's own sections, from the snapshot the monitor writes.
       // Not re-run here: doctor costs ~37s and this is a page load.
       if (url.pathname === "/api/health") {
-        const snap = await readSnapshot();
-        if (!snap.ok) return send(200, { ok: false, reason: snap.reason, sections: null, ageMs: snap.ageMs ?? null });
-        return send(200, { ok: true, ageMs: snap.ageMs, generatedAt: snap.payload.generatedAt,
-          problems: snap.payload.problems, totals: snap.payload.totals, sections: snap.payload.sections });
+        try {
+          const snap = await readSnapshot();
+          if (!snap.ok) return send(200, { ok: false, reason: snap.reason, sections: null, ageMs: snap.ageMs ?? null });
+          return send(200, { ok: true, ageMs: snap.ageMs, generatedAt: snap.payload.generatedAt,
+            problems: snap.payload.problems, totals: snap.payload.totals, sections: snap.payload.sections });
+        } catch (err) {
+          return send(500, { ok: false, error: String(err?.message ?? err) });
+        }
       }
 
       // RULES — the HUB half of the model. docs/HUB-AND-WORKSPACE.md: the hub is
@@ -669,6 +977,20 @@ export async function uiCmd(argv = [], io = console) {
       return send(404, { ok: false, error: "no such endpoint" });
     }
     return send(404, "not found", "text/plain");
+  };
+
+  // The last line of F12's defence. Each endpoint above answers its own errors,
+  // but an async handler's rejection is unhandled and Node exits on it, so one
+  // missed await would still take the server (and a held write) down.
+  const server = createServer((req, res) => {
+    handle(req, res).catch((err) => {
+      try {
+        if (!res.headersSent) {
+          res.writeHead(500, { "content-type": "application/json", "cache-control": "no-store" });
+        }
+        res.end(JSON.stringify({ ok: false, error: String(err?.message ?? err) }));
+      } catch { /* the socket is already gone */ }
+    });
   });
 
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));

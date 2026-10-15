@@ -28,10 +28,32 @@ const read = (rel) => readFileSync(path.join(root, rel), "utf8");
  * rather than resolving empty, so a test that forgot one fails loudly instead
  * of asserting against a pane that never got data.
  */
-export async function mountClient({ inbox, routes = {}, hash = "#ready", reduced = false, timeoutMs = 5000 } = {}) {
+/**
+ * RESPONSE SPECS (2026-10-15, for the redesigned client's api() wrapper).
+ *
+ * A route used to be a value, answered as `200` JSON. The client now has to be
+ * proven against every way a request can end, so a route may also be:
+ *   - a function `(call) => value | spec | Promise`, where call is
+ *     `{path, url, opts, body, n}` (n counts calls to that path);
+ *   - `respond(status, body)`      a JSON body with a chosen status;
+ *   - `rawText(status, text)`      a body that is NOT JSON (a proxy's HTML page);
+ *   - `rejectWith(error)`          a fetch that rejects (the server is down).
+ * Anything else is the old behaviour: 200, JSON.
+ */
+const SPEC = Symbol("response-spec");
+export const respond = (status, body) => ({ [SPEC]: true, status, body });
+export const rawText = (status, text) => ({ [SPEC]: true, status, text: String(text) });
+export const rejectWith = (error) => ({ [SPEC]: true, reject: error });
+
+export async function mountClient({ inbox, routes = {}, hash = "#ready", reduced = false, timeoutMs = 5000, build, speedUp = false, untracked = [] } = {}) {
   const { doc, app } = makeDocument();
+  if (build) doc.body.dataset.build = build;
   const calls = [];
+  const fetches = [];
+  const unstubbed = [];
+  const nth = new Map();
   const inFlight = new Set();
+  const listeners = new Map();
 
   // PENDING MACROTASKS, COUNTED — the condition the earlier attempts kept proxying.
   //
@@ -48,6 +70,11 @@ export async function mountClient({ inbox, routes = {}, hash = "#ready", reduced
   let pendingTimers = 0;
   const ids = new Map();
   const trackedSetTimeout = (fn, ms, ...rest) => {
+    // SPEED-UP: the undo hold is five real seconds, and a test that must see the
+    // write land would otherwise sleep for it. Delays of a second or more are
+    // divided by 100, which keeps every ORDERING (a 150ms debounce still lands
+    // before a 5s hold) while making the hold 50ms. Off by default.
+    if (speedUp && typeof ms === "number" && ms >= 1000) ms = ms / 100;
     pendingTimers += 1;
     let done = false;
     const id = setTimeout(() => {
@@ -76,11 +103,14 @@ export async function mountClient({ inbox, routes = {}, hash = "#ready", reduced
     setTimeout: trackedSetTimeout, clearTimeout: trackedClearTimeout,
     // Untracked on purpose — see pendingTimers above.
     setInterval, clearInterval,
-    Object, Array, String, Number, Boolean, Math, JSON, Map, Set, Promise, RegExp, Error, Date, isNaN, parseInt, parseFloat, Infinity,
+    Object, Array, String, Number, Boolean, Math, JSON, Map, Set, Promise, RegExp, Error, Date, isNaN, isFinite, parseInt, parseFloat, Infinity,
+    AbortController, encodeURIComponent, decodeURIComponent, Symbol,
     document: doc,
     location: { hash },
     matchMedia: () => ({ matches: reduced }),
-    addEventListener() {}, removeEventListener() {},
+    // Captured rather than dropped, so a test can press a key or change the hash.
+    addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); },
+    removeEventListener(type, fn) { listeners.get(type)?.delete(fn); },
     // Expressed in terms of the TRACKED timer, so rAF needs no separate counter.
     requestAnimationFrame: (fn) => trackedSetTimeout(fn, 0),
     cancelAnimationFrame: (id) => trackedClearTimeout(id),
@@ -89,11 +119,46 @@ export async function mountClient({ inbox, routes = {}, hash = "#ready", reduced
     // response and the `json()` body are counted: the client renders after
     // `json()` resolves, so watching only the outer promise would call the mount
     // settled one await too early.
-    fetch: (url) => {
+    fetch: (url, opts = {}) => {
       const p = String(url).split("?")[0];
       calls.push(p);
-      if (!(p in answers)) throw new Error("no stub for " + p);
-      return track(Promise.resolve({ json: () => track(Promise.resolve(answers[p])) }));
+      const n = (nth.get(p) ?? 0) + 1;
+      nth.set(p, n);
+      const body = typeof opts.body === "string" ? opts.body : null;
+      fetches.push({ path: p, url: String(url), opts, body, n });
+      if (!(p in answers)) {
+        unstubbed.push(p);
+        throw new Error("no stub for " + p);
+      }
+      if (opts.signal?.aborted) {
+        const e = new Error("aborted"); e.name = "AbortError"; return Promise.reject(e);
+      }
+      let a = answers[p];
+      if (typeof a === "function") a = a({ path: p, url: String(url), opts, body, n });
+      // A spec may be handed back directly or after a delay; resolve first, then shape.
+      const shaped = Promise.resolve(a).then((v) => {
+        if (v && v[SPEC]) {
+          if (v.reject) return Promise.reject(v.reject);
+          const text = v.text !== undefined ? v.text : JSON.stringify(v.body);
+          return { status: v.status, text };
+        }
+        return { status: 200, text: JSON.stringify(v) };
+      });
+      // An aborted request rejects like the real fetch does, even if it was already answered.
+      const guarded = new Promise((resolve, reject) => {
+        shaped.then(resolve, reject);
+        opts.signal?.addEventListener?.("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; reject(e); });
+      });
+      // UNTRACKED paths are ones a test holds open ON PURPOSE, to look at the page
+      // while a request is outstanding. Counting them in `inFlight` would make the
+      // mount wait for the very thing the test is trying to observe half-done.
+      const t = untracked.includes(p) ? (x) => x : track;
+      return t(guarded.then((r) => ({
+        ok: r.status >= 200 && r.status < 300,
+        status: r.status,
+        text: () => t(Promise.resolve(r.text)),
+        json: () => t(Promise.resolve(r.text).then((x) => JSON.parse(x))),
+      })));
     },
   });
   ctx.globalThis = ctx;
@@ -150,7 +215,8 @@ export async function mountClient({ inbox, routes = {}, hash = "#ready", reduced
   // changes; the constant only says how many consecutive UNCHANGED observations
   // count as quiescent, and 2 is what Preact's own double-hop requires.
   const QUIET_TICKS = 2;
-  const deadline = Date.now() + timeoutMs;
+  async function settle(ms = timeoutMs) {
+  const deadline = Date.now() + ms;
   let previous = null;
   let quiet = 0;
   for (;;) {
@@ -193,12 +259,25 @@ export async function mountClient({ inbox, routes = {}, hash = "#ready", reduced
       // Loud and attributable. A timeout that says only "timed out" sends the next
       // reader back to guessing at durations, which is where this started.
       throw new Error(
-        `mountClient: did not settle within ${timeoutMs}ms — ${inFlight.size} fetch(es) still in ` +
+        `mountClient: did not settle within ${ms}ms — ${inFlight.size} fetch(es) still in ` +
           `flight and ${pendingTimers} timer(s) pending, after ${calls.length} call(s) to ` +
           `${[...new Set(calls)].join(", ") || "nothing"}. ` +
           `Last DOM signature: ${JSON.stringify(now.slice(0, 200))}`,
       );
     }
   }
-  return { ctx, app, calls, ui: ctx.__ui };
+  }
+  await settle();
+
+  /** Fire a window-level event the client registered for (keydown, hashchange, beforeunload). */
+  const fire = (type, ev = {}) => {
+    const e = { type, preventDefault() { e.defaultPrevented = true; }, ...ev };
+    for (const fn of [...(listeners.get(type) ?? [])]) fn(e);
+    return e;
+  };
+  const press = (key, extra = {}) => fire("keydown", { key, ...extra });
+  const setHash = (h) => { ctx.location.hash = h; fire("hashchange"); };
+  const listenerCount = (type) => listeners.get(type)?.size ?? 0;
+  return { ctx, app, calls, fetches, unstubbed, ui: ctx.__ui, settle, fire, press, setHash, listenerCount, doc };
+
 }

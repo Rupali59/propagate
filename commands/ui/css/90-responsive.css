@@ -21,11 +21,16 @@
   .div .n { margin-left: 6px; }
   .rail hr { border-top: 0; border-left: 1px solid var(--line); height: 18px; margin: 0 var(--s2); }
   .rail .lbl { display: none; }
+  /* F4: each diff needs about 480px to stay readable, so below 1100px they stack. */
+  .evgrid { grid-template-columns: 1fr; }
+  .detail.wide { grid-column: 1 / -1; }
 }
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
   .rail { position: sticky; top: 0; z-index: 2; background: var(--bg); }
   .list { max-height: 38vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .detail { padding: var(--s4); }
+  .root { flex-wrap: wrap; }
 }
 
 /* PR-023. The mark-as-seen control. `ghost` is the existing quiet button;

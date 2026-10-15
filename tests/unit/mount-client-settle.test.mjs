@@ -61,7 +61,12 @@ test("a route that resolves LATE is still awaited — the case a sleep gets wron
   // 40 chained macrotasks is well past anything a fixed sleep would have covered
   // at the old 30ms, and the point is that no number appears in the harness at all.
   const { app, calls } = await mountClient({ inbox: afterTicks(INBOX, 40) });
-  assert.deepEqual(calls, ["/api/inbox"], "the mount must have fetched");
+  // WAS `deepEqual(calls, ["/api/inbox"])`. The redesigned client reads the surface
+  // and the seen-set after its first paint (plan E8, D12), and this file's subject is
+  // WHEN the harness returns, not how many reads the client makes -- that count is
+  // pinned where it belongs, in ui-client.test.mjs. What this test needs is that the
+  // mount fetched and that the inbox was the first thing it asked for.
+  assert.equal(calls[0], "/api/inbox", "the mount must have fetched, inbox first");
   const text = app.textContent ?? "";
   assert.ok(text.length > 0, "the pane must have rendered something");
   assert.ok(

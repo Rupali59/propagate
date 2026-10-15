@@ -85,6 +85,14 @@
      and 3.85. Thresholds are .433 and .432; +.44 lands 4.58 and 4.60. */
   --warn-quiet:    oklch(from var(--st-warn)   calc(l + .44) calc(c * .30) h);
   --ok-quiet:      oklch(from var(--st-ok)     calc(l + .44) calc(c * .30) h);
+  /* The quiet half of a two-part bar (verdicts that changed nothing, beside the
+     ones that did). F1, 2026-10-15: the mock built this with a colour-mix
+     interpolation, which runs the HUE the short way round the wheel and turned the
+     accent (250) into sage green on its way to the field colour (85). A relative
+     derivation keeps the hue FIXED and moves only lightness and chroma, which is the
+     one thing a "quieter version of the same colour" means. Same family as
+     --accent-quiet, a stronger step: it is a fill the eye must still find. */
+  --seg-quiet:     oklch(from var(--st-accent) calc(l + .22) calc(c * .55) h);
 
   /* ── SPACE ──────────────────────────────────────────────────────────────
      The widget keeps its own tighter 3/6/9/12/15 scale: its ground is a 300px
@@ -140,6 +148,7 @@
     --accent-quiet: oklch(from var(--st-accent) calc(l - .52) calc(c * .55) h);
     --warn-quiet:   oklch(from var(--st-warn)   calc(l - .52) calc(c * .55) h);
     --ok-quiet:     oklch(from var(--st-ok)     calc(l - .52) calc(c * .55) h);
+    --seg-quiet:    oklch(from var(--st-accent) calc(l - .34) calc(c * .70) h);
 
     --lift-1: 0 1px 2px oklch(0 0 0 / .40);
     --lift-2: 0 4px 14px oklch(0 0 0 / .55);
@@ -165,6 +174,7 @@
   --accent-quiet: oklch(from var(--st-accent) calc(l - .52) calc(c * .55) h);
   --warn-quiet:   oklch(from var(--st-warn)   calc(l - .52) calc(c * .55) h);
   --ok-quiet:     oklch(from var(--st-ok)     calc(l - .52) calc(c * .55) h);
+  --seg-quiet:    oklch(from var(--st-accent) calc(l - .34) calc(c * .70) h);
 
   --lift-1: 0 1px 2px oklch(0 0 0 / .40);
   --lift-2: 0 4px 14px oklch(0 0 0 / .55);

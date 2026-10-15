@@ -27,14 +27,14 @@
 // while the interaction shortcut is held (README), so nothing is hidden behind
 // one: every colour is paired with an icon or a label (Apple HIG: convey
 // meaning without relying on colour), and the clicks are only shortcuts —
-// worklist /ready, leverage /blocked, velocity and commands /analytics, health
-// /reference, the pill /stream — through widget/open-ui.sh.
+// worklist /judge, leverage /unblock, velocity and commands /activity, health
+// /health, the pill /activity (routes renamed 2026-10-15, plan F11) — through widget/open-ui.sh.
 //
 // DESKTOP JUDGING WAS REMOVED (decision D15, 2026-10-15). This file used to
 // carry a judge panel and shell out to widget/judge.sh, which writes events to
 // an append-only ledger — the highest-consequence action on the surface,
-// offered on a layer that may not take clicks at all. The CTAs open /ready and
-// /blocked, where the evidence is.
+// offered on a layer that may not take clicks at all. The CTAs open /judge and
+// /unblock, where the evidence is.
 //
 // ── THE IMPORT RULE ────────────────────────────────────────────────────────
 //
@@ -823,7 +823,7 @@ const HealthPanel = ({ hl, dispatch }) => {
   const why = hl && hl.ok === false ? (hl.reason || 'no doctor snapshot') : (hl ? null : 'missing from the payload');
   const parts = why ? null : healthPills(hl.sections);
   return (
-    <div className="pn act" onClick={() => openView('/reference', dispatch)}>
+    <div className="pn act" onClick={() => openView('/health', dispatch)}>
       {why ? <div className="ph"><span className="st">Health</span></div> : null}
       {why ? <CantTell why={why} /> : (
         <div className="hgrid">
@@ -913,7 +913,7 @@ const WorklistPanel = ({ wl, today, dispatch }) => {
   const keys = ['DRIFTED', 'REVERSED', 'DIVERGED', 'UNMATCHED'].concat(wl.byState.other > 0 ? ['other'] : []);
   const cal = calendarCells(wl.calendar, today, CAL_WEEKS);
   return (
-    <div className="pn act" onClick={() => openView('/ready', dispatch)}>
+    <div className="pn act" onClick={() => openView('/judge', dispatch)}>
       <div className="ph">
         <Icon icon="inbox" size={16} />
         <span className="st">Worklist</span>
@@ -957,7 +957,7 @@ const LeveragePanel = ({ lev, dispatch }) => {
   if (!lev) return <div className="pn">{head}<CantTell why="missing from the payload" /></div>;
   const ups = barHeights(lev.roots.map((rt) => rt.upstreamOf), 56);
   return (
-    <div className="pn act" onClick={() => openView('/blocked', dispatch)}>
+    <div className="pn act" onClick={() => openView('/unblock', dispatch)}>
       {head}
       <div className="lvh">
         <span className="big">{lev.blocked} blocked &#183; {lev.needAllRoots} need several roots</span>
@@ -1001,7 +1001,7 @@ const VelocityPanel = ({ vel, dispatch }) => {
   const ticks = dayTicks(vel.days);
   const W = vel.days.length * STEP;
   return (
-    <div className="pn act" onClick={() => openView('/analytics', dispatch)}>
+    <div className="pn act" onClick={() => openView('/activity', dispatch)}>
       {head}
       <svg width={W} height={BASE + 28} viewBox={`0 0 ${W} ${BASE + 28}`}>
         {bars.map((b, i) => (
@@ -1041,7 +1041,7 @@ const CommandsPanel = ({ use, dispatch }) => {
   const W = use.days.length * STEP;
   const widths = barHeights(use.top.map((cmd) => cmd.count), 110);
   return (
-    <div className="pn act" onClick={() => openView('/analytics', dispatch)}>
+    <div className="pn act" onClick={() => openView('/activity', dispatch)}>
       {head}
       <div className="cmd">
         {draw ? (
@@ -1174,7 +1174,7 @@ export const render = (state, dispatch) => {
     ch.value != null
       ? [
         <span key="t" className="ttl">propagate</span>,
-        <span key="c" className={`chg ${ch.tone}`} onClick={() => openView('/stream', dispatch)}>{ch.value} new</span>,
+        <span key="c" className={`chg ${ch.tone}`} onClick={() => openView('/activity', dispatch)}>{ch.value} new</span>,
       ]
       : [
         <span key="t" className="ttl">propagate</span>,

@@ -1,0 +1,452 @@
+/**
+ * The `propagate ui` HTTP server, driven over real sockets with injected data.
+ *
+ * WHAT THIS PROVES (plan "Eng review 2026-10-15", lane A): the write path's
+ * guards at the level a browser reaches them -- the request body in, the event
+ * store out. tests/cli/ui-dispose-batch.test.mjs covers the pure gates; this
+ * file covers the ROUTE, which is where D9/D11 (which rows are members), F1
+ * (observed), F9 (401 vs 403) and F12 (a throw must answer JSON, not kill the
+ * process) live.
+ *
+ * THE STORE IS SCOPED HERE, NOT BY THE CALLER (GOTCHAS G56). lib/edges/events.mjs
+ * fixes EVENTS_DIR from PROPAGATE_STATE_DIR when it is first imported, and
+ * `node --test` runs files concurrently, so a shared test store would make a
+ * before/after snapshot race with other files' appends. So this file makes its
+ * own directory and imports everything AFTER setting it -- which is why every
+ * import below is dynamic. Static imports are hoisted above the assignment.
+ *
+ * "NOTHING APPENDED" IS ASSERTED ON THE STORE, never on the response
+ * (rule:safety-flag-needs-a-test): a guard that threw after writing would
+ * satisfy every status-code assertion.
+ */
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import http from "node:http";
+import net from "node:net";
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+const STATE = mkdtempSync(path.join(tmpdir(), "ui-server-state-"));
+process.env.PROPAGATE_STATE_DIR = STATE;
+// The seen-set and cursor must resolve under STATE too (stream.mjs reads this at import).
+delete process.env.PROPAGATE_STREAM_CURSOR;
+delete process.env.PROPAGATE_SEEN_EDGES;
+
+const { uiCmd, buildId } = await import("../../commands/ui.mjs");
+const { CURSOR_PATH } = await import("../../lib/report/stream.mjs");
+const { SEEN_PATH } = await import("../../lib/report/seen-edges.mjs");
+const { appendEvent } = await import("../../lib/edges/events.mjs");
+
+const FIX = mkdtempSync(path.join(tmpdir(), "ui-server-files-"));
+const file = (name, text) => { const p = path.join(FIX, name); writeFileSync(p, text); return p; };
+
+function storeSnapshot() {
+  const dir = path.join(STATE, "events");
+  if (!existsSync(dir)) return "";
+  return readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort().map((f) => readFileSync(path.join(dir, f), "utf8")).join("");
+}
+const storeLines = () => storeSnapshot().trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+
+let ROWS = [];
+function mkRow(id, state, extra = {}) {
+  return {
+    edge_id: id,
+    node_id: "/n/" + id,
+    state,
+    why: "fixture",
+    source: { path: file(`src-${id}.md`, `source of ${id}\n`), contentId: "src-" + id },
+    downstream: { path: file(`dst-${id}.md`, `downstream of ${id}\n`), contentId: "dst-" + id },
+    ...extra,
+  };
+}
+
+const free = () => new Promise((res) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => res(p)); }); });
+
+let ctx;       // the server with injected data
+let real;      // a server built with NO overrides: the production construction path
+let hooks = {}; // per-test behaviour for the injected dependencies
+
+before(async () => {
+  const quiet = { log() {} };
+  const port = await free();
+  const deps = {
+    loadWorkspaces: async () => { if (hooks.reconcileThrows) throw new Error("reconcile exploded"); return []; },
+    reconcile: async () => ({ rows: ROWS, stats: { edges: ROWS.length, expanded: ROWS.length } }),
+  };
+  const inboxDeps = {
+    loadWorkspaces: deps.loadWorkspaces,
+    reconcile: deps.reconcile,
+    historyByEdge: async () => new Map(),
+    planBaseline: () => ({ neverVerifiedCount: 0, outcomes: { examinedAndDeferred: [] } }),
+    registerQueue: () => ({ issues: [], todos: [] }),
+  };
+  const r = await uiCmd(["--port", String(port)], quiet, {
+    deps,
+    inboxDeps,
+    root: FIX + "/",
+    readSnapshot: async () => { if (hooks.snapshotThrows) throw new Error("snapshot exploded"); return { ok: false, reason: "none", ageMs: null }; },
+    evidenceFor: async (b) => { if (hooks.evidenceThrows) throw new Error("diff exploded"); return (await import("../../lib/report/evidence.mjs")).evidenceFor(b); },
+    surfacePayload: async () => { if (hooks.surfaceThrows) throw new Error("surface exploded"); return { fixture: "surface" }; },
+  });
+  ctx = { ...r, port };
+
+  const port2 = await free();
+  real = { ...(await uiCmd(["--port", String(port2)], quiet)), port: port2 };
+});
+
+after(async () => {
+  for (const c of [ctx, real]) await new Promise((res) => c?.server.close(res));
+  rmSync(STATE, { recursive: true, force: true });
+  rmSync(FIX, { recursive: true, force: true });
+});
+
+/** node:http rather than fetch: fetch will not let a test set Host or Origin. */
+function call(c, method, pathAndQuery, { body, headers = {}, token = c.token } = {}) {
+  const sep = pathAndQuery.includes("?") ? "&" : "?";
+  const target = token === null ? pathAndQuery : `${pathAndQuery}${sep}token=${token}`;
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port: c.port, path: target, method, headers: { host: `127.0.0.1:${c.port}`, ...headers } }, (res) => {
+      let raw = "";
+      res.on("data", (d) => (raw += d));
+      res.on("end", () => {
+        let json = null; try { json = JSON.parse(raw); } catch { /* html or text */ }
+        resolve({ status: res.statusCode, json, raw });
+      });
+    });
+    req.on("error", reject);
+    if (body !== undefined) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+const dispose = (body) => call(ctx, "POST", "/api/dispose", { body });
+const REASON = "reviewed both sides, no change is needed here";
+const edges = (...pairs) => pairs.map(([edge_id, state, observed]) => (observed ? { edge_id, state, observed } : { edge_id, state }));
+
+// ── F9: 401 for a token, 403 for Host / Origin ──────────────────────────────
+
+test("F9: a missing or wrong token is 401 {ok:false,error:'token'}; Host and Origin refusals stay 403", async () => {
+  const none = await call(ctx, "GET", "/api/inbox", { token: null });
+  assert.equal(none.status, 401);
+  assert.deepEqual(none.json, { ok: false, error: "token" });
+  const wrong = await call(ctx, "GET", "/api/inbox", { token: "nope" });
+  assert.equal(wrong.status, 401);
+
+  const host = await call(ctx, "GET", "/api/inbox", { headers: { host: "evil.example.com" } });
+  assert.equal(host.status, 403);
+  assert.notEqual(host.json.error, "token");
+  const origin = await call(ctx, "GET", "/api/inbox", { headers: { origin: "https://evil.example.com" } });
+  assert.equal(origin.status, 403);
+
+  // The graph route shares the guard; it answers text, with the same split.
+  assert.equal((await call(ctx, "GET", "/graph", { token: "nope" })).status, 401);
+});
+
+test("F9: the page with a bad token is not a 200", async () => {
+  const bad = await call(ctx, "GET", "/", { token: "nope" });
+  assert.notEqual(bad.status, 200);
+  assert.equal(bad.status, 404, "current behaviour kept: an unknown token on the page is not found");
+  assert.equal((await call(ctx, "GET", "/", {})).status, 200);
+});
+
+// ── F5: /api/version and data-build ─────────────────────────────────────────
+
+test("F5: /api/version serves the build id the server started from, and the page carries data-build", async () => {
+  const v = await call(ctx, "GET", "/api/version");
+  assert.equal(v.status, 200);
+  assert.equal(v.json.ok, true);
+  assert.match(v.json.build, /^[0-9a-f]{16}$/);
+  assert.equal(v.json.build, buildId());
+  const html = (await call(ctx, "GET", "/")).raw;
+  assert.ok(html.includes(` data-build="${v.json.build}"`), "the page must carry the same id the server reports");
+  // Behind the token like every /api route.
+  assert.equal((await call(ctx, "GET", "/api/version", { token: "nope" })).status, 401);
+});
+
+test("the production construction path: a server built with NO overrides answers /api/version and refuses a bad token", async () => {
+  const v = await call(real, "GET", "/api/version");
+  assert.equal(v.status, 200);
+  assert.equal(v.json.build, buildId());
+  assert.equal((await call(real, "GET", "/api/inbox", { token: "x" })).status, 401);
+});
+
+// ── D9 + F2 over HTTP ───────────────────────────────────────────────────────
+
+test("D9: a mixed-state, cross-node selection writes both, each carrying the one reason", async () => {
+  ROWS = [mkRow("m1", "DRIFTED"), mkRow("m2", "REVERSED")];
+  const before = storeLines().length;
+  const r = await dispose({ edges: edges(["m1", "DRIFTED"], ["m2", "REVERSED"]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(r.status, 200, r.raw);
+  assert.deepEqual(r.json.results.map((x) => x.edge_id), ["m1", "m2"], "results come back in the order sent");
+  const added = storeLines().slice(before);
+  assert.deepEqual(new Set(added.map((e) => e.edge_id)), new Set(["m1", "m2"]));
+  assert.ok(added.every((e) => e.reason === REASON && e.node_id.startsWith("/n/")));
+});
+
+test("D9: a foreign id is a per-edge 'not actionable' and nothing is appended -- even though the row exists in the world", async () => {
+  ROWS = [mkRow("f1", "DRIFTED"), mkRow("f2", "NEVER_VERIFIED")];
+  const before = storeSnapshot();
+  // f2 EXISTS in the reconciled rows; it is simply not one of the server's queue items.
+  const r = await dispose({ edges: edges(["f2", "NEVER_VERIFIED"]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(r.status, 207);
+  assert.equal(r.json.results[0].ok, false);
+  assert.match(r.json.results[0].error, /not actionable/);
+  assert.equal(storeSnapshot(), before, "a non-parked NEVER_VERIFIED edge must not reach the store");
+});
+
+test("D9: 207 on partial failure -- the valid member lands, the foreign one does not", async () => {
+  ROWS = [mkRow("p1", "DRIFTED"), mkRow("p2", "DRIFTED")];
+  const before = storeLines().length;
+  const r = await dispose({ edges: edges(["p1", "DRIFTED"], ["ghost", "DRIFTED"]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(r.status, 207);
+  assert.equal(r.json.ok, false);
+  assert.deepEqual(r.json.results.map((x) => x.ok), [true, false]);
+  assert.deepEqual(storeLines().slice(before).map((e) => e.edge_id), ["p1"]);
+});
+
+test("D9: a member whose state moved is refused, store unchanged", async () => {
+  ROWS = [mkRow("v1", "REVERSED")];
+  const before = storeSnapshot();
+  const r = await dispose({ edges: edges(["v1", "DRIFTED"]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(r.status, 207);
+  assert.match(r.json.results[0].error, /moved to REVERSED/);
+  assert.equal(storeSnapshot(), before);
+});
+
+test("F2: edges:[] is 400 and writes nothing", async () => {
+  ROWS = [mkRow("z1", "DRIFTED")];
+  const before = storeSnapshot();
+  const r = await dispose({ edges: [], disposition: "no-change-needed", reason: REASON });
+  assert.equal(r.status, 400);
+  assert.equal(storeSnapshot(), before);
+});
+
+test("F2: a reason under 12 characters (after trimming) is 400 and writes nothing", async () => {
+  ROWS = [mkRow("r1", "DRIFTED")];
+  const before = storeSnapshot();
+  const r = await dispose({ edges: edges(["r1", "DRIFTED"]), disposition: "no-change-needed", reason: "   short   " });
+  assert.equal(r.status, 400);
+  assert.match(r.json.error, /12 characters/);
+  assert.equal(storeSnapshot(), before);
+});
+
+test("F2: a disposition one member cannot take is refused for THAT member only", async () => {
+  ROWS = [mkRow("a1", "DRIFTED"), mkRow("a2", "DIVERGED")];
+  const before = storeLines().length;
+  const r = await dispose({ edges: edges(["a1", "DRIFTED"], ["a2", "DIVERGED"]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(r.status, 207);
+  assert.deepEqual(r.json.results.map((x) => x.ok), [true, false]);
+  assert.match(r.json.results[1].error, /both-reconciled/);
+  assert.deepEqual(storeLines().slice(before).map((e) => e.edge_id), ["a1"]);
+});
+
+test("F2: more ids than the queue holds, and duplicate ids, are 400 and write nothing", async () => {
+  ROWS = [mkRow("l1", "DRIFTED"), mkRow("l2", "DRIFTED")];
+  const before = storeSnapshot();
+  const many = await dispose({ edges: edges(["l1", "DRIFTED"], ["l2", "DRIFTED"], ["l3", "DRIFTED"]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(many.status, 400);
+  const dup = await dispose({ edges: edges(["l1", "DRIFTED"], ["l1", "DRIFTED"]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(dup.status, 400);
+  assert.equal(storeSnapshot(), before);
+});
+
+// ── F1: observed ────────────────────────────────────────────────────────────
+
+test("F1: /api/evidence returns the contentId pair it diffed", async () => {
+  ROWS = [mkRow("c1", "DRIFTED")];
+  const r = await call(ctx, "POST", "/api/evidence", { body: { kind: "edge", edge_id: "c1" } });
+  assert.equal(r.status, 200, r.raw);
+  assert.deepEqual(r.json.contentIds, { source: "src-c1", downstream: "dst-c1" });
+});
+
+test("F1: a content change between the evidence call and the flush is a per-edge 409, store unchanged (single, node_id, edges)", async () => {
+  ROWS = [mkRow("o1", "DRIFTED"), mkRow("o2", "DRIFTED", { node_id: "/n/shared" }), mkRow("o3", "DRIFTED", { node_id: "/n/shared" })];
+  const ev = await call(ctx, "POST", "/api/evidence", { body: { kind: "edge", edge_id: "o1" } });
+  const seen = ev.json.contentIds;
+  // The file changes AFTER the diff was drawn.
+  ROWS = ROWS.map((r) => ({ ...r, source: { ...r.source, contentId: "src-CHANGED-" + r.edge_id } }));
+  const before = storeSnapshot();
+
+  const single = await dispose({ edge_id: "o1", disposition: "no-change-needed", reason: REASON, observed: seen });
+  assert.equal(single.status, 409);
+  assert.match(single.json.error, /source changed/);
+
+  const batch = await dispose({ node_id: "/n/shared", state: "DRIFTED", disposition: "no-change-needed", reason: REASON,
+    observed: { o2: { source: "src-o2", downstream: "dst-o2" }, o3: { source: "src-o3", downstream: "dst-o3" } } });
+  assert.equal(batch.status, 207);
+  assert.deepEqual(batch.json.results.map((x) => x.code), [409, 409]);
+
+  const multi = await dispose({ edges: edges(["o1", "DRIFTED", seen]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(multi.status, 207);
+  assert.equal(multi.json.results[0].code, 409);
+
+  assert.equal(storeSnapshot(), before, "no shape may pin content the reviewer did not read");
+});
+
+test("F1: an unchanged observed pair writes; a malformed one is 400 and writes nothing", async () => {
+  ROWS = [mkRow("k1", "DRIFTED"), mkRow("k2", "DRIFTED")];
+  const bad = storeSnapshot();
+  const malformed = await dispose({ edge_id: "k1", disposition: "no-change-needed", reason: REASON, observed: { source: "src-k1" } });
+  assert.equal(malformed.status, 400);
+  assert.equal(storeSnapshot(), bad);
+  const ok = await dispose({ edge_id: "k1", disposition: "no-change-needed", reason: REASON, observed: { source: "src-k1", downstream: "dst-k1" } });
+  assert.equal(ok.status, 200, ok.raw);
+  const noObserved = await dispose({ edge_id: "k2", disposition: "no-change-needed", reason: REASON });
+  assert.equal(noObserved.status, 200, "back-compat: a body without observed still writes");
+});
+
+// ── D11: parked edges ───────────────────────────────────────────────────────
+
+const parkedRow = (id, extra = {}) => mkRow(id, "NEVER_VERIFIED", { deferred: { ts: "2026-09-01T00:00:00Z", reason: "waiting", by: "t" }, ...extra });
+
+test("D11: a parked (deferred NEVER_VERIFIED) edge is accepted, single and in an edges batch", async () => {
+  ROWS = [parkedRow("pk1"), parkedRow("pk2"), mkRow("pk3", "DRIFTED")];
+  const before = storeLines().length;
+  const one = await dispose({ edge_id: "pk1", disposition: "no-change-needed", reason: REASON });
+  assert.equal(one.status, 200, one.raw);
+  const many = await dispose({ edges: edges(["pk2", "NEVER_VERIFIED"], ["pk3", "DRIFTED"]), disposition: "no-change-needed", reason: REASON });
+  assert.equal(many.status, 200, many.raw);
+  assert.deepEqual(storeLines().slice(before).map((e) => e.edge_id), ["pk1", "pk2", "pk3"]);
+});
+
+test("D11: a NON-parked NEVER_VERIFIED edge is still refused (single and evidence), store unchanged", async () => {
+  ROWS = [mkRow("nv1", "NEVER_VERIFIED")];
+  const before = storeSnapshot();
+  const w = await dispose({ edge_id: "nv1", disposition: "no-change-needed", reason: REASON });
+  assert.equal(w.status, 400);
+  assert.match(w.json.error, /no actionable edge/);
+  const ev = await call(ctx, "POST", "/api/evidence", { body: { kind: "edge", edge_id: "nv1" } });
+  assert.equal(ev.status, 404);
+  assert.equal(storeSnapshot(), before);
+});
+
+test("D11: a parked edge goes through the SAME guards -- both-reconciled is refused on it, and the ordering guard applies", async () => {
+  ROWS = [parkedRow("pg1")];
+  const before = storeSnapshot();
+  const r = await dispose({ edge_id: "pg1", disposition: "both-reconciled", reason: REASON });
+  assert.equal(r.status, 400, "validateWrite: both-reconciled is not in a NEVER_VERIFIED edge's allowed list");
+  assert.equal(storeSnapshot(), before);
+
+  // Ordering: an unsettled upstream into the parked edge's source blocks pinning dispositions.
+  const up = mkRow("up", "DRIFTED");
+  const parked = parkedRow("pg2", { source: { path: up.downstream.path, contentId: "mid" } });
+  ROWS = [up, parked];
+  const blocked = await dispose({ edge_id: "pg2", disposition: "no-change-needed", reason: REASON });
+  assert.ok(blocked.status === 400 || blocked.status === 409, blocked.raw);
+  assert.equal(storeSnapshot(), before, "the ordering guard must hold for a parked edge as it does for a queued one");
+});
+
+test("D11: a DIVERGED edge that is also deferred is offered only both-reconciled", async () => {
+  ROWS = [mkRow("dv1", "DIVERGED", { deferred: { ts: "2026-09-01T00:00:00Z", reason: "waiting" } })];
+  const before = storeSnapshot();
+  const bad = await dispose({ edge_id: "dv1", disposition: "no-change-needed", reason: REASON });
+  assert.equal(bad.status, 400);
+  assert.equal(storeSnapshot(), before);
+  const good = await dispose({ edge_id: "dv1", disposition: "both-reconciled", reason: REASON });
+  assert.equal(good.status, 200, good.raw);
+});
+
+test("D11: evidence for a parked edge is the current content, labelled 'no earlier verdict to diff against'", async () => {
+  ROWS = [parkedRow("pe1")];
+  const ev = await call(ctx, "POST", "/api/evidence", { body: { kind: "edge", edge_id: "pe1" } });
+  assert.equal(ev.status, 200, ev.raw);
+  assert.equal(ev.json.ok, true);
+  assert.equal(ev.json.noPriorVerdict, true);
+  assert.match(ev.json.reason, /no earlier verdict to diff against/);
+  assert.equal(ev.json.text, "source of pe1\n");
+  assert.equal(ev.json.downstream.noPriorVerdict, true);
+  assert.equal(ev.json.downstream.text, "downstream of pe1\n");
+  assert.deepEqual(ev.json.contentIds, { source: "src-pe1", downstream: "dst-pe1" });
+});
+
+// ── D10: counts inside /api/inbox ───────────────────────────────────────────
+
+test("D10: /api/inbox returns the widget's worklist and leverage over the rows it renders, plus contentKey", async () => {
+  ROWS = [mkRow("i1", "DRIFTED"), mkRow("i2", "DIVERGED"), mkRow("i3", "REVERSED")];
+  const r = await call(ctx, "GET", "/api/inbox");
+  assert.equal(r.status, 200, r.raw);
+  const rendered = r.json.divisions.worklist.ready.length + r.json.divisions.worklist.blocked.length;
+  assert.equal(r.json.worklist.total, rendered, "the badge denominator is the rendered list");
+  assert.equal(r.json.worklist.toJudge, 2, "unblocked and not DIVERGED");
+  assert.ok(r.json.leverage && "roots" in r.json.leverage);
+  const keys = r.json.divisions.worklist.ready.map((i) => i.contentKey).sort();
+  assert.deepEqual(keys, ["i1|src-i1|dst-i1", "i2|src-i2|dst-i2", "i3|src-i3|dst-i3"]);
+});
+
+// ── /api/surface ────────────────────────────────────────────────────────────
+
+test("/api/surface serves surfacePayload behind the token, and a throw is a 500 JSON body", async () => {
+  const ok = await call(ctx, "GET", "/api/surface");
+  assert.deepEqual(ok.json, { fixture: "surface" });
+  assert.equal((await call(ctx, "GET", "/api/surface", { token: "nope" })).status, 401);
+  hooks.surfaceThrows = true;
+  try {
+    const bad = await call(ctx, "GET", "/api/surface");
+    assert.equal(bad.status, 500);
+    assert.deepEqual(bad.json, { ok: false, error: "surface exploded" });
+  } finally { hooks = {}; }
+});
+
+// ── F12: a throwing dependency answers JSON and the server survives ─────────
+
+test("F12: a throwing reconcile / diff / snapshot is a 500 {ok:false,error} on every wrapped route, and the server keeps serving", async () => {
+  ROWS = [mkRow("t1", "DRIFTED")];
+  const before = storeSnapshot();
+
+  hooks = { reconcileThrows: true };
+  const d = await dispose({ edge_id: "t1", disposition: "no-change-needed", reason: REASON });
+  assert.equal(d.status, 500);
+  assert.deepEqual(d.json, { ok: false, error: "reconcile exploded" });
+  assert.equal((await dispose({ edges: edges(["t1", "DRIFTED"]), disposition: "no-change-needed", reason: REASON })).status, 500);
+  assert.equal((await dispose({ node_id: "/n/t1", state: "DRIFTED", disposition: "no-change-needed", reason: REASON })).status, 500);
+  const e1 = await call(ctx, "POST", "/api/evidence", { body: { kind: "edge", edge_id: "t1" } });
+  assert.equal(e1.status, 500);
+  assert.equal(e1.json.ok, false);
+
+  hooks = { evidenceThrows: true };
+  const e2 = await call(ctx, "POST", "/api/evidence", { body: { kind: "edge", edge_id: "t1" } });
+  assert.equal(e2.status, 500);
+  assert.deepEqual(e2.json, { ok: false, error: "diff exploded" });
+
+  hooks = { snapshotThrows: true };
+  const h = await call(ctx, "GET", "/api/health");
+  assert.equal(h.status, 500);
+  assert.deepEqual(h.json, { ok: false, error: "snapshot exploded" });
+
+  hooks = {};
+  assert.equal((await call(ctx, "GET", "/api/version")).status, 200, "the process must still be serving");
+  assert.equal(storeSnapshot(), before);
+});
+
+// ── D12: the seen-set, and that it never touches the cursor ─────────────────
+
+test("D12: seen-set round trip, validated and bounded, and writeCursor's file is never touched", async () => {
+  assert.ok(SEEN_PATH !== CURSOR_PATH);
+  const cur = await call(ctx, "POST", "/api/seen", { body: { at: "2026-10-15T10:00:00.000Z" } });
+  assert.equal(cur.status, 200);
+  const cursorBefore = readFileSync(CURSOR_PATH, "utf8");
+
+  const empty = await call(ctx, "GET", "/api/seen-edges");
+  assert.equal(empty.json.status, "missing");
+  assert.deepEqual(empty.json.triples, []);
+
+  const t1 = ["e1|s1|d1", "e2|s2|null"];
+  const post = await call(ctx, "POST", "/api/seen-edges", { body: { triples: t1 } });
+  assert.equal(post.status, 200, post.raw);
+  assert.equal(post.json.added, 2);
+  const again = await call(ctx, "POST", "/api/seen-edges", { body: { triples: ["e1|s1|d1", "e3|s3|d3"] } });
+  assert.equal(again.json.added, 1, "an existing triple is not added twice");
+  assert.deepEqual((await call(ctx, "GET", "/api/seen-edges")).json.triples.sort(), ["e1|s1|d1", "e2|s2|null", "e3|s3|d3"]);
+
+  assert.equal(readFileSync(CURSOR_PATH, "utf8"), cursorBefore, "the seen-set must not touch the cursor file");
+  // …and the reverse: moving the cursor does not erase the seen-set.
+  await call(ctx, "POST", "/api/seen", { body: { at: "2026-10-15T11:00:00.000Z" } });
+  assert.equal((await call(ctx, "GET", "/api/seen-edges")).json.triples.length, 3);
+
+  for (const bad of [{}, { triples: [] }, { triples: "x" }, { triples: [1] }, { triples: ["a|b"] }, { triples: ["|a|b"] }, { triples: ["a|b|c|d"] },
+    { triples: Array.from({ length: 5001 }, (_, i) => `e${i}|s|d`) }]) {
+    const r = await call(ctx, "POST", "/api/seen-edges", { body: bad });
+    assert.equal(r.status, 400, JSON.stringify(bad).slice(0, 80));
+  }
+  assert.equal((await call(ctx, "GET", "/api/seen-edges")).json.triples.length, 3, "a refused POST adds nothing");
+});

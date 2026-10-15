@@ -344,7 +344,8 @@ test("the Instruction budget doctor section renders as its own health row, and a
   const failing = buildHealthRows(snap([sec("Instruction budget", { fail: 1, pass: 0 })])).find((r) => r.key === "Instruction budget");
   assert.equal(failing.unit, "fail");
   assert.equal(failing.tone, "fail");
-  assert.equal(failing.cta.route, "/reference");
+  // Route rename 2026-10-15 (plan F11): /reference -> /health.
+  assert.equal(failing.cta.route, "/health");
   assert.equal(buildHealthRows(snap([sec("Delivery", { pass: 1 })])).some((r) => r.key === "Instruction budget"), false, "no section, no row — never a fabricated one");
 });
 
@@ -683,6 +684,53 @@ test("leverage keeps only the top 3 roots", () => {
   const items = ["a", "b", "c", "d"].flatMap((r) => [blockedItem(`x${r}`, "DRIFTED", [r])]);
   assert.equal(buildLeverage(items).roots.length, 3);
   assert.equal(buildLeverage(items).rootsTotal, 4);
+});
+
+// Leverage with an INTERMEDIATE blocker (plan E6/F10, 2026-10-15). Chain:
+// R (unblocked) holds I (blocked by R) holds E (blockedBy is TRANSITIVE: I and R).
+// OUT is not in the queue. J needs two true roots (R and OUT) and flows into a
+// file we can name. Settling I alone frees nothing, so I must not be a lever.
+const chainItems = () => [
+  blockedItem("R", "DRIFTED", []),
+  blockedItem("I", "DRIFTED", ["R"]),
+  blockedItem("E", "DRIFTED", ["I", "R"]),
+  { ...blockedItem("J", "DRIFTED", ["R", "OUT"]), downstream: "/r/shared/target.md" },
+  { ...blockedItem("K", "DRIFTED", ["OUT", "R"]), downstream: "/r/shared/target.md" },
+  { ...blockedItem("L", "DRIFTED", ["R", "OUT"]), downstream: "/r/other/file.md" },
+];
+
+test("leverage: an intermediate blocker (in the queue AND blocked) is not a root", () => {
+  const l = buildLeverage(chainItems(), { root: "/r/" });
+  assert.ok(!l.allRoots.some((r) => r.edge_id === "I"), "I is blocked by R; settling it frees nothing yet");
+  assert.deepEqual(l.allRoots.map((r) => r.edge_id).sort(), ["OUT", "R"]);
+  assert.equal(l.rootsTotal, 2, "rootsTotal counts true roots only");
+});
+
+test("leverage: allRoots is every true root in roots' own order; roots stays the first 3", () => {
+  // Five out-of-queue roots with distinct freesNow so the order is decided by the sort.
+  const items = [
+    ...["a", "b", "c", "d", "e"].map((r, i) => blockedItem(`x${r}`, "DRIFTED", [r])),
+    blockedItem("x2", "DRIFTED", ["e"]), blockedItem("x3", "DRIFTED", ["e"]),
+    blockedItem("x4", "DRIFTED", ["d"]),
+  ];
+  const l = buildLeverage(items);
+  assert.equal(l.allRoots.length, 5);
+  assert.equal(l.roots.length, 3, "the widget still reads exactly the top 3");
+  assert.deepEqual(l.roots, l.allRoots.slice(0, 3), "roots IS the head of allRoots, same sort");
+  assert.deepEqual(l.allRoots.map((r) => r.edge_id).slice(0, 2), ["e", "d"], "freesNow desc: e frees 3, d frees 2");
+  assert.equal(l.rootsTotal, 5);
+});
+
+test("leverage: byFile groups JOINT blockers by the BLOCKED edge's downstream file", () => {
+  const l = buildLeverage(chainItems(), { root: "/r/" });
+  // J and K flow into shared/target.md; L into other/file.md. All three have two
+  // true roots (R, OUT). E has one true root (I is intermediate) so it is NOT joint.
+  assert.deepEqual(l.byFile, [
+    { file: "shared/target.md", blockedEdges: 2, roots: ["OUT", "R"] },
+    { file: "other/file.md", blockedEdges: 1, roots: ["OUT", "R"] },
+  ]);
+  // Keyed by the blocked edge's downstream, NOT the blocker's (that is `bottleneck`).
+  assert.ok(!l.byFile.some((g) => g.file === "R-to.md" || g.file === "OUT-to.md"));
 });
 
 test("usage: no command records is none-recorded with a reason, never zeros", () => {

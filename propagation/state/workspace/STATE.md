@@ -1,5 +1,14 @@
 # propagate — State
 
+## The web UI is redesigned around four tasks, and a verdict pins what you saw — 2026-10-15, `v0.15.25`
+Judge · Unblock · Health · Activity replace the nine source-shaped views (old hashes redirect). A
+verdict now carries the content ids the reviewer diffed and is refused if either side changed
+since; bulk works across workspaces through one `{edges}` dispose body with every per-edge guard;
+parked edges are judgeable; the Judge badge is computed from the same items the list renders, so it
+equals the widget's count. Plan, decisions D1-D12 and both reviews:
+`~/.claude/plans/ticklish-gathering-brook.md`. Closes #70. Open server gaps (parked `allowed`,
+unplaced rows, per-edge never-verified data): the follow-up GitHub issue.
+
 ## A staged deletion no longer prints git's `fatal:` through the commit gate — 2026-10-15, `v0.15.24`
 
 #69 is fixed. `caps --gate` already allowed a deleted path correctly, but the production `runGit` in `cli.mjs` called `execFileSync` with no `stdio`, and Node forwarded git's stderr. The unit tests inject a fake `runGit`, so the real arm ran in no test. `tests/cli/caps-gate-stderr.test.mjs` runs the actual CLI against a temp repo with a staged deletion: it was red before the fix and is green after.

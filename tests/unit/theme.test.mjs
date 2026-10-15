@@ -448,3 +448,65 @@ test("the responsive overrides load AFTER the base rules they override (cascade 
   assert.ok(base > -1 && narrow > -1, "control: both the base .rail rule and the 1100px override exist");
   assert.ok(narrow > base, "the max-width overrides must come after the base .rail rule, or they never win");
 });
+
+// ── the 2026-10-15 redesign: F1-F4, each as a property rather than a promise ──
+
+/** CSS with its comments removed, so a rule can EXPLAIN a banned construct without tripping the ban. */
+const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+
+test("F1: no colour-mix anywhere in the stylesheet -- tints are RELATIVE derivations", () => {
+  // The mock's quiet bar segment was an in-oklch colour-mix of the accent and the
+  // field, and the light render came out SAGE GREEN: that interpolation runs the hue
+  // the short way round the wheel, 250 toward 85, through green. A relative
+  // derivation keeps the hue fixed and moves only lightness and chroma, which is what
+  // "the same colour, quieter" means. 10-tokens.css already did it for --accent-quiet.
+  const css = stripComments(stylesheet());
+  assert.doesNotMatch(css, /color-mix\(/, "a colour-mix is back: derive the tint with oklch(from var(--token) …) instead");
+  // The floor, and the reason it matters: a stylesheet that was emptied, or a strip
+  // that ate everything, would also contain no colour-mix.
+  const derived = (css.match(/oklch\(from /g) || []).length;
+  assert.ok(derived >= 8, `only ${derived} relative derivations found -- the scan has gone blind, it has not found nothing`);
+  // And the negative control: the pattern does fire on the construct it bans.
+  assert.match("background: color-mix(in oklch, var(--a) 40%, var(--b));", /color-mix\(/);
+});
+
+test("F1: every lightness-RAISING derivation is redefined in each dark block", () => {
+  // `calc(l + .44)` makes a pale tint of a LIGHT-theme colour. Inherited into dark,
+  // where the base is already L .78, it clips to white. So a token derived upward in
+  // light must be derived DOWNWARD in dark, in both dark blocks, or it is wrong in
+  // exactly one theme and fine in the other. The both-themes test above cannot see
+  // this: an inherited token "resolves", it just resolves to the wrong colour.
+  const { light, darks } = themes(stylesheet(), ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);
+  const up = [...light].filter(([, v]) => /^oklch\(from [^)]*\)\s*$/.test(String(v).trim()) || String(v).includes("oklch(from"))
+    .filter(([, v]) => /calc\(l \+/.test(v)).map(([k]) => k);
+  assert.ok(up.length >= 4, `only ${up.length} upward derivations found (${up.join(", ")}) -- the scan has gone blind`);
+  assert.ok(up.includes("--seg-quiet"), "the new quiet-segment tint is not among the upward derivations");
+  const missing = [];
+  for (const d of darks) for (const t of up) if (!d.own.has(t)) missing.push(`${t} is not redefined in ${d.name}`);
+  assert.deepEqual(missing, [], missing.join("\n"));
+});
+
+test("F2: FAIL, ACCEPTED and NEVER-VERIFIED are .badge modifiers, and no second pill component exists", () => {
+  const css = stripComments(stylesheet());
+  for (const m of ["fail", "accepted", "NEVER_VERIFIED"]) {
+    assert.match(css, new RegExp(`\\.badge\\.${m}\\s*\\{`), `.badge.${m} has no rule: the badge renders as ink on no background`);
+  }
+  assert.doesNotMatch(css, /\.pill\b/, "a .pill component appeared; the plan says reuse .badge");
+  assert.doesNotMatch(css, /\.stat\b/, "a .stat component appeared; the stat row is .kpi");
+  assert.equal((css.match(/(^|\n)\.bar\s*\{/g) || []).length, 1, ".bar must keep its ONE meaning (a label, track and value row)");
+});
+
+test("F3: a focus ring is 2px --st-accent with a 2px offset, on every control", () => {
+  const css = stripComments(stylesheet());
+  assert.match(css, /:focus-visible\s*\{\s*outline:\s*2px solid var\(--st-accent\);\s*outline-offset:\s*2px/);
+  assert.doesNotMatch(css, /outline:\s*(?:none|0)\b/, "a rule removes the focus ring");
+});
+
+test("F4: below 1100px the two diffs stack, and the wide views span the whole row", () => {
+  const css = stripComments(stylesheet());
+  const i = css.indexOf("@media (max-width: 1100px)");
+  assert.notEqual(i, -1, "no 1100px breakpoint");
+  const block = css.slice(i, css.indexOf("@media (max-width: 860px)"));
+  assert.match(block, /\.evgrid\s*\{\s*grid-template-columns:\s*1fr\s*;?\s*\}/, "the evidence grid is still two columns on a narrow screen");
+  assert.match(block, /\.detail\.wide\s*\{\s*grid-column:\s*1 \/ -1/, "a wide view would sit in a column that no longer exists");
+});
