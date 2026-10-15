@@ -4488,7 +4488,10 @@ async function capsCmd() {
       console.error(`${YELLOW}caps --gate: not a git repository — nothing inspected${RESET}`);
       return;
     }
-    const runGit = (args) => execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    // stdio piped (#69): without it Node forwards git's stderr to ours, so the
+    // deletion probe in capsGate printed `fatal: path ... does not exist` on every
+    // commit that removed a file, although capsGate catches it and allows the delete.
+    const runGit = (args) => execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
     const bypass = process.env.GSTACK_HYGIENE_BYPASS === "1";
     const g = capsGate({ repoRoot, runGit, bypass });
 

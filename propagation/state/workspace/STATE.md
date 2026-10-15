@@ -1,5 +1,9 @@
 # propagate — State
 
+## A staged deletion no longer prints git's `fatal:` through the commit gate — 2026-10-15, `v0.15.24`
+
+#69 is fixed. `caps --gate` already allowed a deleted path correctly, but the production `runGit` in `cli.mjs` called `execFileSync` with no `stdio`, and Node forwarded git's stderr. The unit tests inject a fake `runGit`, so the real arm ran in no test. `tests/cli/caps-gate-stderr.test.mjs` runs the actual CLI against a temp repo with a staged deletion: it was red before the fix and is green after.
+
 ## The widget is redesigned around what needs you, and command use is recorded — 2026-10-15, `v0.15.23`
 
 The Übersicht widget was rebuilt to locked variant A after a design and engineering review (plan
