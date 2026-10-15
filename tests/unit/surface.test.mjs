@@ -33,6 +33,7 @@ import {
   buildHealthSections,
   buildWorklist,
   buildLeverage,
+  pathParts,
   buildVelocity,
   buildUsage,
   buildHeadroom,
@@ -684,6 +685,35 @@ test("leverage keeps only the top 3 roots", () => {
   const items = ["a", "b", "c", "d"].flatMap((r) => [blockedItem(`x${r}`, "DRIFTED", [r])]);
   assert.equal(buildLeverage(items).roots.length, 3);
   assert.equal(buildLeverage(items).rootsTotal, 4);
+});
+
+// THE CASCADE (widget Leverage, direction A, 2026-10-15). segments + several + rest must equal
+// blocked EXACTLY: the bar draws all three, so a miscount shows as a bar that lies about how much
+// settling the top roots frees.
+test("leverage cascade: top-root segments + several + rest add up to blocked, exactly", () => {
+  const items = [
+    ...["a", "a", "a", "b", "b", "c", "d"].map((r, i) => blockedItem(`s${i}`, "DRIFTED", [r])),
+    blockedItem("m1", "DRIFTED", ["a", "b"]),
+    blockedItem("m2", "DRIFTED", ["c", "d"]),
+  ];
+  const c = buildLeverage(items).cascade;
+  assert.deepEqual(c.segments.map((x) => x.n), [3, 2, 1], "a frees 3, b 2, then c and d tie at 1 (c wins on id)");
+  assert.equal(c.freed, 6);
+  assert.equal(c.several, 2);
+  assert.equal(c.rest, 1, "d's single edge is freed by a root beyond the top 3");
+  assert.equal(c.segments.reduce((n, x) => n + x.n, 0) + c.several + c.rest, c.blocked);
+  assert.equal(c.blocked, 9);
+});
+
+test("leverage cascade: nothing blocked is an empty cascade, not a NaN bar", () => {
+  const c = buildLeverage([]).cascade;
+  assert.deepEqual(c, { segments: [], freed: 0, several: 0, rest: 0, blocked: 0 });
+});
+
+test("pathParts keeps the whole file name and the first + immediate folder, so two ends tell apart", () => {
+  assert.deepEqual(pathParts("/r/rules/conventions/CONTEXT-BUDGET.md", "/r"), { name: "CONTEXT-BUDGET.md", dir: "rules/conventions" });
+  assert.deepEqual(pathParts("/r/Vipin Kaushik/astro/docs/conventions/CONTEXT-BUDGET.md", "/r/"), { name: "CONTEXT-BUDGET.md", dir: "Vipin Kaushik/\u2026/conventions" });
+  assert.deepEqual(pathParts("/r/CLAUDE.md", "/r"), { name: "CLAUDE.md", dir: "hub" });
 });
 
 // Leverage with an INTERMEDIATE blocker (plan E6/F10, 2026-10-15). Chain:

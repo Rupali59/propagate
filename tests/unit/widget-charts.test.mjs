@@ -39,7 +39,7 @@ function extract() {
 
 const NAMES = ["donutArcs", "arcPath", "calendarCells", "barHeights", "stackBars", "dayTicks",
   "healthPills", "localISO", "shortDate", "baseName", "agoText", "whyNot",
-  "calendarWeeks", "shouldDrawDays", "recordingSince", "compactPath"];
+  "calendarWeeks", "shouldDrawDays", "recordingSince", "compactPath", "cascadeParts", "rootRoute", "viewRoute"];
 
 /** Run the block in a fresh vm context with NOTHING else in scope, and hand back its functions. */
 function load() {
@@ -349,4 +349,30 @@ test("compactPath: directories are elided first, the filename always survives", 
   assert.equal(tiny, "\u2026/MASTER_DECISIONS.md", "truncating a filename names nothing, so the budget is exceeded instead");
   // The payload already carries an ellipsis directory; it is not duplicated.
   assert.equal(f.compactPath("Rupali/\u2026/docs/COMPONENTS.md", 10), "\u2026/COMPONENTS.md");
+});
+
+// Leverage cascade geometry (direction A, 2026-10-15).
+test("cascadeParts: widths sum to exactly 100, zero parts are omitted, ranks follow segments", () => {
+  const parts = f.cascadeParts({ segments: [{ edge_id: "a", n: 14 }, { edge_id: "b", n: 6 }, { edge_id: "c", n: 6 }], several: 9, rest: 7, blocked: 42 });
+  assert.equal(Math.round(parts.reduce((t, p) => t + p.pct, 0) * 10), 1000, "the bar must fill the track exactly");
+  assert.deepEqual(parts.map((p) => p.rank), [1, 2, 3, 0, 0]);
+  const noRest = f.cascadeParts({ segments: [{ edge_id: "a", n: 3 }], several: 0, rest: 0, blocked: 3 });
+  assert.deepEqual(noRest.map((p) => [p.key, p.pct]), [["a", 100]], "a zero part is omitted, never a zero-width sliver");
+  assert.deepEqual(f.cascadeParts({ segments: [], several: 0, rest: 0, blocked: 0 }), []);
+  assert.deepEqual(f.cascadeParts(null), []);
+});
+
+test("rootRoute: a queued root opens Judge on that edge; anything else, or an unsafe id, opens Unblock", () => {
+  assert.equal(f.rootRoute({ edge_id: "7c9c9f6c", inQueue: true }), "/judge?edge=7c9c9f6c");
+  assert.equal(f.rootRoute({ edge_id: "07e57259", inQueue: false }), "/unblock");
+  assert.equal(f.rootRoute({ edge_id: "x';rm -rf ~;'", inQueue: true }), "/unblock", "the id reaches a single-quoted shell arg");
+});
+
+test("viewRoute: known views only, safe values URL-encoded, unsafe ones dropped (they reach a quoted shell arg)", () => {
+  assert.equal(f.viewRoute("/health", { section: "Workspace:" }), "/health?section=Workspace%3A");
+  assert.equal(f.viewRoute("/health", { section: "Instruction budget" }), "/health?section=Instruction%20budget");
+  assert.equal(f.viewRoute("/judge", { state: "DRIFTED" }), "/judge?state=DRIFTED");
+  assert.equal(f.viewRoute("/judge", { state: "x';rm -rf ~;'" }), "/judge", "an unsafe value is dropped, the view still opens");
+  assert.equal(f.viewRoute("/etc/passwd", {}), "/judge", "an unknown view falls back, never passes through");
+  assert.equal(f.viewRoute("/unblock"), "/unblock");
 });

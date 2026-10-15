@@ -174,7 +174,7 @@ test("the widget reads d.changed and renders it as a toned badge, not a per-edge
   // this file ever sees it. Nothing per-edge should reach the widget, so this
   // asserts BOTH that the badge exists and that no per-item iteration does.
   assert.match(code, /d\.changed/, "the widget must read d.changed");
-  assert.match(code, /className=\{`chg \$\{ch\.tone\}`\}/, "the badge needs a tone class, same convention as every other coloured value on the card");
+  assert.match(code, /className=\{`chg (hv )?\$\{ch\.tone\}`\}/, "the badge needs a tone class, same convention as every other coloured value on the card");
   assert.doesNotMatch(code, /changed\.(list|items|edges)\b/, "iterating a raw changed list would be the table this design rejects");
   assert.doesNotMatch(code, /ch\.(list|items|edges)\b/, "same check against the widget's own local name for the summary");
 });
@@ -600,13 +600,40 @@ test("the widget imports ONLY from 'uebersicht'", () => {
   assert.doesNotMatch(code, /\brequire\(|\bimport\(/, "no dynamic module loading either");
 });
 
-test("no :hover state carries information, and nothing shipped depends on one", () => {
-  // :hover never fires on the desktop layer. The redesign has no hover rules at
-  // all; a future one must not hold a fact. Asserted on the className literal.
+// Rewritten 2026-10-15. The old premise ("hover never fires on the desktop layer") was true of the
+// BACKGROUND layer; a foreground widget's window tracks the mouse (Übersicht 1.6
+// server/src/detectWidgetHover.js), and Rupali asked for every item to be hoverable. The property
+// that matters is unchanged: hover may SIGNAL a click target, never HOLD a fact. So a :hover rule
+// may only touch affordance properties, and tooltips / hover handlers stay banned.
+test("a :hover rule is affordance only (cursor, ground, outline, opacity), and no fact lives in a hover", () => {
   const open = src.indexOf("export const className = `") + "export const className = `".length;
-  const css = src.slice(open, src.indexOf("`", open));
-  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /:hover/, "a :hover rule - hover never fires on the desktop layer");
+  const css = src.slice(open, src.indexOf("`", open)).replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...css.matchAll(/([^{}]*:hover[^{}]*)\{([^}]*)\}/g)];
+  assert.ok(rules.length >= 2, `only ${rules.length} :hover rules found - every item is meant to signal it is clickable`);
+  const ALLOWED = new Set(["background", "background-color", "box-shadow", "cursor", "opacity", "text-decoration", "outline"]);
+  for (const [, sel, body] of rules) {
+    for (const decl of body.split(";").map((d) => d.trim()).filter(Boolean)) {
+      const prop = decl.split(":")[0].trim();
+      assert.ok(ALLOWED.has(prop), `${sel.trim()} sets "${prop}" on hover - hover may signal a target, never change what the card says`);
+    }
+  }
   assert.doesNotMatch(code, /<title>|onMouseEnter|onMouseOver/, "a tooltip or hover handler would hold information nobody can reach");
+});
+
+// "give me cta for everything" (2026-10-15): every item in the click map is a target.
+test("every mapped item has its own click and a hover class: pills, legend rows, segments, root rows, footer", () => {
+  const need = [
+    [/className=\{`pill hv /, "health chip"],
+    [/className="lgr hv" onClick=/, "worklist legend row"],
+    [/className=\{'cs hv ' \+/, "leverage segment"],
+    [/className="rt hv" onClick=/, "leverage root row"],
+    [/className=\{`chg hv /, "the N new pill"],
+    [/className="rf hv" onClick=/, "refresh"],
+    [/className="hr hv" onClick=/, "budget warning"],
+  ];
+  for (const [re, what] of need) assert.match(code, re, `${what} has no click target`);
+  assert.match(code, /viewRoute\('\/health', \{ section: p\.section \}\)/, "a health chip deep-links to its own section");
+  assert.match(code, /viewRoute\('\/judge', \{ state: k \}\)/, "a legend row deep-links to its state");
 });
 
 test("every font-size in the stylesheet is at least 11px (Apple HIG widgets)", () => {
@@ -665,8 +692,10 @@ test("each section's click opens its route through open-ui.sh (CTA per metric)",
     const body = code.slice(code.indexOf(`const ${panel}`));
     assert.match(body.slice(0, body.indexOf("\n};") + 3), new RegExp(`openView\\('${route}'`), `${panel} must open ${route}`);
   }
-  assert.match(code, /chg [^\n]*openView\('\/activity'/, "the new pill opens /activity (was /stream)");
-  for (const r of Object.values(routes)) {
+  // 2026-10-15: the pill opens /judge. D5 moved "new" from an Activity feed to dots on Judge
+  // rows, so /activity no longer shows what the pill counts.
+  assert.match(code, /chg [^\n]*go\('\/judge'/, "the new pill opens /judge, where the new dots are (D5)");
+  for (const r of Object.values(routes).concat(["/judge"])) {
     assert.ok(SERVED_VIEWS.includes(r), `${r} is not a served view - the CTA would be dead`);
   }
 });
@@ -706,8 +735,12 @@ test("the calendar's width budget agrees with the stylesheet's .stack width", ()
   assert.equal(Number(stack[1]) - 22, Number(inner[1]), "CARD_INNER must be the .stack width less 2 x 11px of panel padding");
 });
 
-test("a leverage root's label elides directories only (compactPath), never CSS-truncates a filename", () => {
-  assert.match(code, /compactPath\(rt\.source/, "root labels go through compactPath");
+// Rewritten 2026-10-15 (Leverage cascade, direction A): names now arrive whole as
+// sourceParts/downstreamParts.name and only the FOLDER is elided, at the source (surface.mjs
+// pathParts) — compactPath had made rules/CONTEXT-BUDGET.md -> docs/CONTEXT-BUDGET.md read as
+// an edge to itself. The property is unchanged: a filename is never cut by CSS.
+test("a leverage root's label shows whole file names (sourceParts), never CSS-truncates one", () => {
+  assert.match(code, /rt\.sourceParts/, "root labels read the name/dir parts the surface sends");
   const rn = src.match(/\.rn\s*\{([^}]*)\}/);
   assert.ok(rn, "no .rn rule found");
   assert.doesNotMatch(rn[1], /text-overflow|overflow:\s*hidden|max-width/, "CSS truncation would cut a filename");

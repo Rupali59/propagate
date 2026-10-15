@@ -662,9 +662,29 @@ test("every old hash lands on its new view, and an unknown hash lands on Judge (
 
 test("readHash parses ?edge= and an unknown hash falls back to judge", async () => {
   const m = await mount({ hash: "#/judge?edge=abc%20d" });
-  assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: "abc d" });
+  const none = { section: null, state: null, chip: null };
+  assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: "abc d", ...none });
   m.ctx.location.hash = "#/nonsense";
-  assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: null });
+  assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: null, ...none });
+  // Deep links (2026-10-15): section / state / chip ride in the hash beside edge.
+  m.ctx.location.hash = "#/health?section=Workspace%3A";
+  assert.deepEqual(fromRealm(m.ui.readHash()), { view: "health", edge: null, section: "Workspace:", state: null, chip: null });
+});
+
+test("?state= filters To judge to that state and SAYS so with a clearable control", async () => {
+  const m = await mount({ hash: "#/judge?state=REVERSED" });
+  const filt = byClass(m.app, "filt");
+  assert.equal(filt.length, 1, "a filtered list must never look like the whole queue");
+  assert.match(textOf(filt[0]), /only reversed/);
+  assert.ok(byClass(m.app, "item").every((r) => !/DRI/.test(textOf(r))), "no DRIFTED row survives a REVERSED filter");
+});
+
+test("?chip=both opens Both sides moved; an unknown chip or state is ignored, never a blank list", async () => {
+  const m = await mount({ hash: "#/judge?chip=both" });
+  assert.match(textOf(byClass(m.app, "chip").find((c) => /\bon\b/.test(c.getAttribute("class")))), /Both sides moved/);
+  const u = await mount({ hash: "#/judge?chip=nope&state=EVERYTHING" });
+  assert.equal(byClass(u.app, "filt").length, 0, "an unknown state must not filter");
+  assert.match(textOf(byClass(u.app, "chip").find((c) => /\bon\b/.test(c.getAttribute("class")))), /To judge/);
 });
 
 test("?edge= selects that edge, switching to the chip it lives in", async () => {
@@ -750,6 +770,18 @@ const HEALTH = {
     ] },
   ],
 };
+
+test("?section= opens Health AT that section: a summary line, its rows marked, its warnings open", async () => {
+  const m = await mount({ hash: "#/health?section=State", routes: { "/api/health": HEALTH } });
+  const banner = byClass(m.app, "banner").find((b) => /focus/.test(b.getAttribute("class")));
+  assert.ok(banner, "a focused section always shows SOMETHING, even when it is all green");
+  assert.match(textOf(banner), /State · 1 fail · 0 accepted · 3 warn · 4 pass/);
+  const marked = byClass(m.app, "hrow").filter((r) => /focus/.test(r.getAttribute("class")));
+  assert.equal(marked.length, 1, "only State's fail row is marked, not Rules'");
+  assert.match(textOf(marked[0]), /workspaces conform/);
+  const unknown = await mount({ hash: "#/health?section=Nope", routes: { "/api/health": HEALTH } });
+  assert.match(textOf(byClass(unknown.app, "banner").find((b) => /focus/.test(b.getAttribute("class")))), /no doctor section by that name/);
+});
 
 test("Health opens with one derived line, then fail rows before accepted rows, each with its action", async () => {
   const m = await mount({ hash: "#/health", routes: { "/api/health": HEALTH } });

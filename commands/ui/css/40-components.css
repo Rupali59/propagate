@@ -267,3 +267,11 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
 .rgroup .sitem { padding: var(--s2) 0; }
 .detail.wide { grid-column: 2 / -1; }
 .frame { display: block; }
+
+/* Deep links from the widget (2026-10-15). A focused health section and the Judge state filter
+   are marked with the accent ground, never with a new colour; the banner is the status ground,
+   not a warning, because arriving at a healthy section is not bad news. */
+.banner.focus { background: var(--accent-quiet); }
+.hrow.focus { background: var(--accent-quiet); box-shadow: inset 2px 0 0 var(--st-accent); padding-left: var(--s2); }
+.wsec.focus > summary { font-weight: 600; }
+.chip.filt { border-style: dashed; }

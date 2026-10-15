@@ -615,6 +615,7 @@ function EvidencePane({ entry, row }) {
 
 /* -- the Judge view ------------------------------------------------------- */
 
+const JUDGE_STATES = ["DRIFTED", "REVERSED", "UNMATCHED"];
 const CHIPS = [
   { key: "judge", label: "To judge" },
   { key: "diverged", label: "Both sides moved" },
@@ -648,6 +649,16 @@ function JudgeView({ app, route }) {
   const { inboxSt, retryInbox, model, seen, ev, loadEvidence, evTick, reasons, bulkReason, hold, pending, undo, say,
     msg, reduced, markSeen, rendered } = app;
   const [chip, setChip] = useState("judge");
+  // ?state= narrows To judge to one edge state; ?chip= opens a chip ("both" is the widget's word
+  // for the Both sides moved chip). Both are re-applied when the hash changes.
+  const [stateFilter, setStateFilter] = useState(null);
+  useEffect(() => {
+    const st = JUDGE_STATES.indexOf(route.state) >= 0 ? route.state : null;
+    setStateFilter(st);
+    const ck = route.chip === "both" ? "diverged" : route.chip;
+    if (ck && CHIPS.some((c) => c.key === ck)) { setChip(ck); setIdx(0); }
+    else if (st) { setChip("judge"); setIdx(0); }
+  }, [route.state, route.chip]);
   const [idx, setIdxState] = useState(0);
   // The cursor is mirrored in a ref because the key handler is registered once and
   // two keys can arrive before a render: "j" then "x" must tick the row j moved to,
@@ -662,7 +673,8 @@ function JudgeView({ app, route }) {
   const [bulkOpen, setBulkOpen] = useState(false);
   const bulkRef = useRef(null);
 
-  const rowsFor = (k) => (!model ? [] : k === "judge" ? model.toJudge : k === "diverged" ? model.diverged : k === "parked" ? model.parked : []);
+  const rowsFor = (k) => (!model ? [] : k === "judge" ? (stateFilter ? model.toJudge.filter((r) => r.state === stateFilter) : model.toJudge)
+    : k === "diverged" ? model.diverged : k === "parked" ? model.parked : []);
   const rows = rowsFor(chip);
   const shaped = useMemo(() => groupRows(rows), [rows]);
   const flat = shaped.flat;
@@ -807,6 +819,8 @@ function JudgeView({ app, route }) {
   const chipsBar = html`<div class="chips" role="group" aria-label="queue filter">
     ${CHIPS.map((c) => html`<button key=${c.key} class=${"chip" + (chip === c.key ? " on" : "")} aria-pressed=${chip === c.key ? "true" : "false"}
         onClick=${() => { setChip(c.key); setIdx(0); }}>${c.label} <b>${counts4[c.key] == null ? "" : counts4[c.key]}</b></button>`)}
+    ${stateFilter && chip === "judge" ? html`<button class="chip on filt" aria-label=${"clear the " + stateFilter.toLowerCase() + " filter"}
+        onClick=${() => { setStateFilter(null); setIdx(0); }}>only ${stateFilter.toLowerCase()} <b>${rows.length}</b> ✕</button>` : null}
     <button class="ghost chip-seen" disabled=${!rendered.current || !flat.length || unseenCount === 0} onClick=${() => markSeen(renderedKeys.current)}
       title="records the edges on screen as seen, so only later arrivals carry a new dot">Mark seen</button>
   </div>`;
@@ -1000,8 +1014,8 @@ function ActionCell({ action }) {
   return html`<${Cmd} text=${action.target} label="copy path" />`;
 }
 
-function HealthRow({ e, tag }) {
-  return html`<div class="hrow">
+function HealthRow({ e, tag, hl }) {
+  return html`<div class=${"hrow" + (hl ? " focus" : "")}>
     <span class=${"badge " + tag}>${tag === "fail" ? "FAIL" : "ACCEPTED"}</span>
     <div class="itxt">
       <span class="ttl">${e.label}</span>
@@ -1011,7 +1025,17 @@ function HealthRow({ e, tag }) {
   </div>`;
 }
 
-function HealthView({ st, retry }) {
+// ?section=<doctor section name, or a prefix such as "Workspace:">: the widget's health chip
+// lands HERE, on the section clicked, not on a page that also holds every other warning.
+const inFocus = (focus, name) => !!focus && (name === focus || String(name).startsWith(focus));
+
+function HealthView({ st, retry, focus }) {
+  const top = useRef(null);
+  useEffect(() => {
+    if (!focus || st.status !== "ok" || !top.current || typeof top.current.querySelector !== "function") return;
+    const el = top.current.querySelector(".focus");
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "start" });
+  }, [focus, st.status]);
   if (st.status === "idle" || st.status === "loading") return html`<div class="detail wide"><${Skeleton} rows=${3} /></div>`;
   if (st.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="health could not be read —" st=${st} retry=${retry} /></div>`;
   const data = st.data || {};
@@ -1020,18 +1044,23 @@ function HealthView({ st, retry }) {
       Re-run doctor: <${Cmd} text="propagate doctor" label="copy" /></div></div>`;
   }
   const m = healthModel(data);
-  return html`<div class="detail wide">
+  const focused = focus ? (data.sections || []).filter((s) => inFocus(focus, s.name)) : [];
+  const sum = (k) => focused.reduce((n, s) => n + (s[k] || 0), 0);
+  return html`<div class="detail wide" ref=${top}>
     <h2 class="dtitle">Health</h2>
+    ${focus ? html`<div class="banner focus" role="status"><b>${focus.replace(/:$/, "")}</b> · ${focused.length
+      ? dot(sum("fail") + " fail", sum("accepted") + " accepted", sum("warn") + " warn", sum("pass") + " pass") + (focused.length > 1 ? " across " + plural(focused.length, "section") : "")
+      : "no doctor section by that name in this snapshot"}</div>` : null}
     <div class=${"hline" + (m.fail === 0 ? " okline" : "")}>${dot(
       m.fail + " fail", m.accepted + " accepted", m.warn + " warn in " + plural(m.warnSections, "section"), "snapshot " + ageLabel(m.ageMs))} ·
       <${Copy} text="propagate doctor" label="re-run doctor" /></div>
     ${m.rows.fail.length + m.rows.accepted.length === 0
       ? html`<div class="empty"><b>0 fail</b> · snapshot ${ageLabel(m.ageMs)}. Nothing failing and nothing accepted.</div>`
       : html`<div>
-          ${m.rows.fail.map((e, i) => html`<${HealthRow} key=${"f" + i} e=${e} tag="fail" />`)}
-          ${m.rows.accepted.map((e, i) => html`<${HealthRow} key=${"a" + i} e=${e} tag="accepted" />`)}
+          ${m.rows.fail.map((e, i) => html`<${HealthRow} key=${"f" + i} e=${e} tag="fail" hl=${inFocus(focus, e.section)} />`)}
+          ${m.rows.accepted.map((e, i) => html`<${HealthRow} key=${"a" + i} e=${e} tag="accepted" hl=${inFocus(focus, e.section)} />`)}
         </div>`}
-    ${m.warnBySection.length ? html`<div class="sec">Warnings, by section</div>${m.warnBySection.map((s) => html`<details key=${s.name} class="wsec">
+    ${m.warnBySection.length ? html`<div class="sec">Warnings, by section</div>${m.warnBySection.map((s) => html`<details key=${s.name} class=${"wsec" + (inFocus(focus, s.name) ? " focus" : "")} open=${inFocus(focus, s.name)}>
       <summary>${s.name} <span class="gn">${s.entries.length}</span></summary>
       ${s.entries.map((e, i) => html`<div class="hrow" key=${i}><span class="badge none">WARN</span><div class="itxt"><span class="ttl">${e.label}</span><span class="meta">${e.detail || ""}</span></div></div>`)}
     </details>`)}` : null}
@@ -1244,8 +1273,12 @@ function readHash() {
   const raw = (location.hash || "#/judge").slice(1).replace(/^[/]+/, "");
   const q = raw.indexOf("?");
   const name = q >= 0 ? raw.slice(0, q) : raw;
-  const m = q >= 0 ? /(?:^|&)edge=([^&]*)/.exec(raw.slice(q + 1)) : null;
-  return { view: HASH_TO_VIEW[name] || "judge", edge: m ? decodeURIComponent(m[1]) : null };
+  // Deep links from the widget (2026-10-15, "give me cta for everything"): `section=` opens
+  // Health at a doctor section, `state=` filters Judge to one edge state, `chip=` opens a Judge
+  // chip. A value the view does not know is ignored and the view opens normally.
+  const params = q >= 0 ? raw.slice(q + 1) : "";
+  const get = (k) => { const m = new RegExp("(?:^|&)" + k + "=([^&]*)").exec(params); if (!m) return null; try { return decodeURIComponent(m[1]); } catch { return null; } };
+  return { view: HASH_TO_VIEW[name] || "judge", edge: get("edge"), section: get("section"), state: get("state"), chip: get("chip") };
 }
 
 function App() {
@@ -1462,7 +1495,7 @@ function App() {
   let body;
   if (view === "judge") body = html`<${JudgeView} app=${app} route=${route} />`;
   else if (view === "unblock") body = html`<${UnblockView} app=${app} />`;
-  else if (view === "health") body = html`<${HealthView} st=${healthSt} retry=${retryHealth} />`;
+  else if (view === "health") body = html`<${HealthView} st=${healthSt} retry=${retryHealth} focus=${route.section} />`;
   else if (view === "activity") body = html`<${ActivityView} st=${surfaceSt} retry=${retrySurface} />`;
   else if (view === "registers") body = html`<${RegistersView} st=${regSt} retry=${retryReg} />`;
   else if (view === "reminders") body = html`<${RemindersView} st=${remSt} retry=${retryRem} />`;

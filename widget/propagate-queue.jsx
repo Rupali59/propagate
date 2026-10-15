@@ -77,8 +77,9 @@
 // scope. Flat elements and arrays only. (`html` is window.html, the host's
 // React.createElement; the icon helper calls it directly for the same reason.)
 //
-// Because `:hover` never fires on the desktop layer, no fact lives in a
-// tooltip or a hover state. Everything that matters is inline.
+// No fact lives in a tooltip or a hover state; everything that matters is inline. Hover is
+// AFFORDANCE only (2026-10-15): a foreground widget's window tracks the mouse, so `:hover` does
+// fire there, and every clickable item now says so. It never changes what the card states.
 //
 // TEXT NEVER UNDER 11px, MARGINS 11–16px, SYSTEM FONT, AND `width: max-content`
 // ON THE CARD, NEVER A FIXED PX WIDTH (Apple HIG widgets; G9). The card is as
@@ -405,6 +406,27 @@ export const className = `
   .nums { color: var(--dim); white-space: nowrap; min-width: 235px; text-align: right; }
   .nums b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
   .big { font-size: 14px; font-weight: 600; }
+  /* HOVER IS AFFORDANCE, NEVER INFORMATION (2026-10-15). Every fact stays inline; hover only says
+     "this is clickable". Possible since the foreground window tracks the mouse (Übersicht 1.6
+     detectWidgetHover.js). widget-contract.test.mjs allows only these properties under :hover. */
+  .pn.act, .hv { cursor: pointer; }
+  .hv { border-radius: 6px; }
+  .pn.act:hover { box-shadow: inset 0 0 0 1px var(--track); }
+  .hv:hover { background-color: var(--track); }
+  .cs.hv:hover { opacity: .85; }
+  .cas { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--track); margin-top: 9px; }
+  .cs { display: block; height: 100%; }
+  .cs.root { background: var(--st-accent); }
+  .cs.r2 { opacity: .72; }
+  .cs.r3 { opacity: .5; }
+  .cs.several { background: var(--st-caution); }
+  .cs.rest { background: var(--track); }
+  .csl { display: flex; margin-top: 3px; font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .csl span { overflow: hidden; text-overflow: clip; }
+  .rk { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 2px; }
+  .rnum { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  .rn { display: flex; flex-direction: column; }
+  .rdir { color: var(--dim); font-size: 11px; }
   .keys { display: flex; gap: var(--s4); margin-top: var(--s2); color: var(--dim); }
   .keys span { display: flex; align-items: center; gap: var(--s2); }
 
@@ -647,13 +669,14 @@ function healthPills(sections) {
     const mine = all.filter((s) => (def.prefix ? String(s.key).startsWith(def.prefix) : def.names.indexOf(s.key) !== -1));
     mine.forEach((s) => claimed.add(s.key));
     if (mine.length === 0) {
-      return { label: def.label, icon: def.icon, status: 'unknown', fail: 0, accepted: 0, count: 0, reason: 'no such section in the doctor snapshot' };
+      return { label: def.label, icon: def.icon, section: def.prefix || def.names[0], status: 'unknown', fail: 0, accepted: 0, count: 0, reason: 'no such section in the doctor snapshot' };
     }
     let status = 'unknown';
     for (const s of mine) if ((STATUS_RANK[s.status] || 0) > STATUS_RANK[status]) status = s.status;
     return {
       label: def.label,
       icon: def.icon,
+      section: def.prefix || def.names[0],
       status: status,
       fail: mine.reduce((n, s) => n + (s.fail || 0), 0),
       accepted: mine.reduce((n, s) => n + (s.accepted || 0), 0),
@@ -706,6 +729,49 @@ function compactPath(label, maxChars) {
   for (const t of tries) if (t.length <= maxChars) return t;
   return '\u2026/' + file;
 }
+
+// THE LEVERAGE CASCADE (direction A, 2026-10-15). One bar of every blocked edge: a segment per
+// top root (rank 1..3), then the edges that need several roots, then the rest. Widths are
+// percentages that sum to EXACTLY 100 (largest-remainder rounding to 0.1), so the bar never
+// over- or under-fills the track. A zero part is OMITTED, never drawn as a zero-width sliver.
+// The widget derives no number here: n comes from the payload; only the geometry is computed.
+function cascadeParts(cascade) {
+  if (!cascade || !(cascade.blocked > 0)) return [];
+  const raw = [];
+  (cascade.segments || []).forEach((s, i) => raw.push({ key: s.edge_id, kind: 'root', rank: i + 1, n: s.n }));
+  raw.push({ key: 'several', kind: 'several', rank: 0, n: cascade.several });
+  raw.push({ key: 'rest', kind: 'rest', rank: 0, n: cascade.rest });
+  const parts = raw.filter((p) => Number(p.n) > 0);
+  const total = parts.reduce((t, p) => t + p.n, 0);
+  if (total === 0) return [];
+  const tenths = parts.map((p) => (p.n / total) * 1000);
+  const floors = tenths.map(Math.floor);
+  let left = 1000 - floors.reduce((a, b) => a + b, 0);
+  const order = tenths.map((t, i) => [t - floors[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  for (let k = 0; left > 0; k = (k + 1) % order.length, left -= 1) floors[order[k][1]] += 1;
+  return parts.map((p, i) => ({ ...p, pct: floors[i] / 10 }));
+}
+
+// Where a root row's click goes. A root that is in the queue opens Judge on that edge; anything
+// else opens Unblock. The id is interpolated into a single-quoted shell argument by openView, so
+// only [0-9a-z] ids are allowed through; anything else falls back to /unblock.
+function rootRoute(root) {
+  const id = String((root && root.edge_id) || '');
+  return root && root.inQueue && /^[0-9a-z]+$/.test(id) ? '/judge?edge=' + id : '/unblock';
+}
+// A CLICK TARGET FOR EVERY ITEM (2026-10-15, "give me cta for everything"). Deep links ride in
+// the hash (`/health?section=Delivery`, `/judge?state=DRIFTED`), and openView puts the route in a
+// SINGLE-QUOTED shell argument, so this is the one builder every route goes through: only the
+// views the page routes, and only [A-Za-z0-9 _:-] parameter values, URL-encoded. Anything else
+// is dropped, so the worst case is a click that opens the right view unfiltered.
+const VIEWS = ['/judge', '/unblock', '/health', '/activity', '/registers', '/reminders', '/graph'];
+function viewRoute(path, params) {
+  const base = VIEWS.indexOf(path) >= 0 ? path : '/judge';
+  const q = Object.keys(params || {})
+    .filter((k) => /^[a-z]+$/.test(k) && /^[A-Za-z0-9 _:-]+$/.test(String(params[k] == null ? '' : params[k])))
+    .map((k) => k + '=' + encodeURIComponent(String(params[k])));
+  return q.length ? base + '?' + q.join('&') : base;
+}
 // ---- pure:charts end ----
 
 // ---- vendored:lucide begin ----
@@ -738,6 +804,9 @@ const LUCIDE_ICONS = {
 // read. It exits 1 with a message on stderr when it will not guess — run()
 // rejects with that text and the card shows it, so a dead click says why.
 // `route` is always one of this file's literal constants, never payload text.
+// An item inside a clickable panel: its own target, not the panel's.
+const go = (route, dispatch) => (e) => { if (e && e.stopPropagation) e.stopPropagation(); openView(route, dispatch); };
+
 function openView(route, dispatch) {
   dispatch({ type: 'CLICKED' });
   run('bash "$HOME/Documents/GitHub/propagate/widget/open-ui.sh" \'' + route + '\'')
@@ -837,7 +906,7 @@ const HealthPanel = ({ hl, dispatch }) => {
       {why ? <CantTell why={why} /> : (
         <div className="hgrid">
           {parts.pills.map((p) => (
-            <div key={p.label} className={`pill ${p.status}`}>
+            <div key={p.label} className={`pill hv ${p.status}`} onClick={go(viewRoute('/health', { section: p.section }), dispatch)}>
               <span className="pt">
                 <Icon icon={p.icon} size={16} />
                 <span className="ps">
@@ -941,7 +1010,7 @@ const WorklistPanel = ({ wl, today, dispatch }) => {
         <Donut wl={wl} />
         <div className="lg">
           {keys.map((k) => (
-            <div key={k} className="lgr"><span className={`sw ${k}`} /><span>{STATE_LABEL[k]}</span><span className="n">{wl.byState[k]}</span></div>
+            <div key={k} className="lgr hv" onClick={go(k === 'DIVERGED' ? viewRoute('/judge', { chip: 'both' }) : k === 'other' ? '/judge' : viewRoute('/judge', { state: k }), dispatch)}><span className={`sw ${k}`} /><span>{STATE_LABEL[k]}</span><span className="n">{wl.byState[k]}</span></div>
           ))}
         </div>
         {cal.error ? <CantTell why={cal.error} /> : <Calendar cal={cal} />}
@@ -964,26 +1033,44 @@ const LeveragePanel = ({ lev, dispatch }) => {
     </div>
   );
   if (!lev) return <div className="pn">{head}<CantTell why="missing from the payload" /></div>;
-  const ups = barHeights(lev.roots.map((rt) => rt.upstreamOf), 56);
+  // DIRECTION A, 2026-10-15: one bar answers "how much does settling these unblock". Every
+  // number appears once; the old bottleneck line repeated row 1 and "upstream of" lives in Unblock.
+  const cas = lev.cascade;
+  if (!cas) return <div className="pn act" onClick={() => openView('/unblock', dispatch)}>{head}<CantTell why="this collector sends no cascade (older propagate)" /></div>;
+  if (cas.blocked === 0) return <div className="pn act" onClick={() => openView('/unblock', dispatch)}>{head}<div className="sb">nothing is blocked</div></div>;
+  const parts = cascadeParts(cas);
+  const RANK = ['', '\u2460', '\u2461', '\u2462'];
+  const label = (p) => (p.kind === 'root' ? RANK[p.rank] + ' ' + p.n : p.kind === 'several' ? p.n + ' several' : p.n + ' other');
   return (
     <div className="pn act" onClick={() => openView('/unblock', dispatch)}>
       {head}
       <div className="lvh">
-        <span className="big">{lev.blocked} blocked &#183; {lev.needAllRoots} need several roots</span>
-        <span className="sb">
-          {lev.bottleneck
-            ? `bottleneck: ${baseName(lev.bottleneck.file)} · holds back ${lev.bottleneck.blockedEdges}`
-            : `no single bottleneck — ${lev.bottleneckReason}`}
-        </span>
+        <span className="big">settle {cas.segments.length} &#8594; {cas.freed} of {cas.blocked} free</span>
+        <span className="sb">{cas.several} need several roots settled together</span>
+      </div>
+      <div className="cas">
+        {parts.map((p) => <span key={p.key} className={'cs hv ' + p.kind + (p.rank ? ' r' + p.rank : '')} style={{ width: p.pct + '%' }}
+          onClick={go(p.kind === 'root' ? rootRoute(lev.roots.find((r) => r.edge_id === p.key)) : '/unblock', dispatch)} />)}
+      </div>
+      <div className="csl">
+        {parts.map((p) => <span key={p.key} style={{ width: p.pct + '%' }}>{label(p)}</span>)}
       </div>
       <div className="lv" style={{ marginTop: 6 }}>
-        {lev.roots.map((rt, i) => (
-          <div key={rt.edge_id} className="rt">
-            <span className="rn">{compactPath(rt.source, ROOT_PATH_CHARS)} &#8594; {compactPath(rt.downstream, ROOT_PATH_CHARS)}</span>
-            <span className="mt" style={{ width: 56 }}><span className="mf" style={{ display: 'block', width: ups[i] }} /></span>
-            <span className="nums">frees <b>{rt.freesNow}</b> now &#183; upstream of <b>{rt.upstreamOf}</b>{rt.inQueue ? '' : ' · not in queue'}</span>
-          </div>
-        ))}
+        {lev.roots.filter((rt) => rt.freesNow > 0).map((rt, i) => {
+          const sp = rt.sourceParts || { name: baseName(rt.source), dir: '' };
+          const dp = rt.downstreamParts || { name: baseName(rt.downstream), dir: '' };
+          return (
+            <div key={rt.edge_id} className="rt hv" onClick={(e) => { e.stopPropagation(); openView(rootRoute(rt), dispatch); }}>
+              <span className={'rk cs root r' + (i + 1)} />
+              <span className="rnum">{RANK[i + 1]}</span>
+              <span className="rn">
+                <span>{sp.name}{dp.name !== sp.name ? ' \u2192 ' + dp.name : ''}</span>
+                <span className="rdir">{sp.dir}/ &#8594; {dp.dir}/</span>
+              </span>
+              <span className="nums">{rt.inQueue ? '' : 'never verified \u00b7 '}<b>+{rt.freesNow}</b></span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1088,12 +1175,12 @@ const CommandsPanel = ({ use, dispatch }) => {
 // HEADROOM. Only when thin — or when it cannot be told, because a missing
 // number must not read as a roomy budget. Inline in the footer row; no CTA (the
 // UI has no view for it), so the line names the command to run instead.
-const HeadroomLine = ({ hr }) => {
+const HeadroomLine = ({ hr, dispatch }) => {
   const why = whyNot(hr);
   if (why) return <span className="why"><Icon icon="circle-question-mark" size={14} /><span>can&#8217;t tell &#8212; instruction headroom: {why}</span></span>;
   if (!hr.thin) return null;
   return (
-    <span className="hr">
+    <span className="hr hv" onClick={go(viewRoute('/health', { section: 'Instruction budget' }), dispatch)}>
       <Icon icon="gauge" size={14} />
       <span>{baseName(hr.directory)}: {hr.headroom >= 0 ? `${hr.headroom} chars of instruction budget left` : `${-hr.headroom} chars OVER the instruction budget`}</span>
     </span>
@@ -1183,7 +1270,7 @@ export const render = (state, dispatch) => {
     ch.value != null
       ? [
         <span key="t" className="ttl">propagate</span>,
-        <span key="c" className={`chg ${ch.tone}`} onClick={() => openView('/activity', dispatch)}>{ch.value} new</span>,
+        <span key="c" className={`chg hv ${ch.tone}`} onClick={go('/judge', dispatch)}>{ch.value} new</span>,
       ]
       : [
         <span key="t" className="ttl">propagate</span>,
@@ -1199,14 +1286,14 @@ export const render = (state, dispatch) => {
       </div>
       {note ? <div className="err"><Icon icon="circle-alert" size={14} /><span>{note}</span></div> : null}
       <div className="foot">
-        <span className="rf" onClick={() => forceRefresh(dispatch)}>{busy ? "…" : "↻"}</span>
-        <HeadroomLine hr={hr} />
+        <span className="rf hv" onClick={() => forceRefresh(dispatch)}>{busy ? "…" : "↻"}</span>
+        <HeadroomLine hr={hr} dispatch={dispatch} />
         <span className="sp">
-          <span className={payloadStale ? "stale" : ""}>
+          <span className={'hv ' + (payloadStale ? "stale" : "")} onClick={() => forceRefresh(dispatch)}>
             {payloadStale ? <Icon icon="circle-alert" size={12} /> : null}
             updated {agoText(payloadAge)}
           </span>
-          <span className={doctorStale ? "stale" : ""}>
+          <span className={'hv ' + (doctorStale ? "stale" : "")} onClick={go('/health', dispatch)}>
             {doctorStale ? <Icon icon="circle-alert" size={12} /> : null}
             {snap.ok ? `doctor ${agoText(snap.ageMs)}` : `doctor: can't tell — ${snap.reason || 'no snapshot'}`}
           </span>
