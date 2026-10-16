@@ -195,6 +195,26 @@ the no-ledger-anywhere case, and the pinning rule still wins for anything holdin
 describes what was true then; `rule:state-and-decisions` forbids editing past entries. Only
 live pointers are repointed.
 
+## Docs layout — one folder per project, in its workspace
+
+**Canonical for `rule:workspace-docs-layout`, which states ownership and cites this for
+location.** A sub-project's documentation lives at:
+
+```
+<workspace>/docs/<project>/     one folder per project, flat; plans/ may be a subfolder
+<workspace>/docs/<project>/README.md    that project's documentation index
+```
+
+The project repo keeps its root `README.md`, its walk-up agent files (`CLAUDE.md`,
+`AGENTS.md`), any file a script, test or build reads, its fixtures, and a stub headed
+"moved" at each path a doc left. An edge between project code and a moved doc is declared
+in the **workspace** `.propagates.yml`, its project-side path prefixed with the project
+directory: `check --changed` run inside the project repo cannot see it, `reconcile` at the
+workspace can. A standalone repo with no workspace keeps its `docs/`.
+
+Added 2026-10-16. Before that date the rule sent single-project docs the other way, into
+their repo; dated records describing that layout keep it.
+
 ## Ledger resolution
 
 ⚠️ **Resolve the ledger path from the workspace the row belongs to — do NOT
