@@ -1,6 +1,21 @@
 # propagate — State
 
 
+## The UI token is stable, in a 0600 file, with a cookie session — 2026-10-16, `v0.15.27`
+`<state dir>/ui-token` replaces the per-start token; `/?token=` sets an `HttpOnly; SameSite=Strict` cookie;
+every response has `no-store`, `no-referrer`, `frame-ancestors 'none'`, `X-Frame-Options: DENY`;
+`open-ui.sh` writes 0600; `propagate ui --rotate-token` rotates. See REFERENCE.md "`propagate ui`: the
+access token" and DECISIONS.md 2026-10-16.
+- **Rotation takes effect on the next click.** `open-ui.sh` classifies a server whose `ui-url` token
+  differs from `ui-token` as ROTATED and replaces it. Lane F found the plan's promise was unmet: a
+  running server kept the old token in memory.
+- **Live-checked on a separate port:**
+  - the token file holds 64 hex at mode 600;
+  - the first visit gets a 302 with the cookie and the headers;
+  - the cookie alone gets 200, no cookie gets 404, and the cookie with a foreign Origin gets 403;
+  - after a restart the token is the same and the old cookie still works.
+
+
 ## The web UI opens on an Overview dashboard, in plain language, with every item clickable — 2026-10-16, `v0.15.26`
 - **Overview** (`#/overview`, the new default view):
   - five KPI cards;

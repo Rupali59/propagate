@@ -7,16 +7,30 @@
 # something is `propagate ui`, which is a server, so the click has to be able to
 # start one.
 #
-# THE PER-START TOKEN IS THE WHOLE DIFFICULTY. `propagate ui` binds loopback and
-# mints a fresh token every start, then prints the only URL that works:
+# THE TOKEN IS STABLE NOW, BUT THE URL IS STILL READ, NEVER BUILT (2026-10-16).
+# `propagate ui` binds loopback and keeps one token in <state>/ui-token (64 hex,
+# mode 0600, created on first start and reused by every later one), then prints
+# the URL that carries it:
 #
-#   propagate ui — http://127.0.0.1:8899/?token=<32 hex>
+#   propagate ui — http://127.0.0.1:8899/?token=<64 hex>
 #
-# So the URL cannot be constructed, only READ from what the server said. This
-# script starts the server if it is not up, waits for that line, and opens it.
+# This script still reads that line from the server's log rather than assembling
+# a URL, because the PORT is the server's to choose and a bound port without the
+# printed token is useless here. What changed is lifetime: a restart no longer
+# invalidates a bookmark, and a browser that has followed the link once holds a
+# ptok cookie and needs no token in the address bar. `propagate ui
+# --rotate-token` is the deliberate way to change it; a server still holding the
+# old token is classified ROTATED on the next click and replaced. This script starts the
+# server if it is not up, waits for that line, and opens it.
 #
-# IT MUST NOT START A SECOND SERVER. Two servers means two tokens, and the older
-# browser tab silently 403s on its next write — a failure that looks like the
+# EVERYTHING IT WRITES IS 0600 (T3, 2026-10-16). ui-url, ui-pid and ui.log were
+# 0644, readable by every account on the Mac, and the log holds the token URL.
+# `umask 077` covers files it creates; files left by an older run keep their old
+# mode (a shell redirect does not change the mode of a file that exists), so it
+# chmods the ones it touches too.
+#
+# IT MUST NOT START A SECOND SERVER. A second one lands on another port and an
+# older browser tab keeps writing against the first, a failure that looks like the
 # tool being broken rather than a stale tab. So an existing, reachable URL is
 # reused; only an unreachable one is replaced.
 #
@@ -69,7 +83,9 @@ CLI="${PROPAGATE_CLI:-$HOME/Documents/GitHub/propagate/cli.mjs}"
 OPEN="${PROPAGATE_OPEN:-/usr/bin/open}"
 VIEW="${1:-}"
 
+umask 077
 mkdir -p "$STATE"
+for f in "$URL_FILE" "$PID_FILE" "$LOG"; do [ -e "$f" ] && chmod 600 "$f"; done
 
 NODE="${PROPAGATE_NODE:-}"
 [ -z "$NODE" ] && for c in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
@@ -111,6 +127,14 @@ version_state() {
   fi
 }
 
+# Echoes rotated when ui-url's token differs from the token file; anything else is ok.
+token_state() {
+  local want have
+  want="$(tr -d '[:space:]' < "$STATE/ui-token" 2>/dev/null || true)"
+  have="$(sed -n 's#.*[?&]token=\([a-f0-9]*\).*#\1#p' "$URL_FILE" 2>/dev/null || true)"
+  if [ -n "$want" ] && [ -n "$have" ] && [ "$want" != "$have" ]; then echo rotated; else echo ok; fi
+}
+
 classify() {
   local code=000
   if [ -s "$URL_FILE" ]; then
@@ -121,6 +145,12 @@ classify() {
       # `behind` is stale for a different reason than a refused token; classify runs
       # in a subshell, so the reason travels in the word it echoes.
       [ "$(version_state)" = behind ] && { echo behind; return; }
+      # ROTATED (2026-10-16): `propagate ui --rotate-token` rewrites ui-token, but a running
+      # server keeps the old token in memory and ui-url still holds the old link, so without
+      # this a rotation silently took effect only at the next restart. A mismatch between the
+      # token in ui-url and the token file is therefore stale, and the verified replace below
+      # starts a server on the new token. An unreadable token file is "cannot tell": live.
+      [ "$(token_state)" = rotated ] && { echo rotated; return; }
       echo live; return ;;
   esac
   # Not a good answer. Dead only if nothing is listening; a 404/403, or a port
@@ -163,7 +193,10 @@ start_ui() {
 
 STATUS="$(classify)"
 STALE_WHY="its token is not accepted"
-if [ "$STATUS" = behind ]; then
+if [ "$STATUS" = rotated ]; then
+  STALE_WHY="the access token was rotated (propagate ui --rotate-token) and it still holds the old one"
+  STATUS=stale
+elif [ "$STATUS" = behind ]; then
   STALE_WHY="it is running older code than the files on disk (its /api/version build differs)"
   STATUS=stale
 fi

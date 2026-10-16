@@ -5422,7 +5422,15 @@ if (_invokedDirectly) {
     // http server and the queue model into every `status` invocation, which is
     // the hottest command in this tool.
     const { uiCmd } = await import("./commands/ui.mjs");
-    await uiCmd(process.argv.slice(3));
+    let started;
+    try { started = await uiCmd(process.argv.slice(3)); }
+    catch (err) {
+      // A refused token file must be a clear line and a nonzero exit, not a stack
+      // trace; and --rotate-token below returns without a server, so it must exit.
+      if (err?.name === "TokenFileError") { console.error(err.message); process.exit(1); }
+      throw err;
+    }
+    if (started?.rotated) process.exit(0);
     await new Promise(() => {}); // the server owns the process until Ctrl-C
   } else if (mode === "plans") {
     // Dynamic, same reason as goals/rollup/manifest/registers/docs (D5): a

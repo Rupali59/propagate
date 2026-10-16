@@ -1474,3 +1474,39 @@ layer that may not take clicks.
 
 **Refs:** plan `ticklish-gathering-brook.md` (eng review D13, D15, outside-voice findings), PR-030,
 G56, `rule:delegation-criteria` §2, `rule:safety-flag-needs-a-test`.
+
+## 2026-10-16: the UI token is stable, in a 0600 file, and the browser holds it as a cookie
+
+Supersedes the per-start design (`randomBytes(24)` held in memory, `commands/ui.mjs`, 2026-08 to
+2026-10-15).
+
+**Decision (option C).** The token is created once, kept in `<state dir>/ui-token` at mode 0600 and reused.
+A tokened `GET /` becomes a `302 /` plus an `HttpOnly; SameSite=Strict` cookie; `guardRequest` accepts the
+cookie or `?token=` after the Host and Origin checks, which stay first. Every response carries `no-store`,
+`no-referrer`, `frame-ancestors 'none'` and `X-Frame-Options: DENY`. `open-ui.sh` writes its files 0600.
+`propagate ui --rotate-token` is the deliberate replacement. A malformed token file refuses to start rather
+than regenerate.
+
+**Why.** The per-start token cost a dead bookmark at every restart (T1) and put the secret in the address
+bar and history (T2). It never protected against other websites; the loopback Host check, the same-Origin
+check and `SameSite=Strict` do that. Anything running as this user can read `~/.propagate`, so a short-lived
+token was not a boundary against it either.
+
+**Rejected.**
+- **A, harden only** (file modes and headers, token still per start): fixes T3-T5 and leaves the daily
+  friction (T1) and the token in history (T2), which are what Rupali actually hits.
+- **B, cookie with a per-start token**: removes the token from the address bar but the cookie dies at every
+  restart, so the bookmark still opens a 404 until the widget is used. It pays the cookie's complexity for
+  half the benefit.
+
+**Not done.** No per-session server-side cookie store: a second secret with its own lifetime and nothing it
+protects that the token file does not. The cookie value IS the token.
+
+**Verified vs inferred.** Verified by tests: file mode and bytes, rotation, refusal, 302 and cookie
+attributes, cookie-only page and API, valid cookie plus foreign Origin is 403, all four headers on page, API
+and 404. Inferred: that the cookie survives a browser restart (Max-Age one year); not exercised in a real
+browser.
+
+**Affects:** propagate
+
+**Refs:** plan `ticklish-gathering-brook.md` Parts 6 and 7 (findings T1-T5), `rule:safety-flag-needs-a-test`.

@@ -443,6 +443,28 @@ to patch later. The existing cross-repo layer (`flow: decision`,
 `CROSS_LEDGER_JSONL`) is a decision relay and solves a different problem;
 it is untouched by this view and the two should not be conflated.
 
+## `propagate ui`: the access token
+
+`propagate ui` binds `127.0.0.1` only. Access needs a token, and the token is **stable**:
+
+- **Where.** `<state dir>/ui-token` (`~/.propagate/ui-token` by default): 64 lowercase hex characters,
+  mode `0600`, created on first start and reused by every later one. A file left wider than `0600` is
+  tightened and the startup line says so. A file that is not exactly 64 hex characters **refuses to start**,
+  names the file, and is never regenerated silently.
+- **Browser.** The first visit to `/?token=<token>` answers `302 /` and sets an `HttpOnly; SameSite=Strict`
+  `ptok` cookie (one year), so the address bar and history carry no secret afterwards. The clean URL is
+  bookmarkable and survives restarts. Every response carries `Cache-Control: no-store`,
+  `Referrer-Policy: no-referrer`, `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+- **Rotation.** `propagate ui --rotate-token` writes a fresh token (same atomic `0600` write) and exits
+  without starting a server. The next widget click sees that the running server still holds the old
+  token (`ui-url` and `ui-token` differ), replaces it, and sets the new cookie; open tabs and bookmarks
+  work again once that page has been opened.
+- **Why stable.** What stops other websites is the loopback Host check, the same-Origin check (run before
+  the token or cookie, so a valid cookie on a cross-origin request is still 403) and `SameSite=Strict`.
+  Anything running as you can read `~/.propagate` anyway, so a per-start token bought nothing against it and
+  killed every bookmark at every restart.
+- `widget/open-ui.sh` writes `ui-url`, `ui-pid` and `ui.log` at `0600` (the log holds the token URL).
+
 ## What each verdict means
 
 The web UI (`propagate ui`) prints this one-line meaning under every verdict button. The wording is

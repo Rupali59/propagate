@@ -23,7 +23,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync, rmSync, statSync, chmodSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -89,7 +90,7 @@ before(async () => {
     evidenceFor: async (b) => { if (hooks.evidenceThrows) throw new Error("diff exploded"); return (await import("../../lib/report/evidence.mjs")).evidenceFor(b); },
     surfacePayload: async () => { if (hooks.surfaceThrows) throw new Error("surface exploded"); return { fixture: "surface" }; },
   });
-  ctx = { ...r, port };
+  ctx = { ...r, port, cookie: `ptok=${r.token}` };
 
   const port2 = await free();
   real = { ...(await uiCmd(["--port", String(port2)], quiet)), port: port2 };
@@ -146,7 +147,9 @@ test("F9: the page with a bad token is not a 200", async () => {
   const bad = await call(ctx, "GET", "/", { token: "nope" });
   assert.notEqual(bad.status, 200);
   assert.equal(bad.status, 404, "current behaviour kept: an unknown token on the page is not found");
-  assert.equal((await call(ctx, "GET", "/", {})).status, 200);
+  // A tokened visit is now a 302 to the clean URL (cookie session); the cookie serves the page.
+  assert.equal((await call(ctx, "GET", "/", {})).status, 302);
+  assert.equal((await call(ctx, "GET", "/", { token: null, headers: { cookie: ctx.cookie } })).status, 200);
 });
 
 // ── F5: /api/version and data-build ─────────────────────────────────────────
@@ -157,7 +160,7 @@ test("F5: /api/version serves the build id the server started from, and the page
   assert.equal(v.json.ok, true);
   assert.match(v.json.build, /^[0-9a-f]{16}$/);
   assert.equal(v.json.build, buildId());
-  const html = (await call(ctx, "GET", "/")).raw;
+  const html = (await call(ctx, "GET", "/", { token: null, headers: { cookie: ctx.cookie } })).raw;
   assert.ok(html.includes(` data-build="${v.json.build}"`), "the page must carry the same id the server reports");
   // Behind the token like every /api route.
   assert.equal((await call(ctx, "GET", "/api/version", { token: "nope" })).status, 401);
@@ -449,4 +452,170 @@ test("D12: seen-set round trip, validated and bounded, and writeCursor's file is
     assert.equal(r.status, 400, JSON.stringify(bad).slice(0, 80));
   }
   assert.equal((await call(ctx, "GET", "/api/seen-edges")).json.triples.length, 3, "a refused POST adds nothing");
+});
+
+
+// ── Part 7: stable token file, cookie session, headers (2026-10-16) ─────────
+//
+// Every file-level assertion is on the FILE (bytes and mode), never on what the
+// server said about it (rule:safety-flag-needs-a-test). All of it runs in temp
+// state directories: PROPAGATE_STATE_DIR is pointed at one for the duration of
+// each uiCmd call and restored, so ~/.propagate is never read or written.
+
+const CLI = path.resolve(import.meta.dirname, "..", "..", "cli.mjs");
+const modeOf = (f) => (statSync(f).mode & 0o777).toString(8);
+const tmpState = () => mkdtempSync(path.join(tmpdir(), "ui-token-state-"));
+const HEX64 = /^[0-9a-f]{64}$/;
+
+async function startIn(dir, io = { log() {} }) {
+  const prev = process.env.PROPAGATE_STATE_DIR;
+  process.env.PROPAGATE_STATE_DIR = dir;
+  try { return { ...(await uiCmd(["--port", String(await free())], io)) }; }
+  finally { process.env.PROPAGATE_STATE_DIR = prev; }
+}
+const stop = (r) => new Promise((res) => r.server.close(res));
+const runCli = (dir, args) => spawnSync(process.execPath, [CLI, "ui", ...args], {
+  env: { ...process.env, PROPAGATE_STATE_DIR: dir, HOME: dir }, encoding: "utf8", timeout: 20000,
+});
+
+test("token file: created 64-hex at mode 0600 on first start, and the SAME token survives a second start", async () => {
+  const dir = tmpState();
+  try {
+    const a = await startIn(dir);
+    await stop(a);
+    const file = path.join(dir, "ui-token");
+    assert.match(readFileSync(file, "utf8").trim(), HEX64);
+    assert.equal(readFileSync(file, "utf8").trim(), a.token);
+    assert.equal(modeOf(file), "600");
+    const before = readFileSync(file);
+    const b = await startIn(dir);
+    await stop(b);
+    assert.equal(b.token, a.token, "a restart must not mint a new token -- that is what killed every bookmark");
+    assert.ok(readFileSync(file).equals(before), "a second start must not rewrite the file");
+    assert.equal(readdirSync(dir).filter((f) => f.endsWith(".tmp")).length, 0, "the atomic write must leave no temp file");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("token file: a pre-existing 0644 file is tightened to 0600 on the FILE, and the startup line says so", async () => {
+  const dir = tmpState();
+  try {
+    const file = path.join(dir, "ui-token");
+    const tok = "ab".repeat(32);
+    writeFileSync(file, tok + "\n"); chmodSync(file, 0o644);
+    const lines = [];
+    const r = await startIn(dir, { log: (l) => lines.push(l) });
+    await stop(r);
+    assert.equal(r.token, tok);
+    assert.equal(modeOf(file), "600");
+    assert.match(lines.join("\n"), /tightened .*ui-token from mode 0644 to 0600/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("token file: a malformed file REFUSES to start (nonzero, names the file and the fix) and is left byte-for-byte unchanged", () => {
+  const dir = tmpState();
+  try {
+    const file = path.join(dir, "ui-token");
+    for (const bad of ["", "not-a-token\n", "AB".repeat(32), "ab".repeat(31), "ab".repeat(32) + "x"]) {
+      writeFileSync(file, bad); chmodSync(file, 0o644);
+      const bytes = readFileSync(file), mode = modeOf(file);
+      const r = runCli(dir, ["--port", "0"]);
+      assert.notEqual(r.status, 0, `${JSON.stringify(bad)} must be refused`);
+      assert.ok(r.stderr.includes(file), `the message must name the file: ${r.stderr}`);
+      assert.match(r.stderr, /--rotate-token/);
+      assert.ok(readFileSync(file).equals(bytes), "a refused file must not be regenerated or rewritten");
+      assert.equal(modeOf(file), mode);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("--rotate-token: changes the file (0600), starts no server, exits 0; the old token is then refused by a fresh server", async () => {
+  const dir = tmpState();
+  try {
+    const first = await startIn(dir);
+    await stop(first);
+    const file = path.join(dir, "ui-token");
+    const before = readFileSync(file, "utf8");
+    const r = runCli(dir, ["--rotate-token"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /reopen|restart/);
+    const after = readFileSync(file, "utf8");
+    assert.notEqual(after, before);
+    assert.match(after.trim(), HEX64);
+    assert.equal(modeOf(file), "600");
+    const second = await startIn(dir);
+    try {
+      assert.equal(second.token, after.trim());
+      assert.notEqual(second.token, first.token);
+      assert.equal((await call(second, "GET", "/api/version", { token: first.token })).status, 401, "the OLD token must be refused");
+      assert.equal((await call(second, "GET", "/api/version")).status, 200);
+    } finally { await stop(second); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("cookie session: a tokened GET / is a 302 to / with an HttpOnly, SameSite=Strict, Path=/ ptok cookie", async () => {
+  const r = await call(ctx, "GET", "/");
+  assert.equal(r.status, 302);
+  const res = await new Promise((resolve, reject) => http.get({ host: "127.0.0.1", port: ctx.port, path: `/?token=${ctx.token}`, headers: { host: `127.0.0.1:${ctx.port}` } }, resolve).on("error", reject));
+  res.resume();
+  assert.equal(res.headers.location, "/");
+  const cookie = [].concat(res.headers["set-cookie"]).join("\n");
+  assert.ok(cookie.startsWith(`ptok=${ctx.token};`), cookie);
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /SameSite=Strict/);
+  assert.match(cookie, /Path=\//);
+  assert.match(cookie, /Max-Age=31536000/);
+});
+
+test("cookie session: the cookie alone serves the page (among other cookies); a bad or missing cookie is 404", async () => {
+  const ok = await call(ctx, "GET", "/", { token: null, headers: { cookie: `a=1; ptok=${ctx.token} ;b=2` } });
+  assert.equal(ok.status, 200);
+  assert.ok(ok.raw.includes("<html") || ok.raw.includes("<!doctype") || ok.raw.includes("<!DOCTYPE"));
+  for (const cookie of [`ptok=${"0".repeat(64)}`, "ptok=", "ptok", `xptok=${ctx.token}`, `ptok=${ctx.token}x`]) {
+    assert.equal((await call(ctx, "GET", "/", { token: null, headers: { cookie } })).status, 404, cookie);
+  }
+  assert.equal((await call(ctx, "GET", "/", { token: null })).status, 404);
+});
+
+test("cookie session: the API accepts the cookie alone; a bad cookie is 401", async () => {
+  assert.equal((await call(ctx, "GET", "/api/version", { token: null, headers: { cookie: ctx.cookie } })).status, 200);
+  assert.equal((await call(ctx, "GET", "/api/version", { token: null, headers: { cookie: "ptok=nope" } })).status, 401);
+});
+
+test("cookie session: a VALID cookie with a foreign Origin (or Host) is still 403 -- Origin runs before the cookie", async () => {
+  const origin = await call(ctx, "GET", "/api/version", { token: null, headers: { cookie: ctx.cookie, origin: "https://evil.example.com" } });
+  assert.equal(origin.status, 403);
+  const host = await call(ctx, "GET", "/api/version", { token: null, headers: { cookie: ctx.cookie, host: "evil.example.com" } });
+  assert.equal(host.status, 403);
+  // Effect, not status: a cross-origin POST with the cookie writes nothing.
+  ROWS = [mkRow("co1", "DRIFTED")];
+  const before = storeSnapshot();
+  const w = await call(ctx, "POST", "/api/dispose", { token: null, headers: { cookie: ctx.cookie, origin: "https://evil.example.com" },
+    body: { edges: edges(["co1", "DRIFTED"]), disposition: "no-change-needed", reason: REASON } });
+  assert.equal(w.status, 403);
+  assert.equal(storeSnapshot(), before);
+});
+
+test("headers: no-store, no-referrer, frame-ancestors 'none' and X-Frame-Options DENY on the 302, page, API 200/401/403, graph refusal and 404", async () => {
+  const raw = (pathAndQuery, headers = {}) => new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port: ctx.port, path: pathAndQuery, headers: { host: `127.0.0.1:${ctx.port}`, ...headers } }, (res) => { res.resume(); res.on("end", () => resolve(res)); }).on("error", reject);
+  });
+  const t = ctx.token;
+  const responses = {
+    "302": await raw(`/?token=${t}`),
+    "page 200": await raw("/", { cookie: ctx.cookie }),
+    "api 200": await raw(`/api/version?token=${t}`),
+    "api 401": await raw("/api/version?token=nope"),
+    "api 403": await raw(`/api/version?token=${t}`, { origin: "https://evil.example.com" }),
+    "graph 401": await raw("/graph?token=nope"),
+    "page 404": await raw("/"),
+    "unknown 404": await raw(`/nope?token=${t}`),
+  };
+  assert.deepEqual(Object.entries(responses).map(([k, r]) => `${k}:${r.statusCode}`),
+    ["302:302", "page 200:200", "api 200:200", "api 401:401", "api 403:403", "graph 401:401", "page 404:404", "unknown 404:404"]);
+  for (const [name, res] of Object.entries(responses)) {
+    assert.equal(res.headers["cache-control"], "no-store", name);
+    assert.equal(res.headers["referrer-policy"], "no-referrer", name);
+    assert.equal(res.headers["content-security-policy"], "frame-ancestors 'none'", name);
+    assert.equal(res.headers["x-frame-options"], "DENY", name);
+  }
 });

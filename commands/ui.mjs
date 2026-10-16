@@ -50,8 +50,8 @@
  */
 
 import { createServer } from "node:http";
-import { readFileSync, readdirSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { readFileSync, readdirSync, statSync, chmodSync, mkdirSync, openSync, writeSync, closeSync, renameSync, unlinkSync } from "node:fs";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { queuePayload, buildQueue, orderFor, historyByEdge } from "../lib/report/queue.mjs";
 import { streamPayload, readCursor, writeCursor } from "../lib/report/stream.mjs";
@@ -61,7 +61,104 @@ import { CLAUDE_GLOBAL_CLAUDE_MD, stateDir } from "../lib/core/paths.mjs";
 
 export { buildId };
 
-const TOKEN = randomBytes(24).toString("hex");
+/**
+ * THE TOKEN IS STABLE AND LIVES IN A FILE (2026-10-16, Part 7 option C).
+ *
+ * It used to be randomBytes(24) per start, held in memory. Measured cost: every
+ * bookmark died at each restart and the only working link was the one the widget
+ * read off the server's stdout (T1), and the secret sat in the address bar and
+ * browser history (T2). What stops OTHER WEBSITES is the loopback Host check, the
+ * same-Origin check and SameSite=Strict -- not the token's lifetime -- and
+ * anything running as this user can read ~/.propagate anyway. So the token is
+ * created once, kept in `<stateDir>/ui-token` at mode 0600, and reused.
+ *
+ * A MALFORMED FILE IS REFUSED, NEVER REGENERATED. Regenerating silently would
+ * invalidate every open tab and bookmark with no word said, which is the exact
+ * failure (a client that cannot tell "expired" from "broken") F9 was written to
+ * end. `propagate ui --rotate-token` is the deliberate way to replace it.
+ */
+export const TOKEN_FILE_NAME = "ui-token";
+const TOKEN_RE = /^[0-9a-f]{64}$/;
+
+export class TokenFileError extends Error {
+  constructor(message) { super(message); this.name = "TokenFileError"; }
+}
+
+/** Atomic 0600 write: a temp file created 0600 in the same directory, then renamed over. */
+function writeTokenFile(file, token) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const fd = openSync(tmp, "wx", 0o600);
+  try { writeSync(fd, token + "\n"); } finally { closeSync(fd); }
+  try { chmodSync(tmp, 0o600); renameSync(tmp, file); }
+  catch (err) { try { unlinkSync(tmp); } catch { /* already gone */ } throw err; }
+}
+
+/**
+ * @param {string} dir the state directory
+ * @returns {{token: string, file: string, created: boolean, tightened: string|null}}
+ * @throws {TokenFileError} when the file exists and is not exactly 64 lowercase hex characters
+ */
+export function loadOrCreateToken(dir) {
+  const file = path.join(dir, TOKEN_FILE_NAME);
+  let st = null;
+  try { st = statSync(file); } catch (err) { if (err?.code !== "ENOENT") throw err; }
+  if (!st) {
+    const token = randomBytes(32).toString("hex");
+    writeTokenFile(file, token);
+    return { token, file, created: true, tightened: null };
+  }
+  const token = readFileSync(file, "utf8").replace(/\r?\n$/, "");
+  if (!TOKEN_RE.test(token)) {
+    throw new TokenFileError(
+      `${file} does not hold a token (expected exactly 64 lowercase hex characters). ` +
+      `It was left untouched. To replace it deliberately, run: propagate ui --rotate-token`);
+  }
+  let tightened = null;
+  const mode = st.mode & 0o777;
+  if (mode & 0o077) {
+    chmodSync(file, 0o600);
+    tightened = mode.toString(8).padStart(4, "0");
+  }
+  return { token, file, created: false, tightened };
+}
+
+/** `propagate ui --rotate-token`: a fresh token, same atomic 0600 write. */
+export function rotateToken(dir) {
+  const file = path.join(dir, TOKEN_FILE_NAME);
+  writeTokenFile(file, randomBytes(32).toString("hex"));
+  return file;
+}
+
+/** Constant-time equality of two strings; false for a non-string or a length mismatch. */
+function tokenEq(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const x = Buffer.from(a), y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+/** The ptok cookie, parsed out of however many cookies the browser sent. */
+function cookieToken(req) {
+  for (const part of String(req.headers.cookie ?? "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === "ptok") return part.slice(i + 1).trim();
+  }
+  return null;
+}
+
+const COOKIE_MAX_AGE = 31536000;
+
+/**
+ * On EVERY response, from the one send() path and the 500 fallback. A page that
+ * carries a bearer token must not be cached, framed or leaked in a Referer; none
+ * of these were set before (T4).
+ */
+const SECURITY_HEADERS = {
+  "cache-control": "no-store",
+  "referrer-policy": "no-referrer",
+  "content-security-policy": "frame-ancestors 'none'",
+  "x-frame-options": "DENY",
+};
 
 /**
  * The one refusal that is 401, not 403 (F9). A bad token means "you are not
@@ -86,9 +183,11 @@ export function guardRequest(req, token, port) {
     } catch { ok = false; }
     if (!ok) return "cross-origin request";
   }
+  // Host and Origin ran FIRST and stay first: a valid cookie on a cross-origin
+  // request must still be a 403, or the cookie would be a way round the Origin check.
   const url = new URL(req.url, `http://${host}`);
-  if (url.searchParams.get("token") !== token) return TOKEN_REFUSAL;
-  return null;
+  if (tokenEq(url.searchParams.get("token"), token) || tokenEq(cookieToken(req), token)) return null;
+  return TOKEN_REFUSAL;
 }
 
 /**
@@ -469,6 +568,15 @@ export function page(token, build = buildId()) {
  *   Keys: deps, inboxDeps, appendEvent, evidenceFor, readSnapshot, surfacePayload, root.
  */
 export async function uiCmd(argv = [], io = console, overrides = {}) {
+  if (argv.includes("--rotate-token")) {
+    const file = rotateToken(stateDir());
+    io.log(`propagate ui — wrote a new token to ${file} (mode 0600).`);
+    io.log("  The next widget click replaces a running server that still holds the old token;");
+    io.log("  Open tabs and bookmarks work again once you reopen the page from the widget.");
+    return { rotated: true, file };
+  }
+  const tokenState = loadOrCreateToken(stateDir());
+  const TOKEN = tokenState.token;
   const portArg = argv.indexOf("--port");
   const port = portArg >= 0 ? Number(argv[portArg + 1]) : 4599;
   const root = overrides.root ?? path.join(process.env.HOME ?? "", "Documents/GitHub/");
@@ -549,8 +657,8 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
   };
 
   const handle = async (req, res) => {
-    const send = (code, body, type = "application/json") => {
-      res.writeHead(code, { "content-type": type, "cache-control": "no-store" });
+    const send = (code, body, type = "application/json", extra = {}) => {
+      res.writeHead(code, { "content-type": type, ...SECURITY_HEADERS, ...extra });
       res.end(typeof body === "string" ? body : JSON.stringify(body));
     };
     const url = new URL(req.url, `http://${req.headers.host ?? "127.0.0.1"}`);
@@ -563,8 +671,17 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
       return send(code, { ok: false, error: refusal === TOKEN_REFUSAL ? "token" : refusal });
     };
 
-    if (url.pathname === "/" && url.searchParams.get("token") === TOKEN) {
-      return send(200, page(TOKEN), "text/html; charset=utf-8");
+    if (url.pathname === "/") {
+      // A tokened visit becomes a cookie session and a CLEAN url (the fragment,
+      // i.e. a widget deep link, survives a 302). A cookie alone serves the page.
+      // Neither -> falls through to the 404 below, revealing nothing.
+      if (tokenEq(url.searchParams.get("token"), TOKEN)) {
+        return send(302, "", "text/plain", {
+          location: "/",
+          "set-cookie": `ptok=${TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${COOKIE_MAX_AGE}`,
+        });
+      }
+      if (tokenEq(cookieToken(req), TOKEN)) return send(200, page(TOKEN), "text/html; charset=utf-8");
     }
     // THE GRAPH IS A VIEW HERE, not a file on disk. It used to be generated to
     // ~/.propagate/graph.html and opened directly, which made it a second
@@ -990,7 +1107,7 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
     handle(req, res).catch((err) => {
       try {
         if (!res.headersSent) {
-          res.writeHead(500, { "content-type": "application/json", "cache-control": "no-store" });
+          res.writeHead(500, { "content-type": "application/json", ...SECURITY_HEADERS });
         }
         res.end(JSON.stringify({ ok: false, error: String(err?.message ?? err) }));
       } catch { /* the socket is already gone */ }
@@ -1000,6 +1117,7 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
   const link = `http://127.0.0.1:${port}/?token=${TOKEN}`;
   io.log(`propagate ui — ${link}`);
-  io.log(`  loopback only, per-start token. Ctrl-C to stop.`);
+  io.log(`  loopback only, stable token in ${tokenState.file} (mode 0600). Ctrl-C to stop.`);
+  if (tokenState.tightened) io.log(`  tightened ${tokenState.file} from mode ${tokenState.tightened} to 0600.`);
   return { server, port, token: TOKEN, link };
 }

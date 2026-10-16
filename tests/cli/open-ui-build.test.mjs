@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -125,4 +125,76 @@ test("cannot tell (unparseable version answer, or no files on disk) is left alon
       assert.deepEqual(spawned(sb), [], "a restart that cannot be justified replaces a healthy UI on every click");
     }
   } finally { garbled.cleanup(); nofiles.cleanup(); }
+});
+
+// ── T3 (2026-10-16): ui-url, ui-pid and ui.log were 0644 and the log holds the token URL ──
+// Asserted on the FILES' modes after the run, never on anything the script printed.
+const modeOf = (f) => (statSync(f).mode & 0o777).toString(8);
+
+test("open-ui.sh leaves ui-url, ui-pid and ui.log at mode 600 -- files it creates AND 0644 ones an older run left behind", () => {
+  const v = victim();
+  const sb = sandbox({ versionBody: JSON.stringify({ ok: true, build: "0000000000000000" }), recordedPid: v, holderPid: v, psCommands: { [v]: "node /x/propagate/cli.mjs ui" } });
+  try {
+    // The sandbox wrote ui-url and ui-pid with the default umask; an old ui.log is added the same way.
+    writeFileSync(path.join(sb.state, "ui.log"), "old log\n");
+    for (const f of ["ui-url", "ui-pid", "ui.log"]) chmodSync(path.join(sb.state, f), 0o644);
+    assert.equal(modeOf(path.join(sb.state, "ui-url")), "644");
+    const r = run(sb);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(spawned(sb).length, 1, "the scenario must have restarted the server, i.e. rewritten all three files");
+    for (const f of ["ui-url", "ui-pid", "ui.log"]) assert.equal(modeOf(path.join(sb.state, f)), "600", `${f} must be owner-only`);
+  } finally { killNew(sb); try { process.kill(v, "SIGKILL"); } catch { /* gone */ } sb.cleanup(); }
+});
+
+test("open-ui.sh tightens an old 0644 ui-url even when it only REUSES the server (nothing is rewritten)", () => {
+  const sb0 = sandbox({ versionBody: "" });
+  writeFileSync(path.join(sb0.dir, "version-body"), JSON.stringify({ ok: true, build: sb0.id }));
+  try {
+    chmodSync(path.join(sb0.state, "ui-url"), 0o644);
+    const r = run(sb0);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(spawned(sb0), []);
+    assert.equal(modeOf(path.join(sb0.state, "ui-url")), "600");
+  } finally { sb0.cleanup(); }
+});
+
+test("open-ui.sh CREATES ui-url, ui-pid and ui.log at mode 600 on a cold start (no earlier files for a chmod to rescue)", () => {
+  const sb = sandbox({ versionBody: "" });
+  try {
+    for (const f of ["ui-url", "ui-pid", "ui.log"]) rmSync(path.join(sb.state, f), { force: true });
+    const r = run(sb);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(spawned(sb).length, 1, "a cold start must start exactly one server");
+    for (const f of ["ui-url", "ui-pid", "ui.log"]) {
+      assert.ok(existsSync(path.join(sb.state, f)), `${f} must have been created by this run`);
+      assert.equal(modeOf(path.join(sb.state, f)), "600", `${f} must be owner-only without relying on a chmod`);
+    }
+  } finally { killNew(sb); sb.cleanup(); }
+});
+
+// ROTATED (2026-10-16): --rotate-token rewrites ui-token while a running server keeps the old token
+// in memory; the plan promised the next click would replace it, and Lane F found nothing did.
+test("a rotated token (ui-token differs from ui-url's) replaces the server -- verified pid, one new start", () => {
+  const v = victim();
+  const sb = sandbox({ versionBody: "", recordedPid: v, holderPid: v, psCommands: { [v]: "node /x/propagate/cli.mjs ui" } });
+  writeFileSync(path.join(sb.dir, "version-body"), JSON.stringify({ ok: true, build: sb.id }));
+  writeFileSync(path.join(sb.state, "ui-token"), "bbbb\n");
+  try {
+    const r = run(sb);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(alive(v), false, "the server still on the old token must be stopped");
+    assert.equal(spawned(sb).length, 1, "exactly one new server");
+    assert.equal(readFileSync(path.join(sb.dir, "opened"), "utf8").trim(), NEW_URL);
+  } finally { killNew(sb); try { process.kill(v, "SIGKILL"); } catch { /* gone */ } sb.cleanup(); }
+});
+
+test("a token file that MATCHES ui-url is not a rotation: the live server is reused", () => {
+  const sb = sandbox({ versionBody: "" });
+  writeFileSync(path.join(sb.dir, "version-body"), JSON.stringify({ ok: true, build: sb.id }));
+  writeFileSync(path.join(sb.state, "ui-token"), "aaaa\n");
+  try {
+    const r = run(sb);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(spawned(sb), [], "a matching token must not restart anything");
+  } finally { sb.cleanup(); }
 });
