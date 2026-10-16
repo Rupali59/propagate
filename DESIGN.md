@@ -255,6 +255,14 @@ All reuse an existing token or class; none is a new visual language.
 | `.hline` `.hrow` | Health's single summary line and its fail-then-accepted list | warn stays collapsed per section |
 | `.vel` `.vcol` `.vseg-*` | verdicts per day as a stacked bar | the quiet segment is `--seg-quiet` |
 | `.cmdrow` `.cmd` | a command the reader pastes, with a copy button | the text is always visible, so a blocked clipboard leaves something to select |
+| `.tip` | the one tooltip, at the pointer, for every chart shape and row | **no native `title=`.** `pointer-events: none`, `--card` ground and `--fg` ink, `--lift-2`, `--t-fast`; content is `tipText` in the client and only ever values the page already holds. Focus shows it too |
+| `.pick` `.hit` | a click target's hover affordance: a pointer and a soft ground (`--accent-quiet` / `--field`), nothing else | affordance only; the fact lives in the tooltip, never in the hover |
+| `.vopt` `.vmean` | a verdict button with its one-line meaning beneath | wording in `docs/REFERENCE.md` §"What each verdict means" |
+| `.vaxis` `.vtick` `.axnote` | the day axis under the verdict bars, and the scale note under the sparkline | labels thin out (`axisTicks`) so 30 days do not smear |
+| `.kpis.ov` `.kpi.pick` `.ksub` | the Overview's five clickable stat cards | the existing `.kpi` stat row made a click target; `.warn` colours the figure `--st-warn`, nothing else |
+| `.charts3` `.plot` | the Overview's three chart cards | Plot draws into `.plot`; its fills are tokens resolved at render |
+| `table.t` `.mix` | the top-sources table and its "what moved" bar | `.mix i.<STATE>` uses the same token as `.badge.<STATE>`; column heads are sortable (`aria-sort`) |
+| `.shead` | the column head over a register list ("priority") | |
 | `.sr` | the visually hidden `aria-live="polite"` region | announces verdicts, undo and bulk results, including refusals |
 
 ### Accessibility and layout (F3, F4)
@@ -267,8 +275,18 @@ list sits above the detail.
 
 ## 5 · Deliberately not in the system
 
-- **A chart library.** The page is one self-contained response with no build
-  step; charts are inline SVG that inherits the palette tokens.
+- **A chart library, EXCEPT on the web UI's Overview (amended 2026-10-16).** The page is
+  one self-contained response with no build step, and charts used to be inline SVG that
+  inherits the palette tokens. The owner then asked for a dashboard with more
+  visualisations (a stacked bar per workspace, a waiting-time histogram, verdicts per
+  day, all clickable), and hand-drawing a band axis, a legend and a stacked-bar layout
+  three times is the larger cost. So `d3` 7.9.0 and `@observablehq/plot` 0.6.17 (both ISC)
+  are vendored in `commands/vendor/` as plain `<script>` globals, with their sha256 and
+  licences in `commands/vendor/README.md`. **What did not change:** no colour comes from the
+  library. Every fill is a palette token resolved at render (`resolveToken` in the client),
+  the tooltip is the page's own `.tip`, and the Activity view, the sparklines and the widget
+  stay hand-drawn SVG. **If the library fails to load**, the Overview prints "chart
+  unavailable" with the reason in place of the charts and the KPIs and table still work.
 - **A typeface.** The system font stack stays, chosen 2026-09-21 with the cost
   named: it is the "gave up on typography" signal, and a self-hosted face means
   a woff2 as a data URI in a single-response page.
@@ -279,7 +297,8 @@ list sits above the detail.
 - **An icon library, except in the widget.** The widget vendors a small Lucide subset
   (`lucide` 1.55.0, ISC, React-free node data) into a generated block, because Übersicht
   resolves no relative import and the marketplace install runs no `npm install`. Charts stay
-  hand-drawn SVG on every surface. Decided 2026-10-13 (widget redesign, D3/D9).
+  hand-drawn SVG on the widget and every web view except the Overview (see the first bullet).
+  Decided 2026-10-13 (widget redesign, D3/D9).
 
 ---
 
@@ -295,6 +314,7 @@ list sits above the detail.
 | no `color-mix`, upward derivations redefined in dark, badge modifiers, focus ring, narrow stacking | `tests/unit/theme.test.mjs` |
 | every view's four states, the per-edge reason, nothing preselected, the Judge badge equal to the rendered rows, the transport's failures | `tests/unit/ui-client.test.mjs` |
 | no entity text in the emitted page | `tests/unit/ui-page.test.mjs` |
+| the tooltip is token-only and takes no pointer; no rendered view carries a native `title=`; `tipText` never prints NaN | `tests/unit/theme.test.mjs`, `tests/unit/ui-client.test.mjs` |
 
 **A property worth stating here is worth an acceptance criterion.** The sibling
 widget's theming has not rotted precisely because one test asserts it; this

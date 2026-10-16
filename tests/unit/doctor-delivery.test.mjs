@@ -700,3 +700,28 @@ test("a LEFTOVER cache tree warns and does NOT fail the run — only the live tr
   const failures = r.entries.filter((e) => e.kind === "fail");
   assert.equal(failures.length, 0, `a leftover alone must not fail the run; failed on ${JSON.stringify(failures)}`);
 });
+
+// ── plain-user pass 2026-10-16: the fail row names the one command ────────
+
+test("a delivery fail whose files DIFFER carries a command action; a MISSING-path fail does not (Health 'no action mapped')", async (t) => {
+  // Past the day bound with the same version and different content: the shape the live
+  // Delivery fail takes. The Health view printed "no action mapped" under it while the
+  // detail held a four-command sentence.
+  const { root: repo, headSha } = gitRepo(t, { version: "1.0.0", files: { "cli.mjs": "v1" }, date: daysAgo(DELIVERY_MAX_DAYS + 5) });
+  commitMore(repo, { files: { "cli.mjs": "v2" }, message: "change shipped file" });
+  const cache = cacheFixture(t, [{ marketplace: "m", version: "1.0.0", files: { "cli.mjs": "v1" } }]);
+  const installedPluginsPath = installedPluginsFixture(t, { "propagate@m": [{ scope: "user", gitCommitSha: headSha }] });
+  const r = new Reporter();
+  await checkDelivery({ reporter: r, repoRoot: repo, cacheRoot: cache, installedPluginsPath });
+  const e = r.entries.find((x) => x.kind === "fail");
+  assert.ok(e, `expected a fail entry; got ${JSON.stringify(r.entries)}`);
+  assert.deepEqual(e.action, { kind: "command", target: "claude plugin marketplace update m && claude plugin update propagate@m" });
+
+  // The missing-path fail keeps the long text: that shape needs the uninstall/install pair.
+  const { root: repo2, headSha: sha2 } = gitRepo(t, { version: "1.0.0", files: { "cli.mjs": "v1", "lib/x.mjs": "v1" } });
+  const cache2 = cacheFixture(t, [{ marketplace: "m", version: "1.0.0", files: { "cli.mjs": "v1" } }]);
+  const ip2 = installedPluginsFixture(t, { "propagate@m": [{ scope: "user", gitCommitSha: sha2 }] });
+  const r2 = new Reporter();
+  await checkDelivery({ reporter: r2, repoRoot: repo2, cacheRoot: cache2, installedPluginsPath: ip2 });
+  assert.equal(r2.entries.find((x) => x.kind === "fail")?.action, undefined);
+});

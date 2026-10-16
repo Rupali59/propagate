@@ -228,6 +228,7 @@ import { freezeLedgerV1 } from "./lib/edges/freeze-ledger.mjs";
 // is ONE definition rather than a copy here and a copy per command module.
 import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./commands/ansi.mjs";
 import { actionSuffix } from "./lib/report/doctor/structure.mjs";
+import { ACTION_KINDS } from "./lib/report/doctor/reporter.mjs";
 
 
 /**
@@ -281,6 +282,21 @@ export function renderDoctorEntries(entries) {
       );
     }
   }
+}
+
+/**
+ * Print ONE doctor check that carries an `action` ({kind, target}, as the Reporter's entries do).
+ * Exists because doctor()'s own check() prints bare text; an action has to cross the text
+ * boundary in the form structure.mjs parses back, and re-deriving that format here would be a
+ * second copy of it. Validates like the Reporter does: a typo would otherwise ship a Health row
+ * that silently says "no action mapped". The caller counts the problem; this only prints.
+ * Exported so the seam can be tested without running the whole of doctor.
+ */
+export function checkWithAction(label, ok, detail, action) {
+  if (!action || !ACTION_KINDS.includes(action.kind) || typeof action.target !== "string" || !action.target) {
+    throw new Error(`doctor check ${JSON.stringify(label)}: action must be {kind: ${ACTION_KINDS.join("|")}, target: non-empty string}, got ${JSON.stringify(action)}`);
+  }
+  renderDoctorEntries([{ kind: ok ? "pass" : "fail", label, detail, action }]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -653,7 +669,24 @@ async function doctor({ exitProcess = true } = {}) {
   // pulls this subtree in. Each section imports its own module at its call site.
   const { Reporter } = await import("./lib/report/doctor/reporter.mjs");
 
-  function check(label, ok, detail = "") {
+  // `action` (2026-10-16): a check with one goes through checkWithAction, which renders via
+  // renderDoctorEntries -- the ONE place that appends the marker structure.mjs parses back, so
+  // /api/health offers it. A check without one prints exactly as before.
+  // The 4th argument was historically a PASS detail that check() silently ignored (e.g. "cross
+  // rows carry partner" passes "N row(s) scanned" so "scanned nothing" and "found nothing" read
+  // differently). Giving check() an `action` slot made that string throw as a malformed action and
+  // failed doctor on a clean install (release --check, 2026-10-16). So: a string is the pass
+  // detail its callers always meant; only an object is an action.
+  function check(label, ok, detail = "", action) {
+    if (typeof action === "string") {
+      if (ok && action) detail = action;
+      action = undefined;
+    }
+    if (action) {
+      checkWithAction(label, ok, detail, action);
+      if (!ok) problems++;
+      return;
+    }
     if (ok) {
       console.log(`  ${GREEN}✓${RESET} ${label}${detail ? "  " + DIM + detail + RESET : ""}`);
     } else {
@@ -1379,7 +1412,7 @@ async function doctor({ exitProcess = true } = {}) {
     });
     for (const v of violations) {
       const detailPrefix = v.detail ? `${v.detail} — ` : "";
-      check(v.describe, false, `${detailPrefix}observed ${JSON.stringify(v.observed)} — ${v.basis}`);
+      check(v.describe, false, `${detailPrefix}observed ${JSON.stringify(v.observed)} — ${v.basis}`, v.action);
     }
     if (violations.length === 0) {
       check("all calibrated expectations hold", true, `${EXPECTATIONS.length} checked`);

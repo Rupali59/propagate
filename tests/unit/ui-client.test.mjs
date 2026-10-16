@@ -184,10 +184,12 @@ test("first paint reads the inbox, then the three after-paint reads -- and nothi
 test("the rail shows live counts, and a count that is not loaded is BLANK not zero", async () => {
   const { app } = await mount();
   const labels = byClass(app, "div").map(textOf);
-  assert.match(labels[0], /JUDGE\s*3/, "Judge reads worklist.toJudge");
-  assert.match(labels[1], /UNBLOCK\s*1/, "Unblock reads leverage.blocked");
-  // ACTIVITY and the Explore views have no count; they must not read as 0.
-  for (const i of [3, 4, 5, 6]) assert.doesNotMatch(labels[i], /\d/, `${labels[i]} must not render a count it does not have`);
+  // OVERVIEW joined at the front on 2026-10-16, so every index below moved up by one: that is
+  // the rename this test was rewritten for, not a loosening.
+  assert.match(labels[1], /JUDGE\s*3/, "Judge reads worklist.toJudge");
+  assert.match(labels[2], /UNBLOCK\s*1/, "Unblock reads leverage.blocked");
+  // OVERVIEW, ACTIVITY and the Explore views have no count; they must not read as 0.
+  for (const i of [0, 4, 5, 6, 7]) assert.doesNotMatch(labels[i], /\d/, `${labels[i]} must not render a count it does not have`);
 });
 
 test("the Judge badge EQUALS the rendered To-judge rows, by the widget's own counter (plan test 8)", async () => {
@@ -195,7 +197,7 @@ test("the Judge badge EQUALS the rendered To-judge rows, by the widget's own cou
   // items, and the rows the page draws. The 46-versus-78 defect was these two
   // disagreeing in different units.
   const { app, ui } = await mount();
-  const badge = Number(textOf(byClass(app, "div")[0]).replace(/\D/g, ""));
+  const badge = Number(textOf(byClass(app, "div")[1]).replace(/\D/g, ""));
   assert.equal(badge, INBOX.worklist.toJudge, "the rail did not read worklist.toJudge");
   assert.equal(rows(app).length, badge, "the badge says one number and the list draws another");
   // DIVERGED rows are NOT in To judge: they sit under their own chip with their own count.
@@ -662,13 +664,13 @@ test("every old hash lands on its new view, and an unknown hash lands on Judge (
 
 test("readHash parses ?edge= and an unknown hash falls back to judge", async () => {
   const m = await mount({ hash: "#/judge?edge=abc%20d" });
-  const none = { section: null, state: null, chip: null };
+  const none = { section: null, state: null, chip: null, ws: null, age: null, source: null };
   assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: "abc d", ...none });
   m.ctx.location.hash = "#/nonsense";
   assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: null, ...none });
   // Deep links (2026-10-15): section / state / chip ride in the hash beside edge.
   m.ctx.location.hash = "#/health?section=Workspace%3A";
-  assert.deepEqual(fromRealm(m.ui.readHash()), { view: "health", edge: null, section: "Workspace:", state: null, chip: null });
+  assert.deepEqual(fromRealm(m.ui.readHash()), { view: "health", edge: null, ...none, section: "Workspace:" });
 });
 
 test("?state= filters To judge to that state and SAYS so with a clearable control", async () => {
@@ -1096,4 +1098,633 @@ test("a parked row's dispositions are derived from the queue, and are none when 
   const { ui } = await mount();
   assert.deepEqual(fromRealm(ui.parkedAllowed(fromRealm(INBOX))), ALLOWED);
   assert.deepEqual(fromRealm(ui.parkedAllowed({ divisions: { worklist: { ready: [edge("a", "DIVERGED")], blocked: [] } } })), []);
+});
+
+/* -- plain-user pass 2026-10-16 ---------------------------------------------
+ *
+ * The page spoke in the code's words ("declared / expanded", "crosses the line",
+ * `wontfix` with no gloss), printed raw markdown, ran one cell into another, drew
+ * bars with no days, and answered a hover with the browser's native `title`. The
+ * owner's standard, set on the desktop widget first: every item is actionable,
+ * every shape shows a FORMATTED tooltip built from values already on the page,
+ * and the copy is plain. Copy below is the owner's approved table, typed here by
+ * hand on purpose -- a test that read the strings back out of the client would
+ * pass whatever the client said.
+ */
+
+const hover = (node, x = 40, y = 50) => node.dispatchEvent({ type: "mouseenter", clientX: x, clientY: y });
+const unhover = (node) => node.dispatchEvent({ type: "mouseleave" });
+const tipBox = (app) => byClass(app, "tip")[0] || null;
+
+const APPROVED_MEANING = {
+  "propagated": "Downstream updated to match",
+  "no-change-needed": "Checked: the downstream is still right",
+  "source-corrected": "Source was wrong and is now fixed",
+  "both-reconciled": "Both changed and now agree",
+  "decoupled": "Not related: remove the link",
+  "deferred": "Later: park it with a reason",
+  "wontfix": "Accepted: it stays different (reason needed)",
+  "baselined": "First check: accept today as the start (reason needed)",
+};
+
+test("every verdict button shows its one-line meaning beneath it (approved copy)", async () => {
+  const m = await mount({ hash: "#/judge?state=DRIFTED" });
+  const opts = byClass(m.app, "vopt");
+  assert.equal(opts.length, ALLOWED.length, "one option per allowed verdict; a floor so a silent scan cannot pass");
+  for (const o of opts) {
+    // The name is the longest approved key the button's text starts with (a key cap such as `n` follows it).
+    const label = textOf(byTag(o, "button")[0]).trim();
+    const name = Object.keys(APPROVED_MEANING).filter((k) => label.startsWith(k)).sort((a, b) => b.length - a.length)[0];
+    assert.ok(name, `no approved sentence for the button ${JSON.stringify(label)}`);
+    assert.equal(textOf(byClass(o, "vmean")[0]), APPROVED_MEANING[name], `${name}: the sentence under its button`);
+  }
+  // both-reconciled is only offered on a both-sides-moved edge, so look there too.
+  const d = await mount({ hash: "#/judge?chip=both" });
+  assert.equal(textOf(byClass(d.app, "vmean")[0]), APPROVED_MEANING["both-reconciled"]);
+});
+
+test("the header says links and file pairs, and a row says workspaces and times (approved copy)", async () => {
+  const inbox = inboxOf({ ready: [
+    edge("x", "DRIFTED", { boundary: "crosses the line", judgedCount: 1, noiseRatio: 0.8 }),
+    edge("y", "DRIFTED", { boundary: "crosses the line", judgedCount: 5, noiseRatio: 0.8, node_id: "propagate:other.mjs" }),
+  ], blocked: [], parked: [] });
+  const m = await mount({ hash: "#/judge", inbox });
+  assert.equal(textOf(byClass(m.app, "sum")[0]), "500 links between files · 1010 file pairs checked");
+  const metas = byClass(m.app, "item").map((r) => textOf(byClass(r, "meta")[0]));
+  assert.ok(metas.includes("crosses workspaces · judged 1 time · usually nothing to change"), `singular: ${JSON.stringify(metas)}`);
+  assert.ok(metas.includes("crosses workspaces · judged 5 times · usually nothing to change"), `plural: ${JSON.stringify(metas)}`);
+  assert.doesNotMatch(textOf(m.app), /declared|expanded|crosses the line|mostly no-op|judged \dx/);
+});
+
+test("Registers renders markdown as elements: bold is bold, no literal asterisks, and HTML stays text", async () => {
+  const reg = { error: null, issues: [], handovers: [],
+    todos: [
+      { kind: "todo", short: "state/workspace/TODOS.md", line: 488, priority: 0, text: "**TM-032 — Re-run /plan-eng-review** (P0, blocks impl) with `utm_source=x` and a stray ** marker" },
+      { kind: "todo", short: "k/TODOS.md", line: 3, priority: 1, text: "<img src=x onerror=alert(1)> **P1-1** later" },
+      { kind: "todo", short: "k/TODOS.md", line: 4, priority: null, id: "N1", text: "no priority here" },
+    ] };
+  const m = await mount({ hash: "#/registers", routes: { "/api/registers": reg } });
+  const d = detail(m.app);
+  assert.doesNotMatch(textOf(d), /\*\*/, "a literal ** reached the page");
+  const bold = byTag(d, "b").map(textOf);
+  assert.ok(bold.includes("TM-032 — Re-run /plan-eng-review"), `bold segments: ${JSON.stringify(bold)}`);
+  assert.ok(byClass(d, "mono").some((n) => textOf(n) === "utm_source=x"), "a code span renders as code");
+  assert.equal(byTag(m.app, "img").length, 0, "register text is never injected as HTML");
+  assert.match(textOf(d), /<img src=x onerror=alert\(1\)>/, "the hostile text is shown as text");
+  const badges = byClass(d, "sitem").map((r) => textOf(byClass(r, "badge")[0]));
+  assert.deepEqual(badges, ["P0", "P1", "N1"], "P0 is a priority, not a dot");
+  assert.match(textOf(byClass(d, "shead")[0]), /priority/, "the column is named");
+});
+
+test("Health puts 'no action mapped' in its own block, apart from the detail text", async () => {
+  const m = await mount({ hash: "#/health", routes: { "/api/health": HEALTH } });
+  const none = byClass(m.app, "none-mapped");
+  assert.equal(none.length, 1, "the one unmapped fail row");
+  assert.equal(none[0].localName, "div", "a span here runs on from the detail: '...path(s))no action mapped'");
+  assert.equal(textOf(none[0]), "no action mapped");
+  const detailNode = byClass(none[0].parentNode, "meta").find((n) => n !== none[0]);
+  assert.ok(detailNode && /1 empty/.test(textOf(detailNode)), "the detail is a sibling element, not text in the same node");
+});
+
+test("Activity has a day axis, and the sparkline says what its dashed line is", async () => {
+  const m = await mount({ hash: "#/activity" });
+  const ticks = byClass(m.app, "vtick").map(textOf);
+  assert.equal(ticks.length, 3, "one cell per day column so the labels line up with the bars");
+  assert.deepEqual(ticks, ["13 Oct", "14 Oct", "15 Oct"]);
+  const notes = byClass(m.app, "axnote").map(textOf).join("|");
+  assert.match(notes, /dashed line: max 5\/day/, "the scale carries a unit and sits outside the plot");
+  assert.match(notes, /13 Oct.*15 Oct/, "the window's first and last day");
+  assert.equal(byTag(m.app, "text").filter((t) => textOf(t) === "5").length, 0, "no bare number floating in the svg");
+  const { ui } = m;
+  const t30 = fromRealm(ui.axisTicks(30));
+  assert.ok(t30[0] === 0 && t30[t30.length - 1] === 29, "first and last day always labelled");
+  assert.ok(t30.length <= 7, `30 days must not carry 30 labels: ${t30.length}`);
+  assert.deepEqual(fromRealm(ui.axisTicks(0)), []);
+  assert.deepEqual(fromRealm(ui.axisTicks(1)), [0]);
+});
+
+test("tipText: every kind answers in words, and zero, empty and garbage never print NaN or undefined", async () => {
+  const { ui } = await mount();
+  const T = (k, v) => fromRealm(ui.tipText(k, v));
+  assert.deepEqual(T("verdicts", { day: "2026-10-14", total: 0, changed: 0, noChange: 0 }),
+    { title: "Wed 14 Oct", lines: ["no verdicts recorded", "click to open Judge"] }, "an empty day is a sentence, not '0 verdicts'");
+  assert.deepEqual(T("verdicts", { day: "2026-10-13", total: 4, changed: 1, noChange: 3 }),
+    { title: "Tue 13 Oct", lines: ["4 verdicts", "1 changed something · 3 no change needed", "click to open Judge"] });
+  assert.deepEqual(T("verdicts", { day: "2026-10-13", total: 1, changed: 1, noChange: 0 }).lines[0], "1 verdict");
+  assert.deepEqual(T("runs", { day: "2026-10-14", count: 0 }), { title: "Wed 14 Oct", lines: ["no commands run"] });
+  assert.deepEqual(T("command", { command: "status", count: 6, total: 9 }),
+    { title: "status", lines: ["6 runs", "67% of 9 interactive runs", "click to copy: propagate status"] });
+  const noTotal = T("command", { command: "x", count: 0, total: 0 });
+  assert.deepEqual(noTotal.lines, ["0 runs", "click to copy: propagate x"], "a zero total drops the share rather than dividing");
+  assert.deepEqual(T("bucket", { label: "baselineable now", value: 3, total: 10 }).lines, ["3 edges", "30% of 10 never verified"]);
+  assert.deepEqual(T("root", { source: "a", downstream: "b", freesNow: 2, upstreamOf: 5, inQueue: true }).lines,
+    ["frees 2 now", "upstream of 5", "click to judge this root"]);
+  assert.match(T("root", { source: "a", downstream: "b", freesNow: 0, upstreamOf: 0, inQueue: false }).lines[2], /copy the command/);
+  assert.deepEqual(T("health", { label: "L", section: "State", tag: "fail", action: null }).lines, ["State", "failing check", "no action mapped"]);
+  assert.match(T("health", { label: "L", section: "State", tag: "fail", action: { kind: "command", target: "do it" } }).lines[2], /next step: do it/);
+  assert.equal(T("register", { id: "TM-1", short: "f.md", line: 3, priority: 0 }).lines[0], "priority P0 · f.md · line 3");
+  // garbage in: still no NaN / undefined, and an unknown kind or a missing value is null, never a guess.
+  for (const [k, v] of [["verdicts", { day: "nonsense", total: NaN, changed: undefined, noChange: null }], ["runs", { count: NaN }], ["command", { command: "c", count: NaN, total: NaN }]]) {
+    assert.doesNotMatch(JSON.stringify(T(k, v)), /NaN|undefined|null/, `${k}: ${JSON.stringify(T(k, v))}`);
+  }
+  assert.equal(ui.tipText("verdicts", null), null);
+  assert.equal(ui.tipText("no-such-kind", { a: 1 }), null);
+});
+
+test("tipPlace keeps the tooltip inside the viewport by flipping, and never off the top-left", async () => {
+  const { ui } = await mount();
+  const roomy = fromRealm(ui.tipPlace(100, 100, 1200, 800));
+  assert.ok(roomy.left > 100 && roomy.top > 100, "below and right of the pointer when there is room");
+  const edge = fromRealm(ui.tipPlace(1190, 790, 1200, 800));
+  assert.ok(edge.left < 1190 && edge.top < 790, `flipped left and up at the bottom-right corner: ${JSON.stringify(edge)}`);
+  assert.ok(edge.left + 264 <= 1200 && edge.top + 112 <= 800, "and fully inside");
+  const tiny = fromRealm(ui.tipPlace(2, 2, 100, 60));
+  assert.ok(tiny.left >= 8 && tiny.top >= 8, "clamped, never negative");
+  const bad = fromRealm(ui.tipPlace(NaN, undefined, 0, NaN));
+  assert.ok(Number.isFinite(bad.left) && Number.isFinite(bad.top), "a pointer with no coordinates still places the box");
+});
+
+test("hovering a verdict column, EMPTY days included, shows a formatted tooltip, and leaving hides it", async () => {
+  const m = await mount({ hash: "#/activity" });
+  assert.equal(tipBox(m.app), null, "no tooltip until something is hovered");
+  const cols = byClass(m.app, "vcol");
+  hover(cols[0]);
+  await m.settle();
+  assert.match(textOf(tipBox(m.app)), /Tue 13 Oct.*4 verdicts.*1 changed something · 3 no change needed.*click to open Judge/);
+  assert.equal(tipBox(m.app).getAttribute("role"), "tooltip");
+  unhover(cols[0]);
+  await m.settle();
+  assert.equal(tipBox(m.app), null, "gone on leave");
+  hover(cols[1]);   // the empty day: a 2px stub, but the column is the hit area
+  await m.settle();
+  assert.match(textOf(tipBox(m.app)), /Wed 14 Oct.*no verdicts recorded/);
+});
+
+test("every sparkline reading has a hit circle with its own tooltip, a zero day included", async () => {
+  const m = await mount({ hash: "#/activity" });
+  const hits = byClass(m.app, "hit");
+  assert.equal(hits.length, 3, "one per day reading");
+  hover(hits[1]);
+  await m.settle();
+  assert.match(textOf(tipBox(m.app)), /Wed 14 Oct.*no commands run/);
+  hover(hits[2]);
+  await m.settle();
+  assert.match(textOf(tipBox(m.app)), /Thu 15 Oct.*5 commands run/);
+});
+
+test("a command row shows its tooltip, and clicking it copies `propagate <command>`", async () => {
+  // Real timers: the 1.5s "copied" flash would be sped up to 15ms and gone before it could be read.
+  const m = await mount({ hash: "#/activity", speedUp: false });
+  const wrote = [];
+  m.ctx.navigator = { clipboard: { writeText: (t) => { wrote.push(t); return Promise.resolve(); } } };
+  const picks = byClass(m.app, "pick").filter((n) => /\bbar\b/.test(n.getAttribute("class")));
+  assert.equal(picks.length, 2, "one clickable row per top command");
+  hover(picks[0]);
+  await m.settle();
+  assert.match(textOf(tipBox(m.app)), /status.*6 runs.*67% of 9 interactive runs.*click to copy: propagate status/);
+  click(picks[0]);
+  for (let i = 0; i < 40 && !/copied/.test(textOf(byClass(picks[0], "bar-v")[0])); i++) await sleep(10);
+  assert.deepEqual(wrote, ["propagate status"]);
+  assert.match(textOf(byClass(picks[0], "bar-v")[0]), /copied/, "the row says so");
+});
+
+test("clicking a verdict day column opens Judge", async () => {
+  const m = await mount({ hash: "#/activity" });
+  click(byClass(m.app, "vcol")[0]);
+  await m.settle();
+  assert.equal(m.ctx.location.hash, "#/judge");
+});
+
+test("Unblock, Health and Registers rows each carry a tooltip built from what the row shows", async () => {
+  const u = await mount({ hash: "#/unblock" });
+  const root = byClass(u.app, "root")[0];
+  hover(root);
+  await u.settle();
+  assert.match(textOf(tipBox(u.app)), /frees \d+ now/);
+  const h = await mount({ hash: "#/health", routes: { "/api/health": HEALTH } });
+  const hr = byClass(h.app, "hrow").find((r) => /workspaces conform/.test(textOf(r)));
+  hover(hr);
+  await h.settle();
+  assert.match(textOf(tipBox(h.app)), /workspaces conform.*State.*failing check.*no action mapped/);
+  const reg = { error: null, issues: [], handovers: [], todos: [{ kind: "todo", short: "k/TODOS.md", line: 3, text: "do it", priority: 2, id: "T-9" }] };
+  const r = await mount({ hash: "#/registers", routes: { "/api/registers": reg } });
+  hover(byClass(r.app, "sitem")[0]);
+  await r.settle();
+  assert.match(textOf(tipBox(r.app)), /T-9.*priority P2 · k\/TODOS\.md · line 3/);
+});
+
+test("NO native title= attribute is left in any rendered view: every hint is the one tooltip", async () => {
+  const views = { "#/judge": {}, "#/unblock": {}, "#/health": { "/api/health": HEALTH }, "#/activity": {},
+    "#/registers": { "/api/registers": { error: null, issues: [], todos: [{ kind: "todo", short: "a", text: "t", priority: 1 }], handovers: [] } },
+    "#/reminders": { "/api/conflicts": { ok: true, rows: [], summary: { total: 0 }, list: "L" } },
+    "#/graph": { "/graph": rawText(200, "<html>g</html>") } };
+  let seen = 0;
+  for (const [hash, routes] of Object.entries(views)) {
+    const m = await mount({ hash, routes });
+    const nodes = findAll(m.app, (n) => n.nodeType === 1);
+    seen += nodes.length;
+    assert.ok(nodes.length > 20, `${hash} rendered only ${nodes.length} nodes; the scan has gone blind`);
+    const titled = nodes.filter((n) => n.hasAttribute("title")).map((n) => n.localName + "." + n.getAttribute("class"));
+    assert.deepEqual(titled, [], `${hash} still carries a native title=`);
+  }
+  assert.ok(seen > 200);
+  // and the hints that used to be titles now live on the tooltip: the refresh button, in every view.
+  const m = await mount({ hash: "#/judge" });
+  hover(btnText(m.app, /^refresh$/));
+  await m.settle();
+  assert.match(textOf(tipBox(m.app)), /Refresh.*re-read this view and the counts/);
+});
+
+test("a Reminders timeout is a plain sentence with a Retry that re-reads; other failures keep the server's words", async () => {
+  const m = await mount({ hash: "#/reminders", routes: { "/api/conflicts": { ok: false, reason: "osascript timed out after 3000ms reading list Inbox" } } });
+  const t = textOf(detail(m.app));
+  assert.match(t, /Reminders did not answer in 3s\. Open Reminders once and allow access, then Retry\./);
+  assert.doesNotMatch(textOf(byClass(m.app, "banner")[0]), /osascript/, "the tool's own words are not the headline");
+  const before = m.fetches.filter((f) => f.path === "/api/conflicts").length;
+  click(btnText(byClass(m.app, "banner")[0], /^Retry$/));
+  await m.settle();
+  assert.equal(m.fetches.filter((f) => f.path === "/api/conflicts").length, before + 1, "Retry re-reads the list");
+  assert.equal(m.ui.remindersTimeoutText("EACCES: not allowed"), null);
+});
+
+/* ══ The Overview dashboard (2026-10-16, plan ticklish-gathering-brook, Part 5, Lane E) ══════
+   Built from the approved prototype. Charts are Observable Plot, vendored; the headless suite
+   has NO Plot, which is exactly the "library did not load" path, so most of this proves the
+   KPIs and the table stand on their own. The chart contract (what is drawn, which datum a
+   shape belongs to, where a click goes) is tested on pure functions and on a recording Plot. */
+
+const AGO = (days) => new Date(Date.now() - days * 864e5).toISOString();
+const SRC_A = "/u/Documents/GitHub/WS1/alpha.md";
+const SRC_B = "/u/Documents/GitHub/WS1/beta.md";
+const SRC_C = "/u/Documents/GitHub/WS2/gamma.md";
+const ovEdge = (id, state, source, boundary, over = {}) => edge(id, state, {
+  source, sourceShort: source.split("/Documents/GitHub/")[1], boundary, ...over,
+});
+// x1 40d, x2 2d, x3 never (DIVERGED), x4 today, x5 10d (BLOCKED on x3), x6 3d.
+const OV_READY = [
+  ovEdge("x1", "DRIFTED", SRC_A, "WS1", { orderIndex: 0, last: { ts: AGO(40) } }),
+  ovEdge("x2", "REVERSED", SRC_A, "WS1", { orderIndex: 1, last: { ts: AGO(2) } }),
+  ovEdge("x3", "DIVERGED", SRC_A, "WS1", { orderIndex: 2 }),
+  ovEdge("x4", "DRIFTED", SRC_B, "crosses the line", { orderIndex: 3, last: { ts: AGO(0) } }),
+  ovEdge("x6", "UNMATCHED", SRC_C, "WS2", { orderIndex: 5, last: { ts: AGO(3) } }),
+];
+const OV_BLOCKED = [
+  ovEdge("x5", "DRIFTED", SRC_B, "crosses the line", { orderIndex: 4, blocked: true, last: { ts: AGO(10) },
+    blockedBy: [{ edge_id: "x3", from: SRC_A, to: "/u/Documents/GitHub/propagate/commands/x3.mjs", state: "DIVERGED" }] }),
+];
+const OV_INBOX = inboxOf({ ready: OV_READY, blocked: OV_BLOCKED, parked: [] });
+const TODAY = new Date().toLocaleDateString("en-CA");   // YYYY-MM-DD, local: derived without the client's own localDay
+const OV_SURFACE = { ...SURFACE, velocity: { status: "ok", reason: null, windowDays: 2, events: 5, noChangeEvents: 3,
+  days: [{ day: "2020-01-01", total: 1, noChange: 1, changed: 0 }, { day: TODAY, total: 4, noChange: 3, changed: 1 }] } };
+const mountOv = (opts = {}) => mount({ hash: "#/overview", inbox: OV_INBOX, ...opts,
+  routes: { "/api/surface": OV_SURFACE, "/api/health": HEALTH, ...(opts.routes || {}) } });
+const kpiCards = (app) => byClass(app, "kpi").filter((k) => /\bpick\b/.test(k.getAttribute("class")));
+const srcRows = (app) => findAll(app, (n) => n.nodeType === 1 && n.localName === "tr" && /\bpick\b/.test(n.getAttribute("class") || ""));
+const srcNames = (app) => srcRows(app).map((r) => textOf(byClass(r, "nm")[0]));
+const th = (app, re) => byTag(app, "th").find((t) => re.test(textOf(t)));
+
+test("an empty hash opens the Overview, which is the rail's first item; an unknown hash still opens Judge", async () => {
+  const m = await mountOv({ hash: "" });
+  const on = byClass(m.app, "div").filter((b) => b.getAttribute("aria-current") === "page");
+  assert.equal(on.length, 1);
+  assert.match(textOf(on[0]), /OVERVIEW/);
+  assert.match(textOf(byClass(m.app, "div")[0]), /OVERVIEW/, "Overview must be the FIRST rail item");
+  assert.equal(m.ui.parseHash("").view, "overview");
+  assert.equal(m.ui.parseHash("#").view, "overview");
+  assert.equal(m.ui.parseHash("#/overview").view, "overview");
+  assert.equal(m.ui.parseHash("#/nonsense").view, "judge", "an unknown name is still Judge, never a blank page");
+  // The new filter params: an age band is one of the five keys or nothing; ws/source are taken as written.
+  const p = (h) => fromRealm(m.ui.parseHash(h));
+  assert.equal(p("#/judge?age=gt4w").age, "gt4w");
+  assert.equal(p("#/judge?age=forever").age, null, "a band it does not know must parse to null, not pass through");
+  assert.equal(p("#/judge?age=%3E4w").age, null, "the raw label is not a key: keys are url-safe on purpose");
+  assert.deepEqual([p("#/judge?ws=WS%201&source=%2Fa%2Fb.md").ws, p("#/judge?ws=WS%201&source=%2Fa%2Fb.md").source], ["WS 1", "/a/b.md"]);
+  assert.equal(p("#/judge?ws=%E0%A4%A").ws, null, "a malformed escape is no filter, never a throw");
+});
+
+test("the Overview renders its five KPIs and the sources table from the fixture, with NO chart library", async () => {
+  const m = await mountOv();
+  assert.equal(m.ui.plotUnavailable(), "the chart library did not load", "this suite must be running without Plot, or the test proves nothing");
+  const k = kpiCards(m.app).map(textOf);
+  assert.equal(k.length, 5, "five KPI cards");
+  assert.equal(k[0], "To judge" + OV_INBOX.worklist.toJudge + "of 6 edges in the queue, from 3 source files");
+  assert.match(k[1], new RegExp("Blocked\\s*" + OV_INBOX.leverage.blocked + "waiting on an upstream edge"));
+  assert.match(k[2], /Oldest wait\s*40 d/);
+  assert.match(k[3], /Judged today\s*4/);
+  assert.match(k[4], /Health\s*2 fail/);
+  // The charts degrade to a sentence that NAMES the cause; none is blank, none throws.
+  const lines = byClass(m.app, "reason").map(textOf).filter((t) => /chart unavailable/.test(t));
+  assert.equal(lines.length, 3, "all three charts say so");
+  for (const t of lines) assert.match(t, /chart unavailable — the chart library did not load/);
+  // The table stands on its own.
+  assert.deepEqual(srcNames(m.app), ["alpha.md", "beta.md", "gamma.md"], "ordered by edges, then oldest");
+  const tds = (r) => byTag(r, "td").map(textOf);
+  const [a, b, c] = srcRows(m.app).map(tds);
+  assert.equal(a[1], "3"); assert.equal(a[3], "0", "a source with nothing blocked shows 0, NOT a dot");
+  assert.equal(b[3], "1"); assert.equal(c[3], "0");
+  assert.equal(a[4], "40 d"); assert.equal(b[4], "10 d");
+  assert.match(textOf(byClass(m.app, "go")[0]), /all 3 sources/);
+  assert.deepEqual(m.unstubbed, []);
+});
+
+test("each KPI card routes where Part 5 says, and Oldest wait opens the age band the oldest edge is in", async () => {
+  const want = ["#/judge", "#/unblock", "#/judge?age=gt4w", "#/activity", "#/health"];
+  const m = await mountOv();
+  for (let i = 0; i < want.length; i++) {
+    m.setHash("#/overview"); await m.settle();
+    click(kpiCards(m.app)[i]); await m.settle();
+    assert.equal(m.ctx.location.hash, want[i], `KPI ${i} went to the wrong place`);
+  }
+  // Pure: the same mapping without a render, including the case the card is NOT flagged.
+  assert.equal(m.ui.routeForKpi("oldest", { oldest: 5 }), "judge?age=1to7d", "an unflagged card must not open an empty > 4 weeks list");
+  assert.equal(m.ui.routeForKpi("oldest", { oldest: null }), "judge");
+  assert.equal(m.ui.routeForKpi("nope", {}), null);
+});
+
+test("a KPI whose figure is unknown says so: Judged today and Health are never a silent zero", async () => {
+  const bad = { ...SURFACE, velocity: { status: "unavailable", reason: "no event store", days: [] } };
+  const m = await mountOv({ routes: { "/api/surface": bad, "/api/health": respond(500, { error: "doctor missing" }) } });
+  const k = kpiCards(m.app).map(textOf);
+  assert.match(k[3], /Judged today\s*unknownno event store/);
+  assert.match(k[4], /Health\s*…doctor's snapshot could not be read/);
+});
+
+test("the sources table sorts by a clicked header, flips on a second click, and says which way (aria-sort)", async () => {
+  const m = await mountOv();
+  assert.equal(th(m.app, /^edges/).getAttribute("aria-sort"), "descending");
+  click(th(m.app, /^blocked/)); await m.settle();
+  assert.deepEqual(srcNames(m.app), ["beta.md", "alpha.md", "gamma.md"], "blocked desc: beta (1) first, ties by source path");
+  assert.equal(th(m.app, /^blocked/).getAttribute("aria-sort"), "descending");
+  assert.equal(th(m.app, /^edges/).getAttribute("aria-sort"), "none");
+  click(th(m.app, /^blocked/)); await m.settle();
+  assert.deepEqual(srcNames(m.app), ["alpha.md", "gamma.md", "beta.md"], "second click reverses");
+  click(th(m.app, /^source/)); await m.settle();
+  assert.deepEqual(srcNames(m.app), ["alpha.md", "beta.md", "gamma.md"], "source sorts A to Z first");
+  click(th(m.app, /^oldest/)); await m.settle();
+  assert.deepEqual(srcNames(m.app), ["alpha.md", "beta.md", "gamma.md"], "oldest desc: 40, 10, 3");
+  // 'what moved' is a bar, not a sortable column.
+  assert.equal(th(m.app, /what moved/).getAttribute("aria-sort"), null);
+});
+
+test("a source row opens Judge on exactly that source; 'all N sources' opens Judge unfiltered", async () => {
+  const m = await mountOv();
+  click(srcRows(m.app)[1]); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/judge?source=" + encodeURIComponent(SRC_B));
+  // It landed: the Judge list shows only that source's judgeable edge, under a clearable control.
+  assert.deepEqual(itemTitles(m.app).map((t) => t.replace(/ new$/, "")), ["WS1/beta.md → propagate/commands/x4.mjs"], "only beta.md's judgeable edge (x5 is blocked)");
+  assert.match(textOf(byClass(m.app, "filt")[0]), /only beta\.md/);
+  m.setHash("#/overview"); await m.settle();
+  click(byClass(m.app, "go")[0]); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/judge");
+  assert.equal(byClass(m.app, "filt").length, 0, "no filter rides along");
+});
+
+/* -- Judge filters ---------------------------------------------------------- */
+
+const itemTitles = (app) => byClass(app, "item").map((r) => textOf(byClass(r, "ttl")[0]));
+
+test("?ws= narrows Judge to one workspace, shows a clearable 'only ...' control, and clearing restores the list", async () => {
+  const m = await mount({ hash: "#/judge?ws=WS1", inbox: OV_INBOX });
+  assert.deepEqual(itemTitles(m.app).map((t) => t.replace(/ new$/, "")).sort(), ["WS1/alpha.md → propagate/commands/x1.mjs", "WS1/alpha.md → propagate/commands/x2.mjs"]);
+  const filt = byClass(m.app, "filt");
+  assert.equal(filt.length, 1);
+  assert.match(textOf(filt[0]), /only WS1\s*2/);
+  assert.match(filt[0].getAttribute("aria-label"), /clear the workspace filter/);
+  click(filt[0]); await m.settle();
+  assert.equal(byClass(m.app, "filt").length, 0);
+  assert.equal(byClass(m.app, "item").length, OV_INBOX.worklist.toJudge, "cleared: the whole To-judge queue is back");
+});
+
+test("?ws=crosses workspaces matches the label the chart printed, not the server's 'crosses the line'", async () => {
+  const m = await mount({ hash: "#/judge?ws=" + encodeURIComponent("crosses workspaces"), inbox: OV_INBOX });
+  assert.equal(byClass(m.app, "item").length, 1, "x4 only: x5 is the same boundary but BLOCKED, so Judge never lists it");
+  assert.match(textOf(byClass(m.app, "filt")[0]), /only crosses workspaces/);
+});
+
+test("?age= keeps only that waiting band, and an unknown band is ignored rather than emptying the list", async () => {
+  const m = await mount({ hash: "#/judge?age=gt4w", inbox: OV_INBOX });
+  assert.equal(byClass(m.app, "item").length, 1, "only x1 (40 days) waited more than four weeks");
+  assert.match(textOf(byClass(m.app, "filt")[0]), /only waited > 4 weeks/);
+  const lt = await mount({ hash: "#/judge?age=lt1d", inbox: OV_INBOX });
+  assert.equal(byClass(lt.app, "item").length, 1, "only x4 was judged today");
+  const bad = await mount({ hash: "#/judge?age=forever", inbox: OV_INBOX });
+  assert.equal(byClass(bad.app, "filt").length, 0, "a bucket key it does not know must not filter");
+  assert.equal(byClass(bad.app, "item").length, OV_INBOX.worklist.toJudge);
+});
+
+test("?source= is an EXACT path, offers 'select all N', and ticking them gives the bulk panel the whole set", async () => {
+  const m = await mount({ hash: "#/judge?source=" + encodeURIComponent(SRC_A), inbox: OV_INBOX });
+  assert.equal(byClass(m.app, "item").length, 2, "x1 and x2; x3 is DIVERGED and lives under its own chip");
+  assert.match(textOf(byClass(m.app, "filt")[0]), /only alpha\.md\s*2/);
+  const all = btnText(m.app, /select all 2/);
+  assert.ok(all, "no 'select all N' offered with a source chosen");
+  click(all); await m.settle();
+  assert.equal(ticks(m.app).filter((t) => t.checked).length, 2);
+  assert.match(textOf(detail(m.app)), /2 edges ticked/);
+  assert.equal(btnText(m.app, /select all/), undefined, "once everything is ticked the offer goes away");
+  // A different file with the same basename elsewhere must NOT match: the source is the full path.
+  const other = await mount({ hash: "#/judge?source=" + encodeURIComponent("/elsewhere/alpha.md"), inbox: OV_INBOX });
+  assert.equal(byClass(other.app, "item").length, 0);
+  assert.match(textOf(byClass(other.app, "empty")[0]), /Nothing matches this filter/, "a filtered-empty list must not read as an empty queue");
+});
+
+test("ws, age, source and state COMBINE, each with its own control, and the chip counts follow the filters", async () => {
+  const m = await mount({ hash: "#/judge?state=REVERSED&ws=WS1&source=" + encodeURIComponent(SRC_A) + "&age=1to7d", inbox: OV_INBOX });
+  assert.equal(byClass(m.app, "item").length, 1, "x2 is the only REVERSED, WS1, alpha.md, 1-7 day edge");
+  assert.equal(byClass(m.app, "filt").length, 4, "state + ws + age + source");
+  const toJudgeChip = byClass(m.app, "chip").find((c) => /To judge/.test(textOf(c)));
+  assert.match(textOf(toJudgeChip), /To judge\s*1/, "the chip count must agree with the list under the filters");
+  // Clearing one leaves the other three.
+  click(byClass(m.app, "filt").find((f) => /only alpha/.test(textOf(f)))); await m.settle();
+  assert.equal(byClass(m.app, "filt").length, 3);
+});
+
+test("the filters also narrow the Both-sides-moved chip (a DIVERGED bar opens it with ws=)", async () => {
+  const m = await mount({ hash: "#/judge?ws=WS1&chip=both", inbox: OV_INBOX });
+  assert.equal(byClass(m.app, "item").length, 1, "x3");
+  const none = await mount({ hash: "#/judge?ws=WS2&chip=both", inbox: OV_INBOX });
+  assert.equal(byClass(none.app, "item").length, 0);
+});
+
+/* -- chart data, routing and wiring: pure, no browser ------------------------ */
+
+test("routeForBar: every chart datum maps to ONE destination, and a datum it cannot route maps to null", async () => {
+  const { ui } = await mountOv();
+  const r = ui.routeForBar;
+  assert.equal(r("queue", { ws: "WS1", state: "DRIFTED" }), "judge?ws=WS1&state=DRIFTED");
+  assert.equal(r("queue", { ws: "crosses workspaces", state: "UNMATCHED" }), "judge?ws=crosses%20workspaces&state=UNMATCHED");
+  assert.equal(r("queue", { ws: "WS1", state: "DIVERGED" }), "judge?ws=WS1&chip=both", "a diverged edge is never under To judge, so state= would open an empty list");
+  assert.equal(r("queue", { ws: "a&b=c", state: "REVERSED" }), "judge?ws=a%26b%3Dc&state=REVERSED", "an ampersand in a name must not split the query");
+  assert.equal(r("queue", { ws: "WS1", state: "SOMETHING_ELSE" }), "judge?ws=WS1");
+  assert.equal(r("queue", { state: "DRIFTED" }), null, "no workspace, no destination");
+  assert.equal(r("wait", { bucket: "gt4w" }), "judge?age=gt4w");
+  assert.equal(r("wait", { bucket: "yesterday" }), null);
+  assert.equal(r("verdicts", { day: "2026-10-15" }), "activity");
+  assert.equal(r("pie", { ws: "WS1" }), null);
+  assert.equal(r("queue", null), null);
+  // Every route it emits is one parseHash reads back to the same filters (the round trip).
+  const back = fromRealm(ui.parseHash("#/" + r("queue", { ws: "a&b=c", state: "REVERSED" })));
+  assert.equal(back.view, "judge"); assert.equal(back.ws, "a&b=c"); assert.equal(back.state, "REVERSED");
+});
+
+test("queueBars / waitBars / verdictBars aggregate by key and keep the total honest", async () => {
+  const { ui } = await mountOv();
+  const model = fromRealm(ui.overviewModel(fromRealm(OV_INBOX), Date.now()));
+  assert.equal(model.edges, 6);
+  const q = fromRealm(ui.queueBars(model.rows));
+  assert.deepEqual(q.order, ["WS1", "crosses workspaces", "WS2"], "workspaces by edges waiting, then name");
+  assert.equal(q.bars.reduce((n, b) => n + b.n, 0), 6, "no edge lost or doubled by the aggregation");
+  assert.equal(new Set(q.bars.map((b) => b.key)).size, q.bars.length, "keys are unique: they are how a drawn shape finds its datum");
+  const w = fromRealm(ui.waitBars(model.rows));
+  assert.equal(w.reduce((n, b) => n + b.n, 0), 6);
+  assert.deepEqual(w.map((b) => b.bucket).filter((v, i, a) => a.indexOf(v) === i), ["lt1d", "1to7d", "1to4w", "gt4w", "never"], "buckets in age order");
+  assert.equal(w.find((b) => b.bucket === "never").n, 1, "x3 was never judged and is its own band, not '< 1 day'");
+  const v = fromRealm(ui.verdictBars(fromRealm(OV_SURFACE.velocity)));
+  assert.equal(v.length, 4, "two kinds per day");
+  assert.equal(v.filter((b) => b.day === TODAY).map((b) => b.n).join(), "1,3");
+  assert.deepEqual(fromRealm(ui.verdictBars({ status: "unavailable", days: [{ day: "x", total: 1 }] })), [], "an unavailable series draws nothing, not a flat line");
+});
+
+test("the age bucket edges: 0 and 6 and 27 and 28 days, and null is its own band", async () => {
+  const { ui } = await mountOv();
+  assert.deepEqual([0, 0.9, 1, 6, 7, 27, 28, 400, null, undefined, NaN].map(ui.ageKey),
+    ["lt1d", "lt1d", "1to7d", "1to7d", "1to4w", "1to4w", "gt4w", "gt4w", "never", "never", "never"]);
+  const now = Date.parse("2026-10-16T12:00:00Z");
+  assert.equal(ui.ageDaysOf({ last: { ts: "2026-10-15T11:00:00Z" } }, now), 1);
+  assert.equal(ui.ageDaysOf({ ageDays: 20 }, now), 20, "a parked row's own age is used, not 'never judged'");
+  assert.equal(ui.ageDaysOf({ last: { ts: "garbage" } }, now), null);
+  assert.equal(ui.ageDaysOf({ last: { ts: "2027-01-01T00:00:00Z" } }, now), 0, "a clock-skewed future timestamp is 0 days, never negative");
+});
+
+// A recording stand-in for Plot: it hands back what the mark options say, so the CONTRACT
+// (which fields, which colours, what each shape is labelled with) is asserted without a browser.
+function fakePlot(doc, log = {}) {
+  const mark = (kind) => (data, o) => ({ kind, data, o });
+  return {
+    plot(opts) {
+      log.opts = opts;
+      const svg = doc.createElement("svg");
+      const shapes = [];
+      for (const mk of opts.marks) {
+        if (!mk.data || !mk.o || typeof mk.o.ariaLabel !== "function") continue;
+        for (const d of mk.data) { const r = doc.createElement("rect"); r.setAttribute("aria-label", mk.o.ariaLabel(d)); svg.appendChild(r); shapes.push(r); }
+      }
+      svg.querySelectorAll = () => shapes;
+      log.shapes = shapes;
+      return svg;
+    },
+    barX: mark("barX"), barY: mark("barY"), ruleX: mark("ruleX"), ruleY: mark("ruleY"),
+  };
+}
+
+test("buildPlot: every colour is a TOKEN resolved at render, every shape is labelled with its datum key", async () => {
+  const m = await mountOv();
+  const asked = [];
+  const tok = (n) => { asked.push(n); return "TOK(" + n + ")"; };
+  const model = m.ui.overviewModel(OV_INBOX, Date.now());
+  const log = {};
+  const P = fakePlot(m.doc, log);
+  m.ui.buildPlot(P, "queue", m.ui.queueBars(model.rows), tok, 470);
+  assert.deepEqual([...log.opts.color.range], ["TOK(--edge-drift)", "TOK(--edge-reverse)", "TOK(--edge-diverge)", "TOK(--dim)"], "state colours come from the same tokens as the badges");
+  assert.deepEqual([...log.opts.color.domain], ["DRIFTED", "REVERSED", "DIVERGED", "UNMATCHED"]);
+  assert.equal(log.opts.style.color, "TOK(--fg)");
+  assert.equal(log.shapes.length, m.ui.queueBars(model.rows).bars.length);
+  const labels = fromRealm(log.shapes.map((s) => s.getAttribute("aria-label")));
+  assert.deepEqual(labels, fromRealm(m.ui.queueBars(model.rows).bars.map((b) => b.key)), "a shape's label is its datum's key");
+  m.ui.buildPlot(P, "verdicts", { bars: m.ui.verdictBars(OV_SURFACE.velocity) }, tok, 360);
+  assert.deepEqual([...log.opts.color.range], ["TOK(--st-accent)", "TOK(--seg-quiet)"], "the quiet series is --seg-quiet, the token the dark-mode fix repaired");
+  // No literal colour anywhere in the options handed to the library.
+  assert.doesNotMatch(JSON.stringify(log.opts.color), /#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i);
+});
+
+test("wireChart: a click on a drawn shape goes where routeForBar says; a shape it cannot match is left alone and counted", async () => {
+  const m = await mountOv();
+  const model = m.ui.overviewModel(OV_INBOX, Date.now());
+  const q = m.ui.queueBars(model.rows);
+  const log = {};
+  const node = m.ui.buildPlot(fakePlot(m.doc, log), "queue", q, () => "c", 470);
+  const stray = m.doc.createElement("rect"); stray.setAttribute("aria-label", "bar");   // Plot's own group label
+  const all = [...log.shapes, stray];
+  node.querySelectorAll = () => all;
+  const went = [];
+  const wired = m.ui.wireChart(node, "queue", q.bars, (to) => went.push(to));
+  assert.equal(wired, q.bars.length, "every datum's shape wired, and Plot's own 'bar' group not");
+  assert.equal(stray.listeners.size, 0, "an unmatched element gets no handler");
+  const i = q.bars.findIndex((b) => b.state === "DIVERGED");
+  click(log.shapes[i]);
+  assert.deepEqual(went, [m.ui.routeForBar("queue", q.bars[i])]);
+  assert.match(went[0], /chip=both/);
+  // Hover reaches the page's one tooltip (a no-op here, no TipLayer mounted, but it must not throw).
+  assert.doesNotThrow(() => log.shapes[0].dispatchEvent({ type: "mouseenter", clientX: 5, clientY: 5 }));
+  assert.equal(m.ui.wireChart(null, "queue", q.bars, () => {}), 0, "no node: nothing wired, no throw");
+});
+
+test("tipText speaks for the new shapes in words, and never prints NaN or a bare zero", async () => {
+  const { ui } = await mountOv();
+  const t = (k, v) => fromRealm(ui.tipText(k, v));
+  assert.deepEqual(t("qbar", { ws: "WS1", state: "DIVERGED", n: 1, wsTotal: 4 }), { title: "WS1 · both sides moved", lines: ["1 edge", "25% of the 4 in WS1", "click to judge these"] });
+  assert.deepEqual(t("wbar", { bucket: "gt4w", state: "DRIFTED", n: 2 }), { title: "> 4 weeks · drifted", lines: ["2 edges", "click to open this age band in Judge"] });
+  assert.deepEqual(t("vbar", { day: "2026-10-13", kind: "no change needed", n: 0, total: 0 }), { title: "Tue 13 Oct · no change needed", lines: ["none recorded", "click to open Activity"] });
+  assert.match(JSON.stringify(t("source", { short: "WS1/a.md", edges: 3, blocked: 0, states: {}, oldest: -1 })), /never judged/);
+  for (const v of [{}, { n: undefined, wsTotal: NaN }]) assert.doesNotMatch(JSON.stringify(t("qbar", v)), /NaN|undefined/);
+});
+
+/* -- with a Plot that exists ---------------------------------------------------- */
+
+test("with Plot present the three charts draw, every shape is clickable, and the click navigates", async () => {
+  const m = await mountOv();
+  const log = [];
+  m.ctx.Plot = fakePlot(m.doc, {});
+  const real = m.ctx.Plot.plot;
+  m.ctx.Plot.plot = (o) => { const n = real(o); log.push({ o, n }); return n; };
+  m.setHash("#/overview"); await m.settle();
+  assert.equal(log.length >= 3, true, "the three charts were handed to the library");
+  assert.equal(byClass(m.app, "reason").filter((r) => /chart unavailable/.test(textOf(r))).length, 0);
+  assert.equal(byClass(m.app, "plot").length, 3);
+  // Click the first shape of the waiting-time histogram.
+  const wait = log.find((l) => l.o.marks.some((mk) => mk.o && mk.o.x === "label"));
+  const shape = wait.n.querySelectorAll()[0];
+  click(shape); await m.settle();
+  assert.match(m.ctx.location.hash, /^#\/judge\?age=(lt1d|1to7d|1to4w|gt4w|never)$/);
+});
+
+test("a Plot that THROWS never takes the view down: that chart says why, the KPIs and the table stay", async () => {
+  const m = await mountOv();
+  m.ctx.Plot = { plot() { throw new Error("boom: no svg"); }, barX() {}, barY() {}, ruleX() {}, ruleY() {} };
+  m.setHash("#/overview"); await m.settle();
+  const lines = byClass(m.app, "reason").map(textOf).filter((t) => /chart unavailable/.test(t));
+  assert.equal(lines.length, 3);
+  assert.ok(lines.every((t) => /boom: no svg/.test(t)), "the reason names the cause");
+  assert.equal(kpiCards(m.app).length, 5);
+  assert.equal(srcRows(m.app).length, 3);
+});
+
+test("a Plot that draws but matches no shapes says its hover and click are off, instead of pretending", async () => {
+  const m = await mountOv();
+  const P = fakePlot(m.doc, {});
+  const real = P.plot;
+  P.plot = (o) => { const n = real(o); n.querySelectorAll = () => []; return n; };
+  m.ctx.Plot = P;
+  m.setHash("#/overview"); await m.settle();
+  assert.equal(byClass(m.app, "cov").filter((c) => /hover and click are unavailable/.test(textOf(c))).length, 3);
+});
+
+test("Overview failure states have a voice: a failed inbox, and a failed worklist, are not an empty dashboard", async () => {
+  const bad = await mountOv({ routes: { "/api/inbox": respond(500, { error: "disk gone" }) } });
+  assert.match(textOf(byClass(bad.app, "banner")[0]), /the queue could not be read/);
+  const failed = inboxOf();
+  failed.divisions.worklist = { error: "ledger unreadable", ready: null, blocked: null };
+  const w = await mountOv({ inbox: failed });
+  assert.match(textOf(byClass(w.app, "banner")[0]), /ledger unreadable/);
+  assert.equal(kpiCards(w.app).length, 0, "no KPI is drawn over a worklist that could not be computed");
+  const empty = await mountOv({ inbox: inboxOf({ ready: [], blocked: [], parked: [] }) });
+  assert.match(textOf(byClass(empty.app, "empty")[0]), /Nothing waiting/);
+});
+
+test("a source whose edges are ALL blocked opens Unblock, never an empty Judge (live render 2026-10-16)", async () => {
+  const m = await mount({});
+  const r = (g) => m.ui.sourceRoute(g);
+  assert.equal(r({ source: "/u/a.md", edges: 14, blocked: 14 }), "unblock");
+  assert.equal(r({ source: "/u/a b.md", edges: 12, blocked: 0 }), "judge?source=%2Fu%2Fa%20b.md");
+  assert.equal(r({ source: "/u/c.md", edges: 7, blocked: 3 }), "judge?source=%2Fu%2Fc.md", "a partly blocked source still has edges to judge");
 });

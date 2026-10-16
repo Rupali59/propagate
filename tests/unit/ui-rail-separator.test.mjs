@@ -55,9 +55,11 @@ test("the rail separator is derived from the Explore flag, never from a position
 test("the derived boundary lands on the first Explore view, with every task view above it", () => {
   const d = divisions();
   const first = d.findIndex((x) => x.explore);
-  assert.equal(first, 4, `expected the first Explore view at 4, got ${first} (${d[first]?.key})`);
+  // 5 since 2026-10-16: Overview joined the task views above the boundary (Overview, then Judge,
+  // Unblock, Health, Activity). The separator is derived; this pin says which side each view is on.
+  assert.equal(first, 5, `expected the first Explore view at 5, got ${first} (${d[first]?.key})`);
   assert.equal(d[first].key, "registers");
-  assert.deepEqual(d.slice(0, first).map((x) => x.key), ["judge", "unblock", "health", "activity"]);
+  assert.deepEqual(d.slice(0, first).map((x) => x.key), ["overview", "judge", "unblock", "health", "activity"]);
   assert.ok(d.slice(0, first).every((x) => !x.explore), "a task view carries the Explore flag");
   assert.ok(d.slice(first).every((x) => x.explore), "an Explore view is missing the flag, so it would render above the line");
 });
@@ -89,5 +91,5 @@ test("the rail the client actually renders puts its label before the first Explo
   assert.ok(at > 0, `no explore label in the rail: ${JSON.stringify(kids)}`);
   assert.equal(kids[at - 1], "|", "the rule sits directly above the label");
   assert.match(kids[at + 1], /REGISTERS/, "and the first Explore view directly below it");
-  assert.equal(ui.FIRST_EXPLORE, 4);
+  assert.equal(ui.FIRST_EXPLORE, 5); // Overview is a task view (2026-10-16)
 });

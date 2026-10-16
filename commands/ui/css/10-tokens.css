@@ -145,10 +145,14 @@
     --fg:    oklch(.925 .007 89);
     --on-fill: oklch(.205 .006 271);
 
+    /* --seg-quiet is the "no change needed" half of a bar, and unlike the three tints below
+       (grounds that text sits ON) it is a FILL that must be seen against --card. At -.34 it
+       resolved to #2e557d, 2.11:1 on --card: a dark-blue slab the eye lost (2026-10-16). At
+       -.24 it is 3.25:1, the non-text floor, and still clearly quieter than --st-accent. */
     --accent-quiet: oklch(from var(--st-accent) calc(l - .52) calc(c * .55) h);
     --warn-quiet:   oklch(from var(--st-warn)   calc(l - .52) calc(c * .55) h);
     --ok-quiet:     oklch(from var(--st-ok)     calc(l - .52) calc(c * .55) h);
-    --seg-quiet:    oklch(from var(--st-accent) calc(l - .34) calc(c * .70) h);
+    --seg-quiet:    oklch(from var(--st-accent) calc(l - .24) calc(c * .70) h);
 
     --lift-1: 0 1px 2px oklch(0 0 0 / .40);
     --lift-2: 0 4px 14px oklch(0 0 0 / .55);
@@ -174,7 +178,7 @@
   --accent-quiet: oklch(from var(--st-accent) calc(l - .52) calc(c * .55) h);
   --warn-quiet:   oklch(from var(--st-warn)   calc(l - .52) calc(c * .55) h);
   --ok-quiet:     oklch(from var(--st-ok)     calc(l - .52) calc(c * .55) h);
-  --seg-quiet:    oklch(from var(--st-accent) calc(l - .34) calc(c * .70) h);
+  --seg-quiet:    oklch(from var(--st-accent) calc(l - .24) calc(c * .70) h);
 
   --lift-1: 0 1px 2px oklch(0 0 0 / .40);
   --lift-2: 0 4px 14px oklch(0 0 0 / .55);

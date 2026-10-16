@@ -24,6 +24,9 @@
   /* F4: each diff needs about 480px to stay readable, so below 1100px they stack. */
   .evgrid { grid-template-columns: 1fr; }
   .detail.wide { grid-column: 1 / -1; }
+  /* The Overview: five cards and three charts do not fit side by side below this width. */
+  .kpis.ov { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .charts.charts3 { grid-template-columns: 1fr; }
 }
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }

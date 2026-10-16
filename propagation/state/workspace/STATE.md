@@ -1,5 +1,24 @@
 # propagate — State
 
+
+## The web UI opens on an Overview dashboard, in plain language, with every item clickable — 2026-10-16, `v0.15.26`
+- **Overview** (`#/overview`, the new default view):
+  - five KPI cards;
+  - three Observable Plot charts (queue by workspace, waiting time, verdicts per day);
+  - a sortable top-sources table.
+  Every element clicks through to a filtered Judge, and Judge gains `ws=`, `age=` and `source=`.
+  Settling by source is the fast path: 109 edges came from 49 sources. A source whose edges are
+  all blocked opens Unblock instead of an empty Judge.
+- **Plain-user pass:**
+  - verdict meanings in neutral voice, also in REFERENCE.md "What each verdict means";
+  - plain header and row copy;
+  - formatted tooltips in place of native titles;
+  - Registers markdown rendered, Health actions separated, the Activity day axis restored;
+  - Delivery and Metrics fails carry a next step.
+- **Libraries:** d3 7.9.0 and Plot 0.6.17 are vendored (ISC), with their sha256 values in
+  `commands/vendor/README.md`. DESIGN.md §5 is amended.
+- **Gap:** nothing records queue size over time, so there is no "keeping up" trend yet.
+
 ## The web UI is redesigned around four tasks, and a verdict pins what you saw — 2026-10-15, `v0.15.25`
 Judge · Unblock · Health · Activity replace the nine source-shaped views (old hashes redirect). A
 verdict now carries the content ids the reviewer diffed and is refused if either side changed

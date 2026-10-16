@@ -438,10 +438,14 @@ export function page(token, build = buildId()) {
   // answers with the id the RUNNING SERVER was started from. A client that sees
   // the two differ is talking to a server older than its own page (F5).
   const read = (f) => readFileSync(new URL("./" + f, import.meta.url), "utf8");
-  // Three vendored globals BEFORE the client, in their own script tags. Separate
+  // Five vendored globals BEFORE the client, in their own script tags. Separate
   // tags rather than one concatenation so a syntax error in one cannot silently
   // take the others with it -- and so the browser attributes the error to a file.
-  const vendor = ["vendor/preact.js", "vendor/hooks.js", "vendor/htm.js"].map(read);
+  // d3 then Plot (Overview, 2026-10-16): Plot's UMD build reads the d3 global when it
+  // loads, so the order is a dependency, not taste. If either fails to load the client
+  // still runs and the Overview says "chart unavailable" in place of its charts; the
+  // KPIs and the table do not need them. Name, version, licence and sha256: vendor/README.md.
+  const vendor = ["vendor/preact.js", "vendor/hooks.js", "vendor/htm.js", "vendor/d3.min.js", "vendor/plot.umd.min.js"].map(read);
   return [
     '<!doctype html><html lang="en"><head><meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',

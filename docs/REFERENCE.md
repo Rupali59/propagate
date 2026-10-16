@@ -443,6 +443,26 @@ to patch later. The existing cross-repo layer (`flow: decision`,
 `CROSS_LEDGER_JSONL`) is a decision relay and solves a different problem;
 it is untouched by this view and the two should not be conflated.
 
+## What each verdict means
+
+The web UI (`propagate ui`) prints this one-line meaning under every verdict button. The wording is
+the owner's approved copy (2026-10-16); `tests/unit/ui-client.test.mjs` holds it word for word.
+
+| Verdict | What it means |
+|---|---|
+| `propagated` | Downstream updated to match |
+| `no-change-needed` | Checked: the downstream is still right |
+| `source-corrected` | Source was wrong and is now fixed |
+| `both-reconciled` | Both changed and now agree |
+| `decoupled` | Not related: remove the link |
+| `deferred` | Later: park it with a reason |
+| `wontfix` | Accepted: it stays different (reason needed) |
+| `baselined` | First check: accept today as the start (reason needed) |
+
+The header reads "N links between files · M file pairs checked": the first is the declared couplings,
+the second those expanded to concrete file pairs. A row that crosses the hub/workspace line says
+"crosses workspaces".
+
 ## git pre-push hook
 
 The injection this hook used to be blocked on (`docs/ISSUES.md` G1 — `range`

@@ -510,3 +510,56 @@ test("F4: below 1100px the two diffs stack, and the wide views span the whole ro
   assert.match(block, /\.evgrid\s*\{\s*grid-template-columns:\s*1fr\s*;?\s*\}/, "the evidence grid is still two columns on a narrow screen");
   assert.match(block, /\.detail\.wide\s*\{\s*grid-column:\s*1 \/ -1/, "a wide view would sit in a column that no longer exists");
 });
+
+test("the tooltip is token-only, never takes the pointer, and animates on a duration token", () => {
+  // Plain-user pass 2026-10-16. The tooltip replaced every native title=. Three ways it can
+  // quietly be wrong, each asserted: a literal colour (one theme's value is unreadable in the
+  // other), pointer-events other than none (the box under the pointer steals the hover that
+  // placed it and the whole thing flickers), and a hardcoded duration (reduced motion cannot
+  // reach it). Its ink-on-ground pair is covered by the 4.5:1 sweep above only because it
+  // declares var() for both, which the first assertion holds in place.
+  const css = stylesheet();
+  const m = /(^|\n)\.tip \{([^}]*)\}/.exec(css);
+  assert.ok(m, "no .tip rule: the tooltip has no styling and would render as bare text");
+  const body = m[2];
+  assert.match(body, /pointer-events:\s*none/);
+  assert.match(body, /background:\s*var\(--card\)/);
+  assert.match(body, /color:\s*var\(--fg\)/);
+  assert.match(body, /animation:[^;]*var\(--t-fast\)/);
+  assert.doesNotMatch(body, /#[0-9a-f]{3,8}\b|oklch\(|rgba?\(|hsla?\(/i, "a literal colour inside the tooltip");
+  assert.match(css, /\.hit \{ fill: transparent; \}/, "the sparkline hit circles need a fill to receive the pointer");
+});
+
+test("Overview 2026-10-16: the 'no change needed' fill is READABLE in dark, and still quieter than the changed fill", () => {
+  // --seg-quiet is a FILL the eye has to find, not a ground that text sits on, so the 4.5:1 text
+  // sweep never covered it. In dark it was `l - .34` => #2e557d, 2.11:1 on --card: a dark-blue
+  // slab that disappeared into the card. It paints the quiet half of the Activity bars AND the
+  // Overview's verdict chart, so the floor is the 3:1 non-text minimum (WCAG 1.4.11) on --card,
+  // and it must stay clearly separable from --st-accent (the changed half), or the two-part bar
+  // stops being two-part.
+  const { darks } = themes(stylesheet(), ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);
+  assert.equal(darks.length, 2, "both dark blocks must be checked, or a token can be right in one path only");
+  const fails = [];
+  for (const d of darks) {
+    const seg = resolveColor(d.map.get("--seg-quiet"), d.map);
+    const card = resolveColor(d.map.get("--card"), d.map);
+    const acc = resolveColor(d.map.get("--st-accent"), d.map);
+    const onCard = contrast(seg, card), fromAcc = contrast(seg, acc);
+    if (onCard < 3) fails.push(`${d.name}: --seg-quiet is ${onCard.toFixed(2)}:1 on --card (needs 3)`);
+    if (fromAcc < 2) fails.push(`${d.name}: --seg-quiet is only ${fromAcc.toFixed(2)}:1 from --st-accent (needs 2 to read as a second series)`);
+  }
+  assert.deepEqual(fails, [], fails.join("\n"));
+});
+
+test("Overview 2026-10-16: the new rules declare no colour of their own", () => {
+  // Every fill on the dashboard is a token (CSS) or a token resolved at render (the chart).
+  // A hex or oklch literal in these rules would be one theme's value in both.
+  const css = stripComments(stylesheet());
+  const i = css.indexOf(".kpis.ov");
+  assert.notEqual(i, -1, "the Overview rules are missing, so this check has gone blind");
+  const block = css.slice(i);
+  assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|oklch\((?!from)/i, "a literal colour in the Overview rules");
+  for (const s of ["DRIFTED", "REVERSED", "DIVERGED", "UNMATCHED"]) {
+    assert.match(css, new RegExp("\\.mix i\\." + s + "\\s*\\{\\s*background:\\s*var\\(--"), `the mini bar has no token colour for ${s}`);
+  }
+});

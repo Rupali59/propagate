@@ -275,3 +275,80 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
 .hrow.focus { background: var(--accent-quiet); box-shadow: inset 2px 0 0 var(--st-accent); padding-left: var(--s2); }
 .wsec.focus > summary { font-weight: 600; }
 .chip.filt { border-style: dashed; }
+
+/* ── plain-user pass (2026-10-16): one tooltip, click affordances, the day axis ──
+   THE TOOLTIP. It replaces every native `title=` (unstyled, unthemed, a delay nobody
+   controls, absent on touch). It sits on --card with the ordinary ink and the lift-2
+   shadow, so both themes come from tokens already contrasted against each other; it
+   declares no colour of its own. pointer-events none, or the box under the pointer would
+   steal the hover that placed it and flicker. */
+.tip { position: fixed; z-index: 10; max-width: 264px; pointer-events: none; background: var(--card); color: var(--fg);
+       border: 1px solid var(--line); border-radius: var(--r2); padding: var(--s2) var(--s3); box-shadow: var(--lift-2);
+       font-size: 11.5px; line-height: 1.45; animation: fade var(--t-fast) var(--ease); }
+.tip b { display: block; font-size: 12px; margin-bottom: 2px; word-break: break-word; }
+.tip div { color: var(--dim); word-break: break-word; }
+
+/* AFFORDANCE ONLY. A pointer and a soft ground say "this takes a click"; the fact stays in
+   the tooltip, never in the hover. */
+.pick { cursor: pointer; }
+.vcol.pick:hover { background: var(--accent-quiet); }
+.bar.pick { padding: 2px var(--s1); margin-left: calc(-1 * var(--s1)); border-radius: var(--r1); transition: background var(--t-fast) var(--ease); }
+.bar.pick:hover { background: var(--field); }
+.hit { fill: transparent; }
+.hit:hover { fill: var(--accent-quiet); }
+
+/* A meta line is a block: as an inline span it ran into whatever followed it. */
+.itxt .meta { display: block; }
+
+/* each verdict button carries its one-line meaning beneath it */
+.disp { align-items: flex-start; }
+.vopt { display: flex; flex-direction: column; gap: 3px; max-width: 200px; }
+.vmean { font-size: 10.5px; line-height: 1.35; color: var(--dim); }
+
+/* the day axis under the verdict bars, and the scale note under the sparkline */
+.vaxis { display: flex; gap: 3px; margin-top: 3px; }
+.vtick { flex: 1 1 0; min-width: 0; text-align: center; font-size: 9.5px; color: var(--dim); white-space: nowrap; font-family: ui-monospace, Menlo, monospace; }
+.axnote { display: flex; justify-content: space-between; gap: var(--s2); font-size: 10px; color: var(--dim); margin-top: 3px; font-family: ui-monospace, Menlo, monospace; }
+
+/* the column head over a register list */
+.shead { display: flex; gap: var(--s2); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); padding-bottom: 2px; border-bottom: 1px solid var(--line); }
+.sh-p { min-width: 26px; }
+.badge.open { min-width: 26px; }
+
+/* ── the Overview (2026-10-16) ────────────────────────────────────────────────
+   A dashboard over the same tokens: no colour is declared here. The KPI cards are the
+   existing .kpi stat row made clickable (.pick + the shared tooltip), the charts are the
+   existing .chart cards, and the bars Plot draws take their fills from the tokens at render
+   (resolveToken in the client). The mini "what moved" bar uses the badge colours so a state
+   is the same colour in the list, the chart and the table. */
+.kpis.ov { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--s3); margin: var(--s3) 0 var(--s4); }
+.kpi.pick { background: var(--card); border: 1px solid var(--line); border-radius: var(--r3); padding: var(--s3) var(--s4); box-shadow: var(--lift-1);
+            transition: box-shadow var(--t-fast) var(--ease); }
+.kpi.pick:hover { box-shadow: var(--lift-2); }
+.kpi.warn b { color: var(--st-warn); }
+.kpi b { font-variant-numeric: tabular-nums; }
+.ksub { font-size: 11px; color: var(--dim); margin-top: var(--s1); }
+.charts.charts3 { grid-template-columns: 1.25fr 1fr 1fr; gap: var(--s3); margin-bottom: var(--s4); }
+.chart .plot svg { width: auto; height: auto; max-width: 100%; }
+.chart .plot [aria-label]:hover { opacity: .82; }
+.h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--s3); margin: 0 0 var(--s2); }
+.h2 b { font-size: 13px; }
+.h2 span { font-size: 11.5px; color: var(--dim); }
+.h2 .go { margin-left: auto; }
+table.t { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--r3); overflow: hidden; box-shadow: var(--lift-1); }
+.t th { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); text-align: left; font-weight: 600; padding: var(--s2) var(--s3);
+        border-bottom: 1px solid var(--line); background: var(--field); white-space: nowrap; }
+.t th.sortable { cursor: pointer; }
+.t th.sortable:hover { color: var(--fg); }
+.t th.num, .t td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.t td { padding: var(--s2) var(--s3); border-bottom: 1px solid var(--line); vertical-align: middle; }
+.t tbody tr:last-child td { border-bottom: 0; }
+.t tbody tr:hover td { background: var(--accent-quiet); }
+.t .nm { font-weight: 600; }
+.t .dr { color: var(--dim); font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+.mix { display: flex; height: 8px; border-radius: 4px; overflow: hidden; width: 140px; background: var(--field); }
+.mix i { display: block; height: 100%; }
+.mix i.DRIFTED { background: var(--edge-drift); }
+.mix i.REVERSED { background: var(--edge-reverse); }
+.mix i.DIVERGED { background: var(--edge-diverge); }
+.mix i.UNMATCHED { background: var(--dim); }

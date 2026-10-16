@@ -19,15 +19,17 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Script } from "node:vm";
+import { Script, createContext } from "node:vm";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { page } from "../../commands/ui.mjs";
 
 const html = page("deadbeef");
+// A bare realm the way a browser's global looks to a UMD wrapper: self/window/globalThis all point at it.
+const vmContext = () => { const c = createContext({ console }); c.globalThis = c; c.self = c; c.window = c; return c; };
 /**
- * FOUR SCRIPTS NOW, not one: preact, its hooks, htm, then the client.
+ * SIX SCRIPTS NOW, not one: preact, its hooks, htm, d3, Plot, then the client.
  *
  * This used to take the FIRST match, which quietly became the vendored preact
  * bundle the moment the page grew a vendor stage — so every assertion below
@@ -37,12 +39,17 @@ const html = page("deadbeef");
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 const script = scripts[scripts.length - 1];
 
-test("the page emits its four inline scripts, and EVERY one parses", () => {
+test("the page emits its six inline scripts, and EVERY one parses", () => {
   assert.ok(script, "no inline script found — this check has gone blind");
   // Pinned: three vendored globals plus the client. A missing vendor file
   // leaves the client referencing an undefined `preact` and the page renders
   // nothing, with HTTP 200 and a silent console.
-  assert.equal(scripts.length, 4, "expected preact + hooks + htm + client");
+  // Overview, 2026-10-16: SIX now, deliberately. d3 and Observable Plot were vendored for the
+  // Overview's charts and each is its own script tag, BEFORE the client, so a syntax error in
+  // one is attributed to a file and cannot take the others down. The parse loop below covers
+  // all six, including the two big minified ones: a truncated copy of either is the failure
+  // this guards, and it would show as "Plot is not defined" in a browser console nobody reads.
+  assert.equal(scripts.length, 6, "expected preact + hooks + htm + d3 + plot + client");
   scripts.forEach((src, i) => {
     assert.doesNotThrow(() => new Script(src), `inline script ${i} does not parse; the page is dead`);
   });
@@ -138,3 +145,22 @@ test("the page carries the id of the build it was read from (F5)", () => {
    (never collapsing "absent" into "unresolved", never printing a 7-day default as
    "everything since you looked") have no surface left to protect. /api/stream and
    /api/seen remain on the server for the CLI and the widget. */
+
+test("the vendored d3 and Plot actually define their globals, d3 first, both before the client (Overview, 2026-10-16)", () => {
+  // Parsing is not loading. Plot's UMD build reads the d3 global when it RUNS, so a copy that
+  // parses but was truncated, or that is loaded in the wrong order, leaves `Plot` undefined and
+  // the Overview showing "chart unavailable" with HTTP 200 and a quiet console. Run the real
+  // emitted scripts, in the real order, in a bare realm and ask for the functions the client calls.
+  const ctx = vmContext();
+  const order = scripts.slice(0, -1);
+  assert.equal(order.length, 5, "five vendored scripts precede the client");
+  order.forEach((src) => new Script(src).runInContext(ctx));
+  for (const g of ["preact", "preactHooks", "htm", "d3"]) assert.ok(ctx[g], `${g} was not defined by its script`);
+  for (const f of ["plot", "barX", "barY", "ruleX", "ruleY"]) assert.equal(typeof ctx.Plot?.[f], "function", `Plot.${f} is not a function`);
+  // And the order is a dependency: Plot first, d3 second must NOT yield a working Plot.
+  const wrong = vmContext();
+  const [preact, hooks, htm, d3src, plotsrc] = order;
+  for (const src of [preact, hooks, htm, plotsrc]) { try { new Script(src).runInContext(wrong); } catch { /* the failure is the point */ } }
+  assert.notEqual(typeof wrong.Plot?.plot, "function", "Plot loaded without d3 in front of it; the order test cannot fail");
+  void d3src;
+});

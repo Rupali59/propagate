@@ -440,3 +440,20 @@ test("readMetricsRecords on a nonexistent file returns an empty array, not a thr
   const records = await readMetricsRecords(path.join(dir, "nope.jsonl"));
   assert.deepEqual(records, []);
 });
+
+// ── instructions.unexcepted_over carries an action (Overview lane, 2026-10-16) ───────────────
+
+test("the instruction-budget red names the file to edit: the violation carries an open action, and no other violation grows the key", () => {
+  // The Health row for this check read "no action mapped" beside a sentence that names
+  // scripts/execution/instruction-budget.yml. The fix lives in that file, so the expectation
+  // carries it as data and evaluateExpectations passes it through to the renderer.
+  const base = { "instructions.unexcepted_over": null, "instructions.stale_exceptions": null, "instructions.over_ceiling": null, "instructions.chars.max": null };
+  const over = evaluateExpectations({ ...base, "instructions.unexcepted_over": 3 }).find((v) => v.key === "instructions.unexcepted_over");
+  assert.ok(over, "the expectation did not fire on 3 unexcepted dirs, so this test cannot see the action");
+  assert.deepEqual(over.action, { kind: "open", target: "scripts/execution/instruction-budget.yml" });
+  // The other two instruction reds are NOT given it here: the brief maps one check, and an
+  // action on a check that did not ask for one would be a claim nobody made.
+  const stale = evaluateExpectations({ ...base, "instructions.stale_exceptions": 2 }).find((v) => v.key === "instructions.stale_exceptions");
+  assert.ok(stale, "stale_exceptions did not fire");
+  assert.equal("action" in stale, false, "an expectation with no action must not grow the key (existing deepEqual consumers)");
+});

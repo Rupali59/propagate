@@ -151,3 +151,36 @@ test("actionSuffix refuses a multi-line target instead of corrupting the next li
   assert.throws(() => actionSuffix({ kind: "command", target: "a\nb" }), /one line/);
   assert.equal(actionSuffix(undefined), "");
 });
+
+test("a doctor check built outside the Reporter (cli.mjs checkWithAction) keeps its action through the snapshot parse", async () => {
+  // doctor() has its own bare-text check(); the instruction-budget red goes through
+  // checkWithAction so its action crosses the text boundary like a Reporter entry's. Driven
+  // through the REAL function and the REAL parser, not a hand-written marker line.
+  const { checkWithAction } = await import("../../cli.mjs");
+  const out = [];
+  const real = console.log;
+  console.log = (...a) => { out.push(a.join(" ")); };
+  try {
+    console.log("# Metrics");
+    checkWithAction("instructions.unexcepted_over == 0", false, "3 dirs — observed 3 — Measured 2026-10-02: every one of 57 dirs", { kind: "open", target: "scripts/execution/instruction-budget.yml" });
+    checkWithAction("fine", true, "ok", { kind: "command", target: "propagate rules check" });
+    assert.throws(() => checkWithAction("typo", false, "", { kind: "opn", target: "x" }), /action must be/, "an unknown kind must fail loudly, not ship a row with no action");
+    assert.throws(() => checkWithAction("empty", false, "", { kind: "open", target: "" }), /action must be/);
+  } finally { console.log = real; }
+  const [sec] = toSections(out);
+  const e = sec.entries.find((x) => x.label === "instructions.unexcepted_over == 0");
+  assert.equal(e.kind, "fail");
+  assert.deepEqual(e.action, { kind: "open", target: "scripts/execution/instruction-budget.yml" });
+  assert.match(e.detail, /^3 dirs — observed 3/, "the action is not left glued to the detail");
+  assert.deepEqual(sec.entries.find((x) => x.label === "fine").action, { kind: "command", target: "propagate rules check" });
+});
+
+test("doctor() hands the violation's action to its check (the one call no unit test executes)", async () => {
+  // NAMED BLIND SPOT (rule:name-what-no-test-executes): the loop in doctor() that prints each
+  // violation only runs inside a full doctor run, which needs a real tree. The behaviour either
+  // side of it is tested (evaluateExpectations carries the action; checkWithAction renders it);
+  // this asserts the hand-off itself exists, by source, and says so rather than implying more.
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../../cli.mjs", import.meta.url), "utf8");
+  assert.match(src, /check\(v\.describe, false, `[^`]*`, v\.action\)/, "the violation loop no longer passes v.action to check()");
+});
