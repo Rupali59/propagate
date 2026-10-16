@@ -39,7 +39,7 @@ function extract() {
 
 const NAMES = ["donutArcs", "arcPath", "calendarCells", "barHeights", "stackBars", "dayTicks",
   "healthPills", "localISO", "shortDate", "baseName", "agoText", "whyNot",
-  "calendarWeeks", "shouldDrawDays", "recordingSince", "compactPath", "cascadeParts", "rootRoute", "viewRoute"];
+  "calendarWeeks", "shouldDrawDays", "recordingSince", "compactPath", "cascadeParts", "rootRoute", "viewRoute", "tipLines", "fmtDay"];
 
 /** Run the block in a fresh vm context with NOTHING else in scope, and hand back its functions. */
 function load() {
@@ -375,4 +375,22 @@ test("viewRoute: known views only, safe values URL-encoded, unsafe ones dropped 
   assert.equal(f.viewRoute("/judge", { state: "x';rm -rf ~;'" }), "/judge", "an unsafe value is dropped, the view still opens");
   assert.equal(f.viewRoute("/etc/passwd", {}), "/judge", "an unknown view falls back, never passes through");
   assert.equal(f.viewRoute("/unblock"), "/unblock");
+});
+
+
+test("tipLines formats values the card already has; it never invents one", () => {
+  assert.equal(f.fmtDay("2026-10-15"), "Thu 15 Oct");
+  assert.deepEqual(f.tipLines("state", { label: "drifted", n: 54, total: 90 }),
+    { title: "drifted", lines: ["54 edges", "60% of 90 queued", "click to judge these"] });
+  assert.deepEqual(f.tipLines("verdicts", { day: "2026-10-14", total: 62, noChange: 45, changed: 17 }),
+    { title: "Wed 14 Oct", lines: ["62 verdicts", "17 changed · 45 no change needed"] });
+  assert.deepEqual(f.tipLines("verdicts", { day: "2026-10-07", total: 0, noChange: 0, changed: 0 }).lines, ["no verdicts recorded"]);
+  assert.deepEqual(f.tipLines("judged-day", { iso: "2026-10-15", count: 1 }).lines[0], "1 edge last judged this day");
+  assert.deepEqual(f.tipLines("segment", { kind: "root", n: 6, blocked: 43, name: "CONTEXT-BUDGET.md" }),
+    { title: "CONTEXT-BUDGET.md", lines: ["frees 6 now, on its own", "14% of 43 blocked", "click to judge it"] });
+  assert.deepEqual(f.tipLines("pill", { label: "Discovery", status: "fail", fail: 2, accepted: 3, count: 1 }).lines[0], "2 failing checks");
+  assert.deepEqual(f.tipLines("command", { command: "verify", count: 291, total: 540 }),
+    { title: "verify", lines: ["291 runs", "54% of 540 interactive runs"] });
+  assert.equal(f.tipLines("state", { label: "x", n: 0, total: 0 }).lines.includes("NaN% of 0 queued"), false, "no NaN on an empty queue");
+  assert.equal(f.tipLines("nope", {}), null);
 });

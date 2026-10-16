@@ -162,6 +162,7 @@ export const updateState = (event, previousState) => {
     return { ...prev, pos: DEFAULT_POS };
   }
   if (event.type === 'CLICKED') return { ...prev, interactive: true };
+  if (event.type === 'TIP') return { ...prev, tip: event.tip };
   if (event.type === 'RUN_OK') return { ...prev, note: null };
   if (event.type === 'RUN_ERROR') return { ...prev, note: event.text, busy: false };
   if (event.type === 'BUSY') return { ...prev, busy: true };
@@ -216,6 +217,7 @@ export const className = `
   --dim: rgba(60, 60, 67, 0.62);
   --dimmer: rgba(60, 60, 67, 0.42);
   --track: rgba(60, 60, 67, 0.13);
+  --tip-bg: rgba(255, 255, 255, 0.97);
 
   /* THE WHEEL, the SAME wheel commands/ui/css and lib/graph/graph-html.mjs use,
      asserted identical by tests/unit/theme.test.mjs. OKLCH so lightness and
@@ -252,6 +254,7 @@ export const className = `
     --dim: rgba(235, 235, 245, 0.60);
     --dimmer: rgba(235, 235, 245, 0.38);
     --track: rgba(235, 235, 245, 0.16);
+    --tip-bg: rgba(44, 44, 46, 0.97);
 
     --st-ok:        oklch(.779 .130 var(--h-ok));
     --st-caution:   oklch(.780 .130 var(--h-caution));
@@ -413,7 +416,20 @@ export const className = `
   .hv { border-radius: 6px; }
   .pn.act:hover { box-shadow: inset 0 0 0 1px var(--track); }
   .hv:hover { background-color: var(--track); }
-  .cs.hv:hover { opacity: .85; }
+  .cs.hv:hover { opacity: .75; }
+  /* SHAPES ARE TARGETS TOO (2026-10-15, "visualisations dont have hover, labels do"): every arc,
+     calendar cell and day column. Opacity says "this one"; a cell also gets an outline, because
+     a 13px square barely reads a fade. A transparent .hit rect makes an EMPTY day hoverable. */
+  .vz { cursor: pointer; }
+  .vz:hover { opacity: .7; }
+  .cc.vz:hover { stroke: var(--fg); stroke-width: 1.5; }
+  .hit { fill: none; pointer-events: all; }
+  /* THE TOOLTIP. Fixed to the Übersicht window (clientX/Y are window coordinates), above the card,
+     never catching the mouse itself so it cannot flicker under the pointer. */
+  .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--tip-bg); color: var(--fg);
+         border-radius: 8px; padding: 7px 10px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); font-size: 12px; line-height: 1.45; white-space: nowrap; }
+  .tip .tt { font-weight: 600; }
+  .tip .tl { color: var(--dim); }
   .cas { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--track); margin-top: 9px; }
   .cs { display: block; height: 100%; }
   .cs.root { background: var(--st-accent); }
@@ -772,6 +788,56 @@ function viewRoute(path, params) {
     .map((k) => k + '=' + encodeURIComponent(String(params[k])));
   return q.length ? base + '?' + q.join('&') : base;
 }
+// HOVER DETAIL (2026-10-15, "hover should show labels or info which we already have, formatted").
+// Every tooltip is built HERE from values the card already holds, so hover adds formatting, never a
+// new fact: nothing lives only in a tooltip, and the card still reads with no mouse at all.
+// Returns { title, lines } or null; the widget renders it and adds nothing.
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function fmtDay(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  if (!m) return String(iso || '');
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return WEEKDAYS[dt.getUTCDay()] + ' ' + Number(m[3]) + ' ' + MONTHS[Number(m[2]) - 1];
+}
+function pctOf(n, total) {
+  return total > 0 ? Math.round((n / total) * 100) + '%' : null;
+}
+function plural(n, one, many) {
+  return n + ' ' + (n === 1 ? one : (many || one + 's'));
+}
+function tipLines(kind, v) {
+  if (!v) return null;
+  if (kind === 'state') {
+    const p = pctOf(v.n, v.total);
+    return { title: v.label, lines: [plural(v.n, 'edge'), p ? p + ' of ' + v.total + ' queued' : null, 'click to judge these'].filter(Boolean) };
+  }
+  if (kind === 'judged-day') {
+    return { title: fmtDay(v.iso), lines: [v.count > 0 ? plural(v.count, 'edge') + ' last judged this day' : 'nothing last judged this day', 'click to open Judge'] };
+  }
+  if (kind === 'verdicts') {
+    if (!(v.total > 0)) return { title: fmtDay(v.day), lines: ['no verdicts recorded'] };
+    return { title: fmtDay(v.day), lines: [plural(v.total, 'verdict'), v.changed + ' changed · ' + v.noChange + ' no change needed'] };
+  }
+  if (kind === 'runs') {
+    return { title: fmtDay(v.day), lines: [v.count > 0 ? plural(v.count, 'command') + ' run' : 'no commands run'] };
+  }
+  if (kind === 'segment') {
+    const p = pctOf(v.n, v.blocked);
+    const share = p ? p + ' of ' + v.blocked + ' blocked' : null;
+    if (v.kind === 'root') return { title: v.name || 'root', lines: ['frees ' + v.n + ' now, on its own', share, 'click to judge it'].filter(Boolean) };
+    if (v.kind === 'several') return { title: 'need several roots', lines: [plural(v.n, 'edge') + ' wait on more than one root', share].filter(Boolean) };
+    return { title: 'other roots', lines: [plural(v.n, 'edge') + ' freed by roots beyond the top 3', share].filter(Boolean) };
+  }
+  if (kind === 'pill') {
+    const s = v.status === 'fail' ? plural(v.fail, 'failing check') : v.status === 'accepted-only' ? plural(v.accepted, 'accepted red') : v.status === 'ok' ? 'all checks pass' : "can't tell";
+    return { title: v.label, lines: [s, v.count > 1 ? 'across ' + v.count + ' sections' : null, 'click to open this section'].filter(Boolean) };
+  }
+  if (kind === 'command') {
+    const p = pctOf(v.count, v.total);
+    return { title: v.command, lines: [plural(v.count, 'run'), p ? p + ' of ' + v.total + ' interactive runs' : null].filter(Boolean) };
+  }
+  return null;
+}
 // ---- pure:charts end ----
 
 // ---- vendored:lucide begin ----
@@ -804,6 +870,13 @@ const LUCIDE_ICONS = {
 // read. It exits 1 with a message on stderr when it will not guess — run()
 // rejects with that text and the card shows it, so a dead click says why.
 // `route` is always one of this file's literal constants, never payload text.
+// HOVER: the one way a shape shows its tooltip. Content always comes from tipLines (pure, tested).
+const tipOn = (dispatch, tip) => (e) => { if (tip) dispatch({ type: 'TIP', tip: { title: tip.title, lines: tip.lines, x: e.clientX, y: e.clientY } }); };
+const tipOff = (dispatch) => () => dispatch({ type: 'TIP', tip: null });
+
+// Worklist state -> where it is judged. One mapping for the legend row AND its donut arc.
+const stateRoute = (k) => (k === 'DIVERGED' ? viewRoute('/judge', { chip: 'both' }) : k === 'other' ? '/judge' : viewRoute('/judge', { state: k }));
+
 // An item inside a clickable panel: its own target, not the panel's.
 const go = (route, dispatch) => (e) => { if (e && e.stopPropagation) e.stopPropagation(); openView(route, dispatch); };
 
@@ -906,7 +979,8 @@ const HealthPanel = ({ hl, dispatch }) => {
       {why ? <CantTell why={why} /> : (
         <div className="hgrid">
           {parts.pills.map((p) => (
-            <div key={p.label} className={`pill hv ${p.status}`} onClick={go(viewRoute('/health', { section: p.section }), dispatch)}>
+            <div key={p.label} className={`pill hv ${p.status}`} onClick={go(viewRoute('/health', { section: p.section }), dispatch)}
+              onMouseEnter={tipOn(dispatch, tipLines('pill', p))} onMouseLeave={tipOff(dispatch)}>
               <span className="pt">
                 <Icon icon={p.icon} size={16} />
                 <span className="ps">
@@ -932,12 +1006,13 @@ const HealthPanel = ({ hl, dispatch }) => {
 
 const DONUT = 112;
 
-const Donut = ({ wl }) => {
+const Donut = ({ wl, dispatch }) => {
   const dn = donutArcs(wl.byState);
   return (
     <svg width={DONUT} height={DONUT} viewBox={`0 0 ${DONUT} ${DONUT}`}>
       <circle className="track" cx={DONUT / 2} cy={DONUT / 2} r={DONUT / 2 - 12} />
-      {dn.arcs.map((a) => <path key={a.key} className={`arc ${a.key}`} d={arcPath(DONUT / 2, DONUT / 2, DONUT / 2 - 12, a.startDeg, a.sweepDeg)} />)}
+      {dn.arcs.map((a) => <path key={a.key} className={`arc vz ${a.key}`} onClick={go(stateRoute(a.key), dispatch)}
+        onMouseEnter={tipOn(dispatch, tipLines('state', { label: STATE_LABEL[a.key] || a.key, n: a.count, total: dn.total }))} onMouseLeave={tipOff(dispatch)} d={arcPath(DONUT / 2, DONUT / 2, DONUT / 2 - 12, a.startDeg, a.sweepDeg)} />)}
       <text className="tn" x={DONUT / 2} y={DONUT / 2 + 3} textAnchor="middle">{dn.total}</text>
       <text className="t" x={DONUT / 2} y={DONUT / 2 + 19} textAnchor="middle">queued</text>
     </svg>
@@ -958,7 +1033,7 @@ const CAL_STEP = 15;
 const CAL_CELL = 13;
 const CAL_WEEKS = calendarWeeks(CAL_W, CAL_LABEL, CAL_STEP, CAL_CELL);
 
-const Calendar = ({ cal }) => {
+const Calendar = ({ cal, dispatch }) => {
   const L = CAL_LABEL;
   const T = 14;
   const STEP = CAL_STEP;
@@ -972,7 +1047,10 @@ const Calendar = ({ cal }) => {
       {cal.cols.map((col) => col.filter((c) => !c.future).map((c) => (
         <rect
           key={c.iso}
-          className={`cc l${c.level}${c.today ? ' today' : ''}`}
+          className={`cc vz l${c.level}${c.today ? ' today' : ''}`}
+          onClick={go('/judge', dispatch)}
+          onMouseEnter={tipOn(dispatch, tipLines('judged-day', { iso: c.iso, count: c.count }))}
+          onMouseLeave={tipOff(dispatch)}
           x={L + c.col * STEP}
           y={T + c.row * STEP}
           width={CAL_CELL}
@@ -1007,13 +1085,14 @@ const WorklistPanel = ({ wl, today, dispatch }) => {
         )}
       </div>
       <div className="wl">
-        <Donut wl={wl} />
+        <Donut wl={wl} dispatch={dispatch} />
         <div className="lg">
           {keys.map((k) => (
-            <div key={k} className="lgr hv" onClick={go(k === 'DIVERGED' ? viewRoute('/judge', { chip: 'both' }) : k === 'other' ? '/judge' : viewRoute('/judge', { state: k }), dispatch)}><span className={`sw ${k}`} /><span>{STATE_LABEL[k]}</span><span className="n">{wl.byState[k]}</span></div>
+            <div key={k} className="lgr hv" onClick={go(stateRoute(k), dispatch)}
+              onMouseEnter={tipOn(dispatch, tipLines('state', { label: STATE_LABEL[k], n: wl.byState[k], total: wl.total }))} onMouseLeave={tipOff(dispatch)}><span className={`sw ${k}`} /><span>{STATE_LABEL[k]}</span><span className="n">{wl.byState[k]}</span></div>
           ))}
         </div>
-        {cal.error ? <CantTell why={cal.error} /> : <Calendar cal={cal} />}
+        {cal.error ? <CantTell why={cal.error} /> : <Calendar cal={cal} dispatch={dispatch} />}
       </div>
     </div>
   );
@@ -1050,7 +1129,10 @@ const LeveragePanel = ({ lev, dispatch }) => {
       </div>
       <div className="cas">
         {parts.map((p) => <span key={p.key} className={'cs hv ' + p.kind + (p.rank ? ' r' + p.rank : '')} style={{ width: p.pct + '%' }}
-          onClick={go(p.kind === 'root' ? rootRoute(lev.roots.find((r) => r.edge_id === p.key)) : '/unblock', dispatch)} />)}
+          onClick={go(p.kind === 'root' ? rootRoute(lev.roots.find((r) => r.edge_id === p.key)) : '/unblock', dispatch)}
+          onMouseEnter={tipOn(dispatch, tipLines('segment', { kind: p.kind, n: p.n, blocked: cas.blocked,
+            name: p.kind === 'root' ? ((lev.roots.find((r) => r.edge_id === p.key) || {}).sourceParts || {}).name : null }))}
+          onMouseLeave={tipOff(dispatch)} />)}
       </div>
       <div className="csl">
         {parts.map((p) => <span key={p.key} style={{ width: p.pct + '%' }}>{label(p)}</span>)}
@@ -1101,7 +1183,9 @@ const VelocityPanel = ({ vel, dispatch }) => {
       {head}
       <svg width={W} height={BASE + 28} viewBox={`0 0 ${W} ${BASE + 28}`}>
         {bars.map((b, i) => (
-          <g key={b.day}>
+          <g key={b.day} className="vz" onClick={go('/activity', dispatch)}
+            onMouseEnter={tipOn(dispatch, tipLines('verdicts', vel.days[i]))} onMouseLeave={tipOff(dispatch)}>
+            <rect className="hit" x={i * STEP} y="0" width="14" height={BASE} />
             {b.h === 0 ? <rect className="bz" x={i * STEP} y={BASE - 2} width="14" height="2" /> : null}
             {b.noChangePx > 0 ? <rect className="bn" x={i * STEP} y={BASE - b.noChangePx} width="14" height={b.noChangePx} /> : null}
             {b.changedPx > 0 ? <rect className="bc" x={i * STEP} y={BASE - b.h} width="14" height={b.changedPx} /> : null}
@@ -1143,7 +1227,9 @@ const CommandsPanel = ({ use, dispatch }) => {
         {draw ? (
           <svg width={W} height={BASE + 28} viewBox={`0 0 ${W} ${BASE + 28}`}>
             {hs.map((h, i) => (
-              <g key={use.days[i].day}>
+              <g key={use.days[i].day} className="vz" onClick={go('/activity', dispatch)}
+                onMouseEnter={tipOn(dispatch, tipLines('runs', use.days[i]))} onMouseLeave={tipOff(dispatch)}>
+                <rect className="hit" x={i * STEP} y="0" width="14" height={BASE} />
                 {h === 0 ? <rect className="bz" x={i * STEP} y={BASE - 2} width="14" height="2" /> : <rect className="bu" x={i * STEP} y={BASE - h} width="14" height={h} />}
                 <text className="t" x={i * STEP + 7} y={BASE + 13} textAnchor="middle">{ticks[i].label}</text>
                 {ticks[i].month ? <text className="t" x={i === 0 ? 0 : i * STEP + 7} y={BASE + 26} textAnchor={i === 0 ? "start" : "middle"}>{ticks[i].month}</text> : null}
@@ -1152,7 +1238,7 @@ const CommandsPanel = ({ use, dispatch }) => {
           </svg>
         ) : null}
         <div className="tc">
-          <div className="tot">
+          <div className="tot hv" onClick={go('/activity', dispatch)}>
             <span><b>{use.total}</b> {use.origin || 'interactive'} runs</span>
             {use.failures > 0
               ? <span className="warn"><Icon icon="circle-alert" size={12} />{use.failures} failed</span>
@@ -1160,7 +1246,8 @@ const CommandsPanel = ({ use, dispatch }) => {
             {use.refusals > 0 ? <span>{use.refusals} refused</span> : null}
           </div>
           {use.top.map((cmd, i) => (
-            <div key={cmd.command} className="tcr">
+            <div key={cmd.command} className="tcr hv" onClick={go('/activity', dispatch)}
+              onMouseEnter={tipOn(dispatch, tipLines('command', { command: cmd.command, count: cmd.count, total: use.total }))} onMouseLeave={tipOff(dispatch)}>
               <span className="nm">{cmd.command}</span>
               <span className="mt" style={{ width: 110 }}><span className="mf" style={{ display: 'block', width: widths[i] }} /></span>
               <span className="n">{cmd.count}</span>
@@ -1188,7 +1275,7 @@ const HeadroomLine = ({ hr, dispatch }) => {
 };
 
 export const render = (state, dispatch) => {
-  const { output, error, pos, dragging, moved, interactive, busy, note } = state;
+  const { output, error, pos, dragging, moved, interactive, busy, note, tip } = state;
   const at = pos || DEFAULT_POS;
 
   const card = (head, body) => (
@@ -1300,6 +1387,12 @@ export const render = (state, dispatch) => {
         </span>
       </div>
       {gate}
+      {tip ? (
+        <div className="tip" style={{ left: tip.x + 14, top: tip.y + 14 }}>
+          <div className="tt">{tip.title}</div>
+          {tip.lines.map((l) => <div key={l} className="tl">{l}</div>)}
+        </div>
+      ) : null}
     </div>,
   );
 };

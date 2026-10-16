@@ -610,14 +610,21 @@ test("a :hover rule is affordance only (cursor, ground, outline, opacity), and n
   const css = src.slice(open, src.indexOf("`", open)).replace(/\/\*[\s\S]*?\*\//g, "");
   const rules = [...css.matchAll(/([^{}]*:hover[^{}]*)\{([^}]*)\}/g)];
   assert.ok(rules.length >= 2, `only ${rules.length} :hover rules found - every item is meant to signal it is clickable`);
-  const ALLOWED = new Set(["background", "background-color", "box-shadow", "cursor", "opacity", "text-decoration", "outline"]);
+  const ALLOWED = new Set(["background", "background-color", "box-shadow", "cursor", "opacity", "text-decoration", "outline", "stroke", "stroke-width"]);
   for (const [, sel, body] of rules) {
     for (const decl of body.split(";").map((d) => d.trim()).filter(Boolean)) {
       const prop = decl.split(":")[0].trim();
       assert.ok(ALLOWED.has(prop), `${sel.trim()} sets "${prop}" on hover - hover may signal a target, never change what the card says`);
     }
   }
-  assert.doesNotMatch(code, /<title>|onMouseEnter|onMouseOver/, "a tooltip or hover handler would hold information nobody can reach");
+  assert.doesNotMatch(code, /<title>|onMouseOver/, "a native tooltip or an unmanaged hover handler");
+  // Tooltips (2026-10-15, "hover should show labels or info which we already have, formatted"):
+  // every onMouseEnter goes through tipOn, and every tipOn is fed by tipLines, the pure, tested
+  // formatter over values the card already holds. So no fact can exist only in a hover.
+  const enters = [...code.matchAll(/onMouseEnter=\{([^\n]*)/g)].map((m) => m[1]);
+  assert.ok(enters.length >= 8, `only ${enters.length} hover tooltips - every chart shape and label is meant to have one`);
+  for (const e of enters) assert.match(e, /^tipOn\(dispatch, tipLines\('/, `a hover handler not built from tipLines: ${e.slice(0, 60)}`);
+  assert.equal([...code.matchAll(/onMouseLeave=\{tipOff\(dispatch\)\}/g)].length, enters.length, "every tooltip that opens must close on leave");
 });
 
 // "give me cta for everything" (2026-10-15): every item in the click map is a target.
@@ -630,6 +637,12 @@ test("every mapped item has its own click and a hover class: pills, legend rows,
     [/className=\{`chg hv /, "the N new pill"],
     [/className="rf hv" onClick=/, "refresh"],
     [/className="hr hv" onClick=/, "budget warning"],
+    // The visualisations, not only their labels ("visualisations dont have hover, labels do").
+    [/className=\{`arc vz \$\{a\.key\}`\} onClick=/, "donut arc"],
+    [/className=\{`cc vz l/, "calendar cell"],
+    [/<g key=\{b\.day\} className="vz" onClick=/, "velocity day column"],
+    [/<g key=\{use\.days\[i\]\.day\} className="vz" onClick=/, "commands day column"],
+    [/className="tcr hv" onClick=/, "command row"],
   ];
   for (const [re, what] of need) assert.match(code, re, `${what} has no click target`);
   assert.match(code, /viewRoute\('\/health', \{ section: p\.section \}\)/, "a health chip deep-links to its own section");
