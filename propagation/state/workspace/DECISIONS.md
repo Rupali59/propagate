@@ -1560,3 +1560,36 @@ Inferred: that a branch no recorded run exercised cannot hide a dependency. It c
 
 **Refs:** plan `ticklish-gathering-brook.md` "Test selection by module", `rule:derive-dont-curate`,
 `rule:enforcement-watches-itself`, G56 (store scoping), G76 (new files).
+
+## 2026-10-17: propagate loads in place from its own repo, as `propagate@propagate`
+
+**What:** `propagate@tathya` was uninstalled. The propagate repo was added as its own directory marketplace
+(`claude plugin marketplace add <repo>`, name `propagate`, source `directory`) and `propagate@propagate` installed. The hub's
+`skills-marketplace` entry and the `skills-marketplace/propagate` symlink are removed (hub 462e5d3). `doctor`'s `# Delivery`
+section detects this from `known_marketplaces.json` plus `installed_plugins.json` and passes "served in place"; cache trees
+become LEFTOVER warnings, never lag. The vendored `commands/vendor/README.md` was renamed `README.txt` so it is not read as
+a command.
+
+**Why:** a symlink leaving the marketplace made Claude Code copy the plugin into `~/.claude/plugins/cache/` on every update,
+so a release needed `claude plugin update` plus a hub manifest bump (skipped for 18 days once, see RELEASE.md). Loading in
+place makes `/reload-plugins` the whole delivery step.
+
+**Probe evidence (verified, 2026-10-17):** after install, a probe edit to `commands/propagate-status.md` appeared in the
+session after `/reload-plugins` with no `plugin update`. Install still wrote a cache copy (`cache/propagate/propagate/0.15.28`)
+and `installed_plugins.json` recorded `installPath` = that copy and `gitCommitSha` = cfe1df0, yet the session served the repo.
+So `installPath` is NOT what is served for an in-place plugin. Inferred, not verified: that a hook edit is read from the
+working tree on the next session start (the same mechanism; not exercised on a hook on purpose, see G80).
+
+**Rejected.**
+- **Keep copy-per-release.** Safe from half-finished edits (the cache shields sessions), but costs an update step and a hub
+  manifest bump every release, and that step was skipped and went unnoticed for 18 days.
+- **A `commands` list in `plugin.json` to exclude the stray README.** `claude plugin validate` still read the file and the
+  runtime never loaded it as a command, so renaming it to `README.txt` was simpler and needs no manifest list that must be kept
+  in step with `commands/` (`rule:derive-dont-curate`).
+
+**Cost:** a half-finished edit to `hooks/gotcha-guard.mjs` or `hooks/rule-guard.mjs` is live for any session that starts or
+reloads meanwhile. None yet; accepted. See GOTCHAS G80.
+
+**Affects:** propagate
+
+**Refs:** plan `ticklish-gathering-brook.md` "propagate loads in place", G80, `docs/RELEASE.md`, `lib/report/doctor/delivery.mjs`.

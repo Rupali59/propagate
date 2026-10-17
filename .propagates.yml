@@ -1,6 +1,7 @@
 # propagate's own couplings.
 #
-# Served as a plugin from `skills-marketplace/propagate` (a symlink to this repo).
+# Served as a plugin IN PLACE from this repo: it is its own directory marketplace
+# (`propagate@propagate`, 2026-10-17), so the working tree is what loads.
 # The old `propagate-skill` -> ~/.claude/skills/propagate route was deleted by the
 # 2026-08-22 plugin cutover; corrected 2026-09-01.
 # symlink, exactly as the rules layer is reached via `rules` -> ~/.claude/rules.

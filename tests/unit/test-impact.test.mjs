@@ -246,3 +246,28 @@ test("readRecordings: two processes in one recording file are read as two proces
   assert.ok(r.owners.get("tests/unit/b.test.mjs").deps.has("lib/b.mjs"));
   assert.equal(r.malformed, 1, "a row with no path is counted, not fatal");
 });
+
+// REGRESSION (2026-10-17): release --check runs `npm test`, whose npm processes read package.json and
+// .npmrc with no owner. Recorded, they made the committed map carry 4 "unattributed" processes and the
+// floors test above went red on main. An unowned npm is harness and must leave no record; the same npm
+// started BY a test (owner inherited) must still be recorded, or a test that runs npm loses its deps.
+test("recorder: an unowned npm process leaves no record, an owned one still does", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "impact-npm-"));
+  const fakeNpm = path.join(dir, "npm-cli.js");
+  writeFileSync(fakeNpm, `require("fs").readFileSync(${JSON.stringify(path.join(REPO, "package.json"))});\n`);
+  const run = (out, owner) => {
+    const env = { ...process.env, TESTIMPACT_DIR: out, NODE_OPTIONS: `--import ${path.join(REPO, "scripts", "test-impact", "record.mjs")}` };
+    delete env.TESTIMPACT_OWNER;
+    delete env.NODE_TEST_CONTEXT;
+    if (owner) env.TESTIMPACT_OWNER = owner;
+    const r = spawnSync(process.execPath, [fakeNpm], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return readdirSync(out).filter((n) => n.endsWith(".jsonl"));
+  };
+  const unowned = mkdtempSync(path.join(os.tmpdir(), "impact-npm-out-"));
+  assert.deepEqual(run(unowned, null), [], "an unowned npm process was recorded, so it counts as unattributed");
+  const owned = mkdtempSync(path.join(os.tmpdir(), "impact-npm-out-"));
+  const files = run(owned, "tests/unit/some.test.mjs");
+  assert.equal(files.length, 1, "an npm started by a test must still be recorded against that test");
+  assert.match(readFileSync(path.join(owned, files[0]), "utf8"), /"o":"tests\/unit\/some\.test\.mjs"/);
+});

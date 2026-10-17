@@ -282,7 +282,7 @@ list sits above the detail.
   day, all clickable), and hand-drawing a band axis, a legend and a stacked-bar layout
   three times is the larger cost. So `d3` 7.9.0 and `@observablehq/plot` 0.6.17 (both ISC)
   are vendored in `commands/vendor/` as plain `<script>` globals, with their sha256 and
-  licences in `commands/vendor/README.md`. **What did not change:** no colour comes from the
+  licences in `commands/vendor/README.txt`. **What did not change:** no colour comes from the
   library. Every fill is a palette token resolved at render (`resolveToken` in the client),
   the tooltip is the page's own `.tip`, and the Activity view, the sparklines and the widget
   stay hand-drawn SVG. **If the library fails to load**, the Overview prints "chart

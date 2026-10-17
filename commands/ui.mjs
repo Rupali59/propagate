@@ -543,7 +543,7 @@ export function page(token, build = buildId()) {
   // d3 then Plot (Overview, 2026-10-16): Plot's UMD build reads the d3 global when it
   // loads, so the order is a dependency, not taste. If either fails to load the client
   // still runs and the Overview says "chart unavailable" in place of its charts; the
-  // KPIs and the table do not need them. Name, version, licence and sha256: vendor/README.md.
+  // KPIs and the table do not need them. Name, version, licence and sha256: vendor/README.txt (not .md: the plugin validator reads every .md under commands/ as a slash command).
   const vendor = ["vendor/preact.js", "vendor/hooks.js", "vendor/htm.js", "vendor/d3.min.js", "vendor/plot.umd.min.js"].map(read);
   return [
     '<!doctype html><html lang="en"><head><meta charset="utf-8">',

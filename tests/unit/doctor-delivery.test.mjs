@@ -30,7 +30,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -49,6 +49,7 @@ import {
   servedHashesFor,
   SHIPPED_EXCLUDE_FILES,
   activeInstallPath,
+  inPlaceMarketplace,
 } from "../../lib/report/doctor/delivery.mjs";
 import { Reporter } from "../../lib/report/doctor/reporter.mjs";
 import { DELIVERY_MAX_COMMITS, DELIVERY_MAX_DAYS } from "../../lib/core/config.mjs";
@@ -724,4 +725,90 @@ test("a delivery fail whose files DIFFER carries a command action; a MISSING-pat
   const r2 = new Reporter();
   await checkDelivery({ reporter: r2, repoRoot: repo2, cacheRoot: cache2, installedPluginsPath: ip2 });
   assert.equal(r2.entries.find((x) => x.kind === "fail")?.action, undefined);
+});
+
+// ── served in place (2026-10-17): the repo is its own directory marketplace ──
+
+function knownMarketplacesFixture(t, content) {
+  const dir = mkdtempSync(path.join(tmpdir(), "known-marketplaces-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const p = path.join(dir, "known_marketplaces.json");
+  if (content !== undefined) writeFileSync(p, typeof content === "string" ? content : JSON.stringify(content));
+  return p;
+}
+
+const dirMarketplace = (p) => ({ source: { source: "directory", path: p }, installLocation: p });
+
+test("in place: a directory marketplace at this repo with propagate installed PASSES, and every cache tree is a LEFTOVER warning", async (t) => {
+  const { root: repo, headSha } = gitRepo(t, { version: "1.0.0", files: { "cli.mjs": "v2-live" } });
+  // The install-time copy is deliberately DIFFERENT and stale: under the old logic this is a
+  // delivery failure. In place it must be neither lag, stale nor fail.
+  const cache = cacheFixture(t, [
+    { marketplace: "propagate", version: "1.0.0", files: { "cli.mjs": "old" } },
+    { marketplace: "tathya", version: "0.9.0", files: { "cli.mjs": "ancient" } },
+  ]);
+  const installedPluginsPath = installedPluginsFixture(t, {
+    "propagate@propagate": [{ scope: "user", installPath: path.join(cache, "propagate", "propagate", "1.0.0"), gitCommitSha: headSha }],
+  });
+  const knownMarketplacesPath = knownMarketplacesFixture(t, { propagate: dirMarketplace(repo) });
+
+  const r = new Reporter();
+  await checkDelivery({ reporter: r, repoRoot: repo, cacheRoot: cache, installedPluginsPath, knownMarketplacesPath });
+
+  const pass = r.entries.find((e) => e.kind === "pass");
+  assert.ok(pass, `expected a pass row; got ${JSON.stringify(r.entries)}`);
+  assert.match(pass.detail, /served in place/);
+  assert.match(pass.detail, /\/reload-plugins/);
+  const leftovers = r.entries.filter((e) => /LEFTOVER/.test(String(e.label)));
+  assert.equal(leftovers.length, 2, "every cache tree is reported, including the install-time copy of the in-place marketplace");
+  assert.ok(leftovers.every((e) => e.kind === "warn"));
+  assert.ok(leftovers.some((e) => /install-time copy/.test(e.detail)), "the install-time copy is named as such");
+  assert.equal(r.entries.filter((e) => e.kind === "fail").length, 0);
+  assert.equal(r.entries.some((e) => /STALE|DIVERGED|delivery lag/.test(String(e.label))), false);
+});
+
+test("in place: the repo is matched by REALPATH, so a symlinked marketplace path still counts", async (t) => {
+  const { root: repo } = gitRepo(t, { version: "1.0.0", files: { "cli.mjs": "x" } });
+  const linkDir = mkdtempSync(path.join(tmpdir(), "delivery-link-"));
+  t.after(() => rmSync(linkDir, { recursive: true, force: true }));
+  const link = path.join(linkDir, "via-link");
+  symlinkSync(repo, link);
+  const installed = { plugins: { "propagate@propagate": [{ scope: "user" }] } };
+  assert.equal(inPlaceMarketplace({ knownMarketplaces: { propagate: dirMarketplace(link) }, installedPlugins: installed, repoRoot: repo }), "propagate");
+});
+
+test("in place: a marketplace dir that is a DIFFERENT path, a non-directory source, or nothing installed keeps the old behaviour", async (t) => {
+  const { root: repo, headSha } = gitRepo(t, { version: "1.0.0", files: { "cli.mjs": "v1" } });
+  const { root: other } = gitRepo(t, { version: "1.0.0", files: { "cli.mjs": "v1" } });
+  const installed = { plugins: { "propagate@propagate": [{ scope: "user" }] } };
+  assert.equal(inPlaceMarketplace({ knownMarketplaces: { propagate: dirMarketplace(other) }, installedPlugins: installed, repoRoot: repo }), null);
+  assert.equal(inPlaceMarketplace({ knownMarketplaces: { propagate: { source: { source: "github", repo: "x/y" } } }, installedPlugins: installed, repoRoot: repo }), null);
+  assert.equal(inPlaceMarketplace({ knownMarketplaces: { propagate: dirMarketplace(repo) }, installedPlugins: { plugins: {} }, repoRoot: repo }), null, "a marketplace with nothing installed from it serves nothing");
+
+  // End to end: the old cache comparison still runs and still fails past the bound.
+  const { root: oldRepo, headSha: oldSha } = gitRepo(t, { version: "1.0.0", files: { "cli.mjs": "v1" }, date: daysAgo(DELIVERY_MAX_DAYS + 5) });
+  commitMore(oldRepo, { files: { "cli.mjs": "v2" }, message: "change shipped file" });
+  const cache = cacheFixture(t, [{ marketplace: "m", version: "1.0.0", files: { "cli.mjs": "v1" } }]);
+  const installedPluginsPath = installedPluginsFixture(t, { "propagate@m": [{ scope: "user", gitCommitSha: oldSha }] });
+  const knownMarketplacesPath = knownMarketplacesFixture(t, { m: dirMarketplace(other) });
+  const r = new Reporter();
+  await checkDelivery({ reporter: r, repoRoot: oldRepo, cacheRoot: cache, installedPluginsPath, knownMarketplacesPath });
+  assert.equal(r.entries.filter((e) => e.kind === "fail").length, 1, `expected the old failure; got ${JSON.stringify(r.entries)}`);
+  assert.equal(r.entries.some((e) => /served in place/.test(e.detail ?? "")), false);
+  void headSha;
+});
+
+test("in place: a missing or corrupt known_marketplaces.json falls back WITH A NOTE, never a silent pass", async (t) => {
+  const { root: repo, headSha } = gitRepo(t, { version: "1.0.0", files: { "cli.mjs": "v1" } });
+  for (const [what, content] of [["missing", undefined], ["corrupt", "{ not json"]]) {
+    const cache = cacheFixture(t, [{ marketplace: "m", version: "1.0.0", files: { "cli.mjs": "v1" } }]);
+    const installedPluginsPath = installedPluginsFixture(t, { "propagate@m": [{ scope: "user", installPath: path.join(cache, "m", "propagate", "1.0.0"), gitCommitSha: headSha }] });
+    const knownMarketplacesPath = knownMarketplacesFixture(t, content);
+    const r = new Reporter();
+    await checkDelivery({ reporter: r, repoRoot: repo, cacheRoot: cache, installedPluginsPath, knownMarketplacesPath });
+    const note = r.entries.find((e) => e.kind === "info" && e.label === "in-place install");
+    assert.ok(note, `${what}: expected an attributable note; got ${JSON.stringify(r.entries)}`);
+    assert.match(note.detail, new RegExp(what));
+    assert.ok(r.entries.some((e) => e.kind === "pass" && /identical/.test(e.detail)), `${what}: the cache comparison must still run`);
+  }
 });

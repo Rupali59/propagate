@@ -68,6 +68,12 @@ function install() {
     if (entry.startsWith(REPO_PREFIX)) process.env.TESTIMPACT_OWNER = entry.slice(REPO_PREFIX.length).split(path.sep).join("/");
   }
   const owner = process.env.TESTIMPACT_OWNER || null;
+  // npm itself is harness, like the runner above: `npm test` runs `npm run test:propagate` and
+  // `npm run test:curate-docs`, each an npm process that reads package.json and .npmrc and owns no test.
+  // Recorded, they counted as 4 "unattributed" processes and turned the floors test red on the very map
+  // release --check had just written (2026-10-17). Only an UNOWNED npm is skipped: an npm a test starts
+  // inherits the owner and is still recorded against that test.
+  if (!owner && /(?:^|[\\/])npm(?:-cli(?:\.js)?)?$/.test(process.argv[1] || "")) return;
   const isTestProcess = !!process.env.NODE_TEST_CONTEXT && owner && path.resolve(process.argv[1] || "") === path.join(REPO, owner);
 
   /** @type {Set<string>} "k\tpath" */

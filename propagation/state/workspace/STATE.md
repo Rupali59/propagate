@@ -1,5 +1,16 @@
 # propagate — State
 
+## propagate loads in place (`propagate@propagate`) — 2026-10-17, `v0.15.29`
+The propagate repo is its own directory marketplace, so Claude Code serves the working tree: a release is `/reload-plugins`,
+with no `claude plugin update` and no hub manifest bump. `doctor`'s `# Delivery` passes "served in place" (read from
+`known_marketplaces.json` + `installed_plugins.json`, injectable paths, tests in `tests/unit/doctor-delivery.test.mjs`) and
+reports every cache tree as a LEFTOVER warning. `docs/RELEASE.md`, `docs/REFERENCE.md`, `.propagates.yml` and `hooks/hooks.json`
+comments updated. Trade: a half-finished hook edit is live (G80). Decision: DECISIONS 2026-10-17. Shown, not assumed: a probe edit to
+`commands/propagate-status.md` appeared after `/reload-plugins` alone. `.githooks/post-merge` now detects the in-place
+install and prints a reload hint instead of running `claude plugin update`. The vendored readme is `commands/vendor/README.txt`,
+so the plugin validator no longer reads it as a slash command. Also fixed: the recorder skipped npm's own unowned
+processes, which had left v0.15.28's map with 4 "unattributed" processes and the floors test red on main.
+
 
 ## The web UI is built from one Kpi, one DataTable, one chart and one banner — 2026-10-16, `v0.15.28` (Phases 0, 1 and 1b of the design review)
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section; Phases 2–5 next).

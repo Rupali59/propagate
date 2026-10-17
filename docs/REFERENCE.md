@@ -630,7 +630,13 @@ sidecar, `bootstrap` baselines **edges**, `setup` configures **the machine**.
 
 `doctor`'s `# Delivery` section compares the served plugin under
 `~/.claude/plugins/cache/<marketplace>/propagate/<version>/` against this repo, and fails the run
-once the served tree is too far behind. Two bounds decide "too far":
+once the served tree is too far behind. Two bounds decide "too far".
+
+**Not when propagate is served in place (2026-10-17).** If `~/.claude/plugins/known_marketplaces.json`
+has a `directory` marketplace whose realpath is this repo and `propagate@<it>` is installed, Claude
+Code loads the working tree: there is no copy to lag, so the section passes ("served in place; edits
+apply on `/reload-plugins`") and every cache tree is only a LEFTOVER warning. The bounds below then
+apply to nothing; they are for a plugin installed from a marketplace that copies.
 
 | key | env override | built-in default | meaning |
 |---|---|---|---|

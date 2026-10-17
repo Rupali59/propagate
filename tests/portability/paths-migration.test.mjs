@@ -202,6 +202,7 @@ test("paths.mjs alone resolves every registry default under a controlled HOME, a
     assert.equal(out.PATHS["claude.projects"], path.join(fx.home, ".claude", "projects"));
     assert.equal(out.PATHS["claude.pluginCache"], path.join(fx.home, ".claude", "plugins", "cache"));
     assert.equal(out.PATHS["claude.installedPlugins"], path.join(fx.home, ".claude", "plugins", "installed_plugins.json"));
+    assert.equal(out.PATHS["claude.knownMarketplaces"], path.join(fx.home, ".claude", "plugins", "known_marketplaces.json"));
     assert.equal(out.PATHS["claude.skillsRegistryOff"], path.join(fx.home, ".claude", "skills-registry.off"));
     assert.equal(out.PATHS["claude.userConfig"], path.join(fx.home, ".claude.json"));
     assert.equal(out.PATHS["agents.skillLock"], path.join(fx.home, ".agents", ".skill-lock.json"));
@@ -209,8 +210,9 @@ test("paths.mjs alone resolves every registry default under a controlled HOME, a
     assert.equal(out.PATHS["propagate.stateDirDefault"], path.join(fx.home, ".propagate"));
     assert.equal(
       Object.keys(out.PATHS).length,
-      16,
-      "exactly sixteen entries — fourteen from the plan, plus claude.userConfig (found during migration) and "
+      17,
+      "exactly seventeen entries — fourteen from the plan, plus claude.userConfig (found during migration), "
+        + "claude.knownMarketplaces (2026-10-17, doctor's in-place delivery check) and "
         + "propagate.stateDirDefault (added when the Lane E guard showed config.mjs was STRUCTURALLY forced to "
         + "hand-roll it: no pure .propagate default existed to import). This pin is deliberate — a registry "
         + "that grows silently is the thing it replaced.",

@@ -458,3 +458,71 @@ test("cli: release exports only the --check entry point — no publish flag exis
   const optsBlock = fnBody.slice(0, fnBody.indexOf(") {"));
   assert.doesNotMatch(optsBlock, /apply|publish|push|write/i, `runReleaseCheck's own options must not accept a write flag:\n${optsBlock}`);
 });
+
+// The map this run WROTE is checked before the gate passes (2026-10-17). The suite runs against the map on
+// disk before the rewrite, so v0.15.28's bad recording passed its own gate and turned main red a release
+// later. A stub map test that fails must fail the gate; one that passes must not.
+function impactFixtureWithMapTest(passes) {
+  const dir = impactFixture(`node -e "console.log('ℹ tests 1'); console.log('ℹ pass 1'); console.log('ℹ fail 0')"`);
+  mkdirSync(path.join(dir, "tests", "unit"), { recursive: true });
+  writeFileSync(path.join(dir, "tests", "unit", "test-impact.test.mjs"),
+    `import { test } from "node:test";\nimport assert from "node:assert/strict";\n` +
+    `test("map floors", () => { assert.ok(${passes ? "true" : "false"}, "processes were recorded with no owner"); });\n`);
+  return dir;
+}
+
+test("gate 2: a freshly written impact map that fails its own test FAILS the gate, naming why", () => {
+  const dir = impactFixtureWithMapTest(false);
+  try {
+    const g = gateSuite({ skillDir: dir, env: noRecordEnv() });
+    assert.equal(g.status, "failed", g.detail);
+    assert.match(g.detail, /map this run wrote fails its own check/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 2: a freshly written impact map that passes its own test leaves the gate green", () => {
+  const dir = impactFixtureWithMapTest(true);
+  try {
+    const g = gateSuite({ skillDir: dir, env: noRecordEnv() });
+    assert.equal(g.status, "passed", g.detail);
+    assert.doesNotMatch(g.detail, /fails its own check/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+// Gate 1: a hub without propagate is "not a delivery path" ONLY when this skillDir is served in place
+// (a directory marketplace whose realpath is the skillDir, with propagate@<it> installed). Fixtures only;
+// the real ~/.claude is never read.
+function claudeRecords(dir, marketplacePath) {
+  const known = path.join(dir, "known_marketplaces.json");
+  const installed = path.join(dir, "installed_plugins.json");
+  writeFileSync(known, JSON.stringify({ local: { source: { source: "directory", path: marketplacePath } } }));
+  writeFileSync(installed, JSON.stringify({ plugins: { "propagate@local": [{ scope: "user", installPath: "/x", version: "0.1.0" }] } }));
+  return { knownMarketplacesPath: known, installedPluginsPath: installed };
+}
+
+test("gate 1: a hub without propagate, while THIS repo is served in place, is 'not a delivery path', not UNCHECKED", () => {
+  const dir = manifestFixture({ hubEntryName: "renamed-somehow" });
+  try {
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: hubPath(dir), ...claudeRecords(dir, dir) });
+    assert.equal(g.status, "passed", JSON.stringify(g));
+    assert.match(g.detail, /not a delivery path: propagate loads in place from marketplace "local"/);
+    assert.doesNotMatch(g.detail, /UNCHECKED/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 1: a hub without propagate while a DIFFERENT directory is the marketplace stays UNCHECKED", () => {
+  const dir = manifestFixture({ hubEntryName: "renamed-somehow" });
+  try {
+    const g = gateVersionManifests({ skillDir: dir, hubMarketplacePath: hubPath(dir), ...claudeRecords(dir, tmpdir()) });
+    assert.match(g.detail, /UNCHECKED/);
+    assert.doesNotMatch(g.detail, /not a delivery path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});

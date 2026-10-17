@@ -7,9 +7,11 @@
 # served tree entirely, so the whole judgment lane ran nowhere while every check in
 # this repo stayed green.
 #
-# The `tathya` marketplace is a local DIRECTORY source and `skills-marketplace/propagate`
-# is a symlink to this repo, which makes it feel as though the plugin is served from
-# here. It is not. Claude Code COPIES into ~/.claude/plugins/cache/<mkt>/propagate/<version>/
+# SINCE 2026-10-17 this repo is its own directory marketplace and the plugin loads IN PLACE, so
+# the hook below only prints a /reload-plugins hint. The rest of this header records the old,
+# cached setup, which a machine without the in-place install still has: until then the `tathya`
+# marketplace reached this repo through a symlink, which made it feel as though the plugin was
+# served from here. It was not. Claude Code COPIES into ~/.claude/plugins/cache/<mkt>/propagate/<version>/
 # at install time and serves that snapshot. Editing this repo, merging a PR and bumping
 # VERSION move no served bytes. Only `claude plugin update` re-copies.
 #
@@ -43,7 +45,7 @@ cd "$ROOT" || exit 0
 # change" (rule:discernment-checks §2), so say so rather than exiting quietly.
 if ! git rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
   echo "propagate: post-merge could not read ORIG_HEAD — skipped the delivery check."
-  echo "           If VERSION moved, run: claude plugin update propagate@tathya"
+  echo "           If VERSION moved: run /reload-plugins (in-place install) or claude plugin update propagate@<marketplace>."
   exit 0
 fi
 
@@ -52,23 +54,47 @@ git diff-tree -r --name-only ORIG_HEAD HEAD 2>/dev/null | grep -qx 'VERSION' || 
 SRC=$(cat VERSION 2>/dev/null)
 echo "propagate: VERSION changed in this merge (now ${SRC:-?}) — delivering the plugin."
 
+# IN PLACE (2026-10-17): when this repo is itself a directory marketplace Claude Code knows, the
+# plugin is served from this working tree and there is nothing to deliver. An update would only
+# write another unserved cache copy. Detected from known_marketplaces.json, not installed_plugins.json,
+# whose installPath names that unserved copy (GOTCHAS G80).
+INPLACE=$(ROOT="$ROOT" node -e '
+  const fs = require("fs"), path = require("path");
+  try {
+    const k = JSON.parse(fs.readFileSync(path.join(require("os").homedir(), ".claude/plugins/known_marketplaces.json"), "utf8"));
+    const root = fs.realpathSync(process.env.ROOT);
+    for (const [name, m] of Object.entries(k)) {
+      const s = m && m.source;
+      if (s && s.source === "directory" && s.path && fs.realpathSync(s.path) === root) { console.log(name); break; }
+    }
+  } catch {}
+' 2>/dev/null)
+if [ -n "$INPLACE" ]; then
+  echo "propagate: served in place from this repo (marketplace \"$INPLACE\") — nothing to deliver."
+  echo "           Run /reload-plugins in any open Claude Code session to load $SRC."
+  exit 0
+fi
+# Cached install: the key is whatever propagate@<marketplace> is installed, never a hardcoded one.
+KEY=$(node -e 'try{const i=require(require("os").homedir()+"/.claude/plugins/installed_plugins.json");const k=Object.keys(i.plugins||{}).find(x=>x.startsWith("propagate@"));if(k)console.log(k)}catch{}' 2>/dev/null)
+KEY=${KEY:-propagate@<marketplace>}
+
 if ! command -v claude >/dev/null 2>&1; then
   echo "propagate: \`claude\` is not on PATH, so the plugin was NOT updated."
   echo "           The source is $SRC; whatever is served is now stale."
-  echo "           Run when you can: claude plugin update propagate@tathya"
+  echo "           Run when you can: claude plugin update $KEY"
   exit 0
 fi
 
 # `-y` is REQUIRED here: a git hook has no TTY, and `update` refuses the confirmation
 # prompt without it. That flag auto-accepts a marketplace-declared install command,
-# which is only safe because `tathya` is a local directory marketplace pointing at
+# which is only safe because the marketplace is a local directory pointing at
 # this repo — a path you own. Do NOT copy this hook for a remote marketplace without
 # re-reading what `-y` accepts there.
-if claude plugin update propagate@tathya -y >/dev/null 2>&1; then
+if claude plugin update $KEY -y >/dev/null 2>&1; then
   : # fall through to verification — a success exit is a claim, not proof
 else
   echo "propagate: \`claude plugin update\` FAILED. The served plugin is still stale."
-  echo "           Run manually and read the error: claude plugin update propagate@tathya"
+  echo "           Run manually and read the error: claude plugin update $KEY"
   exit 0
 fi
 

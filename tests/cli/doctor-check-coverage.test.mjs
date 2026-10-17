@@ -92,6 +92,13 @@ const KNOWN_UNCOVERED = [
   // routed count against the register once a register writer exists), delete
   // this entry and write the fixture — do not widen the reason.
   "reminders list readable",
+  // "plugin served in place" — added 2026-10-17. Uncoverable by construction, like the entry
+  // above: the row is only emitted once inPlaceMarketplace() has already found the matching
+  // directory marketplace, so its condition is literally `true`. Every way that lookup can fail
+  // (no match, missing or corrupt known_marketplaces.json) routes to the cache comparison or an
+  // info note, never to this row failing. Those paths ARE tested, in
+  // tests/unit/doctor-delivery.test.mjs, including the realpath comparison mutated red.
+  "plugin served in place",
   // "Affects: tokens parse" — PAID 2026-08-25. tests/unit/doctor-decisions.test.mjs
   // makes DECISIONS.md a directory so existsSync passes and readFile throws EISDIR,
   // then asserts problems === 1. That was the one failure mode EXPECTATIONS cannot

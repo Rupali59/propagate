@@ -1906,3 +1906,21 @@ blocks shipping by the plan's own bar.
 **Instead:** treat `test:affected` as the working tier only; `npm test` / `release --check` and CI still run
 everything. After adding a test, run `npm run test:record` so its deps are recorded rather than defaulted. Derive
 the current partial count from `tests/impact-map.json` (`header.partial`), never from this entry.
+
+### G80 · In place means the working tree is live: a half-finished hook edit breaks every session that reloads
+**Trigger:** `hooks/(gotcha|rule)-guard\.mjs`
+**Fires on:** `Edit hooks/gotcha-guard.mjs`
+Since 2026-10-17 propagate loads in place (`propagate@propagate`, the repo is its own directory marketplace), so
+`hooks/gotcha-guard.mjs` and `hooks/rule-guard.mjs` run from the working tree, not from a cache copy. A syntax error
+or an unfinished edit there is executed by every session that starts, or runs `/reload-plugins`, while the file is in
+that state. Before this the copy in `~/.claude/plugins/cache/` shielded sessions from half-edits; that shield is gone.
+**Signal:** every Bash/Edit/Write call in a fresh or reloaded session errors from a hook, or the guard stops printing
+entries, with no change to the project the session is in.
+**Cost:** none yet. This is the trade accepted on 2026-10-17 (DECISIONS 2026-10-17: propagate loads in place), against
+an update step on every release.
+**Instead:** finish hook edits behind the test gate (`node hooks/gotcha-guard.mjs --selftest`, `npm run test:affected`)
+before any `/reload-plugins` or new session. If a session breaks, revert the file (`git checkout -- hooks/<file>`) and
+run `/reload-plugins`.
+**Also:** for an in-place plugin, `installed_plugins.json`'s `installPath` and `gitCommitSha` describe the install-time
+cache copy Claude Code still writes, not the tree being served. Do not read them as what is running; `doctor`'s
+`# Delivery` section decides in-place from `known_marketplaces.json` instead.
