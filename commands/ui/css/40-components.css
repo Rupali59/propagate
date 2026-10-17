@@ -36,6 +36,18 @@
 .badge.fail { background: var(--st-warn); }
 .badge.accepted { background: var(--dim); }
 .badge.NEVER_VERIFIED { background: var(--dim); }
+/* Phase 4a (2026-10-17): the Claims, Rules, Caps and Skills pages. Their badge values come from the data (a claim kind,
+   a rule or skill status), so a value the stylesheet has not met must still have a background (the UNMATCHED lesson
+   above): the attribute selector gives any k-/r-/c-/s- badge the quiet default, and every value the client is known to
+   emit has its own named rule, which the badge-rule test in ui-client.test.mjs requires of what the pages render. */
+.badge[class*=" k-"], .badge[class*=" r-"], .badge[class*=" c-"], .badge[class*=" s-"] { background: var(--dim); }
+.badge.k-expired-date, .badge.k-footer-stale { background: var(--st-caution); }
+.badge.k-rotted-citation, .badge.k-dead-concept-token, .badge.k-price-literal-drift { background: var(--st-warn); }
+.badge.r-restated, .badge.c-over { background: var(--st-warn); }
+.badge.r-unexercised, .badge.c-yellow, .badge.s-never-invoked { background: var(--st-caution); }
+.badge.r-adopted, .badge.r-firing, .badge.s-active { background: var(--st-ok); }
+.badge.c-exempt { background: var(--dim); }
+.badge.s-dormant { background: var(--st-accent); }
 
 /* ── stream: "what changed since I last looked" ──────────────────────────
    Three ref-vintage states get three rules, deliberately -- collapsing

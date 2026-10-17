@@ -4036,7 +4036,7 @@ async function inventoryCmd() {
  * a git checkout that tracks upstream.
  */
 async function skills() {
-  const { scanSkills, summarize, probeTranscripts, INSTALLER } = await import("./lib/skills/skills-scan.mjs");
+  const { scanSkills, summarize, probeTranscripts, INSTALLER, NEVER_INVOKED_MEANS } = await import("./lib/skills/skills-scan.mjs");
   const tx = probeTranscripts();
   const scan = scanSkills({ transcripts: tx.byName });
   const sum = summarize(scan);
@@ -4060,7 +4060,7 @@ async function skills() {
 
   const pct = sum.total ? Math.round((sum.neverInvoked / sum.total) * 100) : 0;
   console.log();
-  console.log(`  ${YELLOW}${sum.neverInvoked}${RESET} never invoked ${DIM}(${pct}% — zero in skillUsage AND zero in transcripts)${RESET}`);
+  console.log(`  ${YELLOW}${sum.neverInvoked}${RESET} never invoked ${DIM}(${pct}% — ${NEVER_INVOKED_MEANS})${RESET}`);
   if (!tx.scanned) console.log(`  ${YELLOW}transcript probe unavailable${RESET} ${DIM}— never-invoked rests on skillUsage alone${RESET}`);
   if (sum.transcriptOnly) {
     console.log(`  ${RED}${sum.transcriptOnly}${RESET} in transcripts but absent from skillUsage ${DIM}— undermines skillUsage as primary${RESET}`);

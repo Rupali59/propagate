@@ -2265,19 +2265,19 @@ test("Phase 2 machinery: six tiles from /api/machinery, each with its count, det
   assert.equal(kpiCards(m.app).length, 5, "the five KPIs are still five");
   // destinations are stated in the tooltip, not left to be discovered
   hover(tileNamed(m.app, "Claims")); await m.settle();
-  assert.match(textOf(tipBox(m.app)), /There is no Claims page yet\. Click to copy `propagate claims check`/);
+  assert.match(textOf(tipBox(m.app)), /Opens the Claims page, which lists every finding with its file and line/);
   unhover(tileNamed(m.app, "Claims"));
   hover(tileNamed(m.app, "Backlog")); await m.settle();
   assert.match(textOf(tipBox(m.app)), /opens Registers/);
   unhover(tileNamed(m.app, "Backlog"));
 });
 
-test("Phase 2 machinery: a tile with no page yet copies its CLI command; Backlog opens Registers", async () => {
+test("Phase 2 machinery (Phase 4a): Goals, which has no page yet, copies its CLI command; Backlog opens Registers; the four paged tiles never copy", async () => {
   // Real timers: the 1.5 s "copied" flash would be sped up to 15 ms and gone before it could be read.
   const m = await mountOv({ speedUp: false });
   const wrote = clipboard(m);
   const before = m.ctx.location.hash;
-  for (const [name, cmd] of [["Claims", "propagate claims check"], ["Rules", "propagate rules list"], ["Caps", "propagate caps"], ["Skills", "propagate skills"], ["Goals", "propagate goals"]]) {
+  for (const [name, cmd] of [["Goals", "propagate goals"]]) {
     // No m.settle() between the click and the read: settle waits for the tracked 1.5 s timer, i.e. for the flash to END.
     click(tileNamed(m.app, name));
     for (let i = 0; i < 40 && !/copied: /.test(textOf(tileNamed(m.app, name))); i++) await sleep(10);
@@ -2285,6 +2285,7 @@ test("Phase 2 machinery: a tile with no page yet copies its CLI command; Backlog
     assert.equal(m.ctx.location.hash, before, name + " does not navigate");
     assert.match(textOf(tileNamed(m.app, name)), /copied: /, name + " says it copied");
   }
+  assert.equal(wrote.length, 1, "nothing else copied");
   click(tileNamed(m.app, "Backlog")); await m.settle();
   assert.equal(m.ctx.location.hash, "#/registers");
 });
@@ -2299,7 +2300,10 @@ test("Phase 2 machinery: one source that failed reads 'could not read — <reaso
   assert.match(textOf(tileNamed(m.app, "Claims")), /194/);
   // and it still has a stated destination: the command that would show the real error
   hover(tileNamed(m.app, "Skills")); await m.settle();
-  assert.match(textOf(tipBox(m.app)), /failed on its own.*Click to copy `propagate skills`/);
+  assert.match(textOf(tipBox(m.app)), /failed on its own.*Opens the Skills page/, "a failed tile still leads to its page, which shows the reason in full");
+  unhover(tileNamed(m.app, "Skills"));
+  click(tileNamed(m.app, "Skills")); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/skills");
 });
 
 test("Phase 2 machinery: a failed request and a block the server forgot to send both say 'could not read', each with its own reason", async () => {
@@ -2341,7 +2345,7 @@ test("Phase 2 machinery: the pure model gives every tile a destination or a reas
     { status: "ok", data: { ...MACH, caps: { status: "error", reason: "x", count: null } } }]) {
     const ts = model(st);
     assert.equal(ts.length, 6);
-    for (const t of ts) assert.ok(t.tip && t.tip !== ui.KPI_NO_REASON && /no .* page yet|opens Registers/i.test(t.tip), `${t.key} in ${JSON.stringify(st).slice(0, 40)}: tip must state the destination, got ${t.tip}`);
+    for (const t of ts) assert.ok(t.tip && t.tip !== ui.KPI_NO_REASON && /no .* page yet|opens Registers|Opens the \w+ page/i.test(t.tip), `${t.key} in ${JSON.stringify(st).slice(0, 40)}: tip must state the destination, got ${t.tip}`);
   }
 });
 
@@ -2488,4 +2492,301 @@ test("Phase 3: Unblock's settle-together header opens Judge with those roots tic
     await sleep(HOLD_PASSED_MS);
     assert.equal(disposeCalls(m).length, 0, "the hop writes nothing");
   }
+});
+
+/* ══ Dashboard Phase 4a: Claims, Rules, Caps and Skills (2026-10-17) ══════════════════════════════════════════════
+   Each page answers one question, is read-only, and is a DataTable over what /api/<name> sends. The payloads below are
+   LITERALS: hostile and edge shapes (a finding with no line, a file path with markup in it, a rule with no file, an
+   exempt cap with no ratio) are written out by hand and must not be tidied onto a builder
+   (rule:mutate-behind-the-fixture-builder). */
+
+const GH = "/u/Documents/GitHub/";
+const CLAIMS_P = {
+  ok: true,
+  rows: [
+    { id: "c1", kind: "expired-date", kindLabel: "expired date", file: GH + "a/DOC.md", line: 12, claim: "until 2026-06-17", message: "\"until 2026-06-17\" expired 2026-06-17 (122d ago)", historical: false },
+    { id: "c2", kind: "rotted-citation", kindLabel: "rotted internal citation", file: GH + "b/HAND OVER.md", line: null, claim: "gone", message: "cites branch `gone`, absent from the repo", historical: false },
+    { id: "c3", kind: "expired-date", kindLabel: "expired date", file: GH + "c/<img src=x onerror=alert(1)>.md", line: 7, claim: "until 2026-01-01", message: "<b>x</b> expired", historical: true },
+    { id: "c4", kind: "footer-stale", kindLabel: "footer date is behind the newest inline date", file: "", line: null, claim: "2026-08-10", message: "footer says an older date", historical: false },
+  ],
+  kinds: [{ kind: "expired-date", label: "expired date", count: 2 }, { kind: "rotted-citation", label: "rotted internal citation", count: 1 }, { kind: "footer-stale", label: "footer date is behind the newest inline date", count: 1 }],
+  summary: { findings: 4, filesChecked: 702, sidecarsChecked: 50, sourceEdges: 350, globsSkipped: 3, unreadable: 0 },
+};
+const RULES_P = {
+  ok: true,
+  rows: [
+    { id: "adopted-rule", scope: "global", file: "/u/.claude/rules/adopted-rule.md", coverage: "adopted", status: "adopted", referenced: 3, matched: 0, restatedIn: [], excusedIn: [] },
+    { id: "firing-rule", scope: "next-projects", file: "/u/.claude/rules/firing-rule.md", coverage: "firing", status: "firing", referenced: 0, matched: 2, restatedIn: [], excusedIn: [] },
+    { id: "dusty-rule", scope: "global", file: "/u/.claude/rules/dusty-rule.md", coverage: "unexercised", status: "unexercised", referenced: 0, matched: 0, restatedIn: [], excusedIn: [] },
+    { id: "copied-rule", scope: "global", file: "/u/.claude/rules/copied-rule.md", coverage: "firing", status: "restated", referenced: 1, matched: 1,
+      restatedIn: [{ file: GH + "x/CLAUDE.md", line: 41 }, { file: GH + "y/CLAUDE.md", line: null }], excusedIn: [{ file: GH + "z/CLAUDE.md", line: 9 }] },
+    { id: "pathless-rule", scope: null, file: "", coverage: "unexercised", status: "unexercised", referenced: 0, matched: 0, restatedIn: [], excusedIn: [] },
+  ],
+  summary: { rules: 5, adopted: 1, firing: 2, unexercised: 2, restated: 2, restatedRules: 1, excused: 1, filesScanned: 61 },
+};
+const CAPS_P = {
+  ok: true,
+  rows: [
+    { id: GH + "m/CLAUDE.md", file: GH + "m/CLAUDE.md", kind: "CLAUDE.md", scope: "workspace", project: "m", metric: "lines", actual: 305, cap: 220, ratio: 305 / 220, status: "over" },
+    { id: GH + "t/TODOS.md", file: GH + "t/TODOS.md", kind: "TODOS.md", scope: "project", project: "t", metric: "lines", actual: 900, cap: 50, ratio: 18, status: "over" },
+    { id: GH + "o/CLAUDE.md", file: GH + "o/CLAUDE.md", kind: "CLAUDE.md", scope: "project", project: "o", metric: "lines", actual: 176, cap: 180, ratio: 176 / 180, status: "yellow" },
+    { id: GH + "g/GOTCHAS.md", file: GH + "g/GOTCHAS.md", kind: "GOTCHAS.md", scope: "project", project: "g", metric: "entries", actual: 16, cap: null, ratio: null, status: "exempt" },
+  ],
+  summary: { measured: 157, over: 2, yellow: 1, exempt: 1, skippedStubs: 31, excessLines: 100 },
+};
+const SKILLS_P = {
+  ok: true,
+  rows: [
+    { id: "busy", installer: "gstack-relink", provenance: null, uses: 9, transcripts: 2, lastUsedAt: Date.UTC(2026, 9, 16), status: "active" },
+    { id: "stale", installer: "npx-skills", provenance: "owner/repo", uses: 3, transcripts: 0, lastUsedAt: Date.UTC(2026, 2, 1), status: "dormant" },
+    { id: "never-ran", installer: "handmade", provenance: null, uses: 0, transcripts: 0, lastUsedAt: null, status: "never invoked" },
+    { id: "odd<script>", installer: "handmade", provenance: null, uses: 0, transcripts: 0, lastUsedAt: null, status: "never invoked" },
+  ],
+  summary: { total: 4, neverInvoked: 2, dormant: 1, dormantDays: 90, transcriptProbe: true, neverInvokedMeans: "zero in skillUsage AND zero in transcripts", orphanUsageKeys: 62 },
+};
+const PAGE_ROUTES = { claims: "/api/claims", rules: "/api/rules", caps: "/api/caps", skills: "/api/skills" };
+const mountPage = (name, payload, extra = {}) => mount({ hash: "#/" + name, routes: { [PAGE_ROUTES[name]]: payload, ...extra } });
+const firstCells = (m) => dtRows(m.app).map((r) => textOf(r));
+const rowFor = (m, re) => dtRows(m.app).find((r) => re.test(textOf(r)));
+
+test("Phase 4a: the four pages each ask for their own endpoint, only when opened", async () => {
+  const j = await mount({ hash: "#/judge" });
+  for (const p of Object.values(PAGE_ROUTES)) assert.equal(j.calls.filter((c) => c === p).length, 0, p + " is lazy");
+  for (const name of Object.keys(PAGE_ROUTES)) {
+    const payload = { claims: CLAIMS_P, rules: RULES_P, caps: CAPS_P, skills: SKILLS_P }[name];
+    const m = await mountPage(name, payload);
+    assert.equal(m.calls.filter((c) => c === PAGE_ROUTES[name]).length, 1, name);
+    assert.deepEqual(m.unstubbed, [], name + " asked for something this test does not stub");
+    assert.ok(dtRows(m.app).length > 0, name + " rendered no rows");
+    assert.match(textOf(detail(m.app)), new RegExp("^" + name[0].toUpperCase() + name.slice(1)), name + " has its title");
+  }
+});
+
+test("Phase 4a claims: rows show kind, file:line and the message; the summary says files checked; markup in a path or message is text", async () => {
+  const m = await mountPage("claims", CLAIMS_P);
+  assert.match(textOf(detail(m.app)), /4 findings · 702 files and 50 sidecars checked · 3 globs skipped/);
+  assert.match(textOf(detail(m.app)), /Which claims in docs no longer match the code\? · read-only/);
+  assert.equal(dtRows(m.app).length, 4);
+  assert.match(textOf(rowFor(m, /DOC\.md/)), /expired datea\/DOC\.md:12/);
+  assert.match(textOf(rowFor(m, /HAND OVER/)), /b\/HAND OVER\.md(?!:)/, "a finding with no line shows the file alone");
+  assert.equal(byTag(m.app, "img").length, 0, "a path with markup in it is never injected as HTML");
+  assert.match(textOf(m.app), /<img src=x onerror=alert\(1\)>\.md:7/);
+  assert.match(textOf(rowFor(m, /onerror/)), /reads as history/);
+});
+
+test("Phase 4a claims: the kind chips filter the table, a second click clears, and every chip shows its count", async () => {
+  const m = await mountPage("claims", CLAIMS_P);
+  const chips = () => byClass(m.app, "chip");
+  assert.deepEqual(chips().map(textOf), ["all4", "expired date2", "rotted internal citation1", "footer date is behind the newest inline date1"]);
+  click(chips()[2]); await m.settle();
+  assert.equal(dtRows(m.app).length, 1);
+  assert.match(textOf(dtRows(m.app)[0]), /HAND OVER/);
+  click(byClass(m.app, "chip")[2]); await m.settle();
+  assert.equal(dtRows(m.app).length, 4, "the same chip again clears the filter");
+  click(byClass(m.app, "chip")[1]); await m.settle();
+  assert.equal(dtRows(m.app).length, 2);
+  click(byClass(m.app, "chip")[0]); await m.settle();
+  assert.equal(dtRows(m.app).length, 4);
+});
+
+test("Phase 4a claims: a row copies file:line; with no line it copies the file; with no file it is inert and the tooltip says why", async () => {
+  const m = await mountPage("claims", CLAIMS_P);
+  const wrote = clipboard(m);
+  click(rowFor(m, /DOC\.md/)); await m.settle();
+  click(rowFor(m, /HAND OVER/)); await m.settle();
+  assert.deepEqual(Array.from(wrote), [GH + "a/DOC.md:12", GH + "b/HAND OVER.md"]);
+  const inert = rowFor(m, /footer date/);
+  assert.ok(/\binert\b/.test(inert.getAttribute("class")), "a finding with no file goes nowhere");
+  hover(inert); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /no file recorded for this finding/);
+  assert.doesNotMatch(textOf(tipBox(m.app)), new RegExp(m.ui.ROW_NO_REASON), "the reason is specific, not the placeholder");
+  unhover(inert);
+  click(inert); await m.settle();
+  assert.equal(wrote.length, 2, "an inert row copies nothing");
+});
+
+test("Phase 4a claims: the empty state names what was examined, never a bare blank; a failed source is its reason, never an empty table", async () => {
+  const empty = await mountPage("claims", { ...CLAIMS_P, rows: [], kinds: [], summary: { ...CLAIMS_P.summary, findings: 0 } });
+  assert.match(textOf(detail(empty.app)), /0 findings in 702 files checked and 50 sidecars/);
+  assert.equal(dtRows(empty.app).length, 0);
+  assert.equal(byTag(empty.app, "table").length, 0);
+  const bad = await mountPage("claims", respond(502, { ok: false, error: "claims check read 0 files -- it ran and looked at nothing, which is not the same as nothing being wrong" }));
+  const t = textOf(detail(bad.app));
+  assert.match(t, /claims could not be read — claims check read 0 files/);
+  assert.match(t, /This is not "nothing found"/);
+  assert.equal(byTag(bad.app, "table").length, 0, "no table when the source failed");
+  assert.doesNotMatch(t, /0 findings/, "a failure is not reported as zero findings");
+  assert.ok(btnText(bad.app, /^retry$/), "and it offers a retry");
+});
+
+test("Phase 4a: a page says loading while its request is outstanding, and an ok:false body is also a banner with its reason", async () => {
+  for (const name of Object.keys(PAGE_ROUTES)) {
+    const m = await mount({ hash: "#/" + name, untracked: [PAGE_ROUTES[name]], routes: { [PAGE_ROUTES[name]]: () => new Promise(() => {}) } });
+    assert.ok(byClass(m.app, "skel").length > 0, name + " shows a skeleton while loading");
+    assert.equal(byTag(m.app, "table").length, 0, name + " has no table yet");
+  }
+  const weird = await mountPage("caps", { ok: false, error: "a 200 that says it failed" });
+  assert.match(textOf(detail(weird.app)), /caps could not be read — a 200 that says it failed/);
+});
+
+test("Phase 4a rules: restated first, then unexercised, adopted, firing; the row shows restated-in and referenced counts and the scope", async () => {
+  const m = await mountPage("rules", RULES_P);
+  const ids = dtRows(m.app).map((r) => textOf(byClass(r, "nm")[0]));
+  assert.deepEqual(ids, ["copied-rule", "dusty-rule", "pathless-rule", "adopted-rule", "firing-rule"]);
+  assert.match(textOf(rowFor(m, /copied-rule/)), /^restatedcopied-ruleglobal21$/);
+  assert.match(textOf(rowFor(m, /pathless-rule/)), /unknown/, "a rule with no scope says so");
+  assert.match(textOf(detail(m.app)), /5 rules · 2 unexercised · 2 restatements in 1 rules · 1 adopted · 2 firing · 61 files scanned/);
+  assert.equal(btnText(m.app, /promote/i), undefined, "no promote action: `rules promote` is not implemented in the CLI (Decision 6)");
+  assert.doesNotMatch(textOf(m.app), /promote/i);
+});
+
+test("Phase 4a rules: a row copies the rule file path as the library resolved it; a restated row's tooltip names where; a row with no path is inert and says why", async () => {
+  const m = await mountPage("rules", RULES_P);
+  const wrote = clipboard(m);
+  click(rowFor(m, /firing-rule/)); await m.settle();
+  click(rowFor(m, /copied-rule/)); await m.settle();
+  assert.deepEqual(Array.from(wrote), ["/u/.claude/rules/firing-rule.md", "/u/.claude/rules/copied-rule.md"]);
+  hover(rowFor(m, /copied-rule/)); await m.settle();
+  const tip = textOf(tipBox(m.app));
+  assert.match(tip, /restated in x\/CLAUDE\.md:41, y\/CLAUDE\.md/);
+  assert.match(tip, /1 more restatement\(s\) in files that also cite it/);
+  unhover(rowFor(m, /copied-rule/));
+  const none = rowFor(m, /pathless-rule/);
+  assert.ok(/\binert\b/.test(none.getAttribute("class")));
+  hover(none); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /no rule file path recorded for this rule/);
+  unhover(none);
+  click(none); await m.settle();
+  assert.equal(wrote.length, 2);
+});
+
+test("Phase 4a rules: the empty state names the population, a failed source is its reason", async () => {
+  const empty = await mountPage("rules", { ...RULES_P, rows: [], summary: { ...RULES_P.summary, rules: 0 } });
+  assert.match(textOf(detail(empty.app)), /0 rules found in the rules directory, so none could be checked/);
+  const bad = await mountPage("rules", respond(502, { ok: false, error: "rules check did not run (no-rules)" }));
+  assert.match(textOf(detail(bad.app)), /rules could not be read — rules check did not run \(no-rules\)/);
+  assert.equal(byTag(bad.app, "table").length, 0);
+});
+
+test("Phase 4a caps: worst ratio first, over and yellow are different badges, an exempt file has no ratio and sorts last", async () => {
+  const m = await mountPage("caps", CAPS_P);
+  const files = dtRows(m.app).map((r) => textOf(byClass(r, "mono")[0]));
+  assert.deepEqual(files, ["t/TODOS.md", "m/CLAUDE.md", "o/CLAUDE.md", "g/GOTCHAS.md"]);
+  const badge = (re) => byClass(rowFor(m, re), "badge")[0].getAttribute("class");
+  assert.match(badge(/t\/TODOS/), /\bc-over\b/);
+  assert.match(badge(/o\/CLAUDE/), /\bc-yellow\b/);
+  assert.match(badge(/g\/GOTCHAS/), /\bc-exempt\b/);
+  assert.match(textOf(rowFor(m, /t\/TODOS/)), /900.*50.*18\.0x/);
+  assert.match(textOf(rowFor(m, /g\/GOTCHAS/)), /n\/a/);
+  assert.match(textOf(detail(m.app)), /157 measured · 2 over · 1 yellow \(within reach of the cap\) · 1 exempt/);
+});
+
+test("Phase 4a caps: a row copies the file path; the empty state says how many were measured; a failed source is its reason", async () => {
+  const m = await mountPage("caps", CAPS_P);
+  const wrote = clipboard(m);
+  click(rowFor(m, /m\/CLAUDE/)); await m.settle();
+  assert.deepEqual(Array.from(wrote), [GH + "m/CLAUDE.md"]);
+  hover(rowFor(m, /m\/CLAUDE/)); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /85 lines over a cap of 220/);
+  unhover(rowFor(m, /m\/CLAUDE/));
+  const empty = await mountPage("caps", { ...CAPS_P, rows: [], summary: { ...CAPS_P.summary, over: 0, yellow: 0, exempt: 0 } });
+  assert.match(textOf(detail(empty.app)), /0 files over or near a cap among 157 measured/);
+  const bad = await mountPage("caps", respond(502, { ok: false, error: "caps could not place the files: hub root is not configured" }));
+  assert.match(textOf(detail(bad.app)), /caps could not be read — caps could not place the files: hub root is not configured/);
+});
+
+test("Phase 4a skills: never invoked first, then dormant, then active; each row shows provenance, uses and last used", async () => {
+  const m = await mountPage("skills", SKILLS_P);
+  const ids = dtRows(m.app).map((r) => textOf(byClass(r, "nm")[0]));
+  assert.deepEqual(ids, ["never-ran", "odd<script>", "stale", "busy"]);
+  assert.match(textOf(rowFor(m, /^never invoked(never-ran)/)), /handmade0never/);
+  assert.match(textOf(rowFor(m, /stale/)), /npx-skills · owner\/repo32026-03-01/);
+  assert.equal(byTag(m.app, "script").length, 0, "a skill name with markup is text");
+  assert.match(textOf(detail(m.app)), /4 skills · 2 never invoked · 1 dormant \(last used over 90 days ago\)/);
+});
+
+test("Phase 4a skills: it says plainly what 'never invoked' means, in the CLI's own words, and says when the transcript probe was unavailable", async () => {
+  const m = await mountPage("skills", SKILLS_P);
+  const t = textOf(detail(m.app));
+  assert.match(t, /"Never invoked" means zero in skillUsage AND zero in transcripts/);
+  assert.match(t, /not seen in surviving transcripts/);
+  assert.doesNotMatch(t, /transcript probe was unavailable/);
+  const blind = await mountPage("skills", { ...SKILLS_P, summary: { ...SKILLS_P.summary, transcriptProbe: false } });
+  assert.match(textOf(detail(blind.app)), /transcript probe was unavailable, so this rests on the usage counter alone/);
+});
+
+test("Phase 4a skills: a row copies the skill name; empty and failed are stated", async () => {
+  const m = await mountPage("skills", SKILLS_P);
+  const wrote = clipboard(m);
+  click(rowFor(m, /stale/)); await m.settle();
+  assert.deepEqual(Array.from(wrote), ["stale"]);
+  const empty = await mountPage("skills", { ...SKILLS_P, rows: [], summary: { ...SKILLS_P.summary, total: 0, neverInvoked: 0, dormant: 0 } });
+  assert.match(textOf(detail(empty.app)), /0 skills found in the skills directory/);
+  const bad = await mountPage("skills", respond(502, { ok: false, error: "cannot read /u/.claude/skills: EACCES" }));
+  assert.match(textOf(detail(bad.app)), /skills could not be read — cannot read \/u\/\.claude\/skills: EACCES/);
+});
+
+test("Phase 4a: every row of every page is focusable and either acts or says why it does not", async () => {
+  for (const [name, payload] of [["claims", CLAIMS_P], ["rules", RULES_P], ["caps", CAPS_P], ["skills", SKILLS_P]]) {
+    const m = await mountPage(name, payload);
+    for (const r of dtRows(m.app)) {
+      assert.equal(r.getAttribute("tabIndex"), "0", name + ": a row is not focusable");
+      if (/\binert\b/.test(r.getAttribute("class"))) {
+        hover(r); await m.settle();
+        const tip = textOf(tipBox(m.app));
+        assert.ok(tip && !tip.includes(m.ui.ROW_NO_REASON), `${name}: an inert row gave no specific reason (${tip})`);
+        unhover(r);
+      }
+    }
+  }
+});
+
+test("Phase 4a: each Overview tile opens its page, and the page then reads the same endpoint", async () => {
+  for (const [tile, hash, endpoint] of [["Claims", "#/claims", "/api/claims"], ["Rules", "#/rules", "/api/rules"], ["Caps", "#/caps", "/api/caps"], ["Skills", "#/skills", "/api/skills"]]) {
+    const payload = { "/api/claims": CLAIMS_P, "/api/rules": RULES_P, "/api/caps": CAPS_P, "/api/skills": SKILLS_P }[endpoint];
+    const m = await mountOv({ routes: { [endpoint]: payload } });
+    const wrote = clipboard(m);
+    click(tileNamed(m.app, tile)); await m.settle();
+    assert.equal(m.ctx.location.hash, hash, tile + " tile routes to its page");
+    assert.equal(wrote.length, 0, tile + " no longer copies a command");
+    assert.equal(m.calls.filter((c) => c === endpoint).length, 1, "and the page asked for its data");
+    assert.ok(dtRows(m.app).length > 0);
+  }
+  const m = await mountOv();
+  click(tileNamed(m.app, "Backlog")); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/registers", "Backlog is unchanged until Phase 4b");
+  const g = await mountOv();
+  const wrote = clipboard(g);
+  click(tileNamed(g.app, "Goals")); await g.settle();
+  assert.equal(g.ctx.location.hash, "#/overview", "Goals is unchanged until Phase 4b");
+});
+
+test("Phase 4a: the new hashes route to their pages and an unknown hash keeps landing on Judge", async () => {
+  const { ui } = await mount();
+  for (const v of ["claims", "rules", "caps", "skills"]) assert.equal(ui.parseHash("#/" + v).view, v);
+  assert.equal(ui.parseHash("#/claimz").view, "judge", "an unknown name still lands on Judge");
+  assert.equal(ui.parseHash("").view, "overview");
+  assert.equal(ui.parseHash("#/claims?kind=expired-date").view, "claims", "a query does not change the view");
+});
+
+test("Phase 4a: refresh on a page bypasses the server's cache for that page and re-reads it", async () => {
+  const m = await mountPage("caps", CAPS_P);
+  const before = m.fetches.filter((f) => f.path === "/api/caps").length;
+  click(btnText(m.app, /^refresh$/)); await m.settle();
+  const urls = m.fetches.filter((f) => f.path === "/api/caps").map((f) => f.url);
+  assert.ok(urls.some((u) => /fresh=1/.test(u)), "a refresh asks for fresh numbers: " + JSON.stringify(urls));
+  assert.ok(urls.length > before + 1, "and then re-reads the page");
+});
+
+test("Phase 4a: every badge class the four pages render has its own CSS rule (the UNMATCHED lesson)", async () => {
+  const { stylesheet } = await import("../../commands/ui.mjs");
+  const css = stylesheet().replace(/\/\*[\s\S]*?\*\//g, "");
+  const seen = new Set();
+  for (const [name, payload] of [["claims", CLAIMS_P], ["rules", RULES_P], ["caps", CAPS_P], ["skills", SKILLS_P]]) {
+    const m = await mountPage(name, payload);
+    for (const b of byClass(m.app, "badge")) for (const c of b.getAttribute("class").split(/\s+/)) if (c !== "badge") seen.add(c);
+  }
+  assert.ok(seen.size >= 9, `only ${seen.size} badge classes seen (${[...seen].join(", ")}) -- the scan has gone blind`);
+  const bare = [...seen].filter((c) => !new RegExp(`\\.badge\\.${c}\\b`).test(css));
+  assert.deepEqual(bare, [], `rendered with no rule: ${bare.join(", ")}`);
 });

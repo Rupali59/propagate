@@ -1,5 +1,33 @@
 # propagate — State
 
+## Dashboard Phase 4a: Claims, Rules, Caps and Skills pages, and the regrouped rail — 2026-10-17 (unreleased, not committed)
+Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; this pass is only the four machinery pages and the rail).
+Backlog, Goals and Plans, and the Release/Monitor/Doctor history are Phase 4b and untouched. Built on Phases 0 to 3 above.
+- **One computation feeds the tile and the page.** `lib/report/machinery.mjs` gained pure shape functions (`shapeClaims`,
+  `shapeRules`, `shapeCaps`, `shapeSkills`); each returns the headline AND `detail` (the rows), and the headline `count` is
+  derived from those rows. `createMachinery().readDetail(key)` serves a page from the same cached run as `GET /api/machinery`;
+  the rows ride as a non-enumerable `details` map, so the tile payload stays small. A test derives each count from the rows by
+  a separate route and compares it with the tile.
+- **Endpoints** `GET /api/claims`, `/api/rules`, `/api/caps`, `/api/skills` (read-only, behind the token, `?fresh=1` bypass as
+  for the tiles). A failed source is a 502 `{ok:false,error}` with its reason, which the page shows as a banner. **`/api/rules`
+  was repurposed:** it had no caller and returned the raw hub rules check (whole file bodies in `lines`, no coverage status),
+  so it did not fit the page (DECISIONS 2026-10-17, Phase 4a). `/api/gotchas` is untouched.
+- **Pages** (`commands/ui.client.js`, `MachineryPage` frame + one view each): every one is a `DataTable` with a one-line summary,
+  `readState` loading, `ErrorBanner` with the server's reason, and an empty state that names what was examined. Claims filters by
+  kind and copies `file:line`; Rules lists restated first, copies the rule file path from the library and names where it is
+  restated in the tooltip (no promote: `rules promote` is not in the CLI); Caps lists over, yellow and exempt worst first and
+  copies the path; Skills lists never-invoked then dormant first and copies the name. "Never invoked" uses the CLI's own words
+  (`NEVER_INVOKED_MEANS` in `lib/skills/skills-scan.mjs`, now also used by `cli.mjs skills`).
+- **Rail** is TODAY / SETTLE / MACHINERY / WORK / HISTORY, derived from each division's `group` (`railGroups`); the `explore`
+  flag and `FIRST_EXPLORE` are gone. `SERVED_VIEWS` (`lib/report/surface.mjs`) lists the four new views. The Overview tiles for
+  the four route to their pages; Backlog and Goals are unchanged.
+- **Tests rewritten on purpose:** `tests/unit/ui-rail-separator.test.mjs` (the old pins were "first Explore view at index 5";
+  they are now the group order and membership) and three Phase 2 tile tests in `tests/unit/ui-client.test.mjs` (the tiles no
+  longer copy a command). Each new guard was mutated red for its stated reason and restored.
+- **Not done / open:** "dormant" is defined here (a used skill whose last use is over `DORMANT_DAYS` ago); the CLI has no such
+  word, so the page states the constant. `lastUsedAt` comes from the usage counter only, so a transcript-only skill reads active
+  with no date. No browser pass (not asked for).
+
 ## Dashboard Phase 3: group actions in Judge and Unblock — 2026-10-17 (unreleased, not committed)
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 3, Decision 1). Built on Phases 0 to 2 above.
 - **Judge node header** (`.nhead`, `tickNode` in `commands/ui.client.js`) ticks every edge of its node and opens the existing

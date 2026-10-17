@@ -36,7 +36,7 @@ import { checkRules } from "../lib/rules/rules-check.mjs";
 import { WORKSPACES, SEARCH_ROOTS, RULES_DIR, shortPath } from "../lib/core/config.mjs";
 import { CLAUDE_GLOBAL_CLAUDE_MD } from "../lib/core/paths.mjs";
 
-const CHECK_LABELS = {
+export const CHECK_LABELS = {
   "expired-date": "expired date",
   "footer-stale": "footer date is behind the newest inline date",
   "rotted-citation": "rotted internal citation",
@@ -44,7 +44,7 @@ const CHECK_LABELS = {
   "price-literal-drift": "literal not found in its declared downstream",
 };
 
-function describe(f) {
+export function describe(f) {
   switch (f.check) {
     case "expired-date":
       return `"${f.marker}${f.approx ? " ~" : " "}${f.dateText}" expired ${f.expiredISO} (${f.daysExpired}d ago) — ${f.snippet}`;

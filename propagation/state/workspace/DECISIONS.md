@@ -1609,3 +1609,20 @@ reloads meanwhile. None yet; accepted. See GOTCHAS G80.
 **Affects:** propagate
 
 **Refs:** STATE "Dashboard Phase 3", plan `ticklish-gathering-brook.md` Phase 3, `tests/unit/ui-client.test.mjs` "Phase 3".
+
+## 2026-10-17: Phase 4a pages share the tile's computation; `/api/rules` is repurposed; "dormant" is a stated constant
+
+**What:** the Claims, Rules, Caps and Skills pages read `GET /api/claims|rules|caps|skills`, which serve the `detail` rows of the same cached run that feeds the Overview tile (`createMachinery().readDetail`). Each tile's count is derived from its rows. `/api/rules` now returns the Rules page's data; `/api/gotchas` is untouched. A skill is "dormant" when it was used but its last use in the usage counter is more than `DORMANT_DAYS` (90) ago.
+
+**Why:** a second read for the page would show a number a minute newer than the tile, or two numbers computed two ways, and the plan asks that they never disagree. `/api/rules` returned the raw `checkRules` result (read at the call site in `commands/ui.mjs`: whole file bodies in `lines`, `200` with `{error}` on failure) and had no caller and no test, so reusing it as it was would have meant sending file bodies to the browser and re-deriving coverage there. The CLI has no "dormant" status (`skills` prints only never-invoked), so the page needed a definition and states it in its summary line.
+
+**Rejected.** Reusing `/api/rules` unchanged: it lacks `ruleCoverage` (adopted/firing/unexercised), which the page's status needs. Calling the libraries a second time from the page's endpoints: faster to write, but two reads of one tree. Shelling out to the CLI: a node start per page and a parse of coloured text.
+
+**Verified:** the old `/api/rules` shape and its absence of callers (grep across the repo, no hits outside `commands/ui.mjs`); the tile counts and the row-derived counts agree on the real tree and on fixtures. **Inferred:** that nothing outside this repo calls `/api/rules` (the widget reads `/api/surface`).
+
+**Cost:** none yet. A transcript-only skill reads active with no date, because `lastUsedAt` is from the counter alone.
+
+**Affects:** propagate
+
+**Refs:** STATE "Dashboard Phase 4a", plan `ticklish-gathering-brook.md` Phase 4, `lib/report/machinery.mjs`, `tests/unit/machinery.test.mjs`.
+

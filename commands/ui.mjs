@@ -57,7 +57,7 @@ import { queuePayload, buildQueue, orderFor, historyByEdge } from "../lib/report
 import { streamPayload, readCursor, writeCursor } from "../lib/report/stream.mjs";
 import { readSeen, addSeen, validateTriples } from "../lib/report/seen-edges.mjs";
 import { buildId } from "../lib/report/ui-build.mjs";
-import { CLAUDE_GLOBAL_CLAUDE_MD, stateDir } from "../lib/core/paths.mjs";
+import { stateDir } from "../lib/core/paths.mjs";
 
 export { buildId };
 
@@ -728,6 +728,19 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
         catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
       }
 
+      // Dashboard Phase 4a. The pages behind four of the six tiles. Each reads the SAME cached computation as
+      // /api/machinery (one run feeds the tile and the page, so their numbers cannot disagree) and is read-only.
+      // A source that failed is a 502 with its reason, which the page shows as a banner, never an empty table.
+      // /api/rules used to return the raw hub rules check (unfetched, no coverage status, whole file bodies in
+      // `lines`); it is this now, so the Rules page and the Rules tile are one answer.
+      const viewKey = /^[/]api[/](claims|rules|caps|skills)$/.exec(url.pathname);
+      if (viewKey && req.method === "GET") {
+        try {
+          const r = await machinery.readDetail(viewKey[1], { fresh: url.searchParams.get("fresh") === "1" });
+          return send(r.ok ? 200 : 502, r);
+        } catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
       // D12. The content-keyed seen-set. GET returns it; POST adds the triples
       // the client actually rendered. Its own file: writeCursor's is untouched.
       if (url.pathname === "/api/seen-edges") {
@@ -1009,29 +1022,6 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
             problems: snap.payload.problems, totals: snap.payload.totals, sections: snap.payload.sections });
         } catch (err) {
           return send(500, { ok: false, error: String(err?.message ?? err) });
-        }
-      }
-
-      // RULES — the HUB half of the model. docs/HUB-AND-WORKSPACE.md: the hub is
-      // checked by `rules check` and declared edges, workspaces by doctor. The
-      // surface carried doctor and the registers and none of this, so half the
-      // architecture was missing from the only page that claims to show it.
-      if (url.pathname === "/api/rules") {
-        try {
-          // Same arguments cli.mjs's own `rulesCmd` uses, so this page and the
-          // command cannot report different things about the hub.
-          const { checkRules } = await import("../lib/rules/rules-check.mjs");
-          const { RULES_DIR, SEARCH_ROOTS } = await import("../lib/core/config.mjs");
-          // CLAUDE_GLOBAL_CLAUDE_MD (lib/core/paths.mjs, imported at the top of
-          // this file) replaces the old os.homedir() join here -- that module is
-          // a pure HOME join with zero filesystem I/O, so importing it costs
-          // nothing, and it is a real named export (unlike the G24 "destructuring
-          // a missing export yields undefined" trap this comment used to warn
-          // about for config.mjs, which never exported this path at all).
-          const globalMd = CLAUDE_GLOBAL_CLAUDE_MD;
-          return send(200, checkRules({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS, extra: [globalMd], exclude: [globalMd] }));
-        } catch (err) {
-          return send(200, { error: String(err?.message ?? err), findings: null });
         }
       }
 

@@ -120,19 +120,23 @@ const JSON_HEADERS = { "content-type": "application/json" };
 // "overview" joined at the FRONT on 2026-10-16: the dashboard is what an empty hash opens.
 // An unknown hash still lands on Judge, because Judge is where the work is.
 const DIVISIONS = [
-  { key: "overview", label: "OVERVIEW" },
-  { key: "judge", label: "JUDGE", act: true },
-  { key: "unblock", label: "UNBLOCK", act: true },
-  { key: "health", label: "HEALTH" },
-  { key: "activity", label: "ACTIVITY" },
-  { key: "registers", label: "REGISTERS", explore: true },
-  { key: "reminders", label: "REMINDERS", explore: true },
+  { key: "overview", label: "OVERVIEW", group: "today" },
+  { key: "judge", label: "JUDGE", act: true, group: "settle" },
+  { key: "unblock", label: "UNBLOCK", act: true, group: "settle" },
+  { key: "health", label: "HEALTH", group: "machinery" },
+  { key: "claims", label: "CLAIMS", group: "machinery" },
+  { key: "rules", label: "RULES", group: "machinery" },
+  { key: "caps", label: "CAPS", group: "machinery" },
+  { key: "skills", label: "SKILLS", group: "machinery" },
+  { key: "registers", label: "REGISTERS", group: "work" },
+  { key: "reminders", label: "REMINDERS", group: "work" },
+  { key: "activity", label: "ACTIVITY", group: "history" },
   // Framed rather than dropped: lib/graph/graph-html.mjs renders a whole
   // interactive page at /graph, and open-ui.sh turns a widget route into a
   // hash -- so a link to it only resolves if the client routes it. It used to
   // be written to disk and opened standalone, which made it a second place
   // with no way back.
-  { key: "graph", label: "GRAPH", explore: true },
+  { key: "graph", label: "GRAPH", group: "history" },
 ];
 
 /* Every hash an older widget or bookmark can still send, and where it lands.
@@ -140,13 +144,27 @@ const DIVISIONS = [
 const HASH_TO_VIEW = { ready: "judge", parked: "judge", gap: "judge", blocked: "unblock",
   reference: "health", analytics: "activity", stream: "activity", conflicts: "reminders",
   overview: "overview", judge: "judge", unblock: "unblock", health: "health", activity: "activity",
-  registers: "registers", reminders: "reminders", graph: "graph" };
+  registers: "registers", reminders: "reminders", graph: "graph",
+  claims: "claims", rules: "rules", caps: "caps", skills: "skills" };
 
-/* PR-025, re-derived. The rail's group separator used to be `i === 4`, a
-   position that was one insertion away from silently labelling the wrong group.
-   The rule it stands for is "before the first Explore view", so it is derived
-   from the data: `explore: true` on a division is what puts it under the line. */
-const FIRST_EXPLORE = DIVISIONS.findIndex((d) => d.explore);
+/* PR-025, re-derived twice. The rail's group separator used to be `i === 4`, a position one insertion away from
+   silently labelling the wrong group. It was then derived from an `explore` flag; Phase 4a (2026-10-17) replaced the
+   two-way split with five named groups, TODAY / SETTLE / MACHINERY / WORK / HISTORY. A division says which group it is
+   in (`group`), and the rail starts a new group wherever that value changes -- so inserting a view moves nothing by
+   position. `railGroups` is that rule as a pure function, for the renderer and the test to share. */
+const RAIL_GROUPS = [
+  { key: "today", label: "TODAY" }, { key: "settle", label: "SETTLE" }, { key: "machinery", label: "MACHINERY" },
+  { key: "work", label: "WORK" }, { key: "history", label: "HISTORY" },
+];
+function railGroups(divs) {
+  const out = [];
+  for (const d of divs) {
+    const last = out[out.length - 1];
+    if (last && last.key === d.group) last.items.push(d);
+    else out.push({ key: d.group, label: ((RAIL_GROUPS.find((g) => g.key === d.group) || {}).label) || String(d.group).toUpperCase(), items: [d] });
+  }
+  return out;
+}
 
 /* Keys are offered from item.allowed so the UI can never propose a disposition
  * the write path will refuse. A control that always errors is worse than none. */
@@ -2153,14 +2171,15 @@ function NextStrip({ action, nav }) {
 }
 
 /**
- * The six machinery tiles. Until Phase 4 builds their pages each tile goes to the closest page that
- * exists (`route`) or copies the CLI command (`cmd`), and its tooltip says which. No tile is a dead end.
+ * The six machinery tiles. Claims, Rules, Caps and Skills open their own page (Phase 4a); Backlog and Goals wait for
+ * Phase 4b and go to the closest page that exists (`route`) or copy the CLI command (`cmd`). The tooltip says which.
+ * No tile is a dead end.
  */
 const MACH_TILES = [
-  { key: "claims", title: "Claims", cmd: "propagate claims check", why: "There is no Claims page yet" },
-  { key: "rules", title: "Rules", cmd: "propagate rules list", why: "There is no Rules page yet" },
-  { key: "caps", title: "Caps", cmd: "propagate caps", why: "There is no Caps page yet" },
-  { key: "skills", title: "Skills", cmd: "propagate skills", why: "There is no Skills page yet" },
+  { key: "claims", title: "Claims", route: "claims", why: "Opens the Claims page, which lists every finding with its file and line" },
+  { key: "rules", title: "Rules", route: "rules", why: "Opens the Rules page, which lists each rule with its status and where it is restated" },
+  { key: "caps", title: "Caps", route: "caps", why: "Opens the Caps page, which lists the files over their size cap, worst first" },
+  { key: "skills", title: "Skills", route: "skills", why: "Opens the Skills page, which lists every installed skill with its uses, never-invoked first" },
   { key: "backlog", title: "Backlog", route: "registers", why: "There is no Backlog page yet, so this opens Registers, which lists the same issues and todos" },
   { key: "goals", title: "Goals", cmd: "propagate goals", why: "There is no Goals page yet" },
 ];
@@ -2458,6 +2477,163 @@ function GraphView({ tick }) {
   return html`<div class="detail wide"><iframe class="frame" srcdoc=${st.page} aria-label="dependency graph" /></div>`;
 }
 
+/* -- the four machinery pages (Phase 4a, 2026-10-17) --------------------------------------------------------------
+   Each answers ONE question, is read-only, and is a DataTable over the rows /api/<name> sends. The rows come from the
+   same computation as the Overview tile (lib/report/machinery.mjs), so the tile's figure is derived from these rows
+   and the two cannot disagree. A source that failed is its reason in a banner, never an empty table; an empty table
+   names what was examined. `*Rows` are the pure row models (no markup), so a test can feed them any payload. */
+
+const NO_ROWS = [];
+const arr = (x) => (Array.isArray(x) ? x : NO_ROWS);
+const fmtDate = (ms) => (typeof ms === "number" && isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null);
+
+/** The shared frame: title, the question, loading, and a banner that carries the server's reason. */
+function MachineryPage({ title, question, what, st, retry, children }) {
+  const rs = readState(st);
+  if (rs.kind === "loading") return html`<div class="detail wide"><h2 class="dtitle">${title}</h2><${Skeleton} rows=${4} /></div>`;
+  if (rs.kind === "error") return html`<div class="detail wide"><h2 class="dtitle">${title}</h2>
+    <${ErrorBanner} what=${what + " could not be read —"} st=${st} retry=${retry} />
+    <div class="reason">This is not "nothing found". The source could not run, so nothing was examined and nothing can be reported.</div></div>`;
+  const d = st.data || {};
+  if (d.ok === false) return html`<div class="detail wide"><h2 class="dtitle">${title}</h2><${ErrorBanner} what=${what + " could not be read —"} st=${{ error: d.error }} retry=${retry} /></div>`;
+  return html`<div class="detail wide"><h2 class="dtitle">${title}</h2>
+    <div class="dmeta">${question} · read-only</div>
+    ${children(d)}
+  </div>`;
+}
+
+/* ---- Claims ---- */
+
+/** `file:line` when the finding has a line, else the file alone (rotted citations and footers carry none). */
+function claimLocator(r) {
+  if (!r || !r.file) return null;
+  return typeof r.line === "number" ? r.file + ":" + r.line : r.file;
+}
+function claimRows(d, kind) {
+  const rows = arr(d && d.rows);
+  return kind ? rows.filter((r) => r.kind === kind) : rows;
+}
+/** The empty state names the population it examined (a bare "none found" is a panel that failed to load). */
+function claimsEmpty(summary) {
+  const s = summary || {};
+  return "0 findings in " + (s.filesChecked || 0) + " files checked" + (s.sidecarsChecked ? " and " + s.sidecarsChecked + " sidecars" : "");
+}
+const CLAIM_COLUMNS = [
+  { key: "kind", label: "kind", value: (r) => r.kindLabel || r.kind, cell: (r) => html`<span class=${"badge k-" + r.kind}>${r.kindLabel || r.kind}</span>` },
+  { key: "file", label: "file", value: (r) => r.file, cell: (r) => html`<span class="mono">${short(r.file)}${typeof r.line === "number" ? ":" + r.line : ""}</span>` },
+  { key: "message", label: "what it claims", value: (r) => r.message, cell: (r) => html`<div>${r.message}${r.historical ? html` <span class="dmeta">(reads as history)</span>` : null}</div>` },
+];
+
+function ClaimsView({ st, retry }) {
+  const [kind, setKind] = useState(null);
+  const [copied, copy] = useCopyFlash();
+  return html`<${MachineryPage} title="Claims" question="Which claims in docs no longer match the code?" what="claims" st=${st} retry=${retry}>${(d) => {
+    const s = d.summary || {};
+    const all = claimRows(d);
+    const shown = claimRows(d, kind);
+    return html`<div>
+      <div class="sec">${s.findings != null ? s.findings : all.length} findings · ${s.filesChecked || 0} files and ${s.sidecarsChecked || 0} sidecars checked${s.unreadable ? " · " + s.unreadable + " unreadable" : ""}${s.globsSkipped ? " · " + s.globsSkipped + " globs skipped" : ""}</div>
+      ${all.length === 0 ? html`<div class="reason">${claimsEmpty(s)}</div>` : html`<div>
+        <div class="chips" role="group" aria-label="filter by kind">
+          <button class=${"chip" + (kind === null ? " on" : "")} onClick=${() => setKind(null)}>all<b>${all.length}</b></button>
+          ${arr(d.kinds).map((k) => html`<button key=${k.kind} class=${"chip" + (kind === k.kind ? " on" : "")} onClick=${() => setKind(kind === k.kind ? null : k.kind)}>${k.label}<b>${k.count}</b></button>`)}
+        </div>
+        <${DataTable} columns=${CLAIM_COLUMNS} rows=${shown} rowKey=${(r) => r.id} initialSort=${{ key: "kind", dir: "asc" }} tie=${(r) => r.file + ":" + (r.line || 0)} label="claims that no longer match"
+          flashKey=${copied}
+          act=${(r) => { const l = claimLocator(r); return l ? () => copy(r.id, l) : null; }}
+          tip=${(r) => { const l = claimLocator(r); return { title: r.kindLabel || r.kind, lines: [r.claim ? "claim: " + r.claim : null, r.message, l ? "click to copy " + l : "no file recorded for this finding"].filter(Boolean) }; }} />
+      </div>`}
+    </div>`;
+  }}<//>`;
+}
+
+/* ---- Rules ---- */
+
+const RULE_STATUS_RANK = { restated: 0, unexercised: 1, adopted: 2, firing: 3 };
+function ruleRows(d) { return arr(d && d.rows); }
+function ruleWhere(r) { return arr(r.restatedIn).map((x) => short(x.file) + (typeof x.line === "number" ? ":" + x.line : "")); }
+const RULE_COLUMNS = [
+  { key: "status", label: "status", value: (r) => (RULE_STATUS_RANK[r.status] != null ? RULE_STATUS_RANK[r.status] : 9), cell: (r) => html`<span class=${"badge r-" + r.status}>${r.status}</span>` },
+  { key: "id", label: "rule", value: (r) => r.id, cell: (r) => html`<span class="nm">${r.id}</span>` },
+  { key: "scope", label: "scope", value: (r) => r.scope || "", cell: (r) => r.scope || "unknown" },
+  { key: "restated", label: "restated in", num: true, value: (r) => arr(r.restatedIn).length, cell: (r) => arr(r.restatedIn).length },
+  { key: "referenced", label: "referenced", num: true, value: (r) => r.referenced, cell: (r) => r.referenced },
+];
+function RulesView({ st, retry }) {
+  const [copied, copy] = useCopyFlash();
+  return html`<${MachineryPage} title="Rules" question="Which canonical rules need attention?" what="rules" st=${st} retry=${retry}>${(d) => {
+    const s = d.summary || {};
+    const rows = ruleRows(d);
+    return html`<div>
+      <div class="sec">${s.rules != null ? s.rules : rows.length} rules · ${s.unexercised || 0} unexercised · ${s.restated || 0} restatements in ${s.restatedRules || 0} rules · ${s.adopted || 0} adopted · ${s.firing || 0} firing · ${s.filesScanned || 0} files scanned</div>
+      ${rows.length === 0 ? html`<div class="reason">0 rules found in the rules directory, so none could be checked</div>` : html`
+        <${DataTable} columns=${RULE_COLUMNS} rows=${rows} rowKey=${(r) => r.id} initialSort=${{ key: "status", dir: "asc" }} tie=${(r) => r.id} label="canonical rules" flashKey=${copied}
+          act=${(r) => (r.file ? () => copy(r.id, r.file) : null)}
+          tip=${(r) => { const w = ruleWhere(r); return { title: r.id, lines: [
+            r.status === "restated" ? "restated in " + w.join(", ") : r.status === "unexercised" ? "no file matches its fingerprint and none cites rule:" + r.id : r.status === "adopted" ? "cited by " + r.referenced + " file(s); no restatement found" : "its fingerprint matches " + r.matched + " file(s)",
+            arr(r.excusedIn).length ? arr(r.excusedIn).length + " more restatement(s) in files that also cite it" : null,
+            r.file ? "click to copy " + r.file : "no rule file path recorded for this rule"].filter(Boolean) }; }} />`}
+    </div>`;
+  }}<//>`;
+}
+
+/* ---- Caps ---- */
+
+function capRows(d) { return arr(d && d.rows); }
+const CAP_COLUMNS = [
+  { key: "status", label: "status", value: (r) => (r.status === "over" ? 0 : r.status === "yellow" ? 1 : 2), cell: (r) => html`<span class=${"badge c-" + r.status}>${r.status}</span>` },
+  { key: "file", label: "file", value: (r) => r.file, cell: (r) => html`<span class="mono">${short(r.file)}</span>` },
+  { key: "kind", label: "kind", value: (r) => (r.kind || "") + (r.scope || ""), cell: (r) => dot(r.kind, r.scope) },
+  { key: "lines", label: "lines", num: true, value: (r) => r.actual, cell: (r) => (r.actual == null ? "n/a" : r.actual) },
+  { key: "cap", label: "cap", num: true, value: (r) => r.cap, cell: (r) => (r.cap == null ? "none" : r.cap) },
+  { key: "ratio", label: "of cap", num: true, value: (r) => r.ratio, cell: (r) => (r.ratio == null ? "n/a" : r.ratio.toFixed(1) + "x") },
+];
+function CapsView({ st, retry }) {
+  const [copied, copy] = useCopyFlash();
+  return html`<${MachineryPage} title="Caps" question="Which files are over their size cap?" what="caps" st=${st} retry=${retry}>${(d) => {
+    const s = d.summary || {};
+    const rows = capRows(d);
+    return html`<div>
+      <div class="sec">${s.measured || 0} measured · ${s.over || 0} over · ${s.yellow || 0} yellow (within reach of the cap) · ${s.exempt || 0} exempt</div>
+      ${rows.length === 0 ? html`<div class="reason">0 files over or near a cap among ${s.measured || 0} measured</div>` : html`
+        <${DataTable} columns=${CAP_COLUMNS} rows=${rows} rowKey=${(r) => r.id} initialSort=${{ key: "ratio", dir: "desc" }} tie=${(r) => r.file} label="files by size against their cap" flashKey=${copied}
+          act=${(r) => (r.file ? () => copy(r.id, r.file) : null)}
+          tip=${(r) => ({ title: baseName(r.file), lines: [
+            r.status === "over" ? (r.actual - r.cap) + " " + (r.metric || "lines") + " over a cap of " + r.cap : r.status === "yellow" ? "within reach of its cap of " + r.cap : "exempt: no cap applies",
+            r.file ? "click to copy " + r.file : "no path recorded"] })} />`}
+    </div>`;
+  }}<//>`;
+}
+
+/* ---- Skills ---- */
+
+const SKILL_STATUS_RANK = { "never invoked": 0, dormant: 1, active: 2 };
+function skillRows(d) { return arr(d && d.rows); }
+const SKILL_COLUMNS = [
+  { key: "status", label: "status", value: (r) => (SKILL_STATUS_RANK[r.status] != null ? SKILL_STATUS_RANK[r.status] : 9), cell: (r) => html`<span class=${"badge s-" + String(r.status).replace(/ /g, "-")}>${r.status}</span>` },
+  { key: "id", label: "skill", value: (r) => r.id, cell: (r) => html`<span class="nm">${r.id}</span>` },
+  { key: "provenance", label: "provenance", value: (r) => (r.provenance || r.installer || ""), cell: (r) => dot(r.installer, r.provenance) || "none recorded" },
+  { key: "uses", label: "uses", num: true, value: (r) => r.uses, cell: (r) => r.uses },
+  { key: "last", label: "last used", value: (r) => r.lastUsedAt, cell: (r) => fmtDate(r.lastUsedAt) || (r.status === "never invoked" ? "never" : "no date recorded") },
+];
+function SkillsView({ st, retry }) {
+  const [copied, copy] = useCopyFlash();
+  return html`<${MachineryPage} title="Skills" question="Which installed skills are dormant or never used?" what="skills" st=${st} retry=${retry}>${(d) => {
+    const s = d.summary || {};
+    const rows = skillRows(d);
+    return html`<div>
+      <div class="sec">${s.total != null ? s.total : rows.length} skills · ${s.neverInvoked || 0} never invoked · ${s.dormant || 0} dormant (last used over ${s.dormantDays || 0} days ago)</div>
+      <div class="dmeta">"Never invoked" means ${s.neverInvokedMeans || "zero in skillUsage AND zero in transcripts"}: it is not seen in surviving transcripts, so a skill used only in a deleted session reads as never used.${s.transcriptProbe === false ? " The transcript probe was unavailable, so this rests on the usage counter alone." : ""}</div>
+      ${rows.length === 0 ? html`<div class="reason">0 skills found in the skills directory</div>` : html`
+        <${DataTable} columns=${SKILL_COLUMNS} rows=${rows} rowKey=${(r) => r.id} initialSort=${{ key: "status", dir: "asc" }} tie=${(r) => r.id} label="installed skills" flashKey=${copied}
+          act=${(r) => (r.id ? () => copy(r.id, r.id) : null)}
+          tip=${(r) => ({ title: r.id, lines: [
+            r.status === "never invoked" ? "zero uses in the counter and zero in surviving transcripts" : r.status === "dormant" ? "last used " + (fmtDate(r.lastUsedAt) || "unknown") + ", over " + (s.dormantDays || 0) + " days ago" : r.uses + " use(s) in the counter, " + r.transcripts + " transcript(s)",
+            "click to copy the skill name"] })} />`}
+    </div>`;
+  }}<//>`;
+}
+
 /* -- the app -------------------------------------------------------------- */
 
 function parseHash(hash) {
@@ -2509,6 +2685,11 @@ function App() {
   // The Overview reads health only for its fail count, but it is the same resource: one fetch, shared.
   const [healthSt, retryHealth] = useResource("/api/health", view === "health" || view === "overview");
   const [regSt, retryReg] = useResource("/api/registers", view === "registers");
+  // The four machinery pages (Phase 4a): each reads its own endpoint, lazily, from the cache the Overview tile uses.
+  const [claimsSt, retryClaims] = useResource("/api/claims", view === "claims");
+  const [rulesSt, retryRules] = useResource("/api/rules", view === "rules");
+  const [capsSt, retryCaps] = useResource("/api/caps", view === "caps");
+  const [skillsSt, retrySkills] = useResource("/api/skills", view === "skills");
   const [remSt, retryRem] = useResource("/api/conflicts", view === "reminders");
   const [buildNote, setBuildNote] = useState(null);
   const [judged, setJudged] = useState(0);
@@ -2719,6 +2900,9 @@ function App() {
     // refresh means new numbers, while ordinary page loads keep the cache.
     if (view === "overview" && surfaceLanded) api("/api/machinery?fresh=1").then(() => retryMach());
     if (view === "registers") retryReg();
+    // Same rule as the tiles: refresh means new numbers, so the page bypasses the server's 60 s cache, then re-reads.
+    const retryPage = { claims: retryClaims, rules: retryRules, caps: retryCaps, skills: retrySkills }[view];
+    if (retryPage) api("/api/" + view + "?fresh=1").then(() => retryPage());
     if (view === "reminders") retryRem();
   };
 
@@ -2735,6 +2919,10 @@ function App() {
   else if (view === "unblock") body = html`<${UnblockView} app=${app} route=${route} />`;
   else if (view === "health") body = html`<${HealthView} st=${healthSt} retry=${retryHealth} focus=${route.section} />`;
   else if (view === "activity") body = html`<${ActivityView} st=${surfaceSt} retry=${retrySurface} nav=${nav} />`;
+  else if (view === "claims") body = html`<${ClaimsView} st=${claimsSt} retry=${retryClaims} />`;
+  else if (view === "rules") body = html`<${RulesView} st=${rulesSt} retry=${retryRules} />`;
+  else if (view === "caps") body = html`<${CapsView} st=${capsSt} retry=${retryCaps} />`;
+  else if (view === "skills") body = html`<${SkillsView} st=${skillsSt} retry=${retrySkills} />`;
   else if (view === "registers") body = html`<${RegistersView} st=${regSt} retry=${retryReg} />`;
   else if (view === "reminders") body = html`<${RemindersView} st=${remSt} retry=${retryRem} />`;
   else body = html`<${GraphView} tick=${refreshTick} />`;
@@ -2755,13 +2943,13 @@ function App() {
 
     <div class="shell">
       <nav class="rail" aria-label="views">
-        ${DIVISIONS.map((x, i) => html`
-          ${i === FIRST_EXPLORE ? html`<hr /><div class="lbl">explore</div>` : null}
-          <button key=${x.key} class=${"div" + (view === x.key ? " on" : "") + (x.act ? " act" : "")}
+        ${railGroups(DIVISIONS).map((g, gi) => html`
+          ${gi > 0 ? html`<hr key=${"hr-" + g.key} />` : null}<div key=${"lbl-" + g.key} class="lbl">${g.label.toLowerCase()}</div>
+          ${g.items.map((x) => html`<button key=${x.key} class=${"div" + (view === x.key ? " on" : "") + (x.act ? " act" : "")}
                   aria-current=${view === x.key ? "page" : null} onClick=${() => go(x.key)}>
             ${x.label}
             <span class=${"n" + (bumped === x.key ? " bump" : "")}>${badge(x.key) == null ? "" : badge(x.key)}</span>
-          </button>`)}
+          </button>`)}`)}
       </nav>
       ${body}
     </div>`;
@@ -2773,11 +2961,12 @@ function App() {
 if (typeof globalThis !== "undefined") {
   globalThis.__ui = { sourceRoute, counts, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody, judgeModel, groupRows, workspaceOf,
     intersectAllowed, pruneTicked, parseTick, preTick, settleTogetherRoute, unblockModel, healthModel, parkedAllowed, baselineCommand, gitDiffCommand, shellQuote, pct, ratio, dot, ageLabel,
-    conflictGroup, groupConflicts, conflictsEmptyLine, CONFLICT_GROUPS, TOKEN_EXPIRED, HASH_TO_VIEW, FIRST_EXPLORE, request,
+    conflictGroup, groupConflicts, conflictsEmptyLine, CONFLICT_GROUPS, TOKEN_EXPIRED, HASH_TO_VIEW, RAIL_GROUPS, railGroups, request,
     parseHash, hashWithout, AGE_BUCKETS, AGE_KEYS, ageKey, ageDaysOf, judgeFilterRows, overviewModel, overviewKpis, sortSources, routeForKpi, routeForBar,
     queueBars, waitBars, verdictBars, buildPlot, wireChart, plotUnavailable, resolveToken, localDay,
     readState, surfaceVelocity, velocityNote, sortRows, unblockKpis, barTarget, bucketBars, usageBars, runBars, axisLabels, registerLocator, reminderLocator,
     KPI_NO_REASON, ROW_NO_REASON, Kpi, DataTable, nextAction, machineryTiles, MACH_TILES,
+    claimLocator, claimRows, ruleRows, capRows, skillRows, claimsEmpty, SKILL_STATUS_RANK, RULE_STATUS_RANK,
     tipText, tipPlace, inlineMd, dayLabel, dayShort, axisTicks, priorityLabel, remindersTimeoutText, boundaryLabel, VERDICT_MEANING };
 }
 

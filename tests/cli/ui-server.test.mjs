@@ -93,7 +93,7 @@ before(async () => {
     // ttlMs 0: every request recomputes, so a per-test hook is seen. The cache itself is tested in machinery.test.mjs.
     machinery: { ttlMs: 0, sources: Object.fromEntries(["claims", "rules", "caps", "skills", "backlog", "goals"].map((k) => [k, async () => {
       if (hooks.machineryThrows === k) throw new Error(k + " exploded");
-      return { count: 7, of: 9, label: k + " things", top: "top of " + k };
+      return { count: 7, of: 9, label: k + " things", top: "top of " + k, detail: { rows: [{ id: k + "-row" }], summary: { of: k } } };
     }])) },
   });
   ctx = { ...r, port, cookie: `ptok=${r.token}` };
@@ -413,6 +413,67 @@ test("/api/machinery answers six blocks behind the token, and one failing source
     assert.equal(bad.json.caps.count, null, "a failed source has no count: null, never 0");
     assert.equal(bad.json.claims.status, "ok", "the other five are untouched");
   } finally { hooks = {}; }
+});
+
+// ── the four pages behind the tiles (dashboard Phase 4a) ────────────────────
+
+test("/api/claims, /rules, /caps and /skills answer their rows from the same source as the tile, behind the token", async () => {
+  for (const k of ["claims", "rules", "caps", "skills"]) {
+    const r = await call(ctx, "GET", "/api/" + k);
+    assert.equal(r.status, 200, k);
+    assert.equal(r.json.ok, true, k);
+    assert.deepEqual(r.json.rows, [{ id: k + "-row" }], k + " sends the source's rows");
+    assert.deepEqual(r.json.headline, { count: 7, of: 9, label: k + " things" }, k + " carries the tile's own headline");
+    assert.equal((await call(ctx, "GET", "/api/" + k, { token: "nope" })).status, 401, k + " is behind the token");
+    assert.equal((await call(ctx, "POST", "/api/" + k, { body: {} })).status === 200, false, k + " is not a write route");
+  }
+  const tile = await call(ctx, "GET", "/api/machinery");
+  assert.equal(tile.json.claims.count, 7);
+  assert.equal(tile.json.claims.rows, undefined, "the tile payload does not carry the rows");
+  assert.equal(tile.json.details, undefined, "and the detail map is not serialised");
+});
+
+test("a failed source is a 502 carrying its reason on its own page, never an empty table; the other pages are untouched", async () => {
+  hooks.machineryThrows = "caps";
+  try {
+    const bad = await call(ctx, "GET", "/api/caps");
+    assert.equal(bad.status, 502);
+    assert.deepEqual(bad.json, { ok: false, error: "caps exploded" });
+    assert.equal((await call(ctx, "GET", "/api/claims")).status, 200, "claims is fine");
+  } finally { hooks = {}; }
+});
+
+test("?fresh=1 on a page bypasses the cache the tile shares; without it the page and the tile are one computation", async () => {
+  // Its own server: ctx runs with ttlMs 0 (every request recomputes), which would hide a dropped `fresh`.
+  let runs = 0;
+  const port = await free();
+  const counted = Object.fromEntries(["claims", "rules", "caps", "skills", "backlog", "goals"].map((k) => [k, async () => { runs += 1; return { count: runs, label: k, top: "", detail: { rows: [{ id: "r" + runs }], summary: {} } }; }]));
+  const r = await uiCmd(["--port", String(port)], { log() {} }, {
+    deps: { loadWorkspaces: async () => [], reconcile: async () => ({ rows: [], stats: { edges: 0, expanded: 0 } }) },
+    inboxDeps: { loadWorkspaces: async () => [], reconcile: async () => ({ rows: [], stats: { edges: 0, expanded: 0 } }), historyByEdge: async () => new Map(), planBaseline: () => ({ neverVerifiedCount: 0, outcomes: { examinedAndDeferred: [] } }), registerQueue: () => ({ issues: [], todos: [] }) },
+    root: FIX + "/", readSnapshot: async () => ({ ok: false, reason: "none", ageMs: null }),
+    machinery: { ttlMs: 60_000, sources: counted },
+  });
+  const c = { ...r, port };
+  try {
+    await call(c, "GET", "/api/machinery");
+    const a = await call(c, "GET", "/api/claims");
+    assert.equal(runs, 6, "the tile and the page ran the six sources once between them");
+    assert.deepEqual(a.json.rows, [{ id: "r1" }], "the page shows the computation the tile used");
+    await call(c, "GET", "/api/claims?fresh=1");
+    assert.equal(runs, 12, "fresh recomputed");
+    const b = await call(c, "GET", "/api/claims");
+    assert.deepEqual(b.json.rows, [{ id: "r7" }], "and what it computed is what is held afterwards");
+    assert.equal(runs, 12);
+  } finally { await new Promise((res) => c.server.close(res)); }
+});
+
+test("/api/rules is the Rules page's data now: coverage rows, not the raw hub rules check with whole file bodies", async () => {
+  const r = await call(real, "GET", "/api/rules");
+  assert.equal(r.json.findings, undefined, "the old raw checkRules shape is gone");
+  assert.ok(r.status === 200 || r.status === 502, "production path answers a page or a reason, got " + r.status);
+  if (r.status === 200) assert.ok(Array.isArray(r.json.rows) && r.json.summary, "rows and a summary");
+  else assert.ok(r.json.error, "a 502 says why");
 });
 
 test("/api/machinery on the production construction path (no overrides) answers six well-formed blocks, each ok or error with a reason", async () => {
