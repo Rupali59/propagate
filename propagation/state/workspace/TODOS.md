@@ -78,32 +78,6 @@ Several are self-described S1: N10, N14, N11, N19. Derive rather than trusting t
 node -e 'const t=require("fs").readFileSync("propagation/state/workspace/ISSUES.md","utf8").split("\n").filter(l=>/^### N\d+/.test(l));console.log(t.length, t.filter(l=>/\*\*OPEN\*\*/.test(l)).length)'
 ```
 
-### PR-006 · Make the backlog reader count issues, not references to them
-
-Measured 2026-09-23: `propagate backlog` reported `68 total, 60 open` for propagate's
-`ISSUES.md`. The file holds 55 `###` headings and 87 distinct `N\d+` tokens, so the reader is
-matching prose citations as items.
-
-Same family as N72 and N74, which already record the restatement pairer anchoring on the wrong
-thing. A reader that cannot tell an item from a reference to an item inflates every register it
-touches, and the inflation is invisible because the number looks plausible.
-
-### PR-007 · Build the Reminders bridge as a `propagate-digest` section, after N87 slice 2
-
-Spec at `docs/plans/2026-09-23-reminders-todo-bridge.md`, eng-reviewed 2026-09-23. Reads the
-`Claude TODO` Reminders list every 12 hours (09:00 + 21:00), routes tagged items into project
-registers, holds untagged ones, and reconciles completion in both directions.
-
-**Sequenced behind N87 slice 2, deliberately.** The review routed this component's failures
-into `doctor`, and a TCC denial is `INCONCLUSIVE` — "could not look" — which is exactly the
-fourth entry kind N87 slice 2 introduces. Landing the bridge first makes its failures warning
-355 of 355. This is the first real consumer of that state.
-
-Three hazards are verified against the live list rather than predicted: exit codes separate
-"found nothing" from "could not look" (`-1743` is the TCC denial), tags may be CR-separated
-so a `\n`-anchored parser misses them, and `completion date` is the clock while
-`modification date` is not — a tag edit bumps the latter.
-
 ### PR-008 · Chase the intermittent `ui-client` failure — the 91 "missing" tests were the ruler — **RESOLVED 2026-09-28**
 
 **ROOT CAUSE: one line.** `tests/helpers/mount-client.mjs` ended with
@@ -244,77 +218,6 @@ an unrelated one indefinitely. And N91's `doctor.duration_ms` spikes of 18-24 mi
 share a cause with an async test that is sensitive to load — that pairing survives the reframe,
 because it was never about the count.
 
-### PR-012 · `post-merge`'s completeness list is hand-maintained at 5 of 141 plugin files
-
-Filed 2026-09-24, residual from D8/D9 of the plugin-delivery review
-(`docs-plans-2026-09-23-reminders-todo-bri-playful-dawn.md`) — see that review's N78
-disposition for the full decision record.
-
-`.githooks/post-merge`'s `for f in …` loop now names 5 files (widened from 3, this
-session) against 141 shipped `.mjs` files. A module added later is unchecked by
-construction, and that is exactly the shape of the 2026-09-16 incident the hook was
-written to catch. D8 chose the 2-line widening over sharing one definition with
-`lib/report/doctor/delivery.mjs`'s `treeDigest`, on the grounds that the hook must stay
-pure shell with no node dependency and that thirty net new lines was a real cost.
-
-**The fix is a narrow entry point, not a full `doctor` run** — N91 records `doctor` taking
-18 to 24 minutes on a bad day, and a git hook that blocks that long (even though git
-ignores its exit code, the wait is still real) is not an option. Expose one small node
-call that answers only "is the served tree missing any shipped file", built on `treeDigest`,
-and have `post-merge` call that instead of its own list. **Depends on `treeDigest` landing
-first** — it does not exist standalone yet outside `delivery.mjs`'s internal use.
-
-### PR-013 · 241 of 501 gotcha entries carry no trigger, and propagate's own register is the worst
-
-Measured 2026-09-25 across 26 `GOTCHAS.md` files: 263 entries carry a `**Trigger:**` and can
-fire; 241 do not. Not every hazard has a mechanical hook and inventing one makes noise, so the
-target is not 100%. The distribution is the finding, not the total:
-
-| register | inert |
-|---|---|
-| `propagate/propagation/state/workspace` | **55 of 74 (74%)** |
-| `propagate/propagation/state/curate-docs` | 21 of 25 (84%) |
-| `Vipin Kaushik/…/sanskrit-texts` | 27 of 70 |
-| `Sindhu/…/sipl-tms` | 19 of 43 |
-
-The repo that built the trigger mechanism has the highest proportion of entries that cannot use
-it — `rule:enforcement-watches-itself`'s shape, in the register rather than the code. 74% is not
-a considered ratio, it is an unexamined one. The work is to walk propagate's own 55 and decide,
-per entry, whether a trigger exists — not to add 55 triggers.
-
-### PR-014 · `rules promote` stays unbuilt, and the measurement says why
-
-`cli.mjs:1449` prints `not implemented — declared in the Phase 5 plan and not built` and tells
-you to file by hand. The standing assumption was that automating promotion would pay for itself.
-Measured 2026-09-25, it does not: across 26 `GOTCHAS.md` files and ~500 entries there is exactly
-**one** genuinely unpromoted cross-project hazard, and it was promoted by hand the same day
-(G-P). One candidate is not a pipeline.
-
-Two corrections worth keeping with this entry. An earlier count of 31 candidates was duplicate
-checkouts — `curate-docs-skill` is an archived copy of `curate-docs`, and a `worktrees/` path
-without the leading dot escaped the exclusion list. A later count of 2 came from a filter that
-globbed for `GOTCHAS.md` and therefore never loaded `gotchas-global.md` at all, so it excluded
-nothing and looked like it worked. The true yield is 1.
-
-So the decision this entry records is **to leave the stub standing**, with the number that
-justifies it. Revisit if a census ever shows the candidate count in double figures.
-
-### PR-015 · Decide the N35 excused bucket — 17 files the restatement check declines to read
-
-`rules check` reports 1 restatement and separately notes that 17 files "restate a rule they also
-reference — excused, not checked". Twelve of those are `tool-priority`, the rule whose whole
-origin is nine divergent copies making four mutually exclusive claims. The consolidation that
-fixed it left twelve files carrying a pointer and a copy at once, in the one bucket the detector
-skips.
-
-Either that is a real conversion backlog or it is a permanently-fine category, and nobody has
-decided which. The decision is cheap and the ambiguity is not: a checker that reports 1 while
-holding 17 unexamined by design is the N85 shape, where a number gets dismissed because most of
-what it covers was never looked at.
-
-Breakdown: `tool-priority` 12 · `secrets-source-of-truth` 2 · `state-and-decisions` 2 ·
-`environment-vocabulary` 1.
-
 ### PR-016 · `INTEGRATIONS.marketplaceDir` is null here, so the fifth manifest goes unchecked in practice — **RESOLVED 2026-09-26**
 
 `gateVersionManifests` gained the hub `marketplace.json` as a fifth location on 2026-09-25, and
@@ -343,46 +246,6 @@ verdict is the thing worth recording.
 **What this does NOT close:** a machine with no `hubRoot` still verifies nothing for the fifth, and
 `release --check` reports that in `detail` rather than failing. That degradation is deliberate
 (`release.mjs:21` — `could-not-run` is never a failure) and is described in PR-011's closure note.
-
-### PR-017 · Decide whether the doc census earns a place in `release --check` at 21 seconds
-
-`docs --kinds` takes **21.03s** over 1513 docs, because `proseOnlySupersession` opens every file.
-The 2026-09-25 plan proposed gating it and then chose against: 21 seconds on every release, for a
-number with 988 untriaged rows behind it, is how a gate gets routed around (N85).
-
-`--json` and the full `--undeclared` worklist landed, so gating is a one-line change whenever
-someone is acting on the number. The prerequisite is PR-018, not more tooling.
-
-### PR-018 · The 988 undeclared docs now have a worklist and nobody has walked it
-
-Of 1513 docs, 988 resolve to `undeclared` and only **13** declare `kind:` in frontmatter; the
-rest are filename or directory guesses. `docs --undeclared` emits the full list with a
-best-guess kind per row as of 2026-09-25 — before that it printed 8 and "… and 980 more", which
-is why nobody could start.
-
-Walking it is judgement per doc, not a sweep. `guessKind()` is advisory and deliberately never
-feeds back into `kindOf()`.
-
-### PR-019 · Triage the 63 docs already classified `design`
-
-`design` is the fifth-largest kind and had zero consumers until the guidelines landed. The 63
-docs were never triaged against the kind's own rule — `follows its surface`, staleness `age` —
-so some of them describe surfaces that have moved.
-
-Sixteen `DESIGN.md` files exist under at least two incompatible conventions (playbook-style token
-docs, and `/office-hours`-generated build specs), and `Keerti-portfolio/docs/DESIGN.md` says in
-its own text that its `design-tokens.json` is stale.
-
-### PR-020 · The monitor notifies nothing in 89% of its runs
-
-Measured 2026-09-25 over the whole log: **5057 runs, 2041 notified, 168,739 suppressed.** 4502
-runs (89%) notified nothing at all, the suppression rate is 98%, and `actionable` has been pinned
-at 67 for every recent run.
-
-`rule:delegation-criteria` §2's worked example is a watcher that ran 4,420 times and found
-nothing in 4,384 (99.2%), replaced by a command deriving the same answer in 1.2s. This is the
-same shape at 89%. The question the rule asks is what breaks if it is computed on demand
-instead — and with `actionable` static at 67, plausibly nothing.
 
 ### PR-021 · The Reminders bridge cannot reach its stated goal condition — nothing in this repo can INSERT a register line — **RESOLVED 2026-09-25**
 
@@ -612,6 +475,24 @@ what every test uses.
 ---
 
 ## Finished
+
+### Moved to GitHub 2026-10-17 — Project #7 "propagate"
+
+- PR-035 · Judge the 11 open couplings in this repo, in Judge where each diff is visible — **MOVED** → [#72](https://github.com/Rupali59/propagate/issues/72) (2026-10-17; the full entry is there)
+- PR-036 · Give the 19 test files that share one state directory their own temp dir — **MOVED** → [#73](https://github.com/Rupali59/propagate/issues/73) (2026-10-17; the full entry is there)
+- PR-037 · Clear the 14 leftover plugin cache copies that doctor warns about on every run — **MOVED** → [#74](https://github.com/Rupali59/propagate/issues/74) (2026-10-17; the full entry is there)
+- PR-038 · Give the remaining CLI capabilities a dashboard page, and wait on `rules promote` — **MOVED** → [#75](https://github.com/Rupali59/propagate/issues/75) (2026-10-17; the full entry is there)
+- PR-006 · Make the backlog reader count issues, not references to them — **MOVED** → [#76](https://github.com/Rupali59/propagate/issues/76) (2026-10-17; the full entry is there)
+- PR-007 · Build the Reminders bridge as a `propagate-digest` section, after N87 slice 2 — **MOVED** → [#77](https://github.com/Rupali59/propagate/issues/77) (2026-10-17; the full entry is there)
+- PR-012 · `post-merge`'s completeness list is hand-maintained at 5 of 141 plugin files — **MOVED** → [#78](https://github.com/Rupali59/propagate/issues/78) (2026-10-17; the full entry is there)
+- PR-013 · 241 of 501 gotcha entries carry no trigger, and propagate's own register is the worst — **MOVED** → [#79](https://github.com/Rupali59/propagate/issues/79) (2026-10-17; the full entry is there)
+- PR-014 · `rules promote` stays unbuilt, and the measurement says why — **MOVED** → [#80](https://github.com/Rupali59/propagate/issues/80) (2026-10-17; the full entry is there)
+- PR-015 · Decide the N35 excused bucket — 17 files the restatement check declines to read — **MOVED** → [#81](https://github.com/Rupali59/propagate/issues/81) (2026-10-17; the full entry is there)
+- PR-017 · Decide whether the doc census earns a place in `release --check` at 21 seconds — **MOVED** → [#82](https://github.com/Rupali59/propagate/issues/82) (2026-10-17; the full entry is there)
+- PR-018 · The 988 undeclared docs now have a worklist and nobody has walked it — **MOVED** → [#83](https://github.com/Rupali59/propagate/issues/83) (2026-10-17; the full entry is there)
+- PR-019 · Triage the 63 docs already classified `design` — **MOVED** → [#84](https://github.com/Rupali59/propagate/issues/84) (2026-10-17; the full entry is there)
+- PR-020 · The monitor notifies nothing in 89% of its runs — **MOVED** → [#85](https://github.com/Rupali59/propagate/issues/85) (2026-10-17; the full entry is there)
+
 
 ### PR-034 · `backlog` counts a GitHub-tracked project as 0 open: read the tracker it delegates to — **DONE 2026-10-04 (v0.15.19)**
 
