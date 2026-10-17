@@ -1035,14 +1035,17 @@ const Cmd = ({ text, label }) => html`<div class="cmdrow" onClick=${stop} onKeyD
  * different one (value on top, inert), which is the inconsistency this replaces.
  */
 const KPI_NO_REASON = "this figure goes nowhere, and nothing says why";
-function Kpi({ label, value, sub, route, tip, warn, nav }) {
-  const live = !!(route && nav);
+function Kpi({ label, value, sub, route, act, tip, warn, cls, nav }) {
+  // `act` is the second kind of destination: a function (a copy, today) for a figure whose page does not exist
+  // yet. A route wins when both are given. Either way the card is live and `tip` says which it is.
+  const go = route && nav ? () => nav(route) : (typeof act === "function" ? act : null);
+  const live = !!go;
   const text = live ? tip : (tip || KPI_NO_REASON);
   const props = live
-    ? { role: "button", onClick: () => nav(route), onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); nav(route); } } }
+    ? { role: "button", onClick: go, onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } } }
     : { role: "group" };
   // Both kinds take focus: an inert card's reason is a tooltip, and focus is how a keyboard user gets one.
-  return html`<div class=${"kpi " + (live ? "pick" : "inert") + (warn ? " warn" : "")} tabIndex="0" ...${props}
+  return html`<div class=${"kpi " + (live ? "pick" : "inert") + (warn ? " warn" : "") + (cls ? " " + cls : "")} tabIndex="0" ...${props}
       ...${tipProps(tipText("note", { title: label, text: text }))}>
     <span>${label}</span><b>${value}</b><div class="ksub">${sub}</div>
   </div>`;
@@ -2033,6 +2036,95 @@ function ActivityView({ st, retry, nav }) {
   </div>`;
 }
 
+/**
+ * The Overview's next step (Phase 2). Built from the inbox's own leverage block, never recomputed:
+ * `allRoots` arrives ordered by what a root frees alone (surface.mjs buildLeverage), so the first
+ * one is the root that frees the most. Four outcomes, each with a sentence:
+ *   judge     the top root is in the queue            -> Judge it
+ *   baseline  the top root was never verified         -> the UI writes no baseline; copy the command
+ *   together  blocked edges exist, no root frees any alone -> the settle-together groups
+ *   clear     nothing blocked                         -> `bottleneckReason`, so the strip is never empty
+ * Age is the root's own "last judged", read from the worklist row when the root is in the queue.
+ */
+function nextAction(inbox, now) {
+  const lv = inbox && inbox.leverage;
+  if (!lv) return { kind: "clear", title: "No next step to show", detail: "the queue sent no leverage data, so what is blocking what is not known", route: null };
+  const roots = lv.allRoots || [];
+  const top = roots[0];
+  if (top && top.freesNow > 0) {
+    const name = top.source + " → " + top.downstream;
+    const frees = "frees " + plural(top.freesNow, "blocked edge") + " now";
+    const w = inbox.divisions && inbox.divisions.worklist;
+    const row = w ? (w.ready || []).concat(w.blocked || []).find((i) => i.edge_id === top.edge_id) : null;
+    const days = row ? ageDaysOf(row, now) : null;
+    const age = !top.inQueue ? null : (days == null ? "never judged" : "last judged " + days + " d ago");
+    if (top.inQueue) return { kind: "judge", title: "Judge " + name, detail: [frees, age].filter(Boolean).join(" · "), edgeId: top.edge_id, route: "judge?edge=" + encodeURIComponent(top.edge_id), freesNow: top.freesNow };
+    return { kind: "baseline", title: "Baseline " + name + " first", detail: frees + " · never verified, and the UI does not write a baseline", edgeId: top.edge_id, command: baselineCommand(top.edge_id), route: null, freesNow: top.freesNow };
+  }
+  if (lv.blocked > 0) {
+    return { kind: "together", title: "Settle blocked edges together", detail: plural(lv.blocked, "blocked edge") + ", and no single root frees any of them alone" + (lv.bottleneckReason ? " (" + lv.bottleneckReason + ")" : ""), route: "unblock?focus=together" };
+  }
+  return { kind: "clear", title: "Nothing is blocked", detail: lv.bottleneckReason || "no edge is waiting on another, and the queue gave no reason", route: null };
+}
+
+function NextStrip({ action, nav }) {
+  const [copied, copy] = useCopyFlash();
+  const a = action;
+  return html`<div class=${"nextstrip " + a.kind} ...${tipProps(tipText("note", { title: "Next step", text: a.kind === "clear" ? "Shown even when there is nothing to do, so an empty strip never reads as a failure to load" : "The root that frees the most blocked edges right now, from the queue's own leverage figures" }))}>
+    <div class="ns-t"><span class="eyebrow">Next step</span><b>${a.title}</b><span class="ns-s">${a.detail}</span></div>
+    <div class="ns-a">
+      ${a.kind === "judge" ? html`<button onClick=${() => nav(a.route)}>Judge root</button>` : null}
+      ${a.kind === "baseline" ? html`<button onClick=${() => copy("cmd", a.command)}>${copied === "cmd" ? "copied" : "Copy baseline command"}</button>` : null}
+      ${a.kind === "together" ? html`<button onClick=${() => nav(a.route)}>See the groups</button>` : null}
+      ${a.kind !== "clear" ? html`<button class="ghost" onClick=${() => nav("unblock")}>All roots</button>` : null}
+    </div>
+    ${a.kind === "baseline" ? html`<${Cmd} text=${a.command} label="copy command" />` : null}
+  </div>`;
+}
+
+/**
+ * The six machinery tiles. Until Phase 4 builds their pages each tile goes to the closest page that
+ * exists (`route`) or copies the CLI command (`cmd`), and its tooltip says which. No tile is a dead end.
+ */
+const MACH_TILES = [
+  { key: "claims", title: "Claims", cmd: "propagate claims check", why: "There is no Claims page yet" },
+  { key: "rules", title: "Rules", cmd: "propagate rules list", why: "There is no Rules page yet" },
+  { key: "caps", title: "Caps", cmd: "propagate caps", why: "There is no Caps page yet" },
+  { key: "skills", title: "Skills", cmd: "propagate skills", why: "There is no Skills page yet" },
+  { key: "backlog", title: "Backlog", route: "registers", why: "There is no Backlog page yet, so this opens Registers, which lists the same issues and todos" },
+  { key: "goals", title: "Goals", cmd: "propagate goals", why: "There is no Goals page yet" },
+];
+
+function machineryTiles(st, copiedKey) {
+  const rs = readState(st);
+  const data = st && st.status === "ok" ? (st.data || {}) : null;
+  return MACH_TILES.map((t) => {
+    const dest = t.route ? { route: t.route } : { cmd: t.cmd };
+    const goes = t.route ? t.why + "." : t.why + ". Click to copy `" + t.cmd + "`.";
+    const base = { key: t.key, label: t.title, route: dest.route || null, cmd: dest.cmd || null, warn: false };
+    if (rs.kind === "loading") return { ...base, value: LOADING, sub: "reading " + t.key, route: null, cmd: null, tip: "Still reading this source; it opens once the figure lands. " + goes };
+    if (rs.kind === "error") return { ...base, value: "could not read", sub: "could not read — " + rs.reason, warn: true, tip: "The machinery request failed: " + rs.reason + ". " + goes };
+    const b = data && data[t.key];
+    if (!b) return { ...base, value: "could not read", sub: "could not read — the server sent no " + t.key + " block", warn: true, tip: goes };
+    if (b.status !== "ok") return { ...base, value: "could not read", sub: "could not read — " + (b.reason || "the source gave no reason"), warn: true, tip: "This source failed on its own; the others are fine. " + goes };
+    const value = b.of != null ? b.count + " of " + b.of : String(b.count);
+    const sub = copiedKey === t.key ? "copied: " + t.cmd : b.label + (b.top ? " · " + b.top : "");
+    return { ...base, value: value, sub: sub, tip: goes };
+  });
+}
+
+function MachineryTiles({ st, nav }) {
+  const [copied, copy] = useCopyFlash();
+  const tiles = machineryTiles(st, copied);
+  return html`<div>
+    <div class="h2"><b>Machinery and work</b><span>what the tool checks about itself and the tree · each tile says where it goes</span></div>
+    <div class="kpis mach">
+      ${tiles.map((k) => html`<${Kpi} key=${k.key} cls="mt" label=${k.label} value=${k.value} sub=${k.sub} route=${k.route} warn=${k.warn}
+        act=${k.cmd ? () => copy(k.key, k.cmd) : null} tip=${k.tip} nav=${nav} />`)}
+    </div>
+  </div>`;
+}
+
 const SRC_COLS = [
   { key: "source", label: "source", value: (g) => baseName(g.short).toLowerCase(),
     cell: (g) => html`<div><div class="nm">${baseName(g.short)}</div><div class="dr">${String(g.short).split("/").slice(0, -1).slice(-2).join("/")}</div></div>` },
@@ -2065,7 +2157,7 @@ function SourcesTable({ model, nav }) {
   </div>`;
 }
 
-function OverviewView({ app, surfaceSt, healthSt, nav }) {
+function OverviewView({ app, surfaceSt, healthSt, machSt, nav }) {
   const { inboxSt, retryInbox } = app;
   const now = Date.now();
   const model = useMemo(() => overviewModel(inboxSt.data, now), [inboxSt.data]);
@@ -2082,9 +2174,12 @@ function OverviewView({ app, surfaceSt, healthSt, nav }) {
   const vSub = velocity.status === "ok" ? "last " + velocity.windowDays + " days · changed vs no change needed · click a bar for Activity" : velocityNote(velocity);
   return html`<div class="detail wide">
     <h2 class="dtitle">Overview</h2>
+    <${NextStrip} action=${nextAction(inboxSt.data, now)} nav=${nav} />
     <div class="kpis ov">
       ${kpis.map((k) => html`<${Kpi} key=${k.key} label=${k.label} value=${k.text} sub=${k.sub} route=${k.route} tip=${k.tip} warn=${k.warn} nav=${nav} />`)}
     </div>
+    ${/* Right under the KPIs, as in the approved mock (review artifact §4): the tree-wide figures are part of "where do I stand", not a footnote under the sources table. */""}
+    <${MachineryTiles} st=${machSt} nav=${nav} />
     <div class="charts charts3">
       <${Chart} title="Queue by workspace" coverage="edges in the queue, by what moved · click a bar to judge it">
         <${PlotChart} chart="queue" data=${charts.queue} bars=${charts.queue.bars} nav=${nav} /><//>
@@ -2336,6 +2431,10 @@ function App() {
   const [inboxSt, retryInbox] = useResource("/api/inbox", true);
   const firstLanded = inboxSt.status === "ok" || inboxSt.status === "error";
   const [surfaceSt, retrySurface] = useResource("/api/surface", firstLanded);
+  // The machinery tiles wait for /api/surface to land: the server computes claims and skills in-process (over a
+  // second each on a cold cache) and one thread answers one request at a time, so asking sooner would delay the KPIs.
+  const surfaceLanded = surfaceSt.status === "ok" || surfaceSt.status === "error";
+  const [machSt, retryMach] = useResource("/api/machinery", view === "overview" && surfaceLanded);
   // The Overview reads health only for its fail count, but it is the same resource: one fetch, shared.
   const [healthSt, retryHealth] = useResource("/api/health", view === "health" || view === "overview");
   const [regSt, retryReg] = useResource("/api/registers", view === "registers");
@@ -2545,6 +2644,9 @@ function App() {
     setRefreshTick((t) => t + 1);
     retryInbox(); retrySurface();
     if (view === "health" || view === "overview") retryHealth();
+    // ?fresh=1 recomputes past the server's 60 s cache, then the resource re-reads that fresh value:
+    // refresh means new numbers, while ordinary page loads keep the cache.
+    if (view === "overview" && surfaceLanded) api("/api/machinery?fresh=1").then(() => retryMach());
     if (view === "registers") retryReg();
     if (view === "reminders") retryRem();
   };
@@ -2557,7 +2659,7 @@ function App() {
   const badge = (k) => (k === "judge" ? n.judge : k === "unblock" ? n.unblock : k === "health" ? surfaceHealth : null);
 
   let body;
-  if (view === "overview") body = html`<${OverviewView} app=${app} surfaceSt=${surfaceSt} healthSt=${healthSt} nav=${nav} />`;
+  if (view === "overview") body = html`<${OverviewView} app=${app} surfaceSt=${surfaceSt} healthSt=${healthSt} machSt=${machSt} nav=${nav} />`;
   else if (view === "judge") body = html`<${JudgeView} app=${app} route=${route} />`;
   else if (view === "unblock") body = html`<${UnblockView} app=${app} route=${route} />`;
   else if (view === "health") body = html`<${HealthView} st=${healthSt} retry=${retryHealth} focus=${route.section} />`;
@@ -2604,7 +2706,7 @@ if (typeof globalThis !== "undefined") {
     parseHash, hashWithout, AGE_BUCKETS, AGE_KEYS, ageKey, ageDaysOf, judgeFilterRows, overviewModel, overviewKpis, sortSources, routeForKpi, routeForBar,
     queueBars, waitBars, verdictBars, buildPlot, wireChart, plotUnavailable, resolveToken, localDay,
     readState, surfaceVelocity, velocityNote, sortRows, unblockKpis, barTarget, bucketBars, usageBars, runBars, axisLabels, registerLocator, reminderLocator,
-    KPI_NO_REASON, ROW_NO_REASON, Kpi, DataTable,
+    KPI_NO_REASON, ROW_NO_REASON, Kpi, DataTable, nextAction, machineryTiles, MACH_TILES,
     tipText, tipPlace, inlineMd, dayLabel, dayShort, axisTicks, priorityLabel, remindersTimeoutText, boundaryLabel, VERDICT_MEANING };
 }
 

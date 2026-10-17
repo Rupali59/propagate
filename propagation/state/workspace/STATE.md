@@ -1,5 +1,21 @@
 # propagate — State
 
+## Dashboard Phase 2: the Overview leads with a next step, and shows the machinery — 2026-10-17 (unreleased, not committed)
+Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 2). Built on Phases 0 to 1b above.
+- **Next-step strip** (`nextAction`, `NextStrip` in `commands/ui.client.js`) above the five KPIs, from the inbox's own
+  `leverage.allRoots[0]`: a root in the queue opens `#/judge?edge=`; a never-verified one offers the baseline command to copy
+  and says the UI writes no baseline; blocked edges no single root frees go to `unblock?focus=together`; nothing blocked shows
+  `bottleneckReason`, so the strip is never empty. Age is the root's own "last judged", read from its worklist row.
+- **`GET /api/machinery`** (`lib/report/machinery.mjs`, wired in `commands/ui.mjs`): one block per source, each
+  `{status, reason, count, of, label, top}`, read in-process from the libraries behind the CLI commands. A source that throws,
+  or ran and looked at nothing (no config: claims, caps, backlog and goals each return a tidy 0), is `status:"error"` with its
+  reason. Cached for `MACHINERY_TTL_MS`; the reason for the figure is beside the constant.
+- **Six tiles** under the sources table, on the existing `Kpi` (which gained `act` for a copy and `cls`). Tiles with no page yet
+  copy their CLI command; Backlog opens Registers; the tooltip of each states which. The client asks for them only after
+  `/api/surface` lands (the server computes the sources on its one thread).
+- **Not done:** the age is absent for a never-verified root (the payload has none); a header refresh inside the TTL gets the
+  cached answer. Phases 3 to 5 are unchanged.
+
 ## propagate loads in place (`propagate@propagate`) — 2026-10-17, `v0.15.29`
 The propagate repo is its own directory marketplace, so Claude Code serves the working tree: a release is `/reload-plugins`,
 with no `claude plugin update` and no hub manifest bump. `doctor`'s `# Delivery` passes "served in place" (read from

@@ -130,12 +130,23 @@ const evidenceFor = (id) => ({
  * Mount with every endpoint the client reads stubbed, so an UNSTUBBED path is a
  * test bug that `unstubbed` reports rather than a quiet network error on screen.
  */
+const MACH_OK = (count, over = {}) => ({ status: "ok", reason: null, count, of: null, label: "findings", top: "a detail line", ...over });
+const MACH = {
+  ok: true, generatedAt: "2026-10-17T10:00:00.000Z", ttlMs: 60000,
+  claims: MACH_OK(194, { label: "findings", top: "75 expired-date · 40 dead-branch · 702 files checked" }),
+  rules: MACH_OK(19, { of: 34, label: "rules to look at", top: "17 unexercised · 2 restated" }),
+  caps: MACH_OK(34, { of: 157, label: "files over cap", top: "worst 18.0x · Motherboard/TODOS.md" }),
+  skills: MACH_OK(31, { of: 77, label: "never invoked", top: "most used a (9)" }),
+  backlog: MACH_OK(750, { of: 794, label: "items with no priority", top: "top: P0 TM-032" }),
+  goals: MACH_OK(17, { of: 17, label: "open goals", top: "5 files · 2 unreadable" }),
+};
 const mount = (opts = {}) => mountClient({
   inbox: INBOX,
   speedUp: true,
   ...opts,
   routes: {
     "/api/surface": SURFACE,
+    "/api/machinery": MACH,
     "/api/seen-edges": { ok: true, status: "ok", triples: [] },
     "/api/evidence": (c) => evidenceFor(JSON.parse(c.body).edge_id),
     "/api/dispose": respond(200, { ok: true, event_id: "ev-1" }),
@@ -1433,7 +1444,8 @@ const OV_SURFACE = { ...SURFACE, velocity: { status: "ok", reason: null, windowD
   days: [{ day: "2020-01-01", total: 1, noChange: 1, changed: 0 }, { day: TODAY, total: 4, noChange: 3, changed: 1 }] } };
 const mountOv = (opts = {}) => mount({ hash: "#/overview", inbox: OV_INBOX, ...opts,
   routes: { "/api/surface": OV_SURFACE, "/api/health": HEALTH, ...(opts.routes || {}) } });
-const kpiCards = (app) => byClass(app, "kpi").filter((k) => /\bpick\b/.test(k.getAttribute("class")));
+// The five Overview KPIs only: the machinery tiles are Kpi components too (class "mt") and have their own tests (Phase 2).
+const kpiCards = (app) => byClass(app, "kpi").filter((k) => /\bpick\b/.test(k.getAttribute("class")) && !/\bmt\b/.test(k.getAttribute("class")));
 const srcRows = (app) => findAll(app, (n) => n.nodeType === 1 && n.localName === "tr" && /\bpick\b/.test(n.getAttribute("class") || ""));
 const srcNames = (app) => srcRows(app).map((r) => textOf(byClass(r, "nm")[0]));
 const th = (app, re) => byTag(app, "th").find((t) => re.test(textOf(t)));
@@ -2172,4 +2184,163 @@ test("Phase 1b/5: the header refresh re-reads /api/baseline when the Never-verif
   assert.equal(count(g, "/graph"), 1);
   click(btnText(g.app, /^refresh$/)); await g.settle();
   assert.equal(count(g, "/graph"), 2, "refresh re-renders the graph");
+});
+
+/* ══ Dashboard Phase 2: the next-step strip and the machinery tiles ═══════════════════════════ */
+
+const strip = (app) => byClass(app, "nextstrip")[0];
+const tiles = (app) => byClass(app, "kpi").filter((k) => /\bmt\b/.test(k.getAttribute("class")));
+const tileNamed = (app, name) => tiles(app).find((t) => new RegExp("^" + name).test(textOf(t)));
+const stripBtn = (app, re) => buttons(strip(app)).find((b) => re.test(textOf(b)));
+
+test("Phase 2 strip: the top root that frees the most is named with what it frees, and its button opens Judge on that edge", async () => {
+  const m = await mountOv();
+  const s = strip(m.app);
+  assert.ok(s, "the Overview has a next-step strip");
+  // x3 (DIVERGED, in the queue) is the only root and frees x5 alone.
+  assert.match(textOf(s), /Next step\s*Judge propagate\/lib\/x3\.mjs|Next step\s*Judge .*→/);
+  assert.match(textOf(s), /frees 1 blocked edge now/);
+  assert.match(textOf(s), /never judged/, "x3 has no last verdict, and the strip says so rather than staying silent about age");
+  click(stripBtn(m.app, /^Judge root$/)); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/judge?edge=x3");
+  m.setHash("#/overview"); await m.settle();
+  click(stripBtn(m.app, /^All roots$/)); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/unblock", "the secondary action opens the roots list");
+});
+
+test("Phase 2 strip: the age is the root's own 'last judged', from its worklist row", async () => {
+  const aged = inboxOf({ ready: OV_READY.map((e) => (e.edge_id === "x3" ? { ...e, last: { ts: AGO(44) } } : e)), blocked: OV_BLOCKED, parked: [] });
+  const m = await mountOv({ inbox: aged });
+  assert.match(textOf(strip(m.app)), /last judged 44 d ago/);
+});
+
+test("Phase 2 strip: with nothing blocked it shows bottleneckReason, never an empty strip, and offers no button", async () => {
+  const clear = inboxOf({ ready: OV_READY, blocked: [], parked: [] });
+  assert.equal(clear.leverage.bottleneckReason, "nothing is blocked", "the fixture is built by the real buildLeverage");
+  const m = await mountOv({ inbox: clear });
+  const s = strip(m.app);
+  assert.ok(s);
+  assert.match(textOf(s), /Nothing is blocked/);
+  assert.match(textOf(s), /nothing is blocked/, "the reason text comes from the payload, not from a literal in the view");
+  assert.equal(buttons(s).length, 0, "nothing to act on, so no button that goes nowhere");
+});
+
+test("Phase 2 strip: a root that was never verified is not routed to Judge; it offers the baseline command to copy, and says why", async () => {
+  const lone = inboxOf({ ready: [], parked: [], blocked: [edge("zb", "DRIFTED", { orderIndex: 0, blocked: true,
+    blockedBy: [{ edge_id: "zz", from: "/u/Documents/GitHub/propagate/lib/zz.mjs", to: "/u/Documents/GitHub/propagate/commands/zz.mjs", state: "NEVER_VERIFIED" }] })] });
+  assert.equal(lone.leverage.allRoots[0].inQueue, false, "the fixture root is genuinely not in the queue");
+  const m = await mountOv({ inbox: lone });
+  const wrote = clipboard(m);
+  const s = strip(m.app);
+  assert.match(textOf(s), /never verified, and the UI does not write a baseline/);
+  assert.equal(stripBtn(m.app, /^Judge root$/), undefined, "no Judge button for a root Judge cannot list");
+  const before = m.ctx.location.hash;
+  click(stripBtn(m.app, /Copy baseline command/)); await m.settle();
+  assert.deepEqual(Array.from(wrote), [m.ui.baselineCommand("zz")]);
+  assert.equal(m.ctx.location.hash, before, "copying does not navigate");
+});
+
+test("Phase 2 strip: blocked edges that no single root frees go to the settle-together groups", async () => {
+  const two = [
+    edge("r1", "DRIFTED", { orderIndex: 0 }), edge("r2", "DRIFTED", { orderIndex: 1 }),
+  ];
+  const b = edge("b1", "DRIFTED", { orderIndex: 2, blocked: true, blockedBy: [
+    { edge_id: "r1", from: "/u/Documents/GitHub/propagate/lib/r1.mjs", to: "/u/Documents/GitHub/propagate/commands/r1.mjs", state: "DRIFTED" },
+    { edge_id: "r2", from: "/u/Documents/GitHub/propagate/lib/r2.mjs", to: "/u/Documents/GitHub/propagate/commands/r2.mjs", state: "DRIFTED" }] });
+  const m = await mountOv({ inbox: inboxOf({ ready: two, blocked: [b], parked: [] }) });
+  assert.match(textOf(strip(m.app)), /no single root frees any of them alone/);
+  click(stripBtn(m.app, /See the groups/)); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/unblock?focus=together");
+});
+
+test("Phase 2 machinery: six tiles from /api/machinery, each with its count, detail and a stated destination", async () => {
+  const m = await mountOv();
+  const t = tiles(m.app);
+  assert.equal(t.length, 6, "six tiles");
+  assert.deepEqual(t.map((x) => textOf(x).match(/^[A-Za-z]+/)[0]), ["Claims", "Rules", "Caps", "Skills", "Backlog", "Goals"]);
+  assert.match(textOf(tileNamed(m.app, "Claims")), /^Claims194findings · 75 expired-date/);
+  assert.match(textOf(tileNamed(m.app, "Rules")), /^Rules19 of 34rules to look at · 17 unexercised · 2 restated/);
+  assert.match(textOf(tileNamed(m.app, "Backlog")), /^Backlog750 of 794items with no priority/);
+  assert.ok(t.every((x) => /\bpick\b/.test(x.getAttribute("class"))), "every ok tile leads somewhere");
+  assert.equal(kpiCards(m.app).length, 5, "the five KPIs are still five");
+  // destinations are stated in the tooltip, not left to be discovered
+  hover(tileNamed(m.app, "Claims")); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /There is no Claims page yet\. Click to copy `propagate claims check`/);
+  unhover(tileNamed(m.app, "Claims"));
+  hover(tileNamed(m.app, "Backlog")); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /opens Registers/);
+  unhover(tileNamed(m.app, "Backlog"));
+});
+
+test("Phase 2 machinery: a tile with no page yet copies its CLI command; Backlog opens Registers", async () => {
+  // Real timers: the 1.5 s "copied" flash would be sped up to 15 ms and gone before it could be read.
+  const m = await mountOv({ speedUp: false });
+  const wrote = clipboard(m);
+  const before = m.ctx.location.hash;
+  for (const [name, cmd] of [["Claims", "propagate claims check"], ["Rules", "propagate rules list"], ["Caps", "propagate caps"], ["Skills", "propagate skills"], ["Goals", "propagate goals"]]) {
+    // No m.settle() between the click and the read: settle waits for the tracked 1.5 s timer, i.e. for the flash to END.
+    click(tileNamed(m.app, name));
+    for (let i = 0; i < 40 && !/copied: /.test(textOf(tileNamed(m.app, name))); i++) await sleep(10);
+    assert.equal(wrote[wrote.length - 1], cmd, name + " copies its command");
+    assert.equal(m.ctx.location.hash, before, name + " does not navigate");
+    assert.match(textOf(tileNamed(m.app, name)), /copied: /, name + " says it copied");
+  }
+  click(tileNamed(m.app, "Backlog")); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/registers");
+});
+
+test("Phase 2 machinery: one source that failed reads 'could not read — <reason>' on its own tile; the other five are untouched and no tile shows 0", async () => {
+  const bad = { ...MACH, skills: { status: "error", reason: "cannot read ~/.claude/skills: EACCES", count: null, of: null, label: null, top: null } };
+  const m = await mountOv({ routes: { "/api/machinery": bad } });
+  const sk = textOf(tileNamed(m.app, "Skills"));
+  assert.match(sk, /could not read/);
+  assert.match(sk, /could not read — cannot read ~\/\.claude\/skills: EACCES/);
+  assert.doesNotMatch(sk, /\b0\b/, "a failed source is not a zero");
+  assert.match(textOf(tileNamed(m.app, "Claims")), /194/);
+  // and it still has a stated destination: the command that would show the real error
+  hover(tileNamed(m.app, "Skills")); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /failed on its own.*Click to copy `propagate skills`/);
+});
+
+test("Phase 2 machinery: a failed request and a block the server forgot to send both say 'could not read', each with its own reason", async () => {
+  const failed = await mountOv({ routes: { "/api/machinery": respond(500, { ok: false, error: "machinery exploded" }) } });
+  assert.ok(tiles(failed.app).every((t) => /could not read — machinery exploded/.test(textOf(t))));
+  const { claims, ...missing } = MACH;
+  const m = await mountOv({ routes: { "/api/machinery": missing } });
+  assert.match(textOf(tileNamed(m.app, "Claims")), /could not read — the server sent no claims block/);
+  assert.match(textOf(tileNamed(m.app, "Rules")), /19 of 34/);
+});
+
+test("Phase 2 machinery: while the request is outstanding the tiles say 'loading…', and the five KPIs are already on screen", async () => {
+  const m = await mountOv({ untracked: ["/api/machinery"], routes: { "/api/machinery": () => new Promise(() => {}) } });
+  assert.equal(tiles(m.app).length, 6);
+  assert.ok(tiles(m.app).every((t) => /loading…/.test(textOf(t))), "pending reads loading…");
+  assert.ok(tiles(m.app).every((t) => !/could not read|\b0\b/.test(textOf(t))), "and neither a failure nor a zero");
+  assert.equal(kpiCards(m.app).length, 5, "the KPIs never wait for the tiles");
+  assert.match(textOf(kpiCards(m.app)[0]), /^To judge/);
+  // an inert (loading) tile still says why
+  hover(tileNamed(m.app, "Rules")); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /Still reading this source/);
+});
+
+test("Phase 2 machinery: /api/machinery is asked for only AFTER /api/surface has landed, and only on the Overview", async () => {
+  const m = await mountOv();
+  const order = m.calls.filter((c) => c === "/api/surface" || c === "/api/machinery");
+  assert.deepEqual(order, ["/api/surface", "/api/machinery"], "the slow read queues behind the one the KPIs need");
+  const j = await mount({ hash: "#/judge" });
+  assert.equal(j.calls.filter((c) => c === "/api/machinery").length, 0, "nothing else asks for it");
+  // surface held open: machinery has not been asked for yet
+  const held = await mountOv({ untracked: ["/api/surface"], routes: { "/api/surface": () => new Promise(() => {}) } });
+  assert.equal(held.calls.filter((c) => c === "/api/machinery").length, 0, "while the surface read is pending, the machinery read has not started");
+});
+
+test("Phase 2 machinery: the pure model gives every tile a destination or a reason, in every state", async () => {
+  const { ui } = await mount();
+  const model = (st) => fromRealm(ui.machineryTiles(fromRealm(st), null));
+  for (const st of [{ status: "loading" }, { status: "idle" }, { status: "error", error: "boom" }, { status: "ok", data: MACH }, { status: "ok", data: {} },
+    { status: "ok", data: { ...MACH, caps: { status: "error", reason: "x", count: null } } }]) {
+    const ts = model(st);
+    assert.equal(ts.length, 6);
+    for (const t of ts) assert.ok(t.tip && t.tip !== ui.KPI_NO_REASON && /no .* page yet|opens Registers/i.test(t.tip), `${t.key} in ${JSON.stringify(st).slice(0, 40)}: tip must state the destination, got ${t.tip}`);
+  }
 });

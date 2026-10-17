@@ -21,6 +21,7 @@
   .charts.charts3 { grid-template-columns: 1fr; }
 }
 @media (max-width: 860px) {
+  .kpis.mach { grid-template-columns: 1fr; }
   .shell { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
   .rail { position: sticky; top: 0; z-index: 2; background: var(--bg); }
   .list { max-height: 38vh; border-right: 0; border-bottom: 1px solid var(--line); }

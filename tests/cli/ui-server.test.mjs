@@ -90,6 +90,11 @@ before(async () => {
     readSnapshot: async () => { if (hooks.snapshotThrows) throw new Error("snapshot exploded"); return { ok: false, reason: "none", ageMs: null }; },
     evidenceFor: async (b) => { if (hooks.evidenceThrows) throw new Error("diff exploded"); return (await import("../../lib/report/evidence.mjs")).evidenceFor(b); },
     surfacePayload: async () => { if (hooks.surfaceThrows) throw new Error("surface exploded"); return { fixture: "surface" }; },
+    // ttlMs 0: every request recomputes, so a per-test hook is seen. The cache itself is tested in machinery.test.mjs.
+    machinery: { ttlMs: 0, sources: Object.fromEntries(["claims", "rules", "caps", "skills", "backlog", "goals"].map((k) => [k, async () => {
+      if (hooks.machineryThrows === k) throw new Error(k + " exploded");
+      return { count: 7, of: 9, label: k + " things", top: "top of " + k };
+    }])) },
   });
   ctx = { ...r, port, cookie: `ptok=${r.token}` };
 
@@ -389,6 +394,38 @@ test("/api/surface serves surfacePayload behind the token, and a throw is a 500 
     assert.equal(bad.status, 500);
     assert.deepEqual(bad.json, { ok: false, error: "surface exploded" });
   } finally { hooks = {}; }
+});
+
+// ── /api/machinery (dashboard Phase 2) ──────────────────────────────────────
+
+test("/api/machinery answers six blocks behind the token, and one failing source is status:error with its message, never a 0", async () => {
+  const ok = await call(ctx, "GET", "/api/machinery");
+  assert.equal(ok.status, 200);
+  assert.deepEqual(Object.keys(ok.json).filter((k) => ok.json[k] && ok.json[k].status), ["claims", "rules", "caps", "skills", "backlog", "goals"]);
+  assert.deepEqual(ok.json.skills, { status: "ok", reason: null, count: 7, of: 9, label: "skills things", top: "top of skills" });
+  assert.equal((await call(ctx, "GET", "/api/machinery", { token: "nope" })).status, 401);
+  hooks.machineryThrows = "caps";
+  try {
+    const bad = await call(ctx, "GET", "/api/machinery");
+    assert.equal(bad.status, 200, "one bad source is not a failed request");
+    assert.equal(bad.json.caps.status, "error");
+    assert.equal(bad.json.caps.reason, "caps exploded");
+    assert.equal(bad.json.caps.count, null, "a failed source has no count: null, never 0");
+    assert.equal(bad.json.claims.status, "ok", "the other five are untouched");
+  } finally { hooks = {}; }
+});
+
+test("/api/machinery on the production construction path (no overrides) answers six well-formed blocks, each ok or error with a reason", async () => {
+  // Reads the real tree, read-only: the same libraries the CLI calls. Under a test state dir with no
+  // config some blocks are errors -- that is the point of the blind-scan guard -- so only the SHAPE is asserted.
+  const r = await call(real, "GET", "/api/machinery");
+  assert.equal(r.status, 200);
+  for (const k of ["claims", "rules", "caps", "skills", "backlog", "goals"]) {
+    const b = r.json[k];
+    assert.ok(b && (b.status === "ok" || b.status === "error"), k + " block missing or malformed: " + JSON.stringify(b));
+    if (b.status === "ok") assert.equal(typeof b.count, "number", k);
+    else assert.ok(b.reason && b.count === null, k + " failed without a reason, or with a count");
+  }
 });
 
 // ── F12: a throwing dependency answers JSON and the server survives ─────────

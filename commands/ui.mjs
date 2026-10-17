@@ -565,7 +565,7 @@ export function page(token, build = buildId()) {
  *   key is absent, and tests/cli/ui-server.test.mjs also runs once with none, so
  *   the production construction path is exercised (rule:name-what-no-test-executes:
  *   an injection seam is exactly what lets the real arm ship unrun).
- *   Keys: deps, inboxDeps, appendEvent, evidenceFor, readSnapshot, surfacePayload, root.
+ *   Keys: deps, inboxDeps, appendEvent, evidenceFor, readSnapshot, surfacePayload, machinery ({sources, ttlMs, now}), root.
  */
 export async function uiCmd(argv = [], io = console, overrides = {}) {
   if (argv.includes("--rotate-token")) {
@@ -588,6 +588,8 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
   const evidenceFor = overrides.evidenceFor ?? (await import("../lib/report/evidence.mjs")).evidenceFor;
   const readSnapshot = overrides.readSnapshot ?? (await import("../lib/report/doctor/snapshot.mjs")).readSnapshot;
   const surfacePayload = overrides.surfacePayload ?? (await import("../lib/report/surface.mjs")).surfacePayload;
+  // The machinery tiles' data: one cached reader per server (lib/report/machinery.mjs holds the TTL and why).
+  const machinery = (await import("../lib/report/machinery.mjs")).createMachinery(overrides.machinery ?? {});
   // F5. The id of the code this process was STARTED from. page() recomputes from
   // disk on every request; the two differ exactly when files changed under a
   // running server, which is the stale-server case.
@@ -715,6 +717,14 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
       // paint because it costs more than the inbox.
       if (url.pathname === "/api/surface") {
         try { return send(200, await surfacePayload({ root })); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
+      // Dashboard Phase 2. Six sources, read in-process and cached for a minute; the client asks
+      // AFTER first paint because claims and skills take over a second each. A source that fails
+      // is status:"error" inside the body, so one bad source is still a 200 with five good blocks.
+      if (url.pathname === "/api/machinery") {
+        try { return send(200, await machinery.read({ fresh: url.searchParams.get("fresh") === "1" })); }
         catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
       }
 

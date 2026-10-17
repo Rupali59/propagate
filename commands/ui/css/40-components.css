@@ -286,6 +286,18 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
 .kpi.warn b { color: var(--st-warn); }
 .kpi b { font-variant-numeric: tabular-nums; }
 .ksub { font-size: 11px; color: var(--dim); margin-top: var(--s1); }
+/* Phase 2: the next-step strip above the KPIs, and the machinery tiles right under them. Tokens only. */
+.nextstrip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin: var(--s3) 0; padding: var(--s3) var(--s4);
+             background: var(--accent-quiet); border: 1px solid var(--line); border-left: 3px solid var(--st-accent); border-radius: var(--r3); }
+.nextstrip.clear { background: var(--card); border-left-color: var(--line); }
+.nextstrip .ns-t { display: flex; flex-direction: column; gap: var(--s1); flex: 1 1 320px; min-width: 0; }
+.nextstrip .eyebrow { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.nextstrip .ns-s { font-size: 12px; color: var(--dim); }
+.nextstrip .ns-a { display: flex; gap: var(--s2); }
+.nextstrip .cmdrow { flex-basis: 100%; }
+.kpis.mach { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));  /* six tiles: an even 3 x 2, never 4 + 2 */ gap: var(--s3); margin: var(--s2) 0 var(--s4); }
+.kpi.mt b { font-size: 22px; }
+.kpi.mt .ksub { overflow-wrap: anywhere; }
 .charts.charts3 { grid-template-columns: 1.25fr 1fr 1fr; gap: var(--s3); margin-bottom: var(--s4); }
 .chart .plot svg { width: auto; height: auto; max-width: 100%; }
 .chart .plot [aria-label]:hover { opacity: .82; }
