@@ -1,5 +1,8 @@
 # propagate — State
 
+## `release --check` records its per-gate result, and History shows it — 2026-10-17 (unreleased, not committed)
+Plan: `~/.claude/plans/ticklish-gathering-brook.md` (ACTIVE section). `releaseCmd` appends one line per run to `release-checks.jsonl` in the state dir (`lib/core/release-record.mjs`; `runReleaseCheck` never writes). History (`shapeReleaseHistory`) reads it beside the command ledger: recorded runs show their gates, older ledger runs stay as "exit status only", a corrupt line is a row. Format and behaviour: `docs/RELEASE.md` §`release --check`; DECISIONS 2026-10-17 "release --check records its per-gate result". This supersedes the Phase 4b finding below that persistence was not added.
+
 ## Dashboard Phase 4b: paging, Backlog, Goals & Plans and History — 2026-10-17 (unreleased, not committed)
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; this pass is 4b, the rest of the read-first views). Built on 4a below.
 - **DataTable pages itself** (`commands/ui.client.js`, `TABLE_PAGE_SIZE`, `pageWindow`): a table of more rows than one page shows

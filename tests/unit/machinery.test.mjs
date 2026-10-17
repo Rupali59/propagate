@@ -538,3 +538,47 @@ test("phase 4b history: the default source READS only -- the commands it offers 
   assert.deepEqual(Object.keys(HISTORY_COMMANDS).sort(), ["doctor", "monitor", "release"]);
   assert.equal(HISTORY_COMMANDS.monitor, "propagate monitor --dry-run", "the monitor command offered is the dry run: a plain run notifies and writes");
 });
+
+/* ---- release history with the per-gate record (release-checks.jsonl) ---- */
+const REC = (ts, over = {}) => ({ ts, version: "0.15.34", overall: "ready", exitCode: 0, gates: [
+  { name: "version-manifests", status: "passed", detail: "four manifests agree" }, { name: "suite", status: "passed", detail: "1 pass" },
+  { name: "make-public-check", status: "could-not-run", reason: "no identity map" }, { name: "stranger-install", status: "failed", detail: "doctor exited 1" }], ...over });
+test("release history with a recorded run: status 'recorded', the last run's four gates, and the old caveat is gone", () => {
+  const r = shapeReleaseHistory(RUNS, HISTORY_ROWS, { checks: [REC("2026-10-17T10:00:00.000Z", { overall: "blocked", exitCode: 1 })], bad: [], exists: true });
+  assert.equal(r.status, "recorded");
+  assert.equal(r.outcome, "BLOCKED · v0.15.34");
+  assert.deepEqual(r.gates.map((g) => [g.name, g.status, g.detail]), [["version-manifests", "passed", "four manifests agree"], ["suite", "passed", "1 pass"], ["make-public-check", "could-not-run", "no identity map"], ["stranger-install", "failed", "doctor exited 1"]]);
+  assert.doesNotMatch(String(r.note), /Which gate passed or failed is not recorded/);
+  assert.equal(r.summary.gateResultsRecorded, true);
+  assert.equal(r.rows[0].recorded, true);
+  assert.equal(r.rows[0].gates.length, 4);
+});
+test("release history mixed: ledger runs before the record stay listed as 'exit status only' with why; a ledger row beside a record is the SAME run, not a second", () => {
+  const checks = { checks: [REC("2026-10-17T09:59:50.000Z")], bad: [], exists: true };
+  const runs = [...RUNS, { ts: "2026-10-17T10:00:00.000Z", command: "release", outcome: "ok", duration_ms: 90000, origin: "interactive", kind: "command" },
+    { ts: "2026-10-17T11:00:00.000Z", command: "release", outcome: "error", duration_ms: 5, origin: "interactive", kind: "command" }];
+  const r = shapeReleaseHistory(runs, HISTORY_ROWS, checks);
+  assert.equal(r.rows.filter((x) => x.recorded).length, 1);
+  assert.equal(r.rows.filter((x) => !x.recorded).length, 4, "3 older ledger runs + the 11:00 one with no record; the 10:00 ledger row is the recorded run");
+  const old = r.rows.find((x) => x.at === "2026-10-17T07:22:19.979Z");
+  assert.match(old.why, /ran before gate results were recorded \(2026-10-17\)/);
+  assert.match(r.rows.find((x) => x.at === "2026-10-17T11:00:00.000Z").why, /no gate result was recorded for this run \(it ended before its gates finished, or it was a usage error\)/);
+  assert.equal(r.status, "partial", "the newest run (11:00) has no gate result, so the page does not call itself recorded");
+  assert.equal(r.gates.length, 4, "the last recorded run's gates are still shown");
+});
+test("release history: a corrupt line is a row with its reason and line number, never skipped; an unreadable file is a reason, never 'nothing recorded'", () => {
+  const r = shapeReleaseHistory([], HISTORY_ROWS, { checks: [REC("2026-10-17T10:00:00.000Z")], bad: [{ line: 3, reason: "not JSON: Unexpected token" }], exists: true });
+  assert.deepEqual(r.bad, [{ line: 3, reason: "not JSON: Unexpected token" }]);
+  assert.equal(r.summary.unreadableLines, 1);
+  const only = shapeReleaseHistory(RUNS, HISTORY_ROWS, { reason: "EACCES: permission denied" });
+  assert.match(only.bad[0].reason, /release-checks\.jsonl could not be read: EACCES/);
+  assert.notEqual(only.status, "none");
+  const none = shapeReleaseHistory([], HISTORY_ROWS, { checks: [], bad: [], exists: false });
+  assert.equal(none.status, "none");
+});
+test("shapeHistory feeds releaseChecks through: the page reads the file, not only the command ledger", () => {
+  const h = shapeHistory({ doctor: SNAP_OK, monitor: { exists: false, lines: [] }, release: RUNS, releaseChecks: { checks: [REC("2026-10-17T10:00:00.000Z")], bad: [], exists: true } });
+  const rel = h.detail.parts.find((p) => p.key === "release");
+  assert.equal(rel.status, "recorded");
+  assert.equal(rel.gates.length, 4);
+});

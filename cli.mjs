@@ -103,7 +103,7 @@
  */
 
 import { existsSync, globSync, realpathSync, readdirSync, statSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
@@ -220,6 +220,7 @@ import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS
 import { updateNotice, formatUpdateNotice } from "./lib/core/update-notice.mjs";
 import { LABEL as LAUNCHD_LABEL, regeneratePlist, reloadLaunchd, PLIST_PATH } from "./lib/core/plist.mjs";
 import { runReleaseCheck } from "./lib/core/release.mjs";
+import { persistReleaseCheck } from "./lib/core/release-record.mjs";
 import { migrateLedger } from "./lib/edges/migrate-ledger.mjs";
 import { relocateLedger } from "./lib/edges/relocate-ledger.mjs";
 import { freezeLedgerV1 } from "./lib/edges/freeze-ledger.mjs";
@@ -1681,6 +1682,12 @@ async function releaseCmd(argv = []) {
   }
 
   const result = runReleaseCheck();
+
+  // Record the per-gate result (lib/core/release-record.mjs). HERE, not inside runReleaseCheck: the release tests call that
+  // with fixtures and must never write state. A failed write warns on stderr and changes neither the verdict nor the exit code.
+  let version = null;
+  try { version = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "package.json"), "utf8")).version ?? null; } catch { /* the version is a label on the record, not part of the verdict */ }
+  persistReleaseCheck(result, { stateDir: stateDir(), version });
 
   if (asJson) {
     console.log(JSON.stringify(result, null, 2));

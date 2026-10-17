@@ -56,7 +56,7 @@
 .badge.pri-P1 { background: var(--st-caution); }
 .badge.pri-P2, .badge.pri-P3 { background: var(--st-accent); }
 .badge.pri-none { background: var(--dim); }
-.badge.g-open, .badge.pl-undeclared { background: var(--st-caution); }
+.badge.g-open, .badge.pl-undeclared, .badge.h-none { background: var(--st-caution); }
 .badge.g-unknown, .badge.g-unreadable, .badge.pl-unreadable, .badge.h-failed { background: var(--st-warn); }
 .badge.g-closed, .badge.pl-finished, .badge.pl-archived { background: var(--dim); }
 .badge.pl-linked, .badge.h-recorded { background: var(--st-ok); }
@@ -64,6 +64,8 @@
 .pager { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin: var(--s2) 0 var(--s4); font-size: 12px; color: var(--dim); }
 .pager button:disabled { opacity: .45; cursor: default; }
 .hpart { margin-bottom: var(--s5); }
+.hgates { margin: var(--s2) 0; }
+.hgate { margin: var(--s1) 0; font-size: 13px; }
 a.go { color: var(--fg); text-decoration: underline; font-size: 12px; margin-left: var(--s2); }
 .hout { font-size: 13px; margin: var(--s1) 0; }
 .how { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }

@@ -2842,10 +2842,13 @@ const MONITOR_COLUMNS = [
 ];
 const RELEASE_COLUMNS = [
   { key: "at", label: "ran at", value: (r) => r.at, cell: (r) => html`<span class="mono">${stamp(r.at) || r.at}</span>` },
-  { key: "outcome", label: "exit", value: (r) => (r.outcome === "ok" ? 1 : 0), cell: (r) => html`<span class=${"badge h-" + (r.outcome === "ok" ? "recorded" : "failed")}>${r.outcome === "ok" ? "exit 0" : "non-zero"}</span>` },
+  { key: "outcome", label: "result", value: (r) => (r.outcome === "ok" ? 1 : 0), cell: (r) => (r.recorded
+      ? html`<span class=${"badge h-" + (r.outcome === "ok" ? "recorded" : "failed")}>${String(r.overall || "").toUpperCase()}</span>`
+      : html`<span class=${"badge h-" + (r.outcome === "ok" ? "recorded" : "failed")}>${r.outcome === "ok" ? "exit 0" : "non-zero"}</span> <span class="dmeta">exit status only</span>`) },
   { key: "ms", label: "took", num: true, value: (r) => r.ms, cell: (r) => secs(r.ms) },
-  { key: "origin", label: "origin", value: (r) => r.origin || "", cell: (r) => r.origin || "not recorded" },
+  { key: "origin", label: "origin", value: (r) => r.origin || "", cell: (r) => (r.recorded ? (r.version ? "v" + r.version : "") : (r.origin || "not recorded")) },
 ];
+const GATE_MARK = { passed: "h-recorded", failed: "h-failed", "could-not-run": "h-none" };
 
 function HistoryPart({ part, retry, nav }) {
   const [copied, copy] = useCopyFlash();
@@ -2868,8 +2871,12 @@ function HistoryPart({ part, retry, nav }) {
             act=${(r) => (r.raw ? () => copy(r.id, r.raw) : null)}
             tip=${(r) => ({ title: "monitor run", lines: [r.error ? "could not look: " + r.error : r.actionable + " of " + r.rows + " edges actionable, " + r.notified + " notified, " + r.suppressed + " already told", r.runId ? "run " + r.runId : null, r.raw ? "click to copy the log line" : "no log line recorded"].filter(Boolean) })} />`
         : html`<${DataTable} columns=${RELEASE_COLUMNS} rows=${part.rows} rowKey=${(r) => r.id} initialSort=${{ key: "at", dir: "desc" }} tie=${(r) => r.id} label="release runs"
-            tip=${(r) => ({ title: "release run", lines: [r.outcome === "ok" ? "exited 0, which means READY" : "exited non-zero: BLOCKED, INCOMPLETE or a usage error; the ledger cannot say which", "which gate failed was not recorded"] })} />`) : null}
-    ${part.summary && part.summary.runs ? html`<div class="dmeta">${part.summary.runs} runs recorded${part.summary.notifiedRuns != null ? ", " + part.summary.notifiedRuns + " that notified, " + (part.summary.couldNotLook || 0) + " that could not look" : ""}${part.summary.nonZero != null ? ", " + part.summary.nonZero + " exited non-zero" : ""} · showing the latest ${part.summary.shown}${part.summary.unparsedLines ? " · " + part.summary.unparsedLines + " log lines did not match the format" : ""}</div>` : null}
+            tip=${(r) => ({ title: "release run", lines: r.recorded
+              ? [String(r.overall).toUpperCase() + (r.version ? " · v" + r.version : ""), ...arr(r.gates).map((g) => g.name + ": " + g.status + (g.detail ? " — " + g.detail : ""))]
+              : [r.outcome === "ok" ? "exited 0, which means READY" : "exited non-zero: BLOCKED, INCOMPLETE or a usage error; the ledger cannot say which", "which gate failed was not recorded", r.why].filter(Boolean) })} />`) : null}
+    ${part.key === "release" && arr(part.gates).length ? html`<div class="hgates" data-gates="release"><div class="dmeta">Gates of the last recorded run:</div>${arr(part.gates).map((g) => html`<div class="hgate" key=${g.name}><span class=${"badge " + (GATE_MARK[g.status] || "h-none")}>${g.status}</span> <span class="nm">${g.name}</span>${g.detail ? html` <span class="dmeta">${g.detail}</span>` : null}</div>`)}</div>` : null}
+    ${part.key === "release" ? arr(part.bad).map((b) => html`<div class="reason" key=${"bad" + b.line}>${b.line != null ? "release-checks.jsonl line " + b.line + " could not be read: " : ""}${b.reason}</div>`) : null}
+    ${part.summary && part.summary.runs ? html`<div class="dmeta">${part.summary.runs} runs ${part.summary.recorded != null ? "listed (" + part.summary.recorded + " with gate results)" : "recorded"}${part.summary.notifiedRuns != null ? ", " + part.summary.notifiedRuns + " that notified, " + (part.summary.couldNotLook || 0) + " that could not look" : ""}${part.summary.nonZero != null ? ", " + part.summary.nonZero + " exited non-zero" : ""} · showing the latest ${part.summary.shown}${part.summary.unparsedLines ? " · " + part.summary.unparsedLines + " log lines did not match the format" : ""}</div>` : null}
     ${rerun}
   </div>`;
 }

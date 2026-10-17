@@ -3289,3 +3289,27 @@ test("Phase 4b: every badge class the new pages render has its own CSS rule (the
   const bare = [...seen].filter((c) => !new RegExp(`\\.badge\\.${c}\\b`).test(css));
   assert.deepEqual(bare, [], `rendered with no rule: ${bare.join(", ")}`);
 });
+
+test("Phase 4b history: a recorded release shows its four gates with status and detail, an 'exit status only' row says so, and a corrupt line is a visible row", async () => {
+  const gates = [{ name: "version-manifests", status: "passed", detail: "four <b>manifests</b> agree" }, { name: "suite", status: "passed", detail: "1 pass" }, { name: "make-public-check", status: "could-not-run", detail: "no identity map" }, { name: "stranger-install", status: "failed", detail: "doctor exited 1" }];
+  const rel = { key: "release", title: "Release check", command: "propagate release --check", status: "recorded", at: "2026-10-17T10:00:00.000Z", outcome: "BLOCKED \u00b7 v0.15.34", reason: null, note: null, gates,
+    rows: [{ id: "a|rec", at: "2026-10-17T10:00:00.000Z", recorded: true, overall: "blocked", outcome: "error", version: "0.15.34", gates, ms: null, origin: null },
+      { id: "b|0", at: "2026-10-17T07:22:19.979Z", recorded: false, outcome: "ok", ms: 100344, origin: "widget", why: "exit status only: it ran before gate results were recorded (2026-10-17)" }],
+    bad: [{ line: 3, reason: "not JSON: Unexpected token" }], summary: { runs: 2, recorded: 1, ledgerOnly: 1, unreadableLines: 1, nonZero: 1, shown: 2, limit: 20, gateResultsRecorded: true } };
+  const m = await mount4b("history", histWith({ release: rel }));
+  const p = byClass(m.app, "hpart")[0];
+  const t = textOf(p);
+  assert.match(t, /Release check \u2014 last recorded 2026-10-17 10:00 UTC/);
+  assert.match(t, /BLOCKED \u00b7 v0\.15\.34/);
+  const g = byClass(p, "hgate");
+  assert.deepEqual(g.map((x) => textOf(byClass(x, "nm")[0])), ["version-manifests", "suite", "make-public-check", "stranger-install"]);
+  assert.deepEqual(g.map((x) => textOf(byClass(x, "badge")[0])), ["passed", "passed", "could-not-run", "failed"]);
+  assert.match(textOf(g[0]), /four <b>manifests<\/b> agree/, "markup in a detail is text");
+  assert.match(t, /exit status only/);
+  assert.match(t, /release-checks\.jsonl line 3 could not be read: not JSON: Unexpected token/);
+  assert.doesNotMatch(t, /Which gate passed or failed is not recorded/);
+  const rows = byClass(p, "dt-row");
+  hover(rows[1]); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /ran before gate results were recorded/);
+  unhover(rows[1]);
+});

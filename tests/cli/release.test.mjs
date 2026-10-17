@@ -27,7 +27,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -435,6 +435,37 @@ test("runReleaseCheck: a could-not-run gate makes the run 'incomplete', never 'r
     rmSync(suite, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
+});
+
+// The per-gate record is the COMMAND's to write (releaseCmd), never the aggregate's: these tests call runReleaseCheck with
+// fixtures all over, and a write from there would put a line in whatever state dir the environment names
+// (rule:safety-flag-needs-a-test: assert the side effect by snapshotting the artifact, not by reading a flag).
+function treeSnapshot(dir) {
+  const out = [];
+  const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else out.push(f + "\n" + readFileSync(f, "utf8")); } };
+  walk(dir);
+  return out.sort().join("\n--\n");
+}
+test("runReleaseCheck alone writes no state: the state dir is byte-identical before and after, and release.mjs does not import the recorder", () => {
+  const manifests = manifestFixture({ version: "9.9.9" });
+  const suite = suiteFixture(`node -e "console.log('# tests 1'); console.log('# pass 1'); console.log('# fail 0')"`);
+  const home = tmp("propagate-release-nowrite-");
+  const stateDir = path.join(home, "state");
+  mkdirSync(stateDir, { recursive: true });
+  const before = treeSnapshot(stateDir);
+  const prev = process.env.PROPAGATE_STATE_DIR;
+  process.env.PROPAGATE_STATE_DIR = stateDir;
+  try {
+    const result = runReleaseCheck({ manifestsDir: manifests, hubMarketplacePath: hubPath(manifests), suiteDir: suite, skillDir: SKILL_DIR,
+      makePublicEnv: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") } });
+    assert.equal(result.gates.length, 4, "the aggregate really ran");
+    assert.equal(treeSnapshot(stateDir), before, "runReleaseCheck must not write into the state dir");
+    assert.equal(existsSync(path.join(stateDir, "release-checks.jsonl")), false);
+  } finally {
+    if (prev === undefined) delete process.env.PROPAGATE_STATE_DIR; else process.env.PROPAGATE_STATE_DIR = prev;
+    for (const d of [manifests, suite, home]) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+  assert.doesNotMatch(readFileSync(path.join(SKILL_DIR, "lib", "core", "release.mjs"), "utf8"), /release-record/, "the write belongs to the command layer");
 });
 
 // ---------------------------------------------------------------------------

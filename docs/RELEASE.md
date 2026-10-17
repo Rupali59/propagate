@@ -129,6 +129,18 @@ Each gate reports one of `passed` / `failed` / `could-not-run`, always with a
 reason or detail line — never a bare status. `--json` emits the full
 structured result (`lib/core/release.mjs`'s `runReleaseCheck`).
 
+**It records each run.** After the gates finish, `release --check` (and only that
+mode: a usage error never records) appends one line to `release-checks.jsonl` in the
+state dir (`$PROPAGATE_STATE_DIR`, default `~/.propagate`):
+`{ts, version, overall, exitCode, gates:[{name, status, detail | reason}]}`. `ts` is
+the result's `generatedAt`; detail strings are stored whole and a gate's raw child
+output is not. The file is append-only and the dashboard's History page reads it.
+The write is the command's (`releaseCmd` in `cli.mjs`, via `lib/core/release-record.mjs`),
+never `runReleaseCheck`'s, so the release tests cannot write state. A failed write prints a
+`warning:` line to stderr and changes neither the verdict nor the exit code. A run killed
+before its gates finish records nothing; History lists it from the command ledger as
+"exit status only".
+
 ## What this does not cover — the two-repo coupling
 
 `RELEASE.md` step 3 is the only thing standing between the private working

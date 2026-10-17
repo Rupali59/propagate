@@ -1641,3 +1641,19 @@ reloads meanwhile. None yet; accepted. See GOTCHAS G80.
 **Affects:** propagate
 
 **Refs:** STATE "Dashboard Phase 4b", plan `ticklish-gathering-brook.md` Phase 4, `lib/report/machinery.mjs`, `tests/unit/machinery.test.mjs`, `tests/unit/ui-client.test.mjs` "Phase 4b".
+
+## 2026-10-17: release --check records its per-gate result, written by the command and stored as append-only JSONL
+
+**What:** `releaseCmd` (`cli.mjs`) appends one line per `release --check` run to `<state dir>/release-checks.jsonl` via `lib/core/release-record.mjs`: `{ts, version, overall, exitCode, gates:[{name, status, detail|reason}]}`. History reads it beside the command ledger.
+
+**Why:** Rupali, 2026-10-17, on whether to save the result: "lets go". Phase 4b found History could show only the ledger's exit status and duration, and exit 2 means both INCOMPLETE and a usage error. (1) *In the CLI layer, not `runReleaseCheck`:* the release tests call `runReleaseCheck` with fixture repos in many places, and a write there would land a line in whatever state dir the environment names (GOTCHAS G56). The recorder takes `stateDir` as an argument and resolves nothing itself. (2) *JSONL, append-only:* a run is one line, written in one `appendFileSync`; no read-modify-write, so a concurrent or killed run cannot corrupt earlier lines, and a damaged line is reported by line number and does not hide the rest.
+
+**Rejected.** *Write inside `runReleaseCheck`:* simplest, and the first thing `--json` consumers would also get; rejected for the test-write hazard above (a mutation moving the write there goes red). *A JSON file rewritten each run:* last run only, and a half-written file loses the history. *Store the gate's raw output:* can be large and is not part of the verdict; `detail` and `reason` are stored whole instead.
+
+**Verified:** a real `release --check` against a stub `npm` in an isolated HOME and state dir writes exactly one line matching its `--json` output; a usage error writes nothing; an unwritable state dir gives a stderr warning with the same exit code and gate statuses (`tests/cli/release-record.test.mjs`). Each guard was mutated red. **Inferred:** that the command-ledger row of the same run is written within 30 s after the record (it is written at process exit), which is how History pairs them (`SAME_RUN_MS`).
+
+**Cost:** none yet. Runs before 2026-10-17 have no gate result and stay "exit status only". A run killed before its gates finish records nothing. The file grows by one line per release run and is never trimmed.
+
+**Affects:** propagate
+
+**Refs:** STATE "`release --check` records its per-gate result", `lib/core/release-record.mjs`, `cli.mjs` `releaseCmd`, `lib/report/machinery.mjs` `shapeReleaseHistory`, `docs/RELEASE.md`, supersedes the Phase 4b entry's "Rejected: add persistence".
