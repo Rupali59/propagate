@@ -1,5 +1,21 @@
 # propagate — State
 
+## Dashboard Phase 3: group actions in Judge and Unblock — 2026-10-17 (unreleased, not committed)
+Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 3, Decision 1). Built on Phases 0 to 2 above.
+- **Judge node header** (`.nhead`, `tickNode` in `commands/ui.client.js`) ticks every edge of its node and opens the existing
+  bulk panel; it sends nothing. The verdict then goes through `judgeBulk` and the `{edges}` body: reason of 12+ characters,
+  the intersection of allowed dispositions, per-edge state and `observed`, the 5 s hold, `u` undo. **`POST /api/dispose {node_id}`
+  is not used by the UI**: it is one disposition for one (node, state) group and refuses a mixed node whole, where `{edges}`
+  carries each edge's own state and evidence, so reusing the bulk path keeps one write shape (DECISIONS 2026-10-17).
+- **Unblock "settle together" header** opens `#/judge?tick=<id>,<id>` (`settleTogetherRoute`). `parseTick` accepts only
+  edge-id characters (letters, digits, `_`, `-`, 64 long, 200 ids) and rejects the WHOLE value on one bad piece; `preTick`
+  ticks only ids Judge lists and Judge names the rest in a note, so a never-verified root is shown, not dropped. Read once
+  per distinct value, when the queue has loaded.
+- **Safety tests** (`tests/unit/ui-client.test.mjs`, "Phase 3"): a header click and a pre-tick link send no dispose request,
+  checked after the hold would have expired; a node verdict cancelled with undo writes nothing after the timer's time has
+  passed; hostile `tick=` values are literals. Each guard was mutated red for its stated reason and restored.
+- **Not done:** the server's `node_id` batch has no UI caller now, only tests; no browser pass (not asked for).
+
 ## Dashboard Phase 2: the Overview leads with a next step, and shows the machinery — 2026-10-17 (unreleased, not committed)
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 2). Built on Phases 0 to 1b above.
 - **Next-step strip** (`nextAction`, `NextStrip` in `commands/ui.client.js`) above the five KPIs, from the inbox's own

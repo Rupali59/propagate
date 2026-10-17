@@ -548,6 +548,42 @@ function pruneTicked(ticked, allIds) {
   return out.size === ticked.size ? ticked : out;
 }
 
+/**
+ * `?tick=<id>,<id>` (Unblock "settle together", Phase 3, 2026-10-17): the edge ids to pre-tick in Judge.
+ * An id is the characters edge ids are made of (8 hex today, letters digits _ - allowed) and at most 64
+ * long. ONE bad piece rejects the WHOLE value, not just that piece: a link that was mangled in transit
+ * is not partly trusted. The result never reaches a selector or the server -- it is only compared with
+ * ids already in the queue (preTick).
+ */
+const TICK_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const TICK_MAX = 200;
+function parseTick(value) {
+  if (value == null || value === "") return { ids: [], rejected: false };
+  const parts = String(value).split(",");
+  if (parts.length > TICK_MAX) return { ids: [], rejected: true };
+  const ids = [];
+  for (const p of parts) {
+    if (!TICK_ID.test(p)) return { ids: [], rejected: true };
+    if (ids.indexOf(p) < 0) ids.push(p);
+  }
+  return { ids: ids, rejected: false };
+}
+
+/** Split requested ids into those Judge lists (toJudge, diverged, parked) and those it does not. Pure. */
+function preTick(ids, model) {
+  const listed = new Map();
+  if (model) for (const k of ["toJudge", "diverged", "parked"]) for (const r of model[k] || []) if (!listed.has(r.edge_id)) listed.set(r.edge_id, k);
+  const ticked = [];
+  const missing = [];
+  for (const id of ids || []) { if (listed.has(id)) ticked.push(id); else missing.push(id); }
+  return { ticked: ticked, missing: missing, where: ticked.map((id) => listed.get(id)) };
+}
+
+/** The Judge destination for one "settle together" group: every root id, in the group's order. */
+function settleTogetherRoute(g) {
+  return "judge?tick=" + g.roots.map((r) => encodeURIComponent(r.edge_id)).join(",");
+}
+
 /** The Unblock model: roots that free something now first, then joint blockers grouped by file. */
 function unblockModel(inbox) {
   const lv = inbox && inbox.leverage;
@@ -1343,6 +1379,31 @@ function JudgeView({ app, route }) {
   // ---- selection ----
   const toggle = (id) => setTicked((t) => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const clear = () => { setTicked(new Set()); setBulkOpen(false); };
+  // A node header ticks every edge of its node and opens the bulk panel, and does nothing else. The verdict then
+  // goes through judgeBulk like any selection: reason of 12+ characters, the intersection of allowed dispositions,
+  // the 5 s hold, undo. There is deliberately no second write path (no node_id body from the UI).
+  const tickNode = (n) => {
+    setTicked((t) => { const nx = new Set(t); for (const r of n.rows) nx.add(r.edge_id); return nx; });
+    setBulkOpen(true);
+    setTimeout(() => { if (bulkRef.current && bulkRef.current.focus) bulkRef.current.focus(); }, 0);
+  };
+  // ?tick= (Unblock "settle together"): read once per distinct value, when the queue is there to compare with.
+  // Ids not in the queue are listed, never dropped silently; a rejected value ticks nothing and says so.
+  const [tickNote, setTickNote] = useState(null);
+  const tickKey = route.tick ? (route.tick.rejected ? "!" : route.tick.ids.join(",")) : "";
+  const tickDone = useRef("");
+  useEffect(() => {
+    if (!tickKey || !model || tickDone.current === tickKey) return;
+    tickDone.current = tickKey;
+    if (route.tick.rejected) { setTickNote({ rejected: true, missing: [], count: 0 }); return; }
+    const p = preTick(route.tick.ids, model);
+    setTickNote({ rejected: false, missing: p.missing, count: p.ticked.length });
+    if (!p.ticked.length) return;
+    setTicked((t) => { const nx = new Set(t); for (const id of p.ticked) nx.add(id); return nx; });
+    const at = ["toJudge", "diverged", "parked"].find((k) => p.where.indexOf(k) >= 0);
+    setChip(at === "toJudge" ? "judge" : at);
+    setIdx(0);
+  }, [tickKey, model]);
   const tickedRows = useMemo(() => {
     const all = rowsFor("judge").concat(rowsFor("diverged"), rowsFor("parked"));
     return all.filter((r) => ticked.has(r.edge_id));
@@ -1463,6 +1524,9 @@ function JudgeView({ app, route }) {
 
   const seenNote = seen.status === "missing" ? html`<div class="note">No seen-set yet, so nothing is marked new. Mark seen to start tracking arrivals.</div>`
     : seen.status === "corrupt" || seen.status === "error" ? html`<div class="note">The seen-set could not be read (${seen.error}); new marks are off.</div>` : null;
+  const tickNoteEl = !tickNote ? null : tickNote.rejected
+    ? html`<div class="note">The tick= link was not understood, so nothing was ticked. Tick rows with x, or open Judge from Unblock again.</div>`
+    : tickNote.missing.length ? html`<div class="note">${plural(tickNote.count, "root")} ticked. ${plural(tickNote.missing.length, "root")} not in the queue (never verified, or already settled), so not ticked: ${tickNote.missing.join(", ")}.</div>` : null;
   const unplacedNote = model.includesUnplaced > 0 ? html`<div class="note">${plural(model.includesUnplaced, "edge")} in the count ${model.includesUnplaced === 1 ? "has" : "have"} no place in the fix order and cannot be listed here.</div>` : null;
 
   const divErr = chip === "parked" ? model.errors.parked : chip === "never" ? null : model.errors.worklist;
@@ -1481,7 +1545,10 @@ function JudgeView({ app, route }) {
     listBody = html`<div role="listbox" aria-label="edges">${shaped.groups.map((g) => html`<div key=${g.ws}>
       <div class="ghead">${g.ws} <span class="gn">${g.count}</span></div>
       ${g.nodes.map((n) => html`<div key=${n.node_id}>
-        <div class="nhead">${n.node_id}${n.rows.length > 1 ? html` <span class="gn">${n.rows.length}</span>` : null}</div>
+        <div class="nhead act" role="button" tabIndex="0" aria-label=${"tick all " + plural(n.rows.length, "edge") + " of " + n.node_id + " for one verdict"}
+          onClick=${() => tickNode(n)}
+          onKeyDown=${(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); tickNode(n); } }}
+          ...${tipProps(tipText("note", { title: "Decide this node together", text: "tick all " + plural(n.rows.length, "edge") + " of " + n.node_id + " for one verdict. Nothing is written until you pick a verdict and the 5 s hold ends" }))}>${n.node_id}${n.rows.length > 1 ? html` <span class="gn">${n.rows.length}</span>` : null}</div>
         ${n.rows.map((r) => {
           const i = flat.indexOf(r);
           return html`<${Row} key=${r.edge_id} r=${r} sel=${cur && cur.edge_id === r.edge_id} ticked=${ticked.has(r.edge_id)} isNew=${isNew(r)}
@@ -1492,7 +1559,7 @@ function JudgeView({ app, route }) {
   }
 
   return html`
-    <div class="list">${chipsBar}${selectAllBar}${seenNote}${unplacedNote}${listBody}</div>
+    <div class="list">${chipsBar}${selectAllBar}${tickNoteEl}${seenNote}${unplacedNote}${listBody}</div>
     <div class="detail" key=${chip + ":" + (bulkOpen ? "bulk" : curId || "none")}>
       ${ticked.size && !bulkOpen ? html`<div class="bulkstrip"><b>${plural(ticked.size, "edge")} ticked.</b> <kbd>⇧J</kbd> gives them one verdict · <kbd>Esc</kbd> clears
         <button class="ghost" onClick=${() => setBulkOpen(true)}>give them one verdict</button></div>` : null}
@@ -1716,7 +1783,10 @@ function UnblockView({ app, route }) {
       ${m.ranked.length ? html`<${RootsTable} roots=${m.ranked} nav=${nav} label="roots that free blocked edges" />`
         : html`<div class="reason">No single root frees an edge on its own. Every blocked edge needs several roots settled together, below.</div>`}
       ${m.byFile.length ? html`<div class="sec" data-focus="together">Settle together</div>${m.byFile.map((g) => html`<div class="fgroup" key=${g.file}>
-        <div class="fhead">${plural(g.blockedEdges, "blocked edge")} ${g.blockedEdges === 1 ? "flows" : "flow"} into ${g.files.map((f, i) => html`${i ? (i === g.files.length - 1 ? " and " : ", ") : ""}<b key=${f}>${f}</b>`)}; settle these roots together</div>
+        <div class="fhead act" role="button" tabIndex="0" aria-label=${"open Judge with the " + plural(g.roots.length, "root") + " for " + g.file + " ticked"}
+          onClick=${() => nav(settleTogetherRoute(g))}
+          onKeyDown=${(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); nav(settleTogetherRoute(g)); } }}
+          ...${tipProps(tipText("note", { title: "Settle these together", text: "opens Judge with the " + plural(g.roots.length, "root") + " ticked, ready for one verdict" + (g.roots.some((r) => !r.inQueue) ? ". Roots never verified are not in the queue: Judge lists them and ticks the rest" : "") + ". Nothing is written by opening it" }))}>${plural(g.blockedEdges, "blocked edge")} ${g.blockedEdges === 1 ? "flows" : "flow"} into ${g.files.map((f, i) => html`${i ? (i === g.files.length - 1 ? " and " : ", ") : ""}<b key=${f}>${f}</b>`)}; settle these roots together</div>
         <${RootsTable} roots=${g.roots} nav=${nav} label=${"roots to settle together for " + g.file} />
       </div>`)}` : null}
     </div>`}
@@ -2407,6 +2477,7 @@ function parseHash(hash) {
   const age = get("age");
   // `focus=` (Unblock, 2026-10-16) names the part of the page to scroll to; the view ignores a value it does not know.
   return { view: name === "" ? "overview" : (HASH_TO_VIEW[name] || "judge"), edge: get("edge"), section: get("section"), state: get("state"), chip: get("chip"), focus: get("focus"),
+    tick: parseTick(get("tick")),
     ws: get("ws") || null, age: AGE_KEYS.indexOf(age) >= 0 ? age : null, source: get("source") || null };
 }
 function readHash() { return parseHash(location.hash); }
@@ -2701,7 +2772,7 @@ function App() {
  * the gap-breaking path builder, the rail counts -- has no check at all. */
 if (typeof globalThis !== "undefined") {
   globalThis.__ui = { sourceRoute, counts, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody, judgeModel, groupRows, workspaceOf,
-    intersectAllowed, pruneTicked, unblockModel, healthModel, parkedAllowed, baselineCommand, gitDiffCommand, shellQuote, pct, ratio, dot, ageLabel,
+    intersectAllowed, pruneTicked, parseTick, preTick, settleTogetherRoute, unblockModel, healthModel, parkedAllowed, baselineCommand, gitDiffCommand, shellQuote, pct, ratio, dot, ageLabel,
     conflictGroup, groupConflicts, conflictsEmptyLine, CONFLICT_GROUPS, TOKEN_EXPIRED, HASH_TO_VIEW, FIRST_EXPLORE, request,
     parseHash, hashWithout, AGE_BUCKETS, AGE_KEYS, ageKey, ageDaysOf, judgeFilterRows, overviewModel, overviewKpis, sortSources, routeForKpi, routeForBar,
     queueBars, waitBars, verdictBars, buildPlot, wireChart, plotUnavailable, resolveToken, localDay,

@@ -725,7 +725,7 @@ test("every old hash lands on its new view, and an unknown hash lands on Judge (
 
 test("readHash parses ?edge= and an unknown hash falls back to judge", async () => {
   const m = await mount({ hash: "#/judge?edge=abc%20d" });
-  const none = { section: null, state: null, chip: null, focus: null, ws: null, age: null, source: null };
+  const none = { section: null, state: null, chip: null, focus: null, tick: { ids: [], rejected: false }, ws: null, age: null, source: null };  // tick joined 2026-10-17 (Phase 3): no parameter is no ids and not a rejection
   assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: "abc d", ...none });
   m.ctx.location.hash = "#/nonsense";
   assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: null, ...none });
@@ -2342,5 +2342,150 @@ test("Phase 2 machinery: the pure model gives every tile a destination or a reas
     const ts = model(st);
     assert.equal(ts.length, 6);
     for (const t of ts) assert.ok(t.tip && t.tip !== ui.KPI_NO_REASON && /no .* page yet|opens Registers/i.test(t.tip), `${t.key} in ${JSON.stringify(st).slice(0, 40)}: tip must state the destination, got ${t.tip}`);
+  }
+});
+
+/* -- Phase 3 (2026-10-17): group actions. The load-bearing part is what they must NOT do. -------------------
+   rule:safety-flag-needs-a-test. The unsafe path is "a group verdict reaches /api/dispose without the person choosing
+   it": from a header click, from a pre-tick link, or from a cancelled hold. Each test measures the EFFECT (the dispose
+   requests the mounted client made, after the hold has had time to expire) and not a message on screen.
+   HOSTILE INPUTS ARE LITERALS (rule:mutate-behind-the-fixture-builder): the tick= values below are written out by
+   hand and must not be refactored onto a helper that builds a well-formed id list. */
+
+const nodeHead = (app, re) => byClass(app, "nhead").find((n) => re.test(textOf(n)));
+const tickedCount = (app) => ticks(app).filter((b) => b.checked).length;
+const HOLD_PASSED_MS = 250;   // speedUp divides the 5 s hold by 100, so 50 ms; five times that has passed
+
+test("Phase 3: a node header ticks every edge of its node and opens the bulk panel, and sends NOTHING by itself", async () => {
+  const m = await mount();
+  const head = nodeHead(m.app, /propagate:shared\.mjs/);
+  assert.ok(head, "the shared node has a header");
+  assert.equal(head.getAttribute("role"), "button");
+  assert.equal(head.getAttribute("tabindex") ?? head.getAttribute("tabIndex"), "0", "focusable");
+  assert.match(head.getAttribute("aria-label"), /^tick all 2 edges of propagate:shared\.mjs for one verdict$/);
+  assert.equal(tickedCount(m.app), 0);
+  click(head);
+  await m.settle();
+  assert.equal(tickedCount(m.app), 2, "b and c, the node's two edges");
+  assert.match(textOf(detail(m.app)), /2 edges, one verdict/, "the existing bulk panel is what opens");
+  await sleep(HOLD_PASSED_MS);
+  assert.equal(disposeCalls(m).length, 0, "a header click must not send a verdict, now or when a hold would have expired");
+});
+
+test("Phase 3: the node header answers Enter and Space on itself, and ignores a key from something inside it", async () => {
+  for (const key of ["Enter", " "]) {
+    const m = await mount();
+    const head = nodeHead(m.app, /propagate:shared\.mjs/);
+    head.dispatchEvent({ type: "keydown", key, target: m.doc.createElement("button"), preventDefault() {} });
+    await m.settle();
+    assert.equal(tickedCount(m.app), 0, JSON.stringify(key) + " from a child is the child's own");
+    head.dispatchEvent({ type: "keydown", key, target: head, preventDefault() {} });
+    await m.settle();
+    assert.equal(tickedCount(m.app), 2, JSON.stringify(key) + " on the focused header ticks the node");
+    assert.equal(disposeCalls(m).length, 0);
+  }
+});
+
+test("Phase 3: the node header's tooltip says exactly what clicking does", async () => {
+  const m = await mount();
+  hover(nodeHead(m.app, /propagate:shared\.mjs/)); await m.settle();
+  const t = textOf(tipBox(m.app));
+  assert.match(t, /tick all 2 edges of propagate:shared\.mjs for one verdict/);
+  assert.match(t, /Nothing is written until you pick a verdict and the 5 s hold ends/);
+});
+
+test("Phase 3: a node verdict goes through the SAME bulk write: {edges}, never node_id; a short reason is refused before any request", async () => {
+  const m = await mount();
+  click(nodeHead(m.app, /propagate:shared\.mjs/)); await m.settle();
+  typeInto(byTag(m.app, "textarea")[0], "too short"); await m.settle();
+  click(btnText(byClass(m.app, "disp")[0], /no-change-needed/)); await m.settle();
+  assert.match(textOf(detail(m.app)), /reason of 12 or more characters/);
+  await sleep(HOLD_PASSED_MS);
+  assert.equal(disposeCalls(m).length, 0, "the 12-character floor applies to a node verdict exactly as to a selection");
+  typeInto(byTag(m.app, "textarea")[0], "both read against their sources"); await m.settle();
+  click(btnText(byClass(m.app, "disp")[0], /no-change-needed/));
+  await sleep(HOLD_PASSED_MS); await m.settle();
+  const calls = disposeCalls(m);
+  assert.equal(calls.length, 1);
+  const body = fromRealm(JSON.parse(calls[0].body));
+  assert.equal(body.node_id, undefined, "the UI has one write shape for groups");
+  assert.deepEqual(body.edges.map((e) => [e.edge_id, e.state]), [["b", "DRIFTED"], ["c", "DRIFTED"]]);
+  assert.deepEqual(body.edges[0].observed, { source: "s-b", downstream: "d-b" }, "the evidence guard rides along unchanged");
+});
+
+test("Phase 3: a node verdict cancelled with undo within the hold writes NOTHING, even after the hold would have expired", async () => {
+  const m = await mount();
+  click(nodeHead(m.app, /propagate:shared\.mjs/)); await m.settle();
+  typeInto(byTag(m.app, "textarea")[0], "both read against their sources"); await m.settle();
+  click(btnText(byClass(m.app, "disp")[0], /no-change-needed/));
+  await sleep(10);
+  assert.equal(byClass(m.app, "undo").length, 1, "one undo bar for the whole node");
+  assert.equal(disposeCalls(m).length, 0, "nothing is written while the hold runs");
+  m.press("u");
+  await sleep(HOLD_PASSED_MS); await m.settle();
+  assert.equal(disposeCalls(m).length, 0, "the timer was cancelled, not merely not yet fired");
+  assert.equal(m.fetches.filter((f) => f.opts && f.opts.method === "POST" && f.path !== "/api/evidence").length, 0, "and no other write of any kind went out");
+  assert.equal(tickedCount(m.app), 2, "the node stays ticked so the person can choose again");
+});
+
+test("Phase 3: ?tick= is parsed to ids, and ONE bad piece rejects the whole value (hostile literals)", async () => {
+  const { ui } = await mount();
+  const p = (v) => fromRealm(ui.parseTick(v));
+  assert.deepEqual(p("b,c"), { ids: ["b", "c"], rejected: false });
+  assert.deepEqual(p("ab12cd34,b,b"), { ids: ["ab12cd34", "b"], rejected: false }, "duplicates collapse");
+  assert.deepEqual(p(null), { ids: [], rejected: false }, "no parameter is not a rejection");
+  for (const bad of ['b,"],body', "b,c;rm", "<img src=x>", "b c", "b,,c", "../../etc", "b,c\n", "a".repeat(65), "b,c,\u0000", "x[data-focus]", "b,c'"]) {
+    assert.deepEqual(p(bad), { ids: [], rejected: true }, "must be refused: " + JSON.stringify(bad));
+  }
+  assert.deepEqual(p(Array.from({ length: 201 }, (_, i) => "e" + i).join(",")), { ids: [], rejected: true }, "a list longer than the cap is refused");
+  assert.equal(fromRealm(ui.parseHash("#/judge?tick=b,c")).tick.ids.length, 2);
+  assert.equal(fromRealm(ui.parseHash("#/judge")).tick.rejected, false);
+});
+
+test("Phase 3: #/judge?tick= pre-ticks ONLY edges in the queue, lists the ones that are not, and writes nothing", async () => {
+  const m = await mount({ hash: "#/judge?tick=b,c,ghost0001" });
+  await m.settle();
+  assert.equal(tickedCount(m.app), 2, "b and c are in the queue; ghost0001 is not");
+  assert.match(textOf(byClass(m.app, "bulkstrip")[0]), /2 edges ticked/, "the selection itself holds 2, not 3 (a phantom id is not kept)");
+  const note = byClass(m.app, "note").map(textOf).join(" | ");
+  assert.match(note, /2 roots ticked\. 1 root not in the queue/);
+  assert.match(note, /ghost0001/, "named, not silently dropped");
+  await sleep(HOLD_PASSED_MS);
+  assert.equal(disposeCalls(m).length, 0, "opening a link ticks; it never writes");
+});
+
+test("Phase 3: a hostile tick= value ticks nothing, says so, and never reaches a selector or the server", async () => {
+  const hostile = "#/judge?tick=" + encodeURIComponent('b,"],body');
+  const m = await mount({ hash: hostile });
+  const asked = [];
+  for (const host of [m.doc, m.app]) for (const fn of ["querySelector", "querySelectorAll"]) { const real = host[fn]; host[fn] = function (sel) { asked.push(String(sel)); return real ? real.call(this, sel) : null; }; }
+  m.setHash(hostile + "x"); await m.settle();
+  assert.equal(tickedCount(m.app), 0, "not even b is ticked: the value is refused whole");
+  assert.match(byClass(m.app, "note").map(textOf).join(" | "), /tick= link was not understood/);
+  assert.ok(!asked.some((s) => /body|\]/.test(s)), "the value never went into a selector: " + asked.join(" | "));
+  await sleep(HOLD_PASSED_MS);
+  assert.equal(disposeCalls(m).length, 0);
+});
+
+test("Phase 3: Unblock's settle-together header opens Judge with those roots ticked (click and Enter), and its tooltip says so", async () => {
+  const mk = (id, ...roots) => edge(id, "DRIFTED", { orderIndex: 9, blocked: true, node_id: "n:" + id,
+    blockedBy: roots.map((r) => ({ edge_id: r, from: "/u/Documents/GitHub/p/" + r + ".md", to: "/u/Documents/GitHub/p/" + r + "-dst.md", state: "DRIFTED" })),
+    downstream: "/u/Documents/GitHub/p/shared.md", downstreamShort: "p/shared.md" });
+  const roots = [edge("r1", "DRIFTED", { orderIndex: 0 }), edge("r2", "DRIFTED", { orderIndex: 1 })];
+  // gh0st is a root that was never verified: it is a blocker of j1/j2 but is not in the queue
+  const inbox = inboxOf({ ready: roots, blocked: [mk("j1", "r1", "r2", "gh0st"), mk("j2", "r1", "r2", "gh0st")], parked: [] });
+  for (const how of ["click", "Enter"]) {
+    const m = await mount({ inbox, hash: "#/unblock" });
+    const head = byClass(m.app, "fhead")[0];
+    assert.equal(head.getAttribute("role"), "button");
+    hover(head); await m.settle();
+    assert.match(textOf(tipBox(m.app)), /opens Judge with the 3 roots ticked, ready for one verdict.*never verified are not in the queue.*Nothing is written by opening it/);
+    if (how === "click") click(head); else head.dispatchEvent({ type: "keydown", key: "Enter", target: head, preventDefault() {} });
+    await m.settle();
+    assert.equal(m.ctx.location.hash, "#/judge?tick=gh0st,r1,r2");
+    assert.equal(tickedCount(m.app), 2, "r1 and r2 are ticked");
+    assert.match(byClass(m.app, "note").map(textOf).join(" | "), /1 root not in the queue.*gh0st/);
+    await sleep(HOLD_PASSED_MS);
+    assert.equal(disposeCalls(m).length, 0, "the hop writes nothing");
   }
 });

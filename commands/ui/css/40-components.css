@@ -229,6 +229,10 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
 .fgroup { border: 1px solid var(--line); border-radius: var(--r2); padding: 0 var(--s3) var(--s3); margin-bottom: var(--s3); background: var(--card); }
 .fgroup .t { box-shadow: none; }
 .fhead { padding: var(--s2) 0; font-size: 12.5px; }
+/* Phase 3 group headers: a node header (Judge) and a settle-together header (Unblock) tick or open, so they read as controls. */
+.nhead.act, .fhead.act { cursor: pointer; }
+.nhead.act:hover, .fhead.act:hover { background: var(--field); color: var(--fg); }
+.nhead.act:focus-visible, .fhead.act:focus-visible { outline: 2px solid var(--st-accent); outline-offset: -2px; background: var(--field); color: var(--fg); }
 
 /* Health: one line, then one list */
 .hline { font-size: 13px; margin: var(--s2) 0 var(--s4); display: flex; flex-wrap: wrap; gap: var(--s1); align-items: center; }

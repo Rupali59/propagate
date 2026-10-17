@@ -1593,3 +1593,19 @@ reloads meanwhile. None yet; accepted. See GOTCHAS G80.
 **Affects:** propagate
 
 **Refs:** plan `ticklish-gathering-brook.md` "propagate loads in place", G80, `docs/RELEASE.md`, `lib/report/doctor/delivery.mjs`.
+
+## 2026-10-17: Judge's node header reuses the bulk write; the UI has no `node_id` caller
+
+**What:** the node header in Judge ticks the node's edges and opens the existing bulk panel. The verdict is sent as `{edges:[{edge_id,state,observed}]}` through `judgeBulk`, the same body a hand-made selection sends. `POST /api/dispose {node_id}` stays on the server (the CLI-shaped batch, `validateBatchWrite`) with no UI caller.
+
+**Why:** read at the call site (`commands/ui.mjs`, the `body.node_id !== undefined` branch): `node_id` takes one disposition and one `state` for every actionable edge at that node anywhere in the queue, and refuses the whole group if their states differ. The `{edges}` branch checks each member against its own state and its own `observed` pair, and the bulk panel already offers only the intersection of allowed dispositions. A second write shape from the UI would be a second place for the reason floor, the hold and the undo to be skipped (`rule:safety-flag-needs-a-test`). Also the header shows the rows in the current view; `node_id` would also write edges the filter hides.
+
+**Rejected.** Sending `{node_id}` from the header: it would reuse a server batch that exists, but only by routing around the hold-and-undo path that `judgeBulk` owns, and it cannot express a node whose edges are in different states.
+
+**Verified:** the three claims about the endpoint above, by reading its branches. **Inferred:** that no other client sends `node_id`.
+
+**Cost:** none yet. The `node_id` branch is now untested by the UI; its own server tests are unchanged.
+
+**Affects:** propagate
+
+**Refs:** STATE "Dashboard Phase 3", plan `ticklish-gathering-brook.md` Phase 3, `tests/unit/ui-client.test.mjs` "Phase 3".
