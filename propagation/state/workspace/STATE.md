@@ -22,8 +22,8 @@ Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; th
 - **Tests**: each tile's count is derived from its page's rows (`tests/unit/machinery.test.mjs`, now six pairs) and again by a second
   route from the library's own data; paging, the three pages, routes, rail and badge CSS are in `tests/unit/ui-client.test.mjs`.
   Every new guard was mutated red for its stated reason and restored. Derive the test count with `npm run test:affected`, not from here.
-- **Not done / open:** no browser pass (not asked for). `docs/REFERENCE.md` and `DESIGN.md` do not yet list the three endpoints or the
-  paging and pager; that is Phase 5. Registers can be deleted in a later, deliberate pass. Plans cover the propagate repo, not the hub.
+- **Phase 5 (docs) done 2026-10-17:** `DESIGN.md` §4 and `docs/REFERENCE.md` ("the machinery and page endpoints") now describe Kpi, DataTable and paging, PlotChart, ErrorBanner, the page endpoints and the hash parameters.
+- **Not done / open:** no browser pass (not asked for). Registers can be deleted in a later, deliberate pass. Plans cover the propagate repo, not the hub.
 
 ## Dashboard Phase 4a: Claims, Rules, Caps and Skills pages, and the regrouped rail — 2026-10-17 (unreleased, not committed)
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; this pass is only the four machinery pages and the rail).

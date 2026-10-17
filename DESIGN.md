@@ -211,12 +211,12 @@ strings. **"Unknown" is never zero:** a velocity that could not be read says
 `unknown: <reason>`, never fourteen empty bars; a day with no verdicts is drawn as a
 *gap*, not as a bar of zero height.
 
-**Views (2026-10-15).** Four task views and an Explore set, built for what a person
-does rather than where the data came from: **Judge** (the edges you can write a verdict
-on now), **Unblock** (which root holds the most back), **Health** (fail and accepted
-rows, each with its one action), **Activity** (trends only). Explore holds Registers
-(read-only), Graph and Reminders. The rail's separator is derived from the `explore`
-flag on a division, never from a position.
+**Views (superseded 2026-10-17).** The rail is five groups, derived from each division's `group`
+and never from a position (`railGroups`, `DIVISIONS` in `commands/ui.client.js`): **TODAY** (Overview),
+**SETTLE** (Judge, Unblock — the two that write), **MACHINERY** (Health, Claims, Rules, Caps, Skills),
+**WORK** (Backlog, Goals, Registers, Reminders) and **HISTORY** (Activity, History, Graph). The 2026-10-15
+"four task views and an Explore set" split, and its `explore` flag, are gone. Only Judge and Unblock write; every
+other page reads, and where a page offers a command it is copied, never run.
 
 **One count definition.** The unit is an edge. The Judge badge is the widget's own
 `worklist.toJudge`, computed over the same items the list renders, so the two cannot
@@ -239,31 +239,40 @@ diff was empty as "no-op likely". It was inverted: a source that moved under an
 unchanged downstream *is* drift. Bulk is now an explicit choice, row by row, with one
 shared reason.
 
-### Components added with the redesign
+### Component vocabulary (superseded 2026-10-17)
 
-All reuse an existing token or class; none is a new visual language.
+The 2026-10-15 table listed one-off classes (`.root`, `.hrow`, `.vel`, `.vcol`, `.vaxis`, `.shead`, `.sitem`,
+`.hit`, `.bar`) that the 2026-10-16 rebuild deleted; `tests/unit/theme.test.mjs` asserts there is no `.bar` rule and
+no native `title=`. The page is now built from a few shared components, each of which enforces the rules below.
+**Derive the class list, never copy it:** the classes the client emits that the stylesheet defines are those in
+`commands/ui/css/*.css` which `commands/ui.client.js` names in a `class=` (or a string it builds a class from);
+the `.badge` state modifiers, `pl-`, `pri-`, `r-`, `s-`, `k-`, `c-`, `g-` and `vin-` families are composed at
+runtime from a row's value, so a grep for the full name finds nothing. A value the client can emit and the stylesheet
+has no rule for renders as ink on no background; a test renders every view and checks each class it saw.
 
-| component | what it is | note |
+| component | what it is | what it enforces |
 |---|---|---|
-| `.badge.fail` `.badge.accepted` `.badge.NEVER_VERIFIED` | modifiers of the existing badge | **no `.pill`.** A value the client can emit and the stylesheet has no rule for renders as ink on no background; a test renders every view and checks each class it saw |
-| `.chip` | the Judge filter (To judge · Both sides moved · Parked · Never verified) | a toggle button with `aria-pressed`, not tabs |
-| `.ghead` `.nhead` | workspace, then source node, headers over the rows | the server's order holds inside a node |
-| `.newdot` | an edge that entered the queue since it was last marked seen | keyed on the edge **and both content ids**, so a re-drift shows again |
-| `.evgrid` `.evbox` | source and downstream evidence side by side | stacks below 1100px; each needs about 480px to stay readable |
-| `.kpis` `.kpi` | Unblock's stat row | there is no `.stat`; `.bar` keeps its one meaning |
-| `.root` `.fgroup` | a root to settle, and the joint blockers grouped by the file they flow into | |
-| `.hline` `.hrow` | Health's single summary line and its fail-then-accepted list | warn stays collapsed per section |
-| `.vel` `.vcol` `.vseg-*` | verdicts per day as a stacked bar | the quiet segment is `--seg-quiet` |
+| `Kpi` `{label, value, sub, route, act, tip, warn, cls}` → `.kpis` `.kpi` `.pick`/`.inert` `.ksub` | the one stat card: label, value, sub-line | **`route` is required.** A card with a `route` (or an `act`, a copy) is `.pick`; one that leads nowhere is `.inert` and its `tip` is the **reason**. No reason renders `KPI_NO_REASON`, a sentence that reads as a defect on purpose, and a test asserts it never appears. Both kinds take focus, because focus is how a keyboard user gets the tooltip. `.warn` colours the figure `--st-warn`, nothing else |
+| `DataTable` → `table.t` `.dt-row` `.sortable` `.dt-flash` `.pager` | the one table; Unblock roots, Health, Claims, Rules, Caps, Skills, Backlog, Goals, Registers, Reminders and the Overview sources all render through it | sortable headers (`aria-sort`; `value` on a column makes it sortable; null sorts last both ways); **every row is focusable**, Enter or click runs its `route` or its `act`; a row with neither is `.inert` and its tooltip is the reason (`ROW_NO_REASON` otherwise, asserted never to appear). **Paging: `TABLE_PAGE_SIZE`, 50** — every row carries handlers and is focusable, so the DOM cost is per row (a large register is hundreds of rows), and 50 is the cap Registers already used. Sort and filter act on **every** row first and the window is cut from the result; a changed sort, filter or refresh returns to page 1; `[` and `]` page while a row has focus (PageUp and PageDown are left to scroll). A control inside a cell stops its own click, so Enter on a button never also fires the row |
+| `PlotChart` → `.charts3` `.plot` `.chart` `.mix` | **the only chart engine** (Observable Plot; `VerdictsChart` is one component on the Overview and on Activity) | fills are palette tokens resolved at render; the tooltip is the page's own `.tip`; a bar leads somewhere (Overview bars open Activity, Activity bars open Judge) or its tooltip says there is no list behind it. If the library fails to load, "chart unavailable" with the reason replaces the chart. A day with no verdicts is a gap, not a bar of zero height |
+| `ErrorBanner` → `.banner` | **the only error UI**, with "retry" | the server's reason is shown, never a bare "failed". A banner with no `retry` is one where trying again would change nothing (the data was read and is itself the problem). **Two hand-written banners stay on purpose:** the focused-section note (a status, not an error) and the stale-server notice (a restart is the cure, not a retry) |
+| `NextStrip` → `.nextstrip` | the Overview's one next step, above the KPIs | derived from the inbox's own top root, so it is never empty: it opens Judge on that edge, offers the baseline command to copy (the UI writes no baseline), goes to Unblock's settle-together groups, or states why nothing is blocked |
+| `MachineryTiles` → `.mach` (on `Kpi`) | one tile per machinery source (Claims, Rules, Caps, Skills, Backlog, Goals) | each opens its page; a source that failed reads "could not read — <reason>", never 0; the client asks only after `/api/surface` lands |
+| `MachineryPage` frame | title, the question the page answers, loading, a banner carrying the server's reason, then children (a `DataTable` and a one-line summary) | an empty table names what was examined; the figure on the tile is derived from the rows on this page, so the two cannot disagree |
+| `.chip` `.chips` `.filt` | a filter toggle (`aria-pressed`), not tabs | |
+| `.badge` (+ state modifiers) | a state word on a fill | **no `.pill`** |
+| `.ghead` `.nhead` `.newdot` `.fgroup` | Judge's workspace and node headers, the seen marker, Unblock's settle-together group | a node header ticks its edges and sends nothing; a verdict goes through the guarded bulk path |
+| `.evgrid` `.evbox` | source and downstream evidence side by side | stacks below 1100px |
 | `.cmdrow` `.cmd` | a command the reader pastes, with a copy button | the text is always visible, so a blocked clipboard leaves something to select |
-| `.tip` | the one tooltip, at the pointer, for every chart shape and row | **no native `title=`.** `pointer-events: none`, `--card` ground and `--fg` ink, `--lift-2`, `--t-fast`; content is `tipText` in the client and only ever values the page already holds. Focus shows it too |
-| `.pick` `.hit` | a click target's hover affordance: a pointer and a soft ground (`--accent-quiet` / `--field`), nothing else | affordance only; the fact lives in the tooltip, never in the hover |
-| `.vopt` `.vmean` | a verdict button with its one-line meaning beneath | wording in `docs/REFERENCE.md` §"What each verdict means" |
-| `.vaxis` `.vtick` `.axnote` | the day axis under the verdict bars, and the scale note under the sparkline | labels thin out (`axisTicks`) so 30 days do not smear |
-| `.kpis.ov` `.kpi.pick` `.ksub` | the Overview's five clickable stat cards | the existing `.kpi` stat row made a click target; `.warn` colours the figure `--st-warn`, nothing else |
-| `.charts3` `.plot` | the Overview's three chart cards | Plot draws into `.plot`; its fills are tokens resolved at render |
-| `table.t` `.mix` | the top-sources table and its "what moved" bar | `.mix i.<STATE>` uses the same token as `.badge.<STATE>`; column heads are sortable (`aria-sort`) |
-| `.shead` | the column head over a register list ("priority") | |
+| `.tip` | the one tooltip, at the pointer, for every chart shape, card and row | **no native `title=`.** `pointer-events: none`, `--card` ground and `--fg` ink; content is `tipText` and only ever values the page already holds. Focus shows it too |
+| `.vopt` `.vmean` | a verdict button with its one-line meaning | wording in `docs/REFERENCE.md` §"What each verdict means" |
 | `.sr` | the visually hidden `aria-live="polite"` region | announces verdicts, undo and bulk results, including refusals |
+
+**Rules these components enforce, in one place.** (1) **Every element has a destination or a stated inert reason** —
+a card, a row, a chart bar. (2) **Loading and could-not-read are different states** with different words ("loading…"
+and "could not read" with the reason beneath); neither is "unknown", and neither is 0. (3) **A failed source is never
+0:** one failed block is an error state with its reason while the others still render. (4) **One error banner, one
+table, one chart engine, one stat card** — a new view composes them; it does not hand-build a fifth.
 
 ### Accessibility and layout (F3, F4)
 
@@ -275,7 +284,7 @@ list sits above the detail.
 
 ## 5 · Deliberately not in the system
 
-- **A chart library, EXCEPT on the web UI's Overview (amended 2026-10-16).** The page is
+- **A chart library, EXCEPT in the web UI (amended 2026-10-16; widened 2026-10-17).** The page is
   one self-contained response with no build step, and charts used to be inline SVG that
   inherits the palette tokens. The owner then asked for a dashboard with more
   visualisations (a stacked bar per workspace, a waiting-time histogram, verdicts per
@@ -284,8 +293,9 @@ list sits above the detail.
   are vendored in `commands/vendor/` as plain `<script>` globals, with their sha256 and
   licences in `commands/vendor/README.txt`. **What did not change:** no colour comes from the
   library. Every fill is a palette token resolved at render (`resolveToken` in the client),
-  the tooltip is the page's own `.tip`, and the Activity view, the sparklines and the widget
-  stay hand-drawn SVG. **If the library fails to load**, the Overview prints "chart
+  the tooltip is the page's own `.tip`. Phase 1 (2026-10-16) then deleted the hand-drawn
+  web charts (`Velocity`, `Spark`, `Bars`), so `PlotChart` is the only chart engine on every web view; the
+  widget stays hand-drawn SVG. **If the library fails to load**, a chart prints "chart
   unavailable" with the reason in place of the charts and the KPIs and table still work.
 - **A typeface.** The system font stack stays, chosen 2026-09-21 with the cost
   named: it is the "gave up on typography" signal, and a self-hosted face means
@@ -297,7 +307,7 @@ list sits above the detail.
 - **An icon library, except in the widget.** The widget vendors a small Lucide subset
   (`lucide` 1.55.0, ISC, React-free node data) into a generated block, because Übersicht
   resolves no relative import and the marketplace install runs no `npm install`. Charts stay
-  hand-drawn SVG on the widget and every web view except the Overview (see the first bullet).
+  hand-drawn SVG on the widget only (see the first bullet).
   Decided 2026-10-13 (widget redesign, D3/D9).
 
 ---
@@ -314,6 +324,8 @@ list sits above the detail.
 | no `color-mix`, upward derivations redefined in dark, badge modifiers, focus ring, narrow stacking | `tests/unit/theme.test.mjs` |
 | every view's four states, the per-edge reason, nothing preselected, the Judge badge equal to the rendered rows, the transport's failures | `tests/unit/ui-client.test.mjs` |
 | no entity text in the emitted page | `tests/unit/ui-page.test.mjs` |
+| every card and row has a destination or a stated reason (`KPI_NO_REASON`, `ROW_NO_REASON` never appear); table paging; one banner | `tests/unit/ui-client.test.mjs` |
+| the rail's groups and their membership; each machinery tile's figure equals the rows on its page | `tests/unit/ui-rail-separator.test.mjs`, `tests/unit/machinery.test.mjs` |
 | the tooltip is token-only and takes no pointer; no rendered view carries a native `title=`; `tipText` never prints NaN | `tests/unit/theme.test.mjs`, `tests/unit/ui-client.test.mjs` |
 
 **A property worth stating here is worth an acceptance criterion.** The sibling

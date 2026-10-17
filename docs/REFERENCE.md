@@ -482,6 +482,44 @@ it is untouched by this view and the two should not be conflated.
   killed every bookmark at every restart.
 - `widget/open-ui.sh` writes `ui-url`, `ui-pid` and `ui.log` at `0600` (the log holds the token URL).
 
+## `propagate ui`: the machinery and page endpoints (2026-10-16/17)
+
+Source of truth: the `/api/` branch of `commands/ui.mjs` and `lib/report/machinery.mjs`, not this list. Every one is
+`GET`, read-only and behind the token and Origin checks above. **They never run a write or a verdict**; a page that offers a
+command copies it.
+
+| endpoint | answers | notes |
+|---|---|---|
+| `/api/machinery` | one block per source: claims, rules, caps, skills, backlog, goals | each block is `{status, reason, count, of, label, top}`. A source that throws, or ran and looked at nothing, is `status:"error"` with its reason **inside a 200 body**, so one bad source never blanks the other five; a failed source is never `count: 0`. `ok`, `generatedAt` and `ttlMs` ride beside the blocks |
+| `/api/claims` | the claims check's findings, with `kinds` and a coverage `summary` | |
+| `/api/rules` | each hub rule with its coverage (adopted, firing, restated, unexercised) and where it is restated | **replaced the old raw endpoint**, which returned the hub rules check unprocessed (whole file bodies in `lines`, no coverage status) and had no caller. Anything that read the old shape must read this one |
+| `/api/caps` | instruction-budget caps, worst first (over, yellow, exempt) | |
+| `/api/skills` | skill usage, never-invoked then dormant first | "dormant" is a used skill whose last use is over `DORMANT_DAYS` ago; the response carries the constant |
+| `/api/backlog` | the ranked backlog items (priority and kind) and handover summaries | the floor caveat is `priorityCaveat` in `lib/report/backlog.mjs`, shared with `backlog --brief` |
+| `/api/goals` | goals and plans, two tables from one response | a plans failure is carried **inside** the response and does not fail the goals; plans are read from this repo only |
+| `/api/history` | the last **recorded** doctor, monitor and release results | page-only: it has no tile and is not in `/api/machinery`. It reads what each left on disk and **runs none of them**: doctor from its snapshot, monitor from `monitor.log` (the last 20 runs), release from the command ledger (exit status and duration only). **`release --check` persists no per-gate result**, so History cannot show gates; adding persistence was declined (DECISIONS 2026-10-17, Phase 4b). Each part settles on its own: an unreadable part is an error state with its reason |
+
+**One cached run.** The six tile sources and `history` are computed together and reused for `MACHINERY_TTL_MS` (60 s), so a
+tile and its page are one answer and cannot disagree; concurrent callers on a cold cache share one computation. **Why
+60 s:** claims (~1.2 s) and skills (~1.6 s) are slow, and none of the sources changes second to second (they read the
+tree's docs, not the ledger), so a minute turns a page that re-polls into one real computation, while a longer window would
+show a just-fixed file as still broken. The figures are measurements from 2026-10-17; re-measure rather than trust them.
+**`?fresh=1`** bypasses the cache, on `/api/machinery` and on every page endpoint above. A response in which every source
+failed is not kept, so an outage is not held for a minute.
+
+**The 502 convention.** A page endpoint whose source failed answers **502 `{ok:false, error}`** with the source's reason,
+which the page shows as a banner; an empty table is reserved for a source that ran and found nothing, and it names what was
+examined. An unexpected exception is a 500 with the same shape. `/api/machinery` itself stays 200 and reports the
+failure per block (above), because the Overview needs the five good tiles.
+
+**Hash parameters** (the query rides in the fragment, which the server never sees). The ones the Judge view reads:
+`#/judge?edge=<id>` opens one edge; `#/judge?tick=<id>,<id>` pre-ticks edges for a bulk verdict. `tick` accepts only edge-id
+characters (letters, digits, `_`, `-`; each id at most 64 long; at most 200 ids) and **rejects the whole value on one bad
+piece**; ids Judge does not list are named in a note, not dropped silently. `#/unblock?focus=together` opens Unblock at the
+settle-together groups. A pre-tick **ticks and sends nothing**; the verdict still goes through the guarded bulk path (reason of
+12+ characters, the 5 s hold, `u` undo). Other deep links in use are `section=` (Health), `state=`, `chip=`, `ws=`, `age=`,
+`source=` (Judge); parsing is `parseHash` in `commands/ui.client.js`, and a value the view does not know is ignored.
+
 ## What each verdict means
 
 The web UI (`propagate ui`) prints this one-line meaning under every verdict button. The wording is
