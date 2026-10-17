@@ -728,12 +728,12 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
         catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
       }
 
-      // Dashboard Phase 4a. The pages behind four of the six tiles. Each reads the SAME cached computation as
+      // Dashboard Phase 4a (+4b: backlog, goals and the tile-less history). The pages behind the tiles. Each reads the SAME cached computation as
       // /api/machinery (one run feeds the tile and the page, so their numbers cannot disagree) and is read-only.
       // A source that failed is a 502 with its reason, which the page shows as a banner, never an empty table.
       // /api/rules used to return the raw hub rules check (unfetched, no coverage status, whole file bodies in
       // `lines`); it is this now, so the Rules page and the Rules tile are one answer.
-      const viewKey = /^[/]api[/](claims|rules|caps|skills)$/.exec(url.pathname);
+      const viewKey = /^[/]api[/](claims|rules|caps|skills|backlog|goals|history)$/.exec(url.pathname);
       if (viewKey && req.method === "GET") {
         try {
           const r = await machinery.readDetail(viewKey[1], { fresh: url.searchParams.get("fresh") === "1" });

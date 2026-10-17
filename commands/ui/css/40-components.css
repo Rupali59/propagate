@@ -48,6 +48,25 @@
 .badge.r-adopted, .badge.r-firing, .badge.s-active { background: var(--st-ok); }
 .badge.c-exempt { background: var(--dim); }
 .badge.s-dormant { background: var(--st-accent); }
+/* Phase 4b (2026-10-17): Backlog priority (pri-), goal status (g-), plan status (pl-) and a history result (h-). Same rule as
+   above: the attribute selector gives any value the stylesheet has not met the quiet default, and each value the client emits
+   has its own named rule, which the badge-rule test requires of what the pages render. */
+.badge[class*=" pri-"], .badge[class*=" g-"], .badge[class*=" pl-"], .badge[class*=" h-"] { background: var(--dim); }
+.badge.pri-P0 { background: var(--st-warn); }
+.badge.pri-P1 { background: var(--st-caution); }
+.badge.pri-P2, .badge.pri-P3 { background: var(--st-accent); }
+.badge.pri-none { background: var(--dim); }
+.badge.g-open, .badge.pl-undeclared { background: var(--st-caution); }
+.badge.g-unknown, .badge.g-unreadable, .badge.pl-unreadable, .badge.h-failed { background: var(--st-warn); }
+.badge.g-closed, .badge.pl-finished, .badge.pl-archived { background: var(--dim); }
+.badge.pl-linked, .badge.h-recorded { background: var(--st-ok); }
+/* A table longer than one page: the prev and next controls sit under it (DataTable, TABLE_PAGE_SIZE). */
+.pager { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin: var(--s2) 0 var(--s4); font-size: 12px; color: var(--dim); }
+.pager button:disabled { opacity: .45; cursor: default; }
+.hpart { margin-bottom: var(--s5); }
+a.go { color: var(--fg); text-decoration: underline; font-size: 12px; margin-left: var(--s2); }
+.hout { font-size: 13px; margin: var(--s1) 0; }
+.how { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
 
 /* ── stream: "what changed since I last looked" ──────────────────────────
    Three ref-vintage states get three rules, deliberately -- collapsing

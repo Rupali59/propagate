@@ -2268,26 +2268,20 @@ test("Phase 2 machinery: six tiles from /api/machinery, each with its count, det
   assert.match(textOf(tipBox(m.app)), /Opens the Claims page, which lists every finding with its file and line/);
   unhover(tileNamed(m.app, "Claims"));
   hover(tileNamed(m.app, "Backlog")); await m.settle();
-  assert.match(textOf(tipBox(m.app)), /opens Registers/);
+  assert.match(textOf(tipBox(m.app)), /Opens the Backlog page, which lists every open item, filterable by priority and kind/);
   unhover(tileNamed(m.app, "Backlog"));
 });
 
-test("Phase 2 machinery (Phase 4a): Goals, which has no page yet, copies its CLI command; Backlog opens Registers; the four paged tiles never copy", async () => {
-  // Real timers: the 1.5 s "copied" flash would be sped up to 15 ms and gone before it could be read.
-  const m = await mountOv({ speedUp: false });
-  const wrote = clipboard(m);
-  const before = m.ctx.location.hash;
-  for (const [name, cmd] of [["Goals", "propagate goals"]]) {
-    // No m.settle() between the click and the read: settle waits for the tracked 1.5 s timer, i.e. for the flash to END.
-    click(tileNamed(m.app, name));
-    for (let i = 0; i < 40 && !/copied: /.test(textOf(tileNamed(m.app, name))); i++) await sleep(10);
-    assert.equal(wrote[wrote.length - 1], cmd, name + " copies its command");
-    assert.equal(m.ctx.location.hash, before, name + " does not navigate");
-    assert.match(textOf(tileNamed(m.app, name)), /copied: /, name + " says it copied");
+test("Phase 2 machinery (Phase 4b): no tile copies a command any more -- all six open a page, and the clipboard stays untouched", async () => {
+  // A fresh Overview per tile: after the first navigation the Overview is no longer on screen.
+  for (const [name, hash] of [["Claims", "#/claims"], ["Rules", "#/rules"], ["Caps", "#/caps"], ["Skills", "#/skills"], ["Backlog", "#/backlog"], ["Goals", "#/goals"]]) {
+    const m = await mountOv({ speedUp: false, routes: { "/api/claims": CLAIMS_P, "/api/rules": RULES_P, "/api/caps": CAPS_P, "/api/skills": SKILLS_P, "/api/backlog": BACKLOG_P, "/api/goals": GOALS_P } });
+    const wrote = clipboard(m);
+    assert.doesNotMatch(textOf(tileNamed(m.app, name)), /copied: /);
+    click(tileNamed(m.app, name)); await m.settle();
+    assert.equal(m.ctx.location.hash, hash, name + " opens its page");
+    assert.equal(wrote.length, 0, name + ": nothing was copied");
   }
-  assert.equal(wrote.length, 1, "nothing else copied");
-  click(tileNamed(m.app, "Backlog")); await m.settle();
-  assert.equal(m.ctx.location.hash, "#/registers");
 });
 
 test("Phase 2 machinery: one source that failed reads 'could not read — <reason>' on its own tile; the other five are untouched and no tile shows 0", async () => {
@@ -2345,7 +2339,7 @@ test("Phase 2 machinery: the pure model gives every tile a destination or a reas
     { status: "ok", data: { ...MACH, caps: { status: "error", reason: "x", count: null } } }]) {
     const ts = model(st);
     assert.equal(ts.length, 6);
-    for (const t of ts) assert.ok(t.tip && t.tip !== ui.KPI_NO_REASON && /no .* page yet|opens Registers|Opens the \w+ page/i.test(t.tip), `${t.key} in ${JSON.stringify(st).slice(0, 40)}: tip must state the destination, got ${t.tip}`);
+    for (const t of ts) assert.ok(t.tip && t.tip !== ui.KPI_NO_REASON && /Opens the [\w ]+ page/.test(t.tip), `${t.key} in ${JSON.stringify(st).slice(0, 40)}: tip must state the destination, got ${t.tip}`);
   }
 });
 
@@ -2741,9 +2735,10 @@ test("Phase 4a: every row of every page is focusable and either acts or says why
   }
 });
 
-test("Phase 4a: each Overview tile opens its page, and the page then reads the same endpoint", async () => {
-  for (const [tile, hash, endpoint] of [["Claims", "#/claims", "/api/claims"], ["Rules", "#/rules", "/api/rules"], ["Caps", "#/caps", "/api/caps"], ["Skills", "#/skills", "/api/skills"]]) {
-    const payload = { "/api/claims": CLAIMS_P, "/api/rules": RULES_P, "/api/caps": CAPS_P, "/api/skills": SKILLS_P }[endpoint];
+test("Phase 4a/4b: each Overview tile opens its page, and the page then reads the same endpoint", async () => {
+  for (const [tile, hash, endpoint] of [["Claims", "#/claims", "/api/claims"], ["Rules", "#/rules", "/api/rules"], ["Caps", "#/caps", "/api/caps"], ["Skills", "#/skills", "/api/skills"],
+    ["Backlog", "#/backlog", "/api/backlog"], ["Goals", "#/goals", "/api/goals"]]) {
+    const payload = { "/api/claims": CLAIMS_P, "/api/rules": RULES_P, "/api/caps": CAPS_P, "/api/skills": SKILLS_P, "/api/backlog": BACKLOG_P, "/api/goals": GOALS_P }[endpoint];
     const m = await mountOv({ routes: { [endpoint]: payload } });
     const wrote = clipboard(m);
     click(tileNamed(m.app, tile)); await m.settle();
@@ -2752,13 +2747,6 @@ test("Phase 4a: each Overview tile opens its page, and the page then reads the s
     assert.equal(m.calls.filter((c) => c === endpoint).length, 1, "and the page asked for its data");
     assert.ok(dtRows(m.app).length > 0);
   }
-  const m = await mountOv();
-  click(tileNamed(m.app, "Backlog")); await m.settle();
-  assert.equal(m.ctx.location.hash, "#/registers", "Backlog is unchanged until Phase 4b");
-  const g = await mountOv();
-  const wrote = clipboard(g);
-  click(tileNamed(g.app, "Goals")); await g.settle();
-  assert.equal(g.ctx.location.hash, "#/overview", "Goals is unchanged until Phase 4b");
 });
 
 test("Phase 4a: the new hashes route to their pages and an unknown hash keeps landing on Judge", async () => {
@@ -2787,6 +2775,517 @@ test("Phase 4a: every badge class the four pages render has its own CSS rule (th
     for (const b of byClass(m.app, "badge")) for (const c of b.getAttribute("class").split(/\s+/)) if (c !== "badge") seen.add(c);
   }
   assert.ok(seen.size >= 9, `only ${seen.size} badge classes seen (${[...seen].join(", ")}) -- the scan has gone blind`);
+  const bare = [...seen].filter((c) => !new RegExp(`\\.badge\\.${c}\\b`).test(css));
+  assert.deepEqual(bare, [], `rendered with no rule: ${bare.join(", ")}`);
+});
+
+/* ══ Dashboard Phase 4b: DataTable paging, Backlog, Goals & Plans, History (2026-10-17) ═══════════════════════════
+   Payloads are LITERALS where the shape is the point (an item with markup in its text, a goals file that could not be
+   read, a plan with no date, a part that is only partly recorded). Volume, where the count is the point (paging), is
+   generated, with the one row a page-only sort would miss placed LAST so the test cannot pass by luck. */
+
+const isDisabled = (b) => b.disabled === true || b.getAttribute("disabled") !== null;
+const pagerOf = (app) => byClass(app, "pager")[0] || null;
+const showing = (app) => { const p = pagerOf(app); return p ? textOf(byTag(p, "span")[0]) : null; };
+const pagerBtn = (app, re) => buttons(pagerOf(app)).find((b) => re.test(b.getAttribute("aria-label") || ""));
+const mount4b = (name, payload, extra = {}) => mount({ hash: "#/" + name, routes: { ["/api/" + name]: payload, ...extra } });
+
+const BL = (over) => ({ id: "x", priority: null, ref: null, text: "an item", file: GH + "p/TODOS.md", line: 1, kind: "todo", section: null, alsoIn: 0, ...over });
+const BACKLOG_P = {
+  ok: true,
+  rows: [
+    BL({ id: "b1", priority: 0, ref: "TM-001", text: "fix the thing", file: GH + "a/TODOS.md", line: 10, kind: "todo" }),
+    BL({ id: "b2", priority: null, text: "wrap <img src=x onerror=alert(1)> " + "long ".repeat(60), file: GH + "b/STATE.md", line: 40, kind: "state", alsoIn: 2 }),
+    BL({ id: "b3", priority: 2, ref: "N7", text: "an issue", file: GH + "c/ISSUES.md", line: 3, kind: "issue" }),
+    BL({ id: "b4", priority: null, text: "no line recorded", file: GH + "d/NOTES.md", line: null, kind: "other" }),
+    BL({ id: "b5", priority: null, text: "no file recorded", file: "", line: null, kind: "other" }),
+  ],
+  kinds: [{ kind: "todo", label: "TODOS.md", count: 1 }, { kind: "state", label: "STATE.md", count: 1 }, { kind: "issue", label: "ISSUES.md", count: 1 }, { kind: "other", label: "other", count: 2 }],
+  summary: { items: 5, files: 4, filesRead: { state: 2, todo: 1, issue: 1 }, byPriority: { P0: 1, P1: 0, P2: 1, P3: 0, none: 3 },
+    caveat: '3 of 5 carry NO priority — so "2 prioritised" is a floor, not a ranking', mergedDuplicates: 1, unparsedFiles: 0, handovers: { sections: 3, open: 1 }, delegatedRegisters: 1 },
+};
+/** 120 items; the only P0 is the LAST one, so a sort that only reordered the first page would never show it. */
+const BACKLOG_BIG = {
+  ...BACKLOG_P,
+  rows: Array.from({ length: 120 }, (_, i) => BL({ id: "big" + i, priority: i === 119 ? 0 : null, text: "item " + i, file: GH + "w/TODOS.md", line: i + 1, kind: i % 2 ? "todo" : "state" })),
+  kinds: [{ kind: "todo", label: "TODOS.md", count: 60 }, { kind: "state", label: "STATE.md", count: 60 }],
+  summary: { ...BACKLOG_P.summary, items: 120, byPriority: { P0: 1, P1: 0, P2: 0, P3: 0, none: 119 }, caveat: '119 of 120 carry NO priority — so "1 prioritised" is a floor, not a ranking' },
+};
+const GOALS_P = {
+  ok: true,
+  rows: [
+    { id: "g1", file: GH + "G1/GOALS.md", n: 1, title: "open with a command", status: "open", derivation: "claimed", command: "node check.mjs\nnode second.mjs", reason: null },
+    { id: "g2", file: GH + "G1/GOALS.md", n: 2, title: "open <b>judgement</b>", status: "open", derivation: "waived", command: null, reason: null },
+    { id: "g3", file: GH + "G1/GOALS.md", n: 3, title: "closed, nobody can check it", status: "closed", derivation: "none", command: null, reason: null },
+    { id: "g4", file: GH + "G1/GOALS.md", n: 4, title: "nobody said what finishes it", status: "unknown", derivation: "claimed", command: null, reason: null },
+    { id: "g5", file: GH + "G2/GOALS.md", n: null, title: null, status: "unreadable", derivation: null, command: null, reason: "no '## <N> · <title>' goal sections found — format not recognised" },
+  ],
+  plans: { ok: true, rows: [
+    { id: "p1", file: GH + "propagate/docs/plans/2026-08-01-a.md", unreadable: false, date: "2026-08-01", dateSource: "basename", status: "linked", reason: "cited directly by a hub seed", statusPhrase: "ACTIVE", grade: "flagged", gated: false },
+    { id: "p2", file: GH + "propagate/docs/plans/2026-08-02-b.md", unreadable: false, date: "2026-08-02", dateSource: "basename", status: "finished", reason: "Status: names a finished word", statusPhrase: "done", grade: "flagged", gated: false },
+    { id: "p3", file: GH + "propagate/docs/plans/archive/c.md", unreadable: false, date: null, dateSource: "unknown", status: "archived", reason: "lives under archive/ or _archive/", statusPhrase: null, grade: "flagged", gated: false },
+    { id: "p4", file: GH + "propagate/docs/plans/2026-08-04-d.md", unreadable: false, date: "2026-08-04", dateSource: "basename", status: "undeclared", reason: "not archived, no finished Status:, not linked from any hub seed", statusPhrase: null, grade: "flagged", gated: false },
+    { id: "p5", file: GH + "propagate/docs/plans/2026-08-05-e.md", unreadable: true, date: null, dateSource: null, status: "unreadable", reason: "EACCES: permission denied", statusPhrase: null, grade: null, gated: false },
+  ], summary: { root: GH + "propagate", scanned: 50, plans: 5, byStatus: { linked: 1, finished: 1, archived: 1, undeclared: 1, unreadable: 1 }, excluded: 0, notFullyWalked: 0 } },
+  summary: { files: 2, unreadable: 1, goals: 4, open: 2, closed: 1, unknown: 1, claimed: 2, waived: 1, uncheckable: 1 },
+};
+const HISTORY_P = {
+  ok: true, headline: null,
+  summary: { withARecord: 3, of: 3, limit: 20 },
+  parts: [
+    { key: "doctor", title: "Doctor", command: "propagate doctor", status: "recorded", at: "2026-10-17T08:10:19.576Z", outcome: "5 fail · 543 warn · 3 accepted · 182 pass", reason: null,
+      note: "Doctor is run by `propagate monitor`, which saves its answer after each run; this is that saved answer, not a run the page started.",
+      rows: [{ id: "0|State", name: "State", pass: 0, warn: 1, fail: 0, accepted: 0 }, { id: "1|Delivery & <b>x</b>", name: "Delivery & <b>x</b>", pass: 4, warn: 2, fail: 3, accepted: 1 }], summary: { sections: 2, problems: 5, failing: true } },
+    { key: "monitor", title: "Monitor", command: "propagate monitor --dry-run", status: "recorded", at: "2026-10-17T08:08:28.626Z", outcome: "149 actionable · 14 notified · 135 suppressed", reason: null, note: "monitor.log holds one line per run that reached its logging step.",
+      rows: [{ id: "m2", at: "2026-10-17T08:08:28.626Z", rows: 1254, actionable: 0, notified: 0, suppressed: 0, ms: 12, error: "reconcile broke", runId: "r2", raw: "RAW LINE 2" },
+        { id: "m1", at: "2026-10-17T07:36:28.915Z", rows: 1254, actionable: 142, notified: 8, suppressed: 134, ms: 3453, error: null, runId: "r1", raw: "RAW LINE 1" }],
+      summary: { runs: 5589, notifiedRuns: 736, couldNotLook: 1, unparsedLines: 0, shown: 2, limit: 20 } },
+    { key: "release", title: "Release check", command: "propagate release --check", status: "partial", at: "2026-10-17T07:58:16.595Z", outcome: "exited 0 (READY)", reason: null,
+      note: "Which gate passed or failed is not recorded: `release --check` writes no result of its own. The command ledger keeps only the exit status and the duration.",
+      rows: [{ id: "x1", at: "2026-10-17T07:58:16.595Z", outcome: "ok", ms: 125314, origin: "interactive" }, { id: "x0", at: "2026-10-17T07:22:19.979Z", outcome: "error", ms: 100344, origin: "widget" }],
+      summary: { runs: 17, nonZero: 3, shown: 2, limit: 20, gateResultsRecorded: false } },
+  ],
+};
+const part = (key, over) => ({ ...HISTORY_P.parts.find((p) => p.key === key), ...over });
+const histWith = (over) => ({ ...HISTORY_P, parts: HISTORY_P.parts.map((p) => (over[p.key] ? { ...p, ...over[p.key] } : p)) });
+const NONE = (key, command, reason) => ({ key, title: { release: "Release check", monitor: "Monitor", doctor: "Doctor" }[key], command, status: "none", at: null, outcome: null, reason, note: null, rows: [], summary: {} });
+
+test("Phase 4b paging: pageWindow is exact at the edges, clamps a page past the end, and an empty table is page 1 of 1", async () => {
+  const { ui } = await mount();
+  const w = (...a) => fromRealm(ui.pageWindow(...a));
+  assert.equal(ui.TABLE_PAGE_SIZE, 50);
+  assert.deepEqual(w(0, 0, 50), { pages: 1, page: 0, start: 0, end: 0, from: 0, to: 0 });
+  assert.deepEqual(w(50, 0, 50), { pages: 1, page: 0, start: 0, end: 50, from: 1, to: 50 });
+  assert.deepEqual(w(51, 1, 50), { pages: 2, page: 1, start: 50, end: 51, from: 51, to: 51 });
+  assert.deepEqual(w(194, 3, 50), { pages: 4, page: 3, start: 150, end: 194, from: 151, to: 194 });
+  assert.equal(w(194, 99, 50).page, 3, "a page past the end reads as the last page, never an empty one");
+  assert.equal(w(194, -4, 50).page, 0);
+});
+
+test("Phase 4b paging: 120 rows show 50 at a time with 'showing a-b of N', prev and next, and the summary line still reports the FULL count", async () => {
+  const m = await mount4b("backlog", BACKLOG_BIG);
+  assert.equal(dtRows(m.app).length, 50);
+  assert.equal(showing(m.app), "showing 1–50 of 120");
+  assert.match(textOf(detail(m.app)), /120 items in 4 files/, "the summary is the full population, not the page");
+  assert.ok(isDisabled(pagerBtn(m.app, /previous/)), "no page before the first");
+  click(pagerBtn(m.app, /next/)); await m.settle();
+  assert.equal(showing(m.app), "showing 51–100 of 120");
+  assert.equal(dtRows(m.app).length, 50);
+  click(pagerBtn(m.app, /next/)); await m.settle();
+  assert.equal(showing(m.app), "showing 101–120 of 120");
+  assert.equal(dtRows(m.app).length, 20);
+  assert.ok(isDisabled(pagerBtn(m.app, /next/)), "no page after the last");
+  click(pagerBtn(m.app, /next/)); await m.settle();
+  assert.equal(showing(m.app), "showing 101–120 of 120", "a click on a disabled next goes nowhere");
+  click(pagerBtn(m.app, /previous/)); await m.settle();
+  assert.equal(showing(m.app), "showing 51–100 of 120");
+  assert.match(textOf(pagerOf(m.app)), /page 2 of 3/);
+});
+
+test("Phase 4b paging: a table of 50 rows or fewer has no pager at all", async () => {
+  const m = await mount4b("backlog", BACKLOG_P);
+  assert.ok(pagerOf(m.app) === null);
+  assert.equal(dtRows(m.app).length, 5);
+  const exactly = await mount4b("backlog", { ...BACKLOG_BIG, rows: BACKLOG_BIG.rows.slice(0, 50) });
+  assert.ok(pagerOf(exactly.app) === null, "50 rows fit on the one page");
+  const over = await mount4b("backlog", { ...BACKLOG_BIG, rows: BACKLOG_BIG.rows.slice(0, 51) });
+  assert.equal(showing(over.app), "showing 1–50 of 51", "51 is the first count that needs a second page");
+});
+
+test("Phase 4b paging: SORT acts on every row before the page is cut -- the last row of 120 comes first when sorted by priority, and a sort returns to page 1", async () => {
+  const m = await mount4b("backlog", BACKLOG_BIG);
+  const hdr = () => byTag(m.app, "th").find((t) => /^priority/.test(textOf(t)));
+  // The page opens sorted by priority ascending already (P0 first), so the P0 item that sits LAST in the payload is on page 1.
+  assert.match(textOf(dtRows(m.app)[0]), /item 119/, "sorted across all 120 rows, not within the first page");
+  assert.equal(dtRows(m.app).length, 50);
+  click(pagerBtn(m.app, /next/)); await m.settle();
+  assert.equal(showing(m.app), "showing 51–100 of 120");
+  click(hdr()); await m.settle();
+  assert.equal(showing(m.app), "showing 1–50 of 120", "changing the order puts the window back at the start");
+  assert.match(textOf(dtRows(m.app)[dtRows(m.app).length - 1]), /none/, "descending: the unprioritised ones now lead the list's tail end");
+  click(hdr()); await m.settle();
+  assert.match(textOf(dtRows(m.app)[0]), /item 119/, "ascending again: the single P0 is first across the whole set");
+});
+
+test("Phase 4b paging: a FILTER applies before paging, the pager then counts the filtered rows, and a filter returns to page 1", async () => {
+  const m = await mount4b("backlog", BACKLOG_BIG);
+  click(pagerBtn(m.app, /next/)); await m.settle();
+  assert.equal(showing(m.app), "showing 51–100 of 120");
+  const chip = (re) => byClass(m.app, "chip").find((c) => re.test(textOf(c)));
+  click(chip(/^todo/)); await m.settle();
+  assert.equal(showing(m.app), "showing 1–50 of 60", "page 2 became page 1, and the total is the FILTERED 60, not 120");
+  assert.equal(dtRows(m.app).length, 50);
+  assert.match(textOf(detail(m.app)), /120 items in 4 files/, "the summary line keeps the whole population");
+  click(pagerBtn(m.app, /next/)); await m.settle();
+  assert.equal(showing(m.app), "showing 51–60 of 60");
+  click(chip(/^P0/)); await m.settle();
+  assert.ok(pagerOf(m.app) === null, "one row left (item 119 is the only P0 and it is a todo), so no pager");
+  assert.equal(dtRows(m.app).length, 1);
+});
+
+test("Phase 4b paging: filter + filter that match nothing say so with the filters named, and 'clear filters' restores the whole table at page 1", async () => {
+  const m = await mount4b("backlog", BACKLOG_BIG);
+  const chip = (re) => byClass(m.app, "chip").find((c) => re.test(textOf(c)));
+  click(chip(/^state/)); await m.settle();
+  click(chip(/^P0/)); await m.settle();
+  assert.equal(dtRows(m.app).length, 0);
+  assert.equal(byTag(m.app, "table").length, 0);
+  assert.match(textOf(detail(m.app)), /No item matches P0 \+ state among 120/);
+  click(btnText(detail(m.app), /clear filters/)); await m.settle();
+  assert.equal(showing(m.app), "showing 1–50 of 120");
+});
+
+test("Phase 4b paging: '[' and ']' page while focus is in the table; PageUp and PageDown are left to scroll; a one-page table ignores them", async () => {
+  const m = await mount4b("backlog", BACKLOG_BIG);
+  const key = (k) => { const ev = { type: "keydown", key: k, prevented: false, preventDefault() { this.prevented = true; } }; byTag(m.app, "table")[0].dispatchEvent(ev); return ev; };
+  const next = key("]"); await m.settle();
+  assert.equal(showing(m.app), "showing 51–100 of 120");
+  assert.equal(next.prevented, true);
+  const pd = key("PageDown"); await m.settle();
+  assert.equal(pd.prevented, false, "PageDown is not taken");
+  assert.equal(showing(m.app), "showing 51–100 of 120");
+  key("["); await m.settle();
+  assert.equal(showing(m.app), "showing 1–50 of 120");
+  const before = key("["); await m.settle();
+  assert.equal(before.prevented, false, "'[' on the first page does nothing and does not swallow the key");
+  const small = await mount4b("backlog", BACKLOG_P);
+  const ev = { type: "keydown", key: "]", prevented: false, preventDefault() { this.prevented = true; } };
+  byTag(small.app, "table")[0].dispatchEvent(ev);
+  assert.equal(ev.prevented, false);
+});
+
+test("Phase 4b paging: Claims (194 rows) is paged too, and its summary line still says 194 findings", async () => {
+  const rows = Array.from({ length: 194 }, (_, i) => ({ id: "c" + i, kind: "expired-date", kindLabel: "expired date", file: GH + "a/D" + i + ".md", line: i + 1, claim: "x", message: "finding " + i, historical: false }));
+  const m = await mountPage("claims", { ...CLAIMS_P, rows, kinds: [{ kind: "expired-date", label: "expired date", count: 194 }], summary: { ...CLAIMS_P.summary, findings: 194 } });
+  assert.equal(dtRows(m.app).length, 50);
+  assert.equal(showing(m.app), "showing 1–50 of 194");
+  assert.match(textOf(detail(m.app)), /194 findings/);
+  for (let i = 0; i < 3; i++) { click(pagerBtn(m.app, /next/)); await m.settle(); }
+  assert.equal(showing(m.app), "showing 151–194 of 194");
+  assert.equal(dtRows(m.app).length, 44);
+});
+
+/* ---- Backlog ---- */
+
+test("Phase 4b backlog: columns are priority, id, shortened item, file:line and kind; a long item is cut with its full text in the tooltip; markup is text", async () => {
+  const m = await mount4b("backlog", BACKLOG_P);
+  assert.match(textOf(detail(m.app)), /^Backlog/);
+  assert.match(textOf(detail(m.app)), /What open work is recorded, and what is unprioritised\? · read-only/);
+  assert.deepEqual(byTag(m.app, "th").map(textOf).map((t) => t.replace(/ [▴▾]$/, "")), ["priority", "id", "item", "file:line", "kind"]);
+  assert.match(textOf(dtRows(m.app)[0]), /^P0TM-001fix the thinga\/TODOS\.md:10todo$/, "P0 first by default");
+  const long = dtRows(m.app).find((r) => /onerror/.test(textOf(r)));
+  assert.ok(textOf(long).length < 330 && /…/.test(textOf(long)), "a 300-character item is cut in the row");
+  assert.equal(byTag(m.app, "img").length, 0, "markup in an item is never injected as HTML");
+  hover(long); await m.settle();
+  assert.ok(textOf(tipBox(m.app)).includes("long ".repeat(60).trim()), "the tooltip carries the full text");
+  assert.match(textOf(tipBox(m.app)), /also recorded in 2 other register\(s\)/);
+  unhover(long);
+});
+
+test("Phase 4b backlog: the summary names items, files and the priority breakdown, then the CLI's floor caveat, then what is NOT listed", async () => {
+  const m = await mount4b("backlog", BACKLOG_P);
+  const t = textOf(detail(m.app));
+  assert.match(t, /5 items in 4 files · P0 1 · P1 0 · P2 1 · P3 0 · none 3 · 1 duplicates merged/);
+  assert.match(t, /3 of 5 carry NO priority — so "2 prioritised" is a floor, not a ranking/);
+  assert.match(t, /3 handover sections \(1 open\) are not ranked items and are not listed here/);
+  assert.match(t, /1 registers delegate to an external tracker/);
+  assert.ok(byClass(m.app, "caveat").length === 1, "the caveat is its own line, not buried in the summary");
+});
+
+test("Phase 4b backlog: priority chips (P0..P3, none) and kind chips filter, a second click clears, and each chip shows its count", async () => {
+  const m = await mount4b("backlog", BACKLOG_P);
+  const chips = () => byClass(m.app, "chip").map(textOf);
+  assert.deepEqual(chips(), ["any priority5", "P01", "P10", "P21", "P30", "none3", "any kind5", "todo1", "state1", "issue1", "other2"]);
+  const chip = (re) => byClass(m.app, "chip").find((c) => re.test(textOf(c)));
+  click(chip(/^none/)); await m.settle();
+  assert.equal(dtRows(m.app).length, 3);
+  click(chip(/^other/)); await m.settle();
+  assert.equal(dtRows(m.app).length, 2, "priority and kind compose");
+  click(chip(/^none/)); await m.settle();
+  assert.equal(dtRows(m.app).length, 2, "clearing priority keeps the kind filter");
+  click(chip(/^other/)); await m.settle();
+  assert.equal(dtRows(m.app).length, 5);
+  click(chip(/^P3/)); await m.settle();
+  assert.match(textOf(detail(m.app)), /No item matches P3 among 5/, "a priority nobody holds is stated, not an empty table");
+});
+
+test("Phase 4b backlog: a row copies file:line; a missing line copies the file; a missing file is inert and its tooltip says why", async () => {
+  const m = await mount4b("backlog", BACKLOG_P);
+  const wrote = clipboard(m);
+  const row = (re) => dtRows(m.app).find((r) => re.test(textOf(r)));
+  click(row(/TM-001/)); await m.settle();
+  click(row(/no line recorded/)); await m.settle();
+  assert.deepEqual(Array.from(wrote), [GH + "a/TODOS.md:10", GH + "d/NOTES.md"]);
+  const inert = row(/no file recorded/);
+  assert.ok(/\binert\b/.test(inert.getAttribute("class")));
+  hover(inert); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /no file recorded for this item/);
+  unhover(inert);
+  click(inert); await m.settle();
+  assert.equal(wrote.length, 2);
+});
+
+test("Phase 4b backlog: the empty state names the files read; a failed source is its reason and never a table", async () => {
+  const empty = await mount4b("backlog", { ...BACKLOG_P, rows: [], kinds: [], summary: { ...BACKLOG_P.summary, items: 0, files: 0, caveat: null, byPriority: { P0: 0, P1: 0, P2: 0, P3: 0, none: 0 } } });
+  assert.match(textOf(detail(empty.app)), /0 open items in 4 register files read \(2 STATE\.md, 1 TODOS\.md, 1 ISSUES\.md\)/);
+  assert.equal(byTag(empty.app, "table").length, 0);
+  const bad = await mount4b("backlog", respond(502, { ok: false, error: "backlog found 0 STATE, TODOS or ISSUES files -- it ran and looked at nothing, which is not the same as nothing being wrong" }));
+  const t = textOf(detail(bad.app));
+  assert.match(t, /backlog could not be read — backlog found 0 STATE, TODOS or ISSUES files/);
+  assert.equal(byTag(bad.app, "table").length, 0);
+  assert.doesNotMatch(t, /0 open items/, "a failure is not reported as an empty backlog");
+});
+
+test("Phase 4b backlog: Registers is still there, still has no button, and its header links to Backlog", async () => {
+  const reg = { error: null, issues: [], todos: [], handovers: [] };
+  const m = await mount({ hash: "#/registers", routes: { "/api/registers": reg } });
+  const links = findAll(detail(m.app), (n) => n.nodeType === 1 && n.localName === "a");
+  assert.equal(links.length, 1);
+  assert.equal(links[0].getAttribute("href"), "#/backlog");
+  assert.equal(buttons(detail(m.app)).length, 0, "the link is an anchor: Registers gained no write control");
+  assert.ok(byClass(m.app, "div").some((b) => /REGISTERS/.test(textOf(b))), "the rail entry stays for now");
+});
+
+/* ---- Goals & Plans ---- */
+
+test("Phase 4b goals: goals and plans are two tables; an unreadable goals file is a row with its reason; unknown is not closed", async () => {
+  const m = await mount4b("goals", GOALS_P);
+  const t = textOf(detail(m.app));
+  assert.match(t, /^Goals & Plans/);
+  assert.match(t, /What are we building toward, and which plans are live\? · read-only/);
+  assert.equal(byTag(m.app, "table").length, 2);
+  const [gt, pt] = byTag(m.app, "table");
+  assert.equal(byClass(gt, "dt-row").length, 5, "four goals and the unreadable file");
+  assert.equal(byClass(pt, "dt-row").length, 5, "four plans and the unreadable one");
+  const unread = byClass(gt, "dt-row").find((r) => /unreadable/.test(textOf(r)));
+  assert.match(textOf(unread), /format not recognised/, "the reason is on the row");
+  const statuses = byClass(gt, "dt-row").map((r) => textOf(byClass(r, "badge")[0]));
+  assert.deepEqual(statuses, ["open", "open", "unknown", "unreadable", "closed"], "open first, then unknown, then the unreadable file; closed last");
+  assert.match(t, /Goals — 4 in 2 files · 2 open · 1 closed · 1 unknown · 1 files unreadable/);
+  assert.match(t, /2 name a command · 1 declare themselves judgement · 1 neither/);
+  assert.equal(byTag(detail(m.app), "b").length, 0, "markup in a title is text");
+  assert.match(t, /open <b>judgement<\/b>/);
+});
+
+test("Phase 4b goals: a goal row copies its FILE; a goal with a command has a second Copy that copies the command (all lines) and not the file", async () => {
+  const m = await mount4b("goals", GOALS_P);
+  const wrote = clipboard(m);
+  const gt = byTag(m.app, "table")[0];
+  const row = (re) => byClass(gt, "dt-row").find((r) => re.test(textOf(r)));
+  click(row(/open with a command/)); await m.settle();
+  assert.deepEqual(Array.from(wrote), [GH + "G1/GOALS.md"], "the row copies the file");
+  const cmdBtn = buttons(row(/open with a command/)).find((b) => /copy command/.test(textOf(b)));
+  assert.ok(cmdBtn, "a goal with a command has a Copy for it");
+  click(cmdBtn); await m.settle();
+  assert.deepEqual(Array.from(wrote), [GH + "G1/GOALS.md", "node check.mjs\nnode second.mjs"], "the button copied only the command, and did not also fire the row");
+  assert.equal(buttons(row(/open <b>judgement/)).length, 0, "judgement has no command to copy");
+  assert.match(textOf(row(/open <b>judgement/)), /judgement$/);
+  assert.match(textOf(row(/closed, nobody can check it/)), /none - cannot be checked/);
+});
+
+test("Phase 4b goals: the unreadable goals file copies its path; every row acts or says why", async () => {
+  const m = await mount4b("goals", GOALS_P);
+  const wrote = clipboard(m);
+  const gt = byTag(m.app, "table")[0];
+  click(byClass(gt, "dt-row").find((r) => /unreadable/.test(textOf(r)))); await m.settle();
+  assert.deepEqual(Array.from(wrote), [GH + "G2/GOALS.md"]);
+  hover(byClass(gt, "dt-row").find((r) => /unreadable/.test(textOf(r)))); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /this file was not read: no '## <N> · <title>' goal sections found/);
+});
+
+test("Phase 4b plans: status words, an unknown date stays 'date unknown', the unreadable plan shows its reason, a row copies the plan path", async () => {
+  const m = await mount4b("goals", GOALS_P);
+  const wrote = clipboard(m);
+  const pt = byTag(m.app, "table")[1];
+  const rows = byClass(pt, "dt-row");
+  assert.deepEqual(rows.map((r) => textOf(byClass(r, "badge")[0])), ["undeclared", "unreadable", "linked", "finished", "archived"]);
+  assert.match(textOf(rows.find((r) => /c\.md/.test(textOf(r)))), /date unknown/);
+  assert.match(textOf(rows.find((r) => /unreadable/.test(textOf(r)))), /EACCES: permission denied/);
+  click(rows.find((r) => /2026-08-02-b/.test(textOf(r)))); await m.settle();
+  assert.deepEqual(Array.from(wrote), [GH + "propagate/docs/plans/2026-08-02-b.md"]);
+  assert.match(textOf(detail(m.app)), /Plans — 5 plans under propagate \(50 markdown files scanned\)/);
+  assert.match(textOf(detail(m.app)), /linked = cited directly by a hub seed · finished = its Status names a finished word · archived = it sits under archive\/ · undeclared = none of those/);
+});
+
+test("Phase 4b plans: a plans failure is a banner with its reason in the plans' place and the goals table still shows; an empty root names what was scanned", async () => {
+  const bad = await mount4b("goals", { ...GOALS_P, plans: { ok: false, error: "plans check scanned 0 markdown files under /r -- it ran and looked at nothing" } });
+  assert.equal(byTag(bad.app, "table").length, 1, "only the goals table");
+  assert.match(textOf(detail(bad.app)), /plans could not be read — plans check scanned 0 markdown files/);
+  assert.equal(byClass(byTag(bad.app, "table")[0], "dt-row").length, 5, "goals are unaffected");
+  const none = await mount4b("goals", { ...GOALS_P, plans: { ok: true, rows: [], summary: { root: GH + "propagate", scanned: 12, plans: 0, byStatus: {}, excluded: 0 } } });
+  assert.match(textOf(detail(none.app)), /0 plans among 12 markdown files scanned under propagate/);
+});
+
+test("Phase 4b goals: a failed goals source is its reason, never an empty table; zero goals names the files", async () => {
+  const bad = await mount4b("goals", respond(502, { ok: false, error: "goals found no GOALS.md -- it ran and looked at nothing" }));
+  assert.match(textOf(detail(bad.app)), /goals could not be read — goals found no GOALS\.md/);
+  assert.equal(byTag(bad.app, "table").length, 0);
+  const zero = await mount4b("goals", { ...GOALS_P, rows: [], summary: { ...GOALS_P.summary, goals: 0, open: 0, closed: 0, unknown: 0, unreadable: 0, files: 3 } });
+  assert.match(textOf(detail(zero.app)), /0 goals in 3 GOALS\.md files/);
+});
+
+/* ---- History ---- */
+
+test("Phase 4b history: three recorded parts, each with its time, outcome and rows; it only ever asks for /api/history", async () => {
+  const m = await mount4b("history", HISTORY_P);
+  const t = textOf(detail(m.app));
+  assert.match(t, /^History/);
+  assert.match(t, /What did the last release check, monitor pass and doctor run say\? · read-only/);
+  assert.match(t, /3 of 3 have a recorded result/);
+  assert.match(t, /This page never runs release, monitor or doctor/);
+  const parts = byClass(m.app, "hpart");
+  assert.deepEqual(parts.map((p) => p.getAttribute("data-part")), ["release", "monitor", "doctor"], "release, then monitor, then doctor");
+  assert.match(textOf(parts[2]), /Doctor — last recorded 2026-10-17 08:10 UTC/);
+  assert.match(textOf(parts[2]), /5 fail · 543 warn · 3 accepted · 182 pass/);
+  assert.deepEqual(byClass(parts[2], "dt-row").map((r) => textOf(byClass(r, "nm")[0])), ["Delivery & <b>x</b>", "State"], "worst section first; markup in a name is text");
+  assert.match(textOf(parts[1]), /Monitor — last recorded 2026-10-17 08:08 UTC/);
+  assert.equal(byClass(parts[1], "dt-row").length, 2);
+  assert.match(textOf(byClass(parts[1], "dt-row")[0]), /could not look/);
+  assert.match(textOf(parts[1]), /5589 runs recorded, 736 that notified, 1 that could not look · showing the latest 2/);
+  assert.deepEqual(m.calls.filter((c) => /^[/]api[/]/.test(c) && !["/api/inbox", "/api/surface", "/api/seen-edges"].includes(c)), ["/api/history"], "no other data request: it never asks for a release, monitor or doctor run");
+  assert.deepEqual(m.unstubbed, []);
+});
+
+test("Phase 4b history: release is PARTIAL -- it says plainly that no gate result is recorded, shows the exit rows, and offers the command", async () => {
+  const m = await mount4b("history", HISTORY_P);
+  const rel = byClass(m.app, "hpart")[0];
+  const t = textOf(rel);
+  assert.match(t, /Release check — last recorded 2026-10-17 07:58 UTC/);
+  assert.match(t, /exited 0 \(READY\)/);
+  assert.match(t, /Which gate passed or failed is not recorded/);
+  assert.equal(byClass(rel, "caveat").length, 1, "the gap is a visible caveat, not a footnote");
+  assert.deepEqual(byClass(rel, "dt-row").map((r) => textOf(byClass(r, "badge")[0])), ["exit 0", "non-zero"]);
+  assert.match(t, /17 runs recorded, 3 exited non-zero/);
+  assert.match(textOf(byClass(rel, "cmdrow")[0]), /propagate release --check/);
+  const wrote = clipboard(m);
+  click(buttons(byClass(rel, "cmdrow")[0])[0]); await m.settle();
+  assert.deepEqual(Array.from(wrote), ["propagate release --check"], "the command is copied, never run");
+});
+
+test("Phase 4b history: nothing recorded says so, names the reason, and offers the command to copy", async () => {
+  const none = histWith({ release: NONE("release", "propagate release --check", "no recorded run — the command ledger holds no release run, and release --check does not persist its result"),
+    monitor: NONE("monitor", "propagate monitor --dry-run", "no recorded run — there is no monitor.log, so monitor has never run here"),
+    doctor: NONE("doctor", "propagate doctor", "no recorded run — no snapshot yet — the monitor has not run since this was added") });
+  const m = await mount4b("history", { ...none, summary: { withARecord: 0, of: 3, limit: 20 } });
+  const t = textOf(detail(m.app));
+  assert.match(t, /0 of 3 have a recorded result/);
+  assert.match(t, /Release check — nothing recorded/);
+  assert.match(t, /no recorded run — the command ledger holds no release run, and release --check does not persist its result/);
+  assert.equal(byTag(m.app, "table").length, 0, "no table where there is nothing to list");
+  const cmds = byClass(m.app, "cmdrow").map(textOf);
+  assert.equal(cmds.length, 3);
+  assert.ok(["propagate release --check", "propagate monitor --dry-run", "propagate doctor"].every((c) => cmds.some((x) => x.includes(c))));
+  assert.match(t, /Run it yourself \(this page never does\)/);
+});
+
+test("Phase 4b history: a failed doctor run shows its reason and the last good time; a part that cannot be read is a banner and the other two still show", async () => {
+  const m = await mount4b("history", histWith({
+    doctor: { status: "failed", rows: [], outcome: "the last run failed", reason: "doctor failed on its last run — boom", summary: { lastGoodAt: "2026-10-17T04:00:00.000Z" } },
+    monitor: { status: "error", rows: [], outcome: null, reason: "monitor.log has 3 lines and none match the format logRun writes — the scan has gone blind, it has not found nothing", summary: {} } }));
+  const parts = byClass(m.app, "hpart");
+  assert.match(textOf(parts[2]), /The last doctor run failed: doctor failed on its last run — boom · last good run 2026-10-17 04:00 UTC/);
+  assert.equal(byClass(parts[2], "dt-row").length, 0);
+  assert.match(textOf(parts[1]), /monitor history could not be read — monitor\.log has 3 lines and none match the format/);
+  assert.equal(byClass(parts[1], "dt-row").length, 0, "an unreadable log is not shown as an empty table");
+  assert.equal(byClass(parts[0], "dt-row").length, 2, "release is unaffected");
+  const none = await mount4b("history", histWith({ doctor: { status: "failed", rows: [], reason: "boom", summary: { lastGoodAt: null } } }));
+  assert.match(textOf(byClass(none.app, "hpart")[2]), /there is no earlier good run/);
+});
+
+test("Phase 4b history: a doctor row opens that section in Health, and the section name round-trips through the hash", async () => {
+  const m = await mount4b("history", HISTORY_P);
+  const doc = byClass(m.app, "hpart")[2];
+  const dr = byClass(doc, "dt-row")[0];
+  assert.ok(!/\binert\b/.test(dr.getAttribute("class")));
+  click(dr); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/health?section=" + encodeURIComponent("Delivery & <b>x</b>"));
+  assert.equal(m.ui.parseHash(m.ctx.location.hash).section, "Delivery & <b>x</b>");
+});
+
+test("Phase 4b history: a monitor row copies its log line; a release row is inert and says what was not recorded", async () => {
+  const m = await mount4b("history", HISTORY_P);
+  const wrote = clipboard(m);
+  const [rel, mon] = byClass(m.app, "hpart");
+  click(byClass(mon, "dt-row")[1]); await m.settle();
+  assert.deepEqual(Array.from(wrote), ["RAW LINE 1"]);
+  const rr = byClass(rel, "dt-row")[0];
+  assert.ok(/\binert\b/.test(rr.getAttribute("class")));
+  hover(rr); await m.settle();
+  assert.match(textOf(tipBox(m.app)), /which gate failed was not recorded/);
+  assert.doesNotMatch(textOf(tipBox(m.app)), new RegExp(m.ui.ROW_NO_REASON));
+  unhover(rr);
+  click(rr); await m.settle();
+  assert.equal(wrote.length, 1, "an inert row copies nothing");
+});
+
+test("Phase 4b history: a failed source is its reason and never an empty page", async () => {
+  const bad = await mount4b("history", respond(502, { ok: false, error: "history exploded" }));
+  assert.match(textOf(detail(bad.app)), /history could not be read — history exploded/);
+  assert.equal(byClass(bad.app, "hpart").length, 0);
+});
+
+/* ---- routing, rail, refresh, CSS ---- */
+
+test("Phase 4b: the new pages are lazy, each asks only for its own endpoint, and each shows a skeleton while loading", async () => {
+  const j = await mount({ hash: "#/judge" });
+  for (const e of ["/api/backlog", "/api/goals", "/api/history"]) assert.equal(j.calls.filter((c) => c === e).length, 0, e + " is lazy");
+  for (const name of ["backlog", "goals", "history"]) {
+    const payload = { backlog: BACKLOG_P, goals: GOALS_P, history: HISTORY_P }[name];
+    const m = await mount4b(name, payload);
+    assert.equal(m.calls.filter((c) => c === "/api/" + name).length, 1, name);
+    assert.deepEqual(m.unstubbed, [], name);
+    const pending = await mount({ hash: "#/" + name, untracked: ["/api/" + name], routes: { ["/api/" + name]: () => new Promise(() => {}) } });
+    assert.ok(byClass(pending.app, "skel").length > 0, name + " shows a skeleton while loading");
+    assert.equal(byTag(pending.app, "table").length, 0);
+  }
+});
+
+test("Phase 4b: the hashes route to the pages, History sits beside Activity and Graph, and Backlog and Goals lead the WORK group", async () => {
+  const { ui } = await mount();
+  for (const v of ["backlog", "goals", "history"]) assert.equal(ui.parseHash("#/" + v).view, v);
+  assert.equal(ui.parseHash("#/backlogs").view, "judge", "an unknown name still lands on Judge");
+  const groups = fromRealm(ui.railGroups(ui.DIVISIONS)).map((g) => g.key + ":" + g.items.map((i) => i.key).join(","));
+  assert.deepEqual(groups, ["today:overview", "settle:judge,unblock", "machinery:health,claims,rules,caps,skills", "work:backlog,goals,registers,reminders", "history:activity,history,graph"]);
+});
+
+test("Phase 4b: refresh on each new page bypasses the server's cache for that page and re-reads it", async () => {
+  for (const [name, payload] of [["backlog", BACKLOG_P], ["goals", GOALS_P], ["history", HISTORY_P]]) {
+    const m = await mount4b(name, payload);
+    const before = m.fetches.filter((f) => f.path === "/api/" + name).length;
+    click(btnText(m.app, /^refresh$/)); await m.settle();
+    const urls = m.fetches.filter((f) => f.path === "/api/" + name).map((f) => f.url);
+    assert.ok(urls.some((u) => /fresh=1/.test(u)), name + " refresh asks for fresh numbers: " + JSON.stringify(urls));
+    assert.ok(urls.length > before + 1, name + " then re-reads the page");
+  }
+});
+
+test("Phase 4b: every row of the new pages is focusable and either acts or says why it does not", async () => {
+  for (const [name, payload] of [["backlog", BACKLOG_P], ["goals", GOALS_P], ["history", HISTORY_P]]) {
+    const m = await mount4b(name, payload);
+    assert.ok(dtRows(m.app).length > 0, name);
+    for (const r of dtRows(m.app)) {
+      assert.equal(r.getAttribute("tabIndex"), "0", name + ": a row is not focusable");
+      if (/\binert\b/.test(r.getAttribute("class"))) {
+        hover(r); await m.settle();
+        const tip = textOf(tipBox(m.app));
+        assert.ok(tip && !tip.includes(m.ui.ROW_NO_REASON), `${name}: an inert row gave no specific reason (${tip})`);
+        unhover(r);
+      }
+    }
+  }
+});
+
+test("Phase 4b: every badge class the new pages render has its own CSS rule (the UNMATCHED lesson)", async () => {
+  const { stylesheet } = await import("../../commands/ui.mjs");
+  const css = stylesheet().replace(/\/\*[\s\S]*?\*\//g, "");
+  const seen = new Set();
+  for (const [name, payload] of [["backlog", BACKLOG_P], ["goals", GOALS_P], ["history", HISTORY_P]]) {
+    const m = await mount4b(name, payload);
+    for (const b of byClass(m.app, "badge")) for (const c of b.getAttribute("class").split(/\s+/)) if (c !== "badge") seen.add(c);
+  }
+  // Every class the client CAN emit for these pages, by name, so a value the fixtures happen not to reach still needs a rule.
+  for (const c of ["pri-P0", "pri-P1", "pri-P2", "pri-P3", "pri-none", "g-open", "g-closed", "g-unknown", "g-unreadable", "pl-linked", "pl-finished", "pl-archived", "pl-undeclared", "pl-unreadable", "h-recorded", "h-failed"]) seen.add(c);
+  assert.ok(seen.size >= 16, `only ${seen.size} badge classes -- the scan has gone blind`);
   const bare = [...seen].filter((c) => !new RegExp(`\\.badge\\.${c}\\b`).test(css));
   assert.deepEqual(bare, [], `rendered with no rule: ${bare.join(", ")}`);
 });

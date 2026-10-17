@@ -1,5 +1,30 @@
 # propagate — State
 
+## Dashboard Phase 4b: paging, Backlog, Goals & Plans and History — 2026-10-17 (unreleased, not committed)
+Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; this pass is 4b, the rest of the read-first views). Built on 4a below.
+- **DataTable pages itself** (`commands/ui.client.js`, `TABLE_PAGE_SIZE`, `pageWindow`): a table of more rows than one page shows
+  "showing a-b of N" with prev and next, and `[` and `]` page while a row has focus (PageUp and PageDown are left to scroll).
+  Sort and filter act on every row before the window is cut; a changed sort, filter or refresh returns to page 1. Claims is
+  paged by it; no page was changed to get this.
+- **Backlog** (`GET /api/backlog`): the ranked items of the backlog library, priority and kind chips, row copies `file:line`, the
+  CLI's own floor caveat (now one function, `priorityCaveat` in `lib/report/backlog.mjs`, which `cli.mjs backlog --brief` also uses).
+  Handovers are summarised, not rows. **Registers is kept** (rail entry and rows) and its header links to Backlog with an anchor.
+- **Goals & Plans** (`GET /api/goals`): goals (an unreadable GOALS.md is a row with its reason) and plans, two tables from one
+  response. Plans are read from this repo only; a plans failure is carried inside the response and shows in the plans' place without
+  failing the Goals tile. A goal with a command has a second Copy for it; nothing is ever run.
+- **History** (`GET /api/history`): the last RECORDED doctor, monitor and release results; the page never runs any of them and offers
+  each command to copy. It is a page-only source on the same cached run (`PAGE_ONLY_KEYS`), not a seventh tile.
+  **What is recorded:** doctor, the snapshot `monitor` writes (per-section rows); monitor, `monitor.log` (one row per run); release,
+  nothing of its own, so only the command ledger's exit status and duration. **Finding: `release --check` does not persist its
+  per-gate result**; persistence was deliberately not added (DECISIONS 2026-10-17, Phase 4b).
+- **Overview**: the Backlog and Goals tiles open their pages; no tile copies a command any more. Rail: WORK is Backlog, Goals,
+  Registers, Reminders; HISTORY is Activity, History, Graph. `SERVED_VIEWS` lists the three new views.
+- **Tests**: each tile's count is derived from its page's rows (`tests/unit/machinery.test.mjs`, now six pairs) and again by a second
+  route from the library's own data; paging, the three pages, routes, rail and badge CSS are in `tests/unit/ui-client.test.mjs`.
+  Every new guard was mutated red for its stated reason and restored. Derive the test count with `npm run test:affected`, not from here.
+- **Not done / open:** no browser pass (not asked for). `docs/REFERENCE.md` and `DESIGN.md` do not yet list the three endpoints or the
+  paging and pager; that is Phase 5. Registers can be deleted in a later, deliberate pass. Plans cover the propagate repo, not the hub.
+
 ## Dashboard Phase 4a: Claims, Rules, Caps and Skills pages, and the regrouped rail — 2026-10-17 (unreleased, not committed)
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; this pass is only the four machinery pages and the rail).
 Backlog, Goals and Plans, and the Release/Monitor/Doctor history are Phase 4b and untouched. Built on Phases 0 to 3 above.

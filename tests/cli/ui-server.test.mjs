@@ -91,10 +91,14 @@ before(async () => {
     evidenceFor: async (b) => { if (hooks.evidenceThrows) throw new Error("diff exploded"); return (await import("../../lib/report/evidence.mjs")).evidenceFor(b); },
     surfacePayload: async () => { if (hooks.surfaceThrows) throw new Error("surface exploded"); return { fixture: "surface" }; },
     // ttlMs 0: every request recomputes, so a per-test hook is seen. The cache itself is tested in machinery.test.mjs.
-    machinery: { ttlMs: 0, sources: Object.fromEntries(["claims", "rules", "caps", "skills", "backlog", "goals"].map((k) => [k, async () => {
+    // "history" (Phase 4b) is page-only: it has no count and no tile, so it returns a detail and nothing else.
+    machinery: { ttlMs: 0, sources: { ...Object.fromEntries(["claims", "rules", "caps", "skills", "backlog", "goals"].map((k) => [k, async () => {
       if (hooks.machineryThrows === k) throw new Error(k + " exploded");
       return { count: 7, of: 9, label: k + " things", top: "top of " + k, detail: { rows: [{ id: k + "-row" }], summary: { of: k } } };
-    }])) },
+    }])), history: async () => {
+      if (hooks.machineryThrows === "history") throw new Error("history exploded");
+      return { detail: { parts: [{ key: "doctor", status: "none" }], summary: { withARecord: 0, of: 3 } } };
+    } } },
   });
   ctx = { ...r, port, cookie: `ptok=${r.token}` };
 
@@ -417,8 +421,8 @@ test("/api/machinery answers six blocks behind the token, and one failing source
 
 // ── the four pages behind the tiles (dashboard Phase 4a) ────────────────────
 
-test("/api/claims, /rules, /caps and /skills answer their rows from the same source as the tile, behind the token", async () => {
-  for (const k of ["claims", "rules", "caps", "skills"]) {
+test("/api/claims, /rules, /caps, /skills, /backlog and /goals answer their rows from the same source as the tile, behind the token", async () => {
+  for (const k of ["claims", "rules", "caps", "skills", "backlog", "goals"]) {
     const r = await call(ctx, "GET", "/api/" + k);
     assert.equal(r.status, 200, k);
     assert.equal(r.json.ok, true, k);
@@ -431,6 +435,25 @@ test("/api/claims, /rules, /caps and /skills answer their rows from the same sou
   assert.equal(tile.json.claims.count, 7);
   assert.equal(tile.json.claims.rows, undefined, "the tile payload does not carry the rows");
   assert.equal(tile.json.details, undefined, "and the detail map is not serialised");
+});
+
+test("/api/history (Phase 4b) answers the recorded parts behind the token, has no headline and no tile block, and a failure is a 502 with its reason", async () => {
+  const r = await call(ctx, "GET", "/api/history");
+  assert.equal(r.status, 200);
+  assert.equal(r.json.ok, true);
+  assert.deepEqual(r.json.parts, [{ key: "doctor", status: "none" }]);
+  assert.equal(r.json.headline, null, "history has no tile, so no headline figure");
+  assert.equal((await call(ctx, "GET", "/api/history", { token: "nope" })).status, 401);
+  assert.equal((await call(ctx, "POST", "/api/history", { body: {} })).status === 200, false, "not a write route");
+  const tile = await call(ctx, "GET", "/api/machinery");
+  assert.equal(tile.json.history, undefined, "the tile payload has six blocks; history is not one of them");
+  hooks.machineryThrows = "history";
+  try {
+    const bad = await call(ctx, "GET", "/api/history");
+    assert.equal(bad.status, 502);
+    assert.deepEqual(bad.json, { ok: false, error: "history exploded" });
+    assert.equal((await call(ctx, "GET", "/api/backlog")).status, 200, "the other pages are untouched");
+  } finally { hooks = {}; }
 });
 
 test("a failed source is a 502 carrying its reason on its own page, never an empty table; the other pages are untouched", async () => {
@@ -474,6 +497,19 @@ test("/api/rules is the Rules page's data now: coverage rows, not the raw hub ru
   assert.ok(r.status === 200 || r.status === 502, "production path answers a page or a reason, got " + r.status);
   if (r.status === 200) assert.ok(Array.isArray(r.json.rows) && r.json.summary, "rows and a summary");
   else assert.ok(r.json.error, "a 502 says why");
+});
+
+test("/api/backlog, /goals and /history on the production construction path answer a page or a reason (the default sources are the arm the injected ones bypass)", async () => {
+  for (const k of ["backlog", "goals"]) {
+    const r = await call(real, "GET", "/api/" + k);
+    assert.ok(r.status === 200 || r.status === 502, k + " answered " + r.status);
+    if (r.status === 200) assert.ok(Array.isArray(r.json.rows) && r.json.summary, k + " rows and a summary");
+    else assert.ok(r.json.error, k + " 502 without a reason");
+  }
+  const h = await call(real, "GET", "/api/history");
+  assert.equal(h.status, 200, "history reads three files and cannot fail as a whole: " + JSON.stringify(h.json).slice(0, 200));
+  assert.deepEqual(h.json.parts.map((p) => p.key).sort(), ["doctor", "monitor", "release"]);
+  for (const p of h.json.parts) assert.ok(["recorded", "partial", "failed", "none", "error"].includes(p.status) && (p.status === "recorded" || p.status === "partial" || p.reason || p.status === "failed"), p.key + " " + p.status + " carries no reason");
 });
 
 test("/api/machinery on the production construction path (no overrides) answers six well-formed blocks, each ok or error with a reason", async () => {

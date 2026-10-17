@@ -128,9 +128,12 @@ const DIVISIONS = [
   { key: "rules", label: "RULES", group: "machinery" },
   { key: "caps", label: "CAPS", group: "machinery" },
   { key: "skills", label: "SKILLS", group: "machinery" },
+  { key: "backlog", label: "BACKLOG", group: "work" },
+  { key: "goals", label: "GOALS", group: "work" },
   { key: "registers", label: "REGISTERS", group: "work" },
   { key: "reminders", label: "REMINDERS", group: "work" },
   { key: "activity", label: "ACTIVITY", group: "history" },
+  { key: "history", label: "HISTORY", group: "history" },
   // Framed rather than dropped: lib/graph/graph-html.mjs renders a whole
   // interactive page at /graph, and open-ui.sh turns a widget route into a
   // hash -- so a link to it only resolves if the client routes it. It used to
@@ -145,7 +148,7 @@ const HASH_TO_VIEW = { ready: "judge", parked: "judge", gap: "judge", blocked: "
   reference: "health", analytics: "activity", stream: "activity", conflicts: "reminders",
   overview: "overview", judge: "judge", unblock: "unblock", health: "health", activity: "activity",
   registers: "registers", reminders: "reminders", graph: "graph",
-  claims: "claims", rules: "rules", caps: "caps", skills: "skills" };
+  claims: "claims", rules: "rules", caps: "caps", skills: "skills", backlog: "backlog", goals: "goals", history: "history" };
 
 /* PR-025, re-derived twice. The rail's group separator used to be `i === 4`, a position one insertion away from
    silently labelling the wrong group. It was then derived from an `explore` flag; Phase 4a (2026-10-17) replaced the
@@ -1126,6 +1129,28 @@ function sortRows(rows, value, dir, tie) {
 }
 
 /**
+ * Rows a DataTable shows at once. 50, for two measured reasons. Every row is focusable and carries tooltip handlers, so
+ * the DOM cost is per row: Claims alone is 194 rows, Backlog about 800. And 50 is the cap Registers already used, so a
+ * page that gained paging did not also change how much a person sees at once. The paging is in the table, not the
+ * pages: sort and filter act on EVERY row first and the window is cut from the result.
+ */
+const TABLE_PAGE_SIZE = 50;
+
+/**
+ * The window onto `total` rows for page `page` (0-based, clamped), as 1-based `from`/`to` for "showing 51-100 of 194"
+ * and 0-based `start`/`end` for slice. Pure, so the arithmetic is tested without a table. A page past the end (rows
+ * shrank under a filter) reads as the last page, never an empty one.
+ */
+function pageWindow(total, page, size) {
+  const n = Math.max(0, total | 0);
+  const sz = size > 0 ? size : TABLE_PAGE_SIZE;
+  const pages = Math.max(1, Math.ceil(n / sz));
+  const p = Math.min(Math.max(0, page | 0), pages - 1);
+  const start = p * sz;
+  const end = Math.min(n, start + sz);
+  return { pages: pages, page: p, start: start, end: end, from: n === 0 ? 0 : start + 1, to: end };
+}
+/**
  * The ONE table. Generalised from the Overview's sources table; Unblock's roots, Health,
  * Registers and Reminders all render through it, so a row looks, sorts, focuses and explains
  * itself the same way everywhere.
@@ -1138,6 +1163,7 @@ function sortRows(rows, value, dir, tie) {
  *   act       row -> function | null: Enter or a click runs it (a copy, in Registers and Reminders)
  *   tip       row -> {title, lines} | null: the page's one tooltip, on hover AND on focus
  *   rowClass  row -> extra class names; flashKey names the row that was just acted on ("copied")
+ *   pageSize  rows per page (default TABLE_PAGE_SIZE); a table of more rows shows "showing 1-50 of N" with prev and next
  *
  * EVERY row is keyboard-focusable, even an inert one, because focus is how a keyboard user gets
  * the tooltip. A row with neither `route` nor `act` is `inert`, and then `tip` is its reason; with
@@ -1146,18 +1172,39 @@ function sortRows(rows, value, dir, tie) {
  * focus, so Enter on a button never also fires the row.
  */
 const ROW_NO_REASON = "this row goes nowhere, and nothing says why";
-function DataTable({ columns, rows, rowKey, initialSort, tie, route, act, tip, rowClass, flashKey, label, nav }) {
+function DataTable({ columns, rows, rowKey, initialSort, tie, route, act, tip, rowClass, flashKey, label, nav, pageSize }) {
   const [sort, setSort] = useState(initialSort || null);
   const col = sort ? columns.find((c) => c.key === sort.key && c.value) : null;
+  // SORT FIRST, THEN PAGE: the order is over every row, and a page is a window onto it. Paging the rows and sorting
+  // the page would put the largest figure on page 1 only if it happened to be there. `rows` is whatever the caller
+  // already filtered, so a filter also applies before paging.
   const list = col ? sortRows(rows, col.value, sort.dir, tie) : rows;
+  const size = pageSize || TABLE_PAGE_SIZE;
+  // A page number is only meaningful for the rows and order it was chosen under. The signature (order + row count +
+  // first and last key) changes when a filter, a sort or a refresh changes them, and a changed signature reads as page 1.
+  // A filter that leaves the same first row, last row and count cannot be told apart, and cannot have moved the window.
+  const sig = (col ? col.key + sort.dir : "") + "|" + rows.length + "|" + (rows.length ? rowKey(rows[0]) + "|" + rowKey(rows[rows.length - 1]) : "");
+  const [pg, setPg] = useState({ n: 0, sig: sig });
+  // The stored page is dropped when the signature moves on. Without this, going back to an EARLIER signature (sorting a
+  // column twice returns to the first order) would find the old page number still stored under it and revive it.
+  useEffect(() => { setPg((p) => (p.sig === sig ? p : { n: 0, sig: sig })); }, [sig]);
+  const w = pageWindow(list.length, pg.sig === sig ? pg.n : 0, size);
+  const goPage = (n) => setPg({ n: n, sig: sig });
+  const shown = list.slice(w.start, w.end);
   const pickSort = (c) => setSort((s) => (s && s.key === c.key ? { key: c.key, dir: s.dir === "asc" ? "desc" : "asc" } : { key: c.key, dir: c.num ? "desc" : "asc" }));
-  return html`<table class="t dt" aria-label=${label || null}>
+  // "]" and "[" page while focus is in the table. PageUp and PageDown are NOT taken: they scroll, and a table that
+  // swallowed them would break the way a long page is read.
+  const pageKey = w.pages > 1 ? (e) => {
+    if (e.key === "]" && w.page < w.pages - 1) { e.preventDefault(); goPage(w.page + 1); }
+    else if (e.key === "[" && w.page > 0) { e.preventDefault(); goPage(w.page - 1); }
+  } : null;
+  const table = html`<table class="t dt" aria-label=${label || null} onKeyDown=${pageKey}>
     <thead><tr>${columns.map((c) => c.value
       ? html`<th key=${c.key} class=${(c.num ? "num " : "") + "sortable"} tabIndex="0" role="columnheader" scope="col"
           aria-sort=${sort && sort.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
           onClick=${() => pickSort(c)} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickSort(c); } }}>${c.label}${sort && sort.key === c.key ? (sort.dir === "asc" ? " ▴" : " ▾") : ""}</th>`
       : html`<th key=${c.key} class=${c.num ? "num" : ""} scope="col">${c.label}</th>`)}</tr></thead>
-    <tbody>${list.map((r) => {
+    <tbody>${shown.map((r) => {
       const to = route ? route(r) : null;
       const run = !to && act ? act(r) : null;
       const live = !!((to && nav) || run);
@@ -1172,6 +1219,15 @@ function DataTable({ columns, rows, rowKey, initialSort, tie, route, act, tip, r
       </tr>`;
     })}</tbody>
   </table>`;
+  if (w.pages <= 1) return table;
+  return html`<div class="dtpaged">${table}
+    <div class="pager" role="navigation" aria-label=${"pages of " + (label || "the table")} onKeyDown=${pageKey}>
+      <button class="ghost" disabled=${w.page === 0} aria-label="previous page" onClick=${() => w.page > 0 && goPage(w.page - 1)}>← prev</button>
+      <span role="status">showing ${w.from}–${w.to} of ${list.length}</span>
+      <button class="ghost" disabled=${w.page >= w.pages - 1} aria-label="next page" onClick=${() => w.page < w.pages - 1 && goPage(w.page + 1)}>next →</button>
+      <span class="dmeta">page ${w.page + 1} of ${w.pages} · "[" and "]" page while a row has focus</span>
+    </div>
+  </div>`;
 }
 
 /**
@@ -2171,45 +2227,40 @@ function NextStrip({ action, nav }) {
 }
 
 /**
- * The six machinery tiles. Claims, Rules, Caps and Skills open their own page (Phase 4a); Backlog and Goals wait for
- * Phase 4b and go to the closest page that exists (`route`) or copy the CLI command (`cmd`). The tooltip says which.
- * No tile is a dead end.
+ * The six machinery tiles. Every one opens its own page (Phase 4a: Claims, Rules, Caps, Skills; Phase 4b: Backlog and
+ * Goals), and the tooltip says which. No tile is a dead end, and none copies a command any more.
  */
 const MACH_TILES = [
   { key: "claims", title: "Claims", route: "claims", why: "Opens the Claims page, which lists every finding with its file and line" },
   { key: "rules", title: "Rules", route: "rules", why: "Opens the Rules page, which lists each rule with its status and where it is restated" },
   { key: "caps", title: "Caps", route: "caps", why: "Opens the Caps page, which lists the files over their size cap, worst first" },
   { key: "skills", title: "Skills", route: "skills", why: "Opens the Skills page, which lists every installed skill with its uses, never-invoked first" },
-  { key: "backlog", title: "Backlog", route: "registers", why: "There is no Backlog page yet, so this opens Registers, which lists the same issues and todos" },
-  { key: "goals", title: "Goals", cmd: "propagate goals", why: "There is no Goals page yet" },
+  { key: "backlog", title: "Backlog", route: "backlog", why: "Opens the Backlog page, which lists every open item, filterable by priority and kind" },
+  { key: "goals", title: "Goals", route: "goals", why: "Opens the Goals and Plans page, which lists each goal with its status and how it is checked, and the plans beside them" },
 ];
 
-function machineryTiles(st, copiedKey) {
+function machineryTiles(st) {
   const rs = readState(st);
   const data = st && st.status === "ok" ? (st.data || {}) : null;
   return MACH_TILES.map((t) => {
-    const dest = t.route ? { route: t.route } : { cmd: t.cmd };
-    const goes = t.route ? t.why + "." : t.why + ". Click to copy `" + t.cmd + "`.";
-    const base = { key: t.key, label: t.title, route: dest.route || null, cmd: dest.cmd || null, warn: false };
-    if (rs.kind === "loading") return { ...base, value: LOADING, sub: "reading " + t.key, route: null, cmd: null, tip: "Still reading this source; it opens once the figure lands. " + goes };
+    const goes = t.why + ".";
+    const base = { key: t.key, label: t.title, route: t.route, warn: false };
+    if (rs.kind === "loading") return { ...base, value: LOADING, sub: "reading " + t.key, route: null, tip: "Still reading this source; it opens once the figure lands. " + goes };
     if (rs.kind === "error") return { ...base, value: "could not read", sub: "could not read — " + rs.reason, warn: true, tip: "The machinery request failed: " + rs.reason + ". " + goes };
     const b = data && data[t.key];
     if (!b) return { ...base, value: "could not read", sub: "could not read — the server sent no " + t.key + " block", warn: true, tip: goes };
     if (b.status !== "ok") return { ...base, value: "could not read", sub: "could not read — " + (b.reason || "the source gave no reason"), warn: true, tip: "This source failed on its own; the others are fine. " + goes };
     const value = b.of != null ? b.count + " of " + b.of : String(b.count);
-    const sub = copiedKey === t.key ? "copied: " + t.cmd : b.label + (b.top ? " · " + b.top : "");
-    return { ...base, value: value, sub: sub, tip: goes };
+    return { ...base, value: value, sub: b.label + (b.top ? " · " + b.top : ""), tip: goes };
   });
 }
 
 function MachineryTiles({ st, nav }) {
-  const [copied, copy] = useCopyFlash();
-  const tiles = machineryTiles(st, copied);
+  const tiles = machineryTiles(st);
   return html`<div>
     <div class="h2"><b>Machinery and work</b><span>what the tool checks about itself and the tree · each tile says where it goes</span></div>
     <div class="kpis mach">
-      ${tiles.map((k) => html`<${Kpi} key=${k.key} cls="mt" label=${k.label} value=${k.value} sub=${k.sub} route=${k.route} warn=${k.warn}
-        act=${k.cmd ? () => copy(k.key, k.cmd) : null} tip=${k.tip} nav=${nav} />`)}
+      ${tiles.map((k) => html`<${Kpi} key=${k.key} cls="mt" label=${k.label} value=${k.value} sub=${k.sub} route=${k.route} warn=${k.warn} tip=${k.tip} nav=${nav} />`)}
     </div>
   </div>`;
 }
@@ -2318,6 +2369,11 @@ function RegisterList({ title, rows }) {
   </div>`;
 }
 
+/* REGISTERS IS SUPERSEDED BY BACKLOG, AND KEPT FOR NOW (Phase 4b, 2026-10-17). Backlog lists the same open items
+   with a priority filter, a kind filter and paging, where this view shows the first 50 of each register. Registers
+   keeps its rail entry and its rows (it also lists Handovers, which Backlog does not rank); its header sends the reader
+   to Backlog with a plain link (an anchor, not a button: a test pins that this view has no button, so no write control can
+   arrive unnoticed). Deleting it is a later, deliberate pass, not part of this one. */
 function RegistersView({ st, retry }) {
   if (st.status === "idle" || st.status === "loading") return html`<div class="detail wide"><${Skeleton} rows=${4} /></div>`;
   if (st.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="registers could not be read —" st=${st} retry=${retry} /></div>`;
@@ -2326,6 +2382,7 @@ function RegistersView({ st, retry }) {
   return html`<div class="detail wide">
     <h2 class="dtitle">Registers</h2>
     <div class="dmeta">Read-only. Opening or closing an item stays on the command line until the register write flow has its own design pass. Click a row to copy its file and line.</div>
+    <div class="dmeta">Backlog lists every open item, not the first 50 of each register, and filters by priority and kind. <a class="go" href="#/backlog">open Backlog →</a></div>
     <${RegisterList} title="Issues" rows=${r.issues} />
     <${RegisterList} title="Todos" rows=${r.todos} />
     <${RegisterList} title="Handovers" rows=${r.handovers} />
@@ -2634,6 +2691,199 @@ function SkillsView({ st, retry }) {
   }}<//>`;
 }
 
+
+/* ---- Backlog (Phase 4b) ---- */
+
+/** Characters of an item's text shown in its row; the full text is in the tooltip. A register line can run to several hundred. */
+const BACKLOG_TEXT_CHARS = 110;
+const BACKLOG_PRIORITIES = ["P0", "P1", "P2", "P3", "none"];
+const priKey = (r) => (r.priority === null || r.priority === undefined ? "none" : "P" + r.priority);
+const clipText = (t, n) => (String(t || "").length > n ? String(t).slice(0, n - 1) + "…" : String(t || ""));
+function backlogLocator(r) {
+  if (!r || !r.file) return null;
+  return typeof r.line === "number" ? r.file + ":" + r.line : r.file;
+}
+/** Rows after the priority and kind chips. Both filters narrow the full population; neither pages. */
+function backlogRows(d, pri, kind) {
+  return arr(d && d.rows).filter((r) => (!pri || priKey(r) === pri) && (!kind || r.kind === kind));
+}
+function backlogEmpty(summary) {
+  const s = summary || {};
+  const f = s.filesRead || {};
+  return "0 open items in " + ((f.state || 0) + (f.todo || 0) + (f.issue || 0)) + " register files read (" + (f.state || 0) + " STATE.md, " + (f.todo || 0) + " TODOS.md, " + (f.issue || 0) + " ISSUES.md)";
+}
+const BACKLOG_COLUMNS = [
+  { key: "priority", label: "priority", value: (r) => r.priority, cell: (r) => html`<span class=${"badge pri-" + priKey(r)}>${r.priority === null || r.priority === undefined ? "none" : "P" + r.priority}</span>` },
+  { key: "ref", label: "id", value: (r) => r.ref || "", cell: (r) => html`<span class="mono">${r.ref || ""}</span>` },
+  { key: "text", label: "item", value: (r) => r.text, cell: (r) => html`<div>${clipText(r.text, BACKLOG_TEXT_CHARS)}</div>` },
+  { key: "where", label: "file:line", value: (r) => r.file, cell: (r) => html`<span class="mono">${short(r.file)}${typeof r.line === "number" ? ":" + r.line : ""}</span>` },
+  { key: "kind", label: "kind", value: (r) => r.kind, cell: (r) => r.kind },
+];
+function BacklogView({ st, retry }) {
+  const [pri, setPri] = useState(null);
+  const [kind, setKind] = useState(null);
+  const [copied, copy] = useCopyFlash();
+  return html`<${MachineryPage} title="Backlog" question="What open work is recorded, and what is unprioritised?" what="backlog" st=${st} retry=${retry}>${(d) => {
+    const s = d.summary || {};
+    const bp = s.byPriority || {};
+    const all = arr(d.rows);
+    const shown = backlogRows(d, pri, kind);
+    return html`<div>
+      <div class="sec">${s.items != null ? s.items : all.length} items in ${s.files || 0} files · ${BACKLOG_PRIORITIES.map((k) => k + " " + (bp[k] || 0)).join(" · ")}${s.mergedDuplicates ? " · " + s.mergedDuplicates + " duplicates merged" : ""}</div>
+      ${s.caveat ? html`<div class="caveat">${s.caveat}</div>` : null}
+      ${s.handovers && s.handovers.sections ? html`<div class="dmeta">${s.handovers.sections} handover sections (${s.handovers.open} open) are not ranked items and are not listed here; "propagate backlog" prints them.</div>` : null}
+      ${s.delegatedRegisters ? html`<div class="dmeta">${s.delegatedRegisters} registers delegate to an external tracker; their open work is not counted here.</div>` : null}
+      ${all.length === 0 ? html`<div class="reason">${backlogEmpty(s)}</div>` : html`<div>
+        <div class="chips" role="group" aria-label="filter by priority">
+          <button class=${"chip" + (pri === null ? " on" : "")} onClick=${() => setPri(null)}>any priority<b>${all.length}</b></button>
+          ${BACKLOG_PRIORITIES.map((k) => html`<button key=${k} class=${"chip" + (pri === k ? " on" : "")} onClick=${() => setPri(pri === k ? null : k)}>${k}<b>${bp[k] || 0}</b></button>`)}
+        </div>
+        <div class="chips" role="group" aria-label="filter by kind">
+          <button class=${"chip" + (kind === null ? " on" : "")} onClick=${() => setKind(null)}>any kind<b>${all.length}</b></button>
+          ${arr(d.kinds).map((k) => html`<button key=${k.kind} class=${"chip" + (kind === k.kind ? " on" : "")} onClick=${() => setKind(kind === k.kind ? null : k.kind)}>${k.kind}<b>${k.count}</b></button>`)}
+        </div>
+        ${shown.length === 0 ? html`<div class="reason">No item matches ${[pri, kind].filter(Boolean).join(" + ")} among ${all.length}. <button class="ghost" onClick=${() => { setPri(null); setKind(null); }}>clear filters</button></div>` : html`
+          <${DataTable} columns=${BACKLOG_COLUMNS} rows=${shown} rowKey=${(r) => r.id} initialSort=${{ key: "priority", dir: "asc" }} tie=${(r) => r.file + ":" + (r.line || 0)} label="open items" flashKey=${copied}
+            act=${(r) => { const l = backlogLocator(r); return l ? () => copy(r.id, l) : null; }}
+            tip=${(r) => { const l = backlogLocator(r); return { title: (r.ref ? r.ref + " · " : "") + (r.priority === null || r.priority === undefined ? "no priority" : "P" + r.priority), lines: [
+              r.text, r.alsoIn ? "also recorded in " + r.alsoIn + " other register(s)" : null, l ? "click to copy " + l : "no file recorded for this item"].filter(Boolean) }; }} />`}
+      </div>`}
+    </div>`;
+  }}<//>`;
+}
+
+/* ---- Goals and Plans (Phase 4b) ---- */
+
+const GOAL_STATUS_RANK = { open: 0, unknown: 1, unreadable: 2, closed: 3 };
+function goalRows(d) { return arr(d && d.rows); }
+function planRows(d) { return arr(d && d.plans && d.plans.rows); }
+/** What a goal says about how it is checked, in the CLI's own words. */
+function goalDerivation(r) {
+  if (r.status === "unreadable") return "not read";
+  if (r.derivation === "claimed") return r.command ? String(r.command).split("\n")[0] : "a command is named";
+  if (r.derivation === "waived") return "judgement";
+  return "none - cannot be checked";
+}
+const GOAL_COLUMNS = [
+  { key: "status", label: "status", value: (r) => (GOAL_STATUS_RANK[r.status] != null ? GOAL_STATUS_RANK[r.status] : 9), cell: (r) => html`<span class=${"badge g-" + r.status}>${r.status}</span>` },
+  { key: "file", label: "file", value: (r) => r.file, cell: (r) => html`<span class="mono">${short(r.file)}</span>` },
+  { key: "n", label: "#", num: true, value: (r) => r.n, cell: (r) => (r.n == null ? "" : r.n) },
+  { key: "title", label: "goal", value: (r) => r.title || r.reason || "", cell: (r) => (r.status === "unreadable" ? html`<div class="dmeta">${r.reason}</div>` : html`<div>${r.title}</div>`) },
+  { key: "how", label: "checked by", value: (r) => goalDerivation(r),
+    cell: (r) => html`<div class="how">${r.command ? html`<code class="cmd">${clipText(goalDerivation(r), 70)}</code> <${Copy} text=${r.command} label="copy command" />` : goalDerivation(r)}</div>` },
+];
+const PLAN_STATUS_RANK = { undeclared: 0, unreadable: 1, linked: 2, finished: 3, archived: 4 };
+const PLAN_COLUMNS = [
+  { key: "status", label: "status", value: (r) => (PLAN_STATUS_RANK[r.status] != null ? PLAN_STATUS_RANK[r.status] : 9), cell: (r) => html`<span class=${"badge pl-" + r.status}>${r.status}</span>` },
+  { key: "date", label: "date", value: (r) => r.date, cell: (r) => r.date || "date unknown" },
+  { key: "file", label: "plan", value: (r) => r.file, cell: (r) => html`<span class="mono">${short(r.file)}</span>` },
+  { key: "reason", label: "why", value: (r) => r.reason, cell: (r) => html`<div class="dmeta">${r.reason}</div>` },
+];
+function GoalsView({ st, retry }) {
+  const [copied, copy] = useCopyFlash();
+  const [pcopied, pcopy] = useCopyFlash();
+  return html`<${MachineryPage} title="Goals & Plans" question="What are we building toward, and which plans are live?" what="goals" st=${st} retry=${retry}>${(d) => {
+    const s = d.summary || {};
+    const rows = goalRows(d);
+    const p = d.plans || { ok: false, error: "the server sent no plans block" };
+    const ps = p.summary || {};
+    const prows = planRows(d);
+    return html`<div>
+      <div class="sec">Goals — ${s.goals != null ? s.goals : 0} in ${s.files || 0} files · ${s.open || 0} open · ${s.closed || 0} closed · ${s.unknown || 0} unknown${s.unreadable ? " · " + s.unreadable + " files unreadable" : ""}</div>
+      <div class="dmeta">Checked by: ${s.claimed || 0} name a command · ${s.waived || 0} declare themselves judgement · ${s.uncheckable || 0} neither. This page never runs a command; copy one to run it yourself.</div>
+      ${rows.length === 0 ? html`<div class="reason">0 goals in ${s.files || 0} GOALS.md files</div>` : html`
+        <${DataTable} columns=${GOAL_COLUMNS} rows=${rows} rowKey=${(r) => r.id} initialSort=${{ key: "status", dir: "asc" }} tie=${(r) => r.file + ":" + (r.n || 0)} label="goals" flashKey=${copied}
+          act=${(r) => (r.file ? () => copy(r.id, r.file) : null)}
+          tip=${(r) => ({ title: r.status === "unreadable" ? "unreadable goals file" : "goal " + r.n, lines: [
+            r.status === "unreadable" ? "this file was not read: " + r.reason : r.title,
+            r.status === "unknown" ? "unknown = neither Done when nor Resolved is written, which is not the same as done" : null,
+            r.command ? "checked by: " + r.command : null,
+            r.file ? "click to copy " + r.file : "no file recorded"].filter(Boolean) })} />`}
+      <div class="sec">Plans — ${p.ok ? (ps.plans || 0) + " plans under " + short(ps.root || "") + " (" + (ps.scanned || 0) + " markdown files scanned)" : "could not be read"}</div>
+      ${!p.ok ? html`<${ErrorBanner} what="plans could not be read —" st=${{ error: p.error }} retry=${retry} />` : html`<div>
+        <div class="dmeta">linked = cited directly by a hub seed · finished = its Status names a finished word · archived = it sits under archive/ · undeclared = none of those. Plans are read from this repo only.${ps.excluded ? " " + ps.excluded + " files under a plans/ directory were excluded by the classifier." : ""}</div>
+        ${prows.length === 0 ? html`<div class="reason">0 plans among ${ps.scanned || 0} markdown files scanned under ${short(ps.root || "")}</div>` : html`
+          <${DataTable} columns=${PLAN_COLUMNS} rows=${prows} rowKey=${(r) => r.id} initialSort=${{ key: "status", dir: "asc" }} tie=${(r) => r.file} label="plans" flashKey=${pcopied}
+            act=${(r) => (r.file ? () => pcopy(r.id, r.file) : null)}
+            tip=${(r) => ({ title: r.status, lines: [r.reason, r.statusPhrase ? "Status: " + r.statusPhrase : null, r.dateSource ? "date from " + r.dateSource : null, r.file ? "click to copy " + r.file : "no file recorded"].filter(Boolean) })} />`}
+      </div>`}
+    </div>`;
+  }}<//>`;
+}
+
+/* ---- History (Phase 4b) ---- */
+
+/** "2026-10-17 08:08 UTC" from an ISO stamp, or null when it is not one. */
+function stamp(iso) {
+  const t = Date.parse(iso);
+  return typeof iso === "string" && isFinite(t) ? new Date(t).toISOString().slice(0, 16).replace("T", " ") + " UTC" : null;
+}
+const secs = (ms) => (typeof ms === "number" && isFinite(ms) ? (ms >= 10000 ? Math.round(ms / 1000) + " s" : (ms / 1000).toFixed(1) + " s") : "n/a");
+const HISTORY_ORDER = ["release", "monitor", "doctor"];
+function historyParts(d) {
+  const parts = arr(d && d.parts);
+  return HISTORY_ORDER.map((k) => parts.find((p) => p.key === k)).filter(Boolean);
+}
+const DOCTOR_COLUMNS = [
+  { key: "name", label: "section", value: (r) => r.name, cell: (r) => html`<span class="nm">${r.name}</span>` },
+  { key: "fail", label: "fail", num: true, value: (r) => r.fail, cell: (r) => r.fail },
+  { key: "warn", label: "warn", num: true, value: (r) => r.warn, cell: (r) => r.warn },
+  { key: "accepted", label: "accepted", num: true, value: (r) => r.accepted, cell: (r) => r.accepted },
+  { key: "pass", label: "pass", num: true, value: (r) => r.pass, cell: (r) => r.pass },
+];
+const MONITOR_COLUMNS = [
+  { key: "at", label: "ran at", value: (r) => r.at, cell: (r) => html`<span class="mono">${stamp(r.at) || r.at}</span>` },
+  { key: "result", label: "result", value: (r) => (r.error ? 0 : 1), cell: (r) => (r.error ? html`<span class="badge h-failed">could not look</span>` : "looked") },
+  { key: "rows", label: "edges", num: true, value: (r) => r.rows, cell: (r) => r.rows },
+  { key: "actionable", label: "actionable", num: true, value: (r) => r.actionable, cell: (r) => r.actionable },
+  { key: "notified", label: "notified", num: true, value: (r) => r.notified, cell: (r) => r.notified },
+  { key: "suppressed", label: "suppressed", num: true, value: (r) => r.suppressed, cell: (r) => r.suppressed },
+  { key: "ms", label: "took", num: true, value: (r) => r.ms, cell: (r) => secs(r.ms) },
+];
+const RELEASE_COLUMNS = [
+  { key: "at", label: "ran at", value: (r) => r.at, cell: (r) => html`<span class="mono">${stamp(r.at) || r.at}</span>` },
+  { key: "outcome", label: "exit", value: (r) => (r.outcome === "ok" ? 1 : 0), cell: (r) => html`<span class=${"badge h-" + (r.outcome === "ok" ? "recorded" : "failed")}>${r.outcome === "ok" ? "exit 0" : "non-zero"}</span>` },
+  { key: "ms", label: "took", num: true, value: (r) => r.ms, cell: (r) => secs(r.ms) },
+  { key: "origin", label: "origin", value: (r) => r.origin || "", cell: (r) => r.origin || "not recorded" },
+];
+
+function HistoryPart({ part, retry, nav }) {
+  const [copied, copy] = useCopyFlash();
+  const when = stamp(part.at);
+  const head = part.title + (part.status === "none" ? " — nothing recorded" : part.status === "error" ? " — could not be read" : when ? " — last recorded " + when : "");
+  const rerun = html`<div class="dmeta">${part.status === "none" || part.status === "partial" ? "Run it yourself (this page never does): " : "Run it again yourself (this page never does): "}</div><${Cmd} text=${part.command} />`;
+  return html`<div class="hpart" data-part=${part.key}>
+    <div class="sec">${head}</div>
+    ${part.status === "error" ? html`<${ErrorBanner} what=${part.title.toLowerCase() + " history could not be read —"} st=${{ error: part.reason }} retry=${retry} />` : null}
+    ${part.status === "none" ? html`<div class="reason">${part.reason}</div>` : null}
+    ${part.status === "failed" ? html`<div class="reason">The last doctor run failed: ${part.reason}${part.summary && part.summary.lastGoodAt ? " · last good run " + (stamp(part.summary.lastGoodAt) || part.summary.lastGoodAt) : " · there is no earlier good run"}</div>` : null}
+    ${part.outcome && part.status !== "none" && part.status !== "error" ? html`<div class="hout">${part.outcome}</div>` : null}
+    ${part.note ? html`<div class=${part.status === "partial" ? "caveat" : "dmeta"}>${part.note}</div>` : null}
+    ${arr(part.rows).length ? (part.key === "doctor"
+      ? html`<${DataTable} columns=${DOCTOR_COLUMNS} rows=${part.rows} rowKey=${(r) => r.id} initialSort=${{ key: "fail", dir: "desc" }} tie=${(r) => r.name} label="doctor sections"
+          route=${(r) => "health?section=" + encodeURIComponent(r.name)} nav=${nav}
+          tip=${(r) => ({ title: r.name, lines: [r.fail + " fail, " + r.warn + " warn, " + r.accepted + " accepted, " + r.pass + " pass", "click to open this section in Health"] })} />`
+      : part.key === "monitor"
+        ? html`<${DataTable} columns=${MONITOR_COLUMNS} rows=${part.rows} rowKey=${(r) => r.id} initialSort=${{ key: "at", dir: "desc" }} tie=${(r) => r.id} label="monitor runs" flashKey=${copied}
+            act=${(r) => (r.raw ? () => copy(r.id, r.raw) : null)}
+            tip=${(r) => ({ title: "monitor run", lines: [r.error ? "could not look: " + r.error : r.actionable + " of " + r.rows + " edges actionable, " + r.notified + " notified, " + r.suppressed + " already told", r.runId ? "run " + r.runId : null, r.raw ? "click to copy the log line" : "no log line recorded"].filter(Boolean) })} />`
+        : html`<${DataTable} columns=${RELEASE_COLUMNS} rows=${part.rows} rowKey=${(r) => r.id} initialSort=${{ key: "at", dir: "desc" }} tie=${(r) => r.id} label="release runs"
+            tip=${(r) => ({ title: "release run", lines: [r.outcome === "ok" ? "exited 0, which means READY" : "exited non-zero: BLOCKED, INCOMPLETE or a usage error; the ledger cannot say which", "which gate failed was not recorded"] })} />`) : null}
+    ${part.summary && part.summary.runs ? html`<div class="dmeta">${part.summary.runs} runs recorded${part.summary.notifiedRuns != null ? ", " + part.summary.notifiedRuns + " that notified, " + (part.summary.couldNotLook || 0) + " that could not look" : ""}${part.summary.nonZero != null ? ", " + part.summary.nonZero + " exited non-zero" : ""} · showing the latest ${part.summary.shown}${part.summary.unparsedLines ? " · " + part.summary.unparsedLines + " log lines did not match the format" : ""}</div>` : null}
+    ${rerun}
+  </div>`;
+}
+function HistoryView({ st, retry, nav }) {
+  return html`<${MachineryPage} title="History" question="What did the last release check, monitor pass and doctor run say?" what="history" st=${st} retry=${retry}>${(d) => {
+    const s = d.summary || {};
+    return html`<div>
+      <div class="sec">${s.withARecord != null ? s.withARecord : 0} of ${s.of != null ? s.of : 3} have a recorded result</div>
+      <div class="dmeta">Only recorded results are shown. This page never runs release, monitor or doctor; each section offers the command to copy.</div>
+      ${historyParts(d).map((p) => html`<${HistoryPart} key=${p.key} part=${p} retry=${retry} nav=${nav} />`)}
+    </div>`;
+  }}<//>`;
+}
+
 /* -- the app -------------------------------------------------------------- */
 
 function parseHash(hash) {
@@ -2690,6 +2940,9 @@ function App() {
   const [rulesSt, retryRules] = useResource("/api/rules", view === "rules");
   const [capsSt, retryCaps] = useResource("/api/caps", view === "caps");
   const [skillsSt, retrySkills] = useResource("/api/skills", view === "skills");
+  const [backlogSt, retryBacklog] = useResource("/api/backlog", view === "backlog");
+  const [goalsSt, retryGoals] = useResource("/api/goals", view === "goals");
+  const [historySt, retryHistory] = useResource("/api/history", view === "history");
   const [remSt, retryRem] = useResource("/api/conflicts", view === "reminders");
   const [buildNote, setBuildNote] = useState(null);
   const [judged, setJudged] = useState(0);
@@ -2901,7 +3154,7 @@ function App() {
     if (view === "overview" && surfaceLanded) api("/api/machinery?fresh=1").then(() => retryMach());
     if (view === "registers") retryReg();
     // Same rule as the tiles: refresh means new numbers, so the page bypasses the server's 60 s cache, then re-reads.
-    const retryPage = { claims: retryClaims, rules: retryRules, caps: retryCaps, skills: retrySkills }[view];
+    const retryPage = { claims: retryClaims, rules: retryRules, caps: retryCaps, skills: retrySkills, backlog: retryBacklog, goals: retryGoals, history: retryHistory }[view];
     if (retryPage) api("/api/" + view + "?fresh=1").then(() => retryPage());
     if (view === "reminders") retryRem();
   };
@@ -2923,6 +3176,9 @@ function App() {
   else if (view === "rules") body = html`<${RulesView} st=${rulesSt} retry=${retryRules} />`;
   else if (view === "caps") body = html`<${CapsView} st=${capsSt} retry=${retryCaps} />`;
   else if (view === "skills") body = html`<${SkillsView} st=${skillsSt} retry=${retrySkills} />`;
+  else if (view === "backlog") body = html`<${BacklogView} st=${backlogSt} retry=${retryBacklog} />`;
+  else if (view === "goals") body = html`<${GoalsView} st=${goalsSt} retry=${retryGoals} />`;
+  else if (view === "history") body = html`<${HistoryView} st=${historySt} retry=${retryHistory} nav=${nav} />`;
   else if (view === "registers") body = html`<${RegistersView} st=${regSt} retry=${retryReg} />`;
   else if (view === "reminders") body = html`<${RemindersView} st=${remSt} retry=${retryRem} />`;
   else body = html`<${GraphView} tick=${refreshTick} />`;
@@ -2967,6 +3223,7 @@ if (typeof globalThis !== "undefined") {
     readState, surfaceVelocity, velocityNote, sortRows, unblockKpis, barTarget, bucketBars, usageBars, runBars, axisLabels, registerLocator, reminderLocator,
     KPI_NO_REASON, ROW_NO_REASON, Kpi, DataTable, nextAction, machineryTiles, MACH_TILES,
     claimLocator, claimRows, ruleRows, capRows, skillRows, claimsEmpty, SKILL_STATUS_RANK, RULE_STATUS_RANK,
+    pageWindow, TABLE_PAGE_SIZE, backlogRows, backlogLocator, backlogEmpty, BACKLOG_TEXT_CHARS, goalRows, planRows, goalDerivation, stamp, historyParts,
     tipText, tipPlace, inlineMd, dayLabel, dayShort, axisTicks, priorityLabel, remindersTimeoutText, boundaryLabel, VERDICT_MEANING };
 }
 

@@ -4255,7 +4255,7 @@ async function journalCmd() {
 }
 
 async function backlogCmd() {
-  const { backlog, repoSegments, filterByAffects, groupForBrief, BRIEF_TRUNC, readDelegatedTrackers } = await import("./lib/report/backlog.mjs");
+  const { backlog, repoSegments, filterByAffects, groupForBrief, priorityCaveat, BRIEF_TRUNC, readDelegatedTrackers } = await import("./lib/report/backlog.mjs");
   // HUB_ROOT is used by --brief's path shortener. Imported HERE, not borrowed
   // from capsCmd's scope — `node --check` does not resolve names inside a
   // function body it never calls (G60, third instance today).
@@ -4475,15 +4475,13 @@ async function backlogCmd() {
   // The priority gap, printed BECAUSE a filtered view hides it. "P0+P1 = 16"
   // reads as "there are 16 important things" when 481 items are simply
   // unclassified; stating the denominator stops the digest lying by omission.
-  const prioritised = listed - byPriority.none;
   console.log(`\n  ${BOLD}brief${RESET} ${DIM}— ${listed} item(s) listed, none dropped${RESET}`);
   console.log(`    ${truncated} shortened to ${BRIEF_TRUNC} chars ${DIM}(full text: drop --brief)${RESET}`);
   console.log(`    priority: ${Object.entries(byPriority).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ")}`);
   if (byPriority.none) {
-    console.log(
-      `    ${YELLOW}${byPriority.none} of ${listed} carry NO priority${RESET} ` +
-        `${DIM}— so "${prioritised} prioritised" is a floor, not a ranking${RESET}`,
-    );
+    // The wording lives in priorityCaveat (lib/report/backlog.mjs): the dashboard's Backlog page prints the same sentence.
+    const cav = priorityCaveat(byPriority.none, listed);
+    console.log(`    ${YELLOW}${cav.head}${RESET} ${DIM}— ${cav.tail}${RESET}`);
   }
   if (!verbose) console.log(`    ${DIM}file discovery listing omitted — --verbose to include it${RESET}`);
 }

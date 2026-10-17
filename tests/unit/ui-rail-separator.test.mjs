@@ -45,8 +45,8 @@ const GROUPS = {
   today: ["overview"],
   settle: ["judge", "unblock"],
   machinery: ["health", "claims", "rules", "caps", "skills"],
-  work: ["registers", "reminders"],
-  history: ["activity", "graph"],
+  work: ["backlog", "goals", "registers", "reminders"],
+  history: ["activity", "history", "graph"],
 };
 
 test("the rail separator is derived from each division's group, never from a position or an Explore flag", () => {
@@ -98,6 +98,6 @@ test("the rail the client actually renders: five labels in order, a rule above e
   const flat = kids.join(" ");
   assert.equal(flat, [
     "LBL:today B:OVERVIEW", "| LBL:settle B:JUDGE B:UNBLOCK", "| LBL:machinery B:HEALTH B:CLAIMS B:RULES B:CAPS B:SKILLS",
-    "| LBL:work B:REGISTERS B:REMINDERS", "| LBL:history B:ACTIVITY B:GRAPH",
+    "| LBL:work B:BACKLOG B:GOALS B:REGISTERS B:REMINDERS", "| LBL:history B:ACTIVITY B:HISTORY B:GRAPH",
   ].join(" "));
 });
