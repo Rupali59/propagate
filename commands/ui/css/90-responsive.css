@@ -1,14 +1,6 @@
 /* ── responsive ───────────────────────────────────────────────────────────── */
-/* A horizontal bar: label, track, value. Used by every categorical chart.
-   The fill animates its width so a value that changed is visible as a change
-   rather than as a different number in the same place. */
 .frame { width: 100%; height: 100%; min-height: 70vh; border: 0; border-radius: var(--r3); background: var(--card); }
 
-.bar { display: flex; align-items: center; gap: var(--s2); margin-bottom: 5px; }
-.bar-l { width: 150px; font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar-t { flex: 1 1 auto; height: 9px; background: var(--field); border-radius: var(--r1); overflow: hidden; }
-.bar-f { display: block; height: 100%; transition: width var(--t-slow) var(--ease); }
-.bar-v { font-size: 11.5px; min-width: 52px; text-align: right; }
 .chart ul { margin: var(--s2) 0 0; padding-left: 18px; }
 .chart li, .reason li { font-size: 11.5px; margin: 2px 0; font-family: ui-monospace, Menlo, monospace; }
 
@@ -33,7 +25,6 @@
   .rail { position: sticky; top: 0; z-index: 2; background: var(--bg); }
   .list { max-height: 38vh; border-right: 0; border-bottom: 1px solid var(--line); }
   .detail { padding: var(--s4); }
-  .root { flex-wrap: wrap; }
 }
 
 /* PR-023. The mark-as-seen control. `ghost` is the existing quiet button;

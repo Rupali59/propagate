@@ -399,8 +399,9 @@ test("ui.css styles every held disposition the reminders lane can emit", () => {
     `the reminders lane can emit these and ui.css gives their badge no background: ${unstyled.join(", ")}`);
 
   // The muted row is a rule too, and it is the one that had none.
-  assert.match(css, /\.sitem\.quiet\s*\{/,
-    "`already-inserted` is rendered in a `.sitem.quiet` row and the stylesheet has no rule for it");
+  // (`.sitem.quiet` until the DataTable unification, 2026-10-16: the Reminders rows are DataTable rows now.)
+  assert.match(css, /\.dt-row\.quiet td\s*\{/,
+    "`already-inserted` is rendered in a `.dt-row.quiet` row and the stylesheet has no rule for it");
 });
 
 test("every colour/background pair ui.css DECLARES clears 4.5:1, both themes", () => {
@@ -493,7 +494,9 @@ test("F2: FAIL, ACCEPTED and NEVER-VERIFIED are .badge modifiers, and no second 
   }
   assert.doesNotMatch(css, /\.pill\b/, "a .pill component appeared; the plan says reuse .badge");
   assert.doesNotMatch(css, /\.stat\b/, "a .stat component appeared; the stat row is .kpi");
-  assert.equal((css.match(/(^|\n)\.bar\s*\{/g) || []).length, 1, ".bar must keep its ONE meaning (a label, track and value row)");
+  // Phase 1 (2026-10-16) deleted the div-bar chart: EVERY chart is Observable Plot. A `.bar` rule
+  // coming back is a fifth chart implementation arriving, which is the thing that was removed.
+  assert.equal((css.match(/(^|\n)\.bar\s*\{/g) || []).length, 0, "a .bar rule came back: the div-bar chart was deleted, every chart is PlotChart");
 });
 
 test("F3: a focus ring is 2px --st-accent with a 2px offset, on every control", () => {
@@ -527,7 +530,8 @@ test("the tooltip is token-only, never takes the pointer, and animates on a dura
   assert.match(body, /color:\s*var\(--fg\)/);
   assert.match(body, /animation:[^;]*var\(--t-fast\)/);
   assert.doesNotMatch(body, /#[0-9a-f]{3,8}\b|oklch\(|rgba?\(|hsla?\(/i, "a literal colour inside the tooltip");
-  assert.match(css, /\.hit \{ fill: transparent; \}/, "the sparkline hit circles need a fill to receive the pointer");
+  // An inert DataTable row must not light up on hover: a ground that answers the pointer says "click me".
+  assert.match(css, /\.dt-row\.inert:hover td \{ background: transparent; \}/, "an inert row would hover like a live one");
 });
 
 test("Overview 2026-10-16: the 'no change needed' fill is READABLE in dark, and still quieter than the changed fill", () => {

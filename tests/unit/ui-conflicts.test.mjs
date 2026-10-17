@@ -96,7 +96,7 @@ test("the six dispositions render in three groups, each with its count", async (
 
   // Every row is placed. A disposition with no group would vanish silently,
   // which is the UNMATCHED-badge defect one level out.
-  assert.equal(byClass(app, "sitem").length, HELD.length,
+  assert.equal(byClass(app, "dt-row").length, HELD.length,
     "a disposition was dropped — every row must land in a group");
 });
 
@@ -128,7 +128,7 @@ test("nothing held REPORTS THE POPULATION — it is a result, not an absence", a
   assert.match(text, /all 5 reminder/i, `the empty state does not state its population:\n${text}`);
   assert.doesNotMatch(text, /no conflicts found/i,
     "the empty state fell back to the uncounted default it exists to replace");
-  assert.equal(byClass(app, "sitem").length, 0, "no rows should render");
+  assert.equal(byClass(app, "dt-row").length, 0, "no rows should render");
 });
 
 test("could-not-look renders DIFFERENTLY from nothing-held, and carries no counts", async () => {
@@ -181,7 +181,8 @@ test("no numbered 01-06 labels, and no per-row colour border", async () => {
   for (const b of byClass(app, "badge")) {
     assert.doesNotMatch(textOf(b), /^\s*0\d/, `a numbered badge came back: ${textOf(b)}`);
   }
-  for (const r of byClass(app, "sitem")) {
+  assert.ok(byClass(app, "dt-row").length >= 6, "no rows rendered, so the loop below would pass over nothing");
+  for (const r of byClass(app, "dt-row")) {
     assert.doesNotMatch(String(r.getAttribute?.("style") ?? ""), /border-left/,
       "a coloured left border on a row is AI-slop pattern 8");
   }

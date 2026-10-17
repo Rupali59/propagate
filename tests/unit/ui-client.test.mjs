@@ -154,6 +154,19 @@ const evidenceCalls = (m) => m.fetches.filter((f) => f.path === "/api/evidence")
 const disposeCalls = (m) => m.fetches.filter((f) => f.path === "/api/dispose");
 const ticks = (app) => findAll(app, (n) => n.nodeType === 1 && n.localName === "input" && n.getAttribute("type") === "checkbox");
 
+/* Phase 1 helpers (2026-10-16): every chart is Plot now, and the headless suite has none, so a test that
+   needs to see a chart's shapes installs the recording stand-in (fakePlot, below) and re-renders. */
+const dtRows = (root) => byClass(root, "dt-row");
+const withPlot = (m, log = {}) => {
+  const P = fakePlot(m.doc, log);
+  const real = P.plot;
+  log.all = [];
+  P.plot = (o) => { const n = real(o); log.all.push({ o, n, shapes: log.shapes }); return n; };
+  m.ctx.Plot = P;
+  return log;
+};
+const clipboard = (m) => { const wrote = []; m.ctx.navigator = { clipboard: { writeText: (t) => { wrote.push(t); return Promise.resolve(); } } }; return wrote; };
+
 /* -- it renders at all ---------------------------------------------------- */
 
 test("the client mounts and renders a rail, a list and a detail pane", async () => {
@@ -585,16 +598,53 @@ test("edges counted but not placed in the fix order are named, never silently dr
 test("Never verified is read-only: counts and the buckets, the reason there is no button, and a copyable bulk command", async () => {
   const m = await mount({ routes: { "/api/baseline": { buckets: { baselineable: 6, noCoCommit: 253, boundReached: 1, ineligibleCrossRepo: 64, examinedAndDeferred: 33 },
     total: 357, accountedFor: true, unaccounted: 0, error: null } } });
+  const log = withPlot(m);
   click(btnText(m.app, /Never verified/));
   await m.settle();
   const t = textOf(byClass(m.app, "detail")[0]);
   assert.match(t, /357 never verified/);
-  assert.match(t, /PERMANENT/);
   assert.match(t, /never clear/i);
   assert.match(t, /It is not a baseline|It is not a backlog/);
   assert.match(t, /UI writes no baseline/);
   assert.equal(byTag(byClass(m.app, "disp")[0] ? m.app : byClass(m.app, "detail")[0], "textarea").length, 0, "a never-verified view must offer no verdict form");
   assert.ok(byClass(m.app, "cmd").some((c) => /propagate bootstrap --baseline-from-git/.test(textOf(c))));
+  // The five buckets are a Plot chart now (the div Bars are gone); the PERMANENT one is a datum, not text on the page.
+  const bars = fromRealm(m.ui.bucketBars({ baselineable: 6, noCoCommit: 253, boundReached: 1, ineligibleCrossRepo: 64, examinedAndDeferred: 33 }, 357));
+  assert.equal(bars.length, 5);
+  assert.ok(bars.some((b) => /PERMANENT/.test(b.label) && b.tone === "permanent"));
+  assert.equal(log.shapes.length, 5, "one drawn shape per bucket");
+});
+
+test("a never-verified bucket leads somewhere only when something is there: Parked opens, baselineable copies, the rest say why not", async () => {
+  const k = { baselineable: 6, noCoCommit: 253, boundReached: 1, ineligibleCrossRepo: 64, examinedAndDeferred: 33 };
+  const m = await mount({ routes: { "/api/baseline": { buckets: k, total: 357, accountedFor: true, unaccounted: 0, error: null } } });
+  const wrote = clipboard(m);
+  const log = withPlot(m);
+  click(btnText(m.app, /Never verified/));
+  await m.settle();
+  const bars = fromRealm(m.ui.bucketBars(k, 357));
+  const at = (id) => log.shapes[bars.findIndex((b) => b.id === id)];
+  // the pure mapping first: every bucket has a target or a stated reason, never a bare bar
+  for (const b of bars) {
+    const target = m.ui.barTarget("buckets", b);
+    assert.ok(target || /no list to open/.test(b.hint), b.id + " is neither clickable nor explains why not");
+  }
+  assert.equal(fromRealm(m.ui.barTarget("buckets", bars.find((b) => b.id === "examinedAndDeferred"))).route, "judge?chip=parked");
+  // and the drawn shapes
+  const before = m.ctx.location.hash;
+  hover(at("noCoCommit"));
+  await m.settle();
+  assert.match(textOf(tipBox(m.app)), /253 edges.*no list to open/);
+  click(at("noCoCommit"));
+  await m.settle();
+  assert.equal(m.ctx.location.hash, before, "an inert bucket must not navigate");
+  assert.equal(wrote.length, 0, "an inert bucket must not copy");
+  click(at("baselineable"));
+  await m.settle();
+  assert.deepEqual(wrote, ["propagate bootstrap --baseline-from-git"]);
+  click(at("examinedAndDeferred"));
+  await m.settle();
+  assert.equal(m.ctx.location.hash, "#/judge?chip=parked");
 });
 
 test("a baseline split that does not add up SAYS so", async () => {
@@ -664,7 +714,7 @@ test("every old hash lands on its new view, and an unknown hash lands on Judge (
 
 test("readHash parses ?edge= and an unknown hash falls back to judge", async () => {
   const m = await mount({ hash: "#/judge?edge=abc%20d" });
-  const none = { section: null, state: null, chip: null, ws: null, age: null, source: null };
+  const none = { section: null, state: null, chip: null, focus: null, ws: null, age: null, source: null };
   assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: "abc d", ...none });
   m.ctx.location.hash = "#/nonsense";
   assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: null, ...none });
@@ -702,11 +752,14 @@ test("?edge= selects that edge, switching to the chip it lives in", async () => 
 test("Unblock shows the stat row, ranks roots that free something, and 'Judge root' routes to ?edge=", async () => {
   const m = await mount({ hash: "#/unblock" });
   const t = textOf(detail(m.app));
-  assert.match(t, /1\s*blocked/);
-  assert.match(t, /1\s*roots/);
-  assert.match(t, /0\s*need several/);
-  assert.match(t, /frees 1 now/);
-  assert.match(t, /lib\/a\.mjs → propagate\/commands\/a\.mjs|propagate\/lib\/a\.mjs/);
+  assert.match(t, /Blocked\s*1/);
+  assert.match(t, /Roots\s*1/);
+  assert.match(t, /Need several\s*0/);
+  // the root list is a DataTable: two sortable number columns beside the edge, not a sentence
+  const root = dtRows(detail(m.app))[0];
+  assert.deepEqual(byTag(root, "td").slice(2, 4).map(textOf), ["1", "1"], "frees now and upstream of");
+  assert.deepEqual(byTag(detail(m.app), "th").map((h) => textOf(h).replace(/ [▴▾]$/, "")), ["kind", "edge", "frees now", "upstream of", ""]);
+  assert.match(textOf(root), /propagate\/lib\/a\.mjs/);
   click(btnText(detail(m.app), /Judge root/));
   await m.settle();
   assert.equal(m.ctx.location.hash, "#/judge?edge=a");
@@ -735,7 +788,7 @@ test("joint blockers are grouped under the file their edges flow into", async ()
   const t = textOf(detail(m.app));
   assert.match(t, /2 blocked edges flow into p\/shared\.md; settle these roots together/);
   assert.equal(byClass(m.app, "fgroup").length, 1);
-  assert.match(t, /2\s*need several/);
+  assert.match(t, /Need several\s*2/);
 });
 
 test("joint blockers sharing one root set are ONE group naming every file (live pass 2026-10-15)", async () => {
@@ -778,7 +831,7 @@ test("?section= opens Health AT that section: a summary line, its rows marked, i
   const banner = byClass(m.app, "banner").find((b) => /focus/.test(b.getAttribute("class")));
   assert.ok(banner, "a focused section always shows SOMETHING, even when it is all green");
   assert.match(textOf(banner), /State · 1 fail · 0 accepted · 3 warn · 4 pass/);
-  const marked = byClass(m.app, "hrow").filter((r) => /focus/.test(r.getAttribute("class")));
+  const marked = dtRows(m.app).filter((r) => /\bfocus\b/.test(r.getAttribute("class")));
   assert.equal(marked.length, 1, "only State's fail row is marked, not Rules'");
   assert.match(textOf(marked[0]), /workspaces conform/);
   const unknown = await mount({ hash: "#/health?section=Nope", routes: { "/api/health": HEALTH } });
@@ -790,7 +843,7 @@ test("Health opens with one derived line, then fail rows before accepted rows, e
   const t = textOf(detail(m.app));
   assert.match(t, /2 fail · 1 accepted · 3 warn in 1 section · snapshot 14 min old/);
   assert.ok(byTag(detail(m.app), "button").some((b) => /re-run doctor/.test(textOf(b))), "re-run doctor is a copyable command");
-  const hrows = byClass(m.app, "hrow").map(textOf);
+  const hrows = dtRows(m.app).map(textOf);
   const kinds = byClass(m.app, "badge").map(textOf);
   assert.deepEqual(kinds.filter((k) => /FAIL|ACCEPTED/.test(k)), ["FAIL", "FAIL", "ACCEPTED"], "fail rows come first");
   assert.ok(hrows.some((r) => /CLAUDE\.md restates rule:x.*CLAUDE\.md/.test(r)), "an open action carries its path");
@@ -816,25 +869,28 @@ test("zero failures reads as a result, with the snapshot age", async () => {
 
 /* -- Activity ------------------------------------------------------------- */
 
-test("Activity draws verdicts as a stacked bar per day and states its share without NaN", async () => {
-  const m = await mount({ hash: "#/activity" });
+test("Activity draws verdicts as a Plot bar per day and kind, and states its share without NaN", async () => {
+  const m = await mount({ hash: "#/judge" });
+  const log = withPlot(m);
+  m.setHash("#/activity"); await m.settle();
   const t = textOf(detail(m.app));
-  assert.equal(byClass(m.app, "vcol").length, 3);
-  assert.equal(byClass(m.app, "vgap").length, 1, "a day with no verdicts is a gap, not a zero-height bar");
+  const verdicts = log.all.find((l) => l.o.marks.some((mk) => mk.o && mk.o.x === "day" && mk.o.fill === "kind"));
+  assert.ok(verdicts, "the verdict chart went to Plot");
+  assert.equal(verdicts.n.querySelectorAll().length, 6, "two kinds for each of the three days");
   assert.match(t, /71% of 7 verdicts in 3 days recorded that nothing needed doing/);
-  assert.match(t, /status/);
+  assert.ok(log.all.some((l) => l.o.marks.some((mk) => mk.o && mk.o.y === "command")), "the commands chart went to Plot too");
   assert.doesNotMatch(t, /NaN|undefined/);
-  assert.equal(byClass(m.app, "vseg-quiet").length, 3);
-  assert.equal(byClass(m.app, "changed").length, 0, "no changed-since feed (D5)");
+  assert.equal(byClass(m.app, "vcol").length + byClass(m.app, "vseg-quiet").length + byClass(m.app, "changed").length, 0, "the hand-built columns are gone");
 });
 
-test("Activity says unknown with the reason, never 14 zeros", async () => {
+test("Activity says what could not be read and why, never 14 zeros -- and never the word 'unknown'", async () => {
   const bad = { ...SURFACE, velocity: { status: "unknown", reason: "event store unreadable: EACCES", days: [] }, usage: { status: "none-recorded", reason: "no command records in the runs store" } };
   const m = await mount({ hash: "#/activity", routes: { "/api/surface": bad } });
   const t = textOf(detail(m.app));
-  assert.match(t, /unknown: event store unreadable: EACCES/);
+  assert.match(t, /could not read — event store unreadable: EACCES/);
   assert.match(t, /None recorded: no command records/);
-  assert.equal(byClass(m.app, "vcol").length, 0);
+  assert.doesNotMatch(t, /unknown/, "a failed read is 'could not read', not 'unknown' (Phase 0)");
+  assert.equal(byClass(m.app, "plot").length, 0);
 });
 
 test("a day-less window with no events says so", async () => {
@@ -843,21 +899,15 @@ test("a day-less window with no events says so", async () => {
   assert.match(textOf(detail(m.app)), /No verdicts in 14 days \(event store read\)/);
 });
 
-test("a gap in a series BREAKS the path instead of interpolating across it", async () => {
-  // A line drawn across a day nobody measured asserts a reading never taken.
+test("a day with no reading is a GAP in the runs chart, counted and never drawn as a zero", async () => {
+  // The old sparkline broke its path at a null day. The line is bars now; the property is the same:
+  // a day nobody measured is not a day with zero runs.
   const { ui } = await mount();
-  const pts = [{ value: 1 }, { value: null }, { value: 3 }];
-  const d = ui.linePath(pts, (i) => i * 10, (v) => v);
-  assert.equal((d.match(/M/g) || []).length, 2, "two subpaths, because the middle day is a gap");
-  assert.doesNotMatch(d, /M0\.0 1\.0 L20/, "must not join across the gap");
-});
-
-test("a chart path measures itself and hands the length to the CSS", async () => {
-  // Without --len the draw-in animation silently does not run.
-  const { app } = await mount({ hash: "#/activity" });
-  const series = findAll(app, (n) => n.nodeType === 1 && String(n.getAttribute && n.getAttribute("class") || "").includes("series"));
-  assert.ok(series.length, "no series paths rendered");
-  assert.equal(series[0].style._props.get("--len"), "123.4", "getTotalLength() must reach the CSS");
+  const r = fromRealm(ui.runBars({ days: [{ day: "2026-10-13", count: 4 }, { day: "2026-10-14", count: null }, { day: "2026-10-15", count: 0 }] }));
+  assert.deepEqual(r.bars.map((b) => b.day), ["2026-10-13", "2026-10-15"], "the unmeasured day has no bar");
+  assert.equal(r.gaps, 1);
+  assert.equal(r.bars.find((b) => b.day === "2026-10-15").count, 0, "a measured zero IS drawn");
+  assert.deepEqual(r.days, ["2026-10-13", "2026-10-14", "2026-10-15"], "but it keeps its place on the axis");
 });
 
 /* -- Explore -------------------------------------------------------------- */
@@ -1171,9 +1221,9 @@ test("Registers renders markdown as elements: bold is bold, no literal asterisks
   assert.ok(byClass(d, "mono").some((n) => textOf(n) === "utm_source=x"), "a code span renders as code");
   assert.equal(byTag(m.app, "img").length, 0, "register text is never injected as HTML");
   assert.match(textOf(d), /<img src=x onerror=alert\(1\)>/, "the hostile text is shown as text");
-  const badges = byClass(d, "sitem").map((r) => textOf(byClass(r, "badge")[0]));
+  const badges = dtRows(d).map((r) => textOf(byClass(r, "badge")[0]));
   assert.deepEqual(badges, ["P0", "P1", "N1"], "P0 is a priority, not a dot");
-  assert.match(textOf(byClass(d, "shead")[0]), /priority/, "the column is named");
+  assert.match(textOf(byTag(d, "th")[0]), /priority/, "the column is named");
 });
 
 test("Health puts 'no action mapped' in its own block, apart from the detail text", async () => {
@@ -1186,32 +1236,30 @@ test("Health puts 'no action mapped' in its own block, apart from the detail tex
   assert.ok(detailNode && /1 empty/.test(textOf(detailNode)), "the detail is a sibling element, not text in the same node");
 });
 
-test("Activity has a day axis, and the sparkline says what its dashed line is", async () => {
-  const m = await mount({ hash: "#/activity" });
-  const ticks = byClass(m.app, "vtick").map(textOf);
-  assert.equal(ticks.length, 3, "one cell per day column so the labels line up with the bars");
-  assert.deepEqual(ticks, ["13 Oct", "14 Oct", "15 Oct"]);
-  const notes = byClass(m.app, "axnote").map(textOf).join("|");
-  assert.match(notes, /dashed line: max 5\/day/, "the scale carries a unit and sits outside the plot");
-  assert.match(notes, /13 Oct.*15 Oct/, "the window's first and last day");
-  assert.equal(byTag(m.app, "text").filter((t) => textOf(t) === "5").length, 0, "no bare number floating in the svg");
+test("Activity has a day axis on both Plot charts, thinned so 30 days do not become 30 labels", async () => {
+  const m = await mount({ hash: "#/judge" });
+  const log = withPlot(m);
+  m.setHash("#/activity"); await m.settle();
+  const runs = log.all.find((l) => l.o.marks.some((mk) => mk.o && mk.o.x === "day" && mk.o.fill === "tone" && mk.o.y === "count"));
+  assert.ok(runs, "the commands-per-day chart went to Plot");
+  assert.deepEqual(fromRealm([...runs.o.x.domain].map((d) => runs.o.x.tickFormat(d))), ["13 Oct", "14 Oct", "15 Oct"], "every day of a short window is labelled");
+  const notes = byClass(m.app, "cov").map(textOf).join("|");
+  assert.match(notes, /most in a day: 5/, "the scale is stated outside the plot");
   const { ui } = m;
   const t30 = fromRealm(ui.axisTicks(30));
   assert.ok(t30[0] === 0 && t30[t30.length - 1] === 29, "first and last day always labelled");
   assert.ok(t30.length <= 7, `30 days must not carry 30 labels: ${t30.length}`);
   assert.deepEqual(fromRealm(ui.axisTicks(0)), []);
   assert.deepEqual(fromRealm(ui.axisTicks(1)), [0]);
+  const days = Array.from({ length: 30 }, (_, i) => "2026-09-" + String(i + 1).padStart(2, "0"));
+  assert.ok(ui.axisLabels(days).size <= 7 && ui.axisLabels(days).has("2026-09-01") && ui.axisLabels(days).has("2026-09-30"), "the Plot axis uses the same thinning");
 });
 
 test("tipText: every kind answers in words, and zero, empty and garbage never print NaN or undefined", async () => {
   const { ui } = await mount();
   const T = (k, v) => fromRealm(ui.tipText(k, v));
-  assert.deepEqual(T("verdicts", { day: "2026-10-14", total: 0, changed: 0, noChange: 0 }),
-    { title: "Wed 14 Oct", lines: ["no verdicts recorded", "click to open Judge"] }, "an empty day is a sentence, not '0 verdicts'");
-  assert.deepEqual(T("verdicts", { day: "2026-10-13", total: 4, changed: 1, noChange: 3 }),
-    { title: "Tue 13 Oct", lines: ["4 verdicts", "1 changed something · 3 no change needed", "click to open Judge"] });
-  assert.deepEqual(T("verdicts", { day: "2026-10-13", total: 1, changed: 1, noChange: 0 }).lines[0], "1 verdict");
-  assert.deepEqual(T("runs", { day: "2026-10-14", count: 0 }), { title: "Wed 14 Oct", lines: ["no commands run"] });
+  // (the per-day "verdicts" kind went with the hand-built columns; the Plot bars use "vbar", below)
+  assert.deepEqual(T("runs", { day: "2026-10-14", count: 0 }), { title: "Wed 14 Oct", lines: ["no commands run", "hover only — no list behind a day's count"] });
   assert.deepEqual(T("command", { command: "status", count: 6, total: 9 }),
     { title: "status", lines: ["6 runs", "67% of 9 interactive runs", "click to copy: propagate status"] });
   const noTotal = T("command", { command: "x", count: 0, total: 0 });
@@ -1221,13 +1269,16 @@ test("tipText: every kind answers in words, and zero, empty and garbage never pr
     ["frees 2 now", "upstream of 5", "click to judge this root"]);
   assert.match(T("root", { source: "a", downstream: "b", freesNow: 0, upstreamOf: 0, inQueue: false }).lines[2], /copy the command/);
   assert.deepEqual(T("health", { label: "L", section: "State", tag: "fail", action: null }).lines, ["State", "failing check", "no action mapped"]);
+  assert.deepEqual(T("health", { label: "L", section: "State", tag: "warn", action: null }).lines, ["State", "warning, not failing", "doctor maps no next step for a warning"], "a warn row is never silent");
   assert.match(T("health", { label: "L", section: "State", tag: "fail", action: { kind: "command", target: "do it" } }).lines[2], /next step: do it/);
   assert.equal(T("register", { id: "TM-1", short: "f.md", line: 3, priority: 0 }).lines[0], "priority P0 · f.md · line 3");
+  assert.equal(T("register", { id: "TM-1", file: "/u/GitHub/f.md", short: "f.md", line: 3 }).lines[1], "click to copy /u/GitHub/f.md:3");
+  assert.equal(T("register", { id: "TM-1" }).lines[1], "no file recorded for this item", "a row with no locator says so");
   // garbage in: still no NaN / undefined, and an unknown kind or a missing value is null, never a guess.
-  for (const [k, v] of [["verdicts", { day: "nonsense", total: NaN, changed: undefined, noChange: null }], ["runs", { count: NaN }], ["command", { command: "c", count: NaN, total: NaN }]]) {
+  for (const [k, v] of [["vbar", { day: "nonsense", n: NaN, total: undefined }], ["runs", { count: NaN }], ["command", { command: "c", count: NaN, total: NaN }]]) {
     assert.doesNotMatch(JSON.stringify(T(k, v)), /NaN|undefined|null/, `${k}: ${JSON.stringify(T(k, v))}`);
   }
-  assert.equal(ui.tipText("verdicts", null), null);
+  assert.equal(ui.tipText("vbar", null), null);
   assert.equal(ui.tipText("no-such-kind", { a: 1 }), null);
 });
 
@@ -1244,73 +1295,77 @@ test("tipPlace keeps the tooltip inside the viewport by flipping, and never off 
   assert.ok(Number.isFinite(bad.left) && Number.isFinite(bad.top), "a pointer with no coordinates still places the box");
 });
 
-test("hovering a verdict column, EMPTY days included, shows a formatted tooltip, and leaving hides it", async () => {
-  const m = await mount({ hash: "#/activity" });
+test("hovering a verdict bar shows a formatted tooltip, and leaving hides it", async () => {
+  const m = await mount({ hash: "#/judge" });
+  const log = withPlot(m);
+  m.setHash("#/activity"); await m.settle();
+  const verdicts = log.all.find((l) => l.o.marks.some((mk) => mk.o && mk.o.fill === "kind"));
+  const shapes = verdicts.n.querySelectorAll();
   assert.equal(tipBox(m.app), null, "no tooltip until something is hovered");
-  const cols = byClass(m.app, "vcol");
-  hover(cols[0]);
+  hover(shapes[0]);   // 13 Oct, "changed something"
   await m.settle();
-  assert.match(textOf(tipBox(m.app)), /Tue 13 Oct.*4 verdicts.*1 changed something · 3 no change needed.*click to open Judge/);
+  assert.match(textOf(tipBox(m.app)), /Tue 13 Oct · changed something.*1 verdict.*of 4 verdicts that day.*click to open Judge/);
   assert.equal(tipBox(m.app).getAttribute("role"), "tooltip");
-  unhover(cols[0]);
+  unhover(shapes[0]);
   await m.settle();
   assert.equal(tipBox(m.app), null, "gone on leave");
-  hover(cols[1]);   // the empty day: a 2px stub, but the column is the hit area
+  hover(shapes[2]);   // 14 Oct: the empty day still has a datum
   await m.settle();
-  assert.match(textOf(tipBox(m.app)), /Wed 14 Oct.*no verdicts recorded/);
+  assert.match(textOf(tipBox(m.app)), /Wed 14 Oct.*none recorded/);
 });
 
-test("every sparkline reading has a hit circle with its own tooltip, a zero day included", async () => {
-  const m = await mount({ hash: "#/activity" });
-  const hits = byClass(m.app, "hit");
-  assert.equal(hits.length, 3, "one per day reading");
-  hover(hits[1]);
-  await m.settle();
-  assert.match(textOf(tipBox(m.app)), /Wed 14 Oct.*no commands run/);
-  hover(hits[2]);
-  await m.settle();
-  assert.match(textOf(tipBox(m.app)), /Thu 15 Oct.*5 commands run/);
-});
-
-test("a command row shows its tooltip, and clicking it copies `propagate <command>`", async () => {
+test("a command bar shows its tooltip, and clicking it copies `propagate <command>`", async () => {
   // Real timers: the 1.5s "copied" flash would be sped up to 15ms and gone before it could be read.
-  const m = await mount({ hash: "#/activity", speedUp: false });
-  const wrote = [];
-  m.ctx.navigator = { clipboard: { writeText: (t) => { wrote.push(t); return Promise.resolve(); } } };
-  const picks = byClass(m.app, "pick").filter((n) => /\bbar\b/.test(n.getAttribute("class")));
-  assert.equal(picks.length, 2, "one clickable row per top command");
-  hover(picks[0]);
+  const m = await mount({ hash: "#/judge", speedUp: false });
+  const wrote = clipboard(m);
+  const log = withPlot(m);
+  m.setHash("#/activity"); await m.settle();
+  const usage = log.all.find((l) => l.o.marks.some((mk) => mk.o && mk.o.y === "command"));
+  const shapes = usage.n.querySelectorAll();
+  assert.equal(shapes.length, 2, "one clickable bar per top command");
+  hover(shapes[0]);
   await m.settle();
   assert.match(textOf(tipBox(m.app)), /status.*6 runs.*67% of 9 interactive runs.*click to copy: propagate status/);
-  click(picks[0]);
-  for (let i = 0; i < 40 && !/copied/.test(textOf(byClass(picks[0], "bar-v")[0])); i++) await sleep(10);
+  click(shapes[0]);
+  for (let i = 0; i < 40 && !/copied/.test(textOf(detail(m.app))); i++) await sleep(10);
   assert.deepEqual(wrote, ["propagate status"]);
-  assert.match(textOf(byClass(picks[0], "bar-v")[0]), /copied/, "the row says so");
+  assert.match(textOf(detail(m.app)), /copied: propagate status/, "the page says so");
 });
 
-test("clicking a verdict day column opens Judge", async () => {
-  const m = await mount({ hash: "#/activity" });
-  click(byClass(m.app, "vcol")[0]);
+test("clicking a verdict bar on Activity opens Judge; the same bar on the Overview opens Activity", async () => {
+  const m = await mount({ hash: "#/judge" });
+  const log = withPlot(m);
+  m.setHash("#/activity"); await m.settle();
+  click(log.all.find((l) => l.o.marks.some((mk) => mk.o && mk.o.fill === "kind")).n.querySelectorAll()[0]);
   await m.settle();
-  assert.equal(m.ctx.location.hash, "#/judge");
+  assert.equal(m.ctx.location.hash, "#/judge", "Activity is already the place to read verdicts, so its bars go to where they are made");
+  const o = await mountOv();
+  const olog = withPlot(o);
+  o.setHash("#/overview"); await o.settle();
+  click(olog.all.find((l) => l.o.marks.some((mk) => mk.o && mk.o.fill === "kind")).n.querySelectorAll()[0]);
+  await o.settle();
+  assert.equal(o.ctx.location.hash, "#/activity");
+  // and the pure rule, so the two homes cannot drift apart
+  assert.equal(m.ui.routeForBar("verdicts", { day: "2026-10-15" }), "activity");
+  assert.equal(m.ui.routeForBar("verdicts", { day: "2026-10-15" }, "activity"), "judge");
 });
 
 test("Unblock, Health and Registers rows each carry a tooltip built from what the row shows", async () => {
   const u = await mount({ hash: "#/unblock" });
-  const root = byClass(u.app, "root")[0];
+  const root = dtRows(u.app)[0];
   hover(root);
   await u.settle();
   assert.match(textOf(tipBox(u.app)), /frees \d+ now/);
   const h = await mount({ hash: "#/health", routes: { "/api/health": HEALTH } });
-  const hr = byClass(h.app, "hrow").find((r) => /workspaces conform/.test(textOf(r)));
+  const hr = dtRows(h.app).find((r) => /workspaces conform/.test(textOf(r)));
   hover(hr);
   await h.settle();
   assert.match(textOf(tipBox(h.app)), /workspaces conform.*State.*failing check.*no action mapped/);
   const reg = { error: null, issues: [], handovers: [], todos: [{ kind: "todo", short: "k/TODOS.md", line: 3, text: "do it", priority: 2, id: "T-9" }] };
   const r = await mount({ hash: "#/registers", routes: { "/api/registers": reg } });
-  hover(byClass(r.app, "sitem")[0]);
+  hover(dtRows(r.app)[0]);
   await r.settle();
-  assert.match(textOf(tipBox(r.app)), /T-9.*priority P2 · k\/TODOS\.md · line 3/);
+  assert.match(textOf(tipBox(r.app)), /T-9.*priority P2 · k\/TODOS\.md · line 3.*click to copy k\/TODOS\.md:3/);
 });
 
 test("NO native title= attribute is left in any rendered view: every hint is the one tooltip", async () => {
@@ -1338,10 +1393,10 @@ test("NO native title= attribute is left in any rendered view: every hint is the
 test("a Reminders timeout is a plain sentence with a Retry that re-reads; other failures keep the server's words", async () => {
   const m = await mount({ hash: "#/reminders", routes: { "/api/conflicts": { ok: false, reason: "osascript timed out after 3000ms reading list Inbox" } } });
   const t = textOf(detail(m.app));
-  assert.match(t, /Reminders did not answer in 3s\. Open Reminders once and allow access, then Retry\./);
+  assert.match(t, /Reminders did not answer in 3s\. Open Reminders once and allow access, then retry\./);
   assert.doesNotMatch(textOf(byClass(m.app, "banner")[0]), /osascript/, "the tool's own words are not the headline");
   const before = m.fetches.filter((f) => f.path === "/api/conflicts").length;
-  click(btnText(byClass(m.app, "banner")[0], /^Retry$/));
+  click(btnText(byClass(m.app, "banner")[0], /^retry$/));
   await m.settle();
   assert.equal(m.fetches.filter((f) => f.path === "/api/conflicts").length, before + 1, "Retry re-reads the list");
   assert.equal(m.ui.remindersTimeoutText("EACCES: not allowed"), null);
@@ -1445,8 +1500,8 @@ test("a KPI whose figure is unknown says so: Judged today and Health are never a
   const bad = { ...SURFACE, velocity: { status: "unavailable", reason: "no event store", days: [] } };
   const m = await mountOv({ routes: { "/api/surface": bad, "/api/health": respond(500, { error: "doctor missing" }) } });
   const k = kpiCards(m.app).map(textOf);
-  assert.match(k[3], /Judged today\s*unknownno event store/);
-  assert.match(k[4], /Health\s*…doctor's snapshot could not be read/);
+  assert.match(k[3], /Judged today\s*could not readno event store/);
+  assert.match(k[4], /Health\s*could not readdoctor missing/);
 });
 
 test("the sources table sorts by a clicked header, flips on a second click, and says which way (aria-sort)", async () => {
@@ -1727,4 +1782,394 @@ test("a source whose edges are ALL blocked opens Unblock, never an empty Judge (
   assert.equal(r({ source: "/u/a.md", edges: 14, blocked: 14 }), "unblock");
   assert.equal(r({ source: "/u/a b.md", edges: 12, blocked: 0 }), "judge?source=%2Fu%2Fa%20b.md");
   assert.equal(r({ source: "/u/c.md", edges: 7, blocked: 3 }), "judge?source=%2Fu%2Fc.md", "a partly blocked source still has edges to judge");
+});
+
+/* ══ Phase 0 and Phase 1 (2026-10-16): loading states, Kpi, DataTable, one chart implementation, ErrorBanner ══
+   Plan ticklish-gathering-brook, Phases 0 and 1. The earlier cases in this file were rewritten where the
+   markup they pinned (hand-built columns, div bars, the sparkline, bare .kpi) was deliberately replaced. */
+
+const tabIndexOf = (n) => n.getAttribute("tabIndex") ?? n.getAttribute("tabindex");
+const cardText = (app, re) => textOf(byClass(app, "chart").find((c) => re.test(textOf(c))) || { textContent: "" });
+
+test("Phase 0: a pending read says 'loading…', a failed read says 'could not read — <reason>', and the two never share a word", async () => {
+  // Pure first: the same Overview model in the three states /api/surface and /api/health can be in.
+  const m = await mountOv();
+  const model = m.ui.overviewModel(OV_INBOX, Date.now());
+  const kpis = (v, h) => Object.fromEntries(fromRealm(m.ui.overviewKpis(model, v, h, Date.now())).map((k) => [k.key, k]));
+  const loading = kpis({ status: "loading", reason: null }, { status: "loading" });
+  const failed = kpis({ status: "error", reason: "surface exploded" }, { status: "error", kind: "http", error: "doctor missing" });
+  for (const key of ["today", "health"]) {
+    assert.equal(loading[key].text, "loading…");
+    assert.equal(failed[key].text, "could not read");
+    assert.notEqual(loading[key].text, failed[key].text, key + ": pending and failed must not read the same");
+    assert.notEqual(loading[key].sub, failed[key].sub);
+    for (const k of [loading[key], failed[key]]) assert.doesNotMatch(k.text + k.sub, /unknown/, "'unknown' is neither a wait nor a failure");
+  }
+  assert.equal(failed.today.sub, "surface exploded", "the reason is the server's own");
+  assert.equal(failed.health.sub, "doctor missing");
+  // readState is the one place the three states are told apart
+  assert.deepEqual(fromRealm(m.ui.readState({ status: "idle" })), { kind: "loading", reason: null, text: "loading…" });
+  assert.deepEqual(fromRealm(m.ui.readState({ status: "loading" })).kind, "loading");
+  assert.equal(fromRealm(m.ui.readState({ status: "error", kind: "http", error: "boom" })).text, "could not read — boom");
+  assert.match(fromRealm(m.ui.readState({ status: "error", kind: "token", error: "x" })).text, /token expired/, "a dead token says reopen, not the raw error");
+  assert.equal(m.ui.readState({ status: "ok", data: {} }).kind, "ok");
+  assert.equal(m.ui.velocityNote({ status: "ok" }), null);
+});
+
+test("Phase 0: on screen, a held /api/surface reads 'loading…' and a failed one 'could not read', in the KPI AND the chart", async () => {
+  const held = await mountOv({ untracked: ["/api/surface"], routes: { "/api/surface": () => new Promise(() => {}) } });
+  assert.match(kpiCards(held.app).map(textOf)[3], /^Judged today\s*loading…/);
+  assert.match(cardText(held.app, /Verdicts per day/), /loading…/);
+  assert.doesNotMatch(textOf(held.app), /unknown|could not read/, "while pending, nothing claims a failure or an unknown");
+  const failed = await mountOv({ routes: { "/api/surface": respond(500, { error: "surface exploded" }) } });
+  assert.match(kpiCards(failed.app).map(textOf)[3], /^Judged today\s*could not readsurface exploded/);
+  assert.match(cardText(failed.app, /Verdicts per day/), /could not read — surface exploded/);
+  assert.doesNotMatch(textOf(failed.app), /loading…|unknown/);
+  // and it is the SAME two sentences on Activity
+  const act = await mount({ hash: "#/activity", routes: { "/api/surface": respond(500, { error: "surface exploded" }) } });
+  assert.match(textOf(detail(act.app)), /activity could not be read — surface exploded/);
+});
+
+/* -- Kpi ------------------------------------------------------------------------ */
+
+test("Kpi: every card has a route or says why in its tooltip -- the Unblock row is clickable now, and the fallback sentence never shows", async () => {
+  const m = await mount({ hash: "#/unblock" });
+  const cards = byClass(m.app, "kpi");
+  assert.equal(cards.length, 3);
+  assert.deepEqual(cards.map((c) => /\bpick\b/.test(c.getAttribute("class")) ? "pick" : "inert"), ["pick", "pick", "inert"], "blocked and roots lead somewhere; 'need several' is 0, so it is inert");
+  assert.ok(cards.every((c) => tabIndexOf(c) === "0"), "an inert card takes focus too: focus is how a keyboard user gets its reason");
+  // the inert card says why, in the page's one tooltip
+  hover(cards[2]);
+  await m.settle();
+  assert.match(textOf(tipBox(m.app)), /Need several.*no edge that needs several roots, so there is nothing to open/);
+  unhover(cards[2]);
+  // the live ones navigate: blocked -> the roots list, roots -> Judge on the top root
+  click(cards[0]); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/unblock?focus=roots");
+  assert.equal(findAll(m.app, (n) => n.nodeType === 1 && n.getAttribute("data-focus") === "roots").length, 1, "the target the route names exists");
+  m.setHash("#/unblock"); await m.settle();
+  click(byClass(m.app, "kpi")[1]); await m.settle();
+  assert.equal(m.ctx.location.hash, "#/judge?edge=a");
+  // pure: the rule for every figure, including the all-zero case
+  const model = (o) => fromRealm(m.ui.unblockKpis({ blocked: 0, rootsTotal: 0, needAllRoots: 0, ranked: [], byFile: [], ...o }));
+  for (const k of model({})) { assert.equal(k.route, null); assert.ok(k.tip && k.tip !== m.ui.KPI_NO_REASON, k.key + " is inert and must say why"); }
+  assert.equal(model({ blocked: 3, needAllRoots: 3, byFile: [{ file: "x" }] })[0].route, "unblock?focus=together", "no single root frees anything: go to the joint groups");
+  assert.equal(model({ blocked: 3, needAllRoots: 3, byFile: [{ file: "x" }] })[2].route, "unblock?focus=together");
+  assert.equal(model({ blocked: 2, rootsTotal: 1, ranked: [{ edge_id: "r1", inQueue: false }] })[1].route, "unblock?focus=roots", "a never-verified top root cannot be judged: fall back to the list");
+});
+
+test("Kpi: a card given no route and no reason shows the fallback sentence that reads as a defect -- and no real view does", async () => {
+  const m = await mountOv();
+  // The fallbacks themselves, rendered bare: that they exist and show is what makes their absence below mean something.
+  const { h, render } = m.ctx.preact;
+  const host = m.doc.createElement("div");
+  m.app.appendChild(host);
+  render(h(m.ui.Kpi, { label: "Bare", value: 1, sub: "", route: null, tip: null, nav: () => {} }), host);
+  hover(byClass(host, "kpi")[0]); await m.settle();
+  assert.ok(tipBox(m.app), "a card with no reason still shows a tooltip");
+  assert.match(textOf(tipBox(m.app)), new RegExp(m.ui.KPI_NO_REASON), "a card with no route and no reason falls back to the defect sentence");
+  unhover(byClass(host, "kpi")[0]);
+  render(h(m.ui.DataTable, { columns: [{ key: "a", label: "a", cell: (r) => r.a }], rows: [{ a: "x" }], rowKey: (r) => r.a }), host);
+  hover(dtRows(host)[0]); await m.settle();
+  assert.ok(tipBox(m.app), "an inert row with no tip still shows a tooltip");
+  assert.match(textOf(tipBox(m.app)), new RegExp(m.ui.ROW_NO_REASON), "a row with no route, no action and no tip falls back to the defect sentence");
+  assert.match(dtRows(host)[0].getAttribute("class"), /\binert\b/);
+  unhover(dtRows(host)[0]);
+  render(null, host);
+  // the component directly: that the fallback exists and shows is what makes its absence everywhere else mean something
+  const bare = await mount({ hash: "#/unblock", inbox: inboxOf({ blocked: [] }) });
+  assert.equal(byClass(bare.app, "kpi").every((c) => /\binert\b/.test(c.getAttribute("class"))), true, "nothing blocked: all three are inert");
+  const views = { "#/overview": { "/api/health": HEALTH }, "#/judge": {}, "#/unblock": {}, "#/health": { "/api/health": HEALTH }, "#/activity": {},
+    "#/registers": { "/api/registers": { error: null, issues: [{ kind: "issue", short: "a", text: "t", priority: 1, file: "/f" }], todos: [], handovers: [] } },
+    "#/reminders": { "/api/conflicts": { ok: true, list: "L", rows: [{ reminderId: "1", disposition: "held-no-register", reason: "r" }], summary: { total: 1 } } } };
+  let seen = 0;
+  for (const [hash, routes] of Object.entries(views)) {
+    const v = await mount({ hash, inbox: OV_INBOX, routes });
+    const t = textOf(v.app);
+    seen += byClass(v.app, "kpi").length + dtRows(v.app).length;
+    assert.ok(!t.includes(m.ui.KPI_NO_REASON) && !t.includes(m.ui.ROW_NO_REASON), `${hash} rendered a card or row that goes nowhere and says nothing`);
+    for (const el of [...byClass(v.app, "kpi"), ...dtRows(v.app)]) {
+      hover(el); await v.settle();
+      const tb = tipBox(v.app);
+      assert.ok(tb, `${hash}: "${textOf(el).slice(0, 40)}" shows no tooltip at all, so nothing explains what it does or why it does nothing`);
+      assert.ok(!/goes nowhere, and nothing says why/.test(textOf(tb)), `${hash}: ${textOf(el).slice(0, 40)} has no reason`);
+      unhover(el);
+    }
+  }
+  assert.ok(seen >= 12, `only ${seen} cards and rows exercised -- the sweep has gone blind`);
+});
+
+/* -- DataTable ------------------------------------------------------------------ */
+
+test("sortRows: null sorts last in BOTH directions, text A to Z, numbers by size, ties by the tie key", async () => {
+  const { ui } = await mount();
+  const rows = [{ k: "b", v: 2 }, { k: "a", v: 2 }, { k: "n", v: null }, { k: "c", v: 9 }, { k: "m", v: undefined }];
+  const order = (dir) => fromRealm(ui.sortRows(rows, (r) => r.v, dir, (r) => r.k)).map((r) => r.k).join("");
+  assert.equal(order("desc"), "cabmn", "9, then the 2s by tie key, then the two nulls by tie key");
+  assert.equal(order("asc"), "abcmn", "nulls are still last, not first");
+  assert.equal(fromRealm(ui.sortRows([{ s: "b" }, { s: "A" }, { s: "c" }], (r) => r.s, "asc")).map((r) => r.s).join(""), "AbC".replace("C", "c"));
+  assert.deepEqual(fromRealm(ui.sortRows(null, () => 0, "asc")), [], "no rows is an empty list, not a throw");
+});
+
+test("every DataTable row takes focus, Enter acts only when the ROW has focus, and a control inside a row stops its own click", async () => {
+  const m = await mountOv();
+  const row = srcRows(m.app)[0];
+  assert.ok(dtRows(m.app).every((r) => tabIndexOf(r) === "0"));
+  // Enter on a focused control INSIDE the row is the control's, not the row's (key events bubble in a browser; the target tells them apart)
+  const before = m.ctx.location.hash;
+  row.dispatchEvent({ type: "keydown", key: "Enter", target: m.doc.createElement("button"), preventDefault() {} });
+  await m.settle();
+  assert.equal(m.ctx.location.hash, before, "Enter on a control inside the row did not navigate");
+  row.dispatchEvent({ type: "keydown", key: "Enter", preventDefault() {} });
+  await m.settle();
+  assert.notEqual(m.ctx.location.hash, before);
+  assert.match(m.ctx.location.hash, /^#\/judge\?source=/);
+  // the stop() that keeps a Copy button from also firing its row
+  const h = await mount({ hash: "#/health", routes: { "/api/health": HEALTH } });
+  let stopped = 0;
+  const copyBtn = btnText(dtRows(h.app)[0], /^copy/);
+  assert.ok(copyBtn, "a health row carries its Copy button");
+  copyBtn.dispatchEvent({ type: "click", stopPropagation() { stopped += 1; }, preventDefault() {} });
+  assert.equal(stopped, 1, "Copy must stop the click, or the row copies as well");
+});
+
+test("Unblock roots: a root in the queue opens Judge, a never-verified one copies its baseline command, and both flash 'copied'", async () => {
+  const items = [edge("x", "DRIFTED", { orderIndex: 0, blocked: true, blockedBy: [{ edge_id: "it's-root", from: "/u/Documents/GitHub/k/a.md", to: "/u/Documents/GitHub/k/b.md", state: "NEVER_VERIFIED" }] })];
+  const m = await mount({ inbox: inboxOf({ ready: [], blocked: items, parked: [] }), hash: "#/unblock", speedUp: false });
+  const wrote = clipboard(m);
+  const row = dtRows(m.app)[0];
+  assert.match(textOf(row), /NEVER VERIFIED/);
+  click(row);
+  for (let i = 0; i < 40 && !/copied/.test(textOf(row)); i++) await sleep(10);
+  assert.deepEqual(wrote, ["propagate verify --edge 'it'\\''s-root' --disposition baselined --reason '<what you checked, as file:line>' --apply"]);
+  assert.match(textOf(row), /copied/, "the row says so");
+  // a root in the queue: the row itself opens Judge, no button needed
+  const q = await mount({ hash: "#/unblock" });
+  click(dtRows(q.app)[0]); await q.settle();
+  assert.equal(q.ctx.location.hash, "#/judge?edge=a");
+});
+
+test("Health: warn rows are grouped by section and each carries a tooltip; a mapped next step copies on click", async () => {
+  const m = await mount({ hash: "#/health", routes: { "/api/health": HEALTH }, speedUp: false });
+  const wrote = clipboard(m);
+  const sections = byTag(detail(m.app), "details");
+  assert.equal(sections.length, 1);
+  const warn = dtRows(sections[0]);
+  assert.equal(warn.length, 3, "State's three warnings");
+  assert.ok(warn.every((r) => textOf(byClass(r, "badge")[0]) === "WARN"));
+  for (const r of warn) {
+    hover(r); await m.settle();
+    assert.match(textOf(tipBox(m.app)), /State.*warning, not failing.*doctor maps no next step for a warning/, textOf(r));
+    unhover(r);
+  }
+  assert.equal(byClass(sections[0], "none-mapped").length, 0, "a warning carries no 'no action mapped' line: that is the normal case");
+  // a fail row WITH a next step copies it
+  const open = dtRows(m.app).find((r) => /CLAUDE\.md restates rule:x/.test(textOf(r)));
+  click(open);
+  for (let i = 0; i < 40 && !/copied/.test(textOf(open)); i++) await sleep(10);
+  assert.deepEqual(wrote, ["/u/Documents/GitHub/CLAUDE.md"]);
+  // and one WITHOUT is inert, and says so
+  const none = dtRows(m.app).find((r) => /workspaces conform/.test(textOf(r)));
+  assert.match(none.getAttribute("class"), /\binert\b/);
+  const before = wrote.length;
+  click(none);
+  await m.settle();
+  assert.equal(wrote.length, before, "an inert row copies nothing");
+});
+
+test("Registers and Reminders rows copy their locator: file:line for a register item, the best available for a reminder", async () => {
+  const reg = { error: null, handovers: [], todos: [],
+    issues: [{ kind: "issue", file: "/u/Documents/GitHub/propagate/ISSUES.md", short: "propagate/ISSUES.md", line: 10, text: "N1 · something", id: "N1", priority: "S2" },
+      { kind: "issue", text: "no file recorded", id: "N2", priority: null }] };
+  const m = await mount({ hash: "#/registers", routes: { "/api/registers": reg }, speedUp: false });
+  const wrote = clipboard(m);
+  const rows = dtRows(m.app);
+  assert.equal(rows.length, 2);
+  click(rows[0]);
+  for (let i = 0; i < 40 && !/copied/.test(textOf(rows[0])); i++) await sleep(10);
+  assert.deepEqual(wrote, ["/u/Documents/GitHub/propagate/ISSUES.md:10"], "the absolute path and the line, so it opens from a terminal");
+  assert.equal(m.ui.registerLocator({ short: "k/TODOS.md", line: 3 }), "k/TODOS.md:3", "a row with no `file` falls back to its short path");
+  assert.equal(m.ui.registerLocator({ text: "x" }), null);
+  assert.match(rows[1].getAttribute("class"), /\binert\b/, "an item with no locator is inert");
+  assert.equal(buttons(detail(m.app)).length, 0, "still no write control: copying is not a register write");
+  // Reminders: /api/conflicts rows carry registerPath (no line) or only reminderId -- no file:line exists
+  const rem = { ok: true, list: "Claude TODO", summary: { total: 2 }, rows: [
+    { reminderId: "R-1", disposition: "held-unrecognized-shape", reason: "no staging heading", registerPath: "/u/Documents/GitHub/k/TODOS.md", project: "k", prId: "PR-001" },
+    { reminderId: "R-2", disposition: "held-no-register", reason: "no TODOS.md found", tag: "k" }] };
+  const r = await mount({ hash: "#/reminders", routes: { "/api/conflicts": rem }, speedUp: false });
+  const rw = clipboard(r);
+  const rr = dtRows(r.app);
+  assert.equal(rr.length, 2);
+  click(rr.find((x) => /PR-001/.test(textOf(x))));
+  click(rr.find((x) => /no TODOS\.md found/.test(textOf(x))));
+  for (let i = 0; i < 40 && rw.length < 2; i++) await sleep(10);
+  assert.deepEqual(rw, ["/u/Documents/GitHub/k/TODOS.md", "R-2"], "the register path when there is one, the reminder id when there is not");
+});
+
+/* -- one chart implementation, one banner ------------------------------------------ */
+
+test("every chart in every view is Plot: the Velocity columns, the Spark and the div Bars are gone", async () => {
+  const src = read("commands/ui.client.js");
+  assert.ok(src.length > 20000, "the scan has gone blind");
+  assert.doesNotMatch(src, /function (Velocity|Spark|Bars)\b/, "a deleted chart implementation came back");
+  const gone = ["vcol", "vstack", "vseg-changed", "vseg-quiet", "vaxis", "vtick", "axnote", "bar-t", "bar-f", "series", "hit", "vleg"];
+  const views = { "#/overview": {}, "#/judge": {}, "#/unblock": {}, "#/health": { "/api/health": HEALTH }, "#/activity": {} };
+  let plots = 0;
+  for (const [hash, routes] of Object.entries(views)) {
+    const m = await mountOv({ hash: "#/judge", routes });
+    const log = withPlot(m);
+    m.setHash(hash); await m.settle();
+    plots += log.all.length;
+    for (const cls of gone) assert.equal(byClass(m.app, cls).length, 0, `${hash} still draws .${cls}`);
+  }
+  assert.ok(plots >= 5, `only ${plots} Plot charts drawn across the views (3 on the Overview, 2 on Activity) -- the sweep has gone blind`);
+  // The Never verified buckets are Plot too -- covered where they are opened, above.
+});
+
+test("a hand-written div.banner is gone: every error is ErrorBanner, and each one that can be retried offers 'retry'", async () => {
+  const src = read("commands/ui.client.js");
+  const from = src.indexOf("function ErrorBanner");
+  const eb = src.slice(from, src.indexOf("/** Stop a click"));
+  assert.ok(from > 0 && eb.length > 200, "ErrorBanner not found: the scan has gone blind");
+  const left = [...src.replace(eb, "").matchAll(/<div class="banner[^>]*>/g)].map((x) => x[0]).sort();
+  // Two remain on purpose: the focused-section note (a status, not an error) and the stale-server notice
+  // (restarting the server is the cure, so a retry button would be a lie).
+  assert.deepEqual(left, ['<div class="banner focus" role="status">', '<div class="banner" role="alert">'], "an error banner was written by hand");
+  const retries = [];
+  const check = async (label, m) => {
+    const banner = byClass(m.app, "banner")[0];
+    assert.ok(banner, label + ": no banner");
+    const btn = btnText(banner, /^retry$/);
+    assert.ok(btn, label + ": no retry in " + textOf(banner));
+    retries.push(label);
+  };
+  const fatal = { fatal: "reconcile failed: no workspaces", divisions: null };
+  await check("judge fatal", await mount({ inbox: fatal }));
+  await check("unblock fatal", await mount({ inbox: fatal, hash: "#/unblock" }));
+  await check("overview fatal", await mountOv({ inbox: fatal }));
+  const broken = JSON.parse(JSON.stringify(INBOX));
+  broken.divisions.worklist = { error: "fix-order join exploded", ready: null, blocked: null };
+  await check("judge worklist", await mount({ inbox: broken }));
+  await check("unblock worklist", await mount({ inbox: broken, hash: "#/unblock" }));
+  await check("overview worklist", await mountOv({ inbox: broken }));
+  await check("health unreadable", await mount({ hash: "#/health", routes: { "/api/health": { ok: false, reason: "no snapshot yet" } } }));
+  await check("registers", await mount({ hash: "#/registers", routes: { "/api/registers": { error: "backlog exploded", issues: null, todos: null } } }));
+  await check("reminders", await mount({ hash: "#/reminders", routes: { "/api/conflicts": { ok: false, reason: "EPERM" } } }));
+  assert.equal(retries.length, 9);
+  // and the retry actually re-reads: the reminders one
+  const r = await mount({ hash: "#/reminders", routes: { "/api/conflicts": { ok: false, reason: "EPERM" } } });
+  const n = r.fetches.filter((f) => f.path === "/api/conflicts").length;
+  click(btnText(byClass(r.app, "banner")[0], /^retry$/)); await r.settle();
+  assert.equal(r.fetches.filter((f) => f.path === "/api/conflicts").length, n + 1);
+  // a dead token has nothing to retry: it gives the instruction instead of a button that cannot work
+  const dead = await mount({ inbox: respond(401, { error: "token" }) });
+  assert.equal(btnText(byClass(dead.app, "banner")[0], /^retry$/), undefined);
+  assert.match(textOf(byClass(dead.app, "banner")[0]), /token expired/);
+});
+
+test("Unblock ?focus= is parsed, and a value the page does not know is ignored rather than put in a selector", async () => {
+  const { ui } = await mount();
+  assert.equal(fromRealm(ui.parseHash("#/unblock?focus=roots")).focus, "roots");
+  assert.equal(fromRealm(ui.parseHash("#/unblock")).focus, null);
+  // an unknown value reaches the view but never a querySelector: mount with a hostile one and with a querySelector that records its argument
+  const m = await mount({ hash: '#/unblock?focus=%22%5D%2C%20body' });
+  assert.equal(byClass(m.app, "kpi").length, 3, "the view still renders");
+  const asked = [];
+  const root = detail(m.app);
+  root.querySelector = (sel) => { asked.push(sel); return null; };
+  m.setHash("#/unblock?focus=together"); await m.settle();
+  m.setHash('#/unblock?focus=%22%5D%2C%20body'); await m.settle();
+  assert.ok(asked.every((s) => /^\[data-focus="(roots|together)"\]$/.test(s)), "only a known anchor name is ever put in a selector: " + asked.join(" | "));
+});
+
+/* ══ Phase 1b (2026-10-16): five touch-point fixes found on the Phase 0-1 review ══ */
+
+test("Phase 1b/1: 'To judge' and 'Blocked' say 'loading…' while the queue is read and 'could not read' when it failed, never 'unknown'", async () => {
+  const m = await mountOv();
+  const model = fromRealm(m.ui.overviewModel(OV_INBOX, Date.now()));
+  // The model as it is when a figure is MISSING: the payload carried no worklist / leverage count.
+  const holed = { ...model, toJudge: null, blocked: null };
+  const k = (inbox) => Object.fromEntries(fromRealm(m.ui.overviewKpis(holed, { status: "ok", days: [] }, { status: "loading" }, Date.now(), inbox)).map((x) => [x.key, x]));
+  const loading = k({ status: "loading" });
+  const failed = k({ status: "error", kind: "http", error: "inbox exploded" });
+  const sent = k({ status: "ok", data: {} });
+  for (const key of ["judge", "blocked"]) {
+    assert.equal(loading[key].text, "loading…");
+    assert.equal(failed[key].text, "could not read");
+    assert.equal(failed[key].sub, "inbox exploded", "the reason is the server's own");
+    assert.equal(sent[key].text, "could not read", "read fine but the figure is not in it: still not a number, still not 'unknown'");
+    assert.match(sent[key].sub, /the queue sent no/);
+    for (const x of [loading[key], failed[key], sent[key]]) assert.doesNotMatch(x.text + x.sub, /unknown/);
+  }
+  // a figure that IS held is shown whatever the resource is doing (a refresh keeps the old number up)
+  const held = Object.fromEntries(fromRealm(m.ui.overviewKpis(model, { status: "ok", days: [] }, { status: "loading" }, Date.now(), { status: "loading" })).map((x) => [x.key, x]));
+  assert.equal(held.judge.text, String(OV_INBOX.worklist.toJudge));
+});
+
+test("Phase 1b/2: Enter and Space on a focused Judge row select it like a click; on the checkbox inside it they do not", async () => {
+  const m = await mount();
+  const list = () => rows(m.app);
+  assert.match(list()[0].getAttribute("class"), /\bsel\b/, "the first row starts selected");
+  const second = list()[1];
+  assert.doesNotMatch(second.getAttribute("class"), /\bsel\b/);
+  // a key event from the checkbox inside the row is the checkbox's own (Space toggles it)
+  second.dispatchEvent({ type: "keydown", key: " ", target: byTag(second, "input")[0], preventDefault() {} });
+  await m.settle();
+  assert.doesNotMatch(list()[1].getAttribute("class"), /\bsel\b/, "Space on the checkbox must not select the row");
+  for (const key of ["Enter", " "]) {
+    list()[0].dispatchEvent({ type: "click", stopPropagation() {}, preventDefault() {} });
+    await m.settle();
+    assert.doesNotMatch(list()[1].getAttribute("class"), /\bsel\b/);
+    list()[1].dispatchEvent({ type: "keydown", key, target: list()[1], preventDefault() {} });
+    await m.settle();
+    assert.match(list()[1].getAttribute("class"), /\bsel\b/, JSON.stringify(key) + " on the focused row selects it");
+  }
+});
+
+test("Phase 1b/3: clearing a Judge filter chip rewrites the hash without that parameter and keeps the others", async () => {
+  const { ui } = await mount();
+  // the pure rewrite first
+  const w = (h, k, c) => ui.hashWithout(h, k, c);
+  assert.equal(w("#/judge?ws=WS1&age=1to7d&source=%2Fa.md", "age"), "judge?ws=WS1&source=%2Fa.md");
+  assert.equal(w("#/judge?ws=WS1", "ws"), "judge", "the last parameter takes the '?' with it");
+  assert.equal(w("#/judge?ws=WS1&chip=parked", "ws", "both"), "judge?chip=both", "the open chip replaces the old chip=, never doubles it");
+  assert.equal(w("#/judge", "ws"), "judge");
+  // then on screen: every chip, with the others kept and the address bar agreeing
+  const full = "#/judge?state=REVERSED&ws=WS1&source=" + encodeURIComponent(SRC_A) + "&age=1to7d";
+  for (const [aria, gone] of [["workspace", "ws"], ["waiting time", "age"], ["source", "source"], ["reverse", "state"]]) {
+    const m = await mount({ hash: full, inbox: OV_INBOX });
+    const chip = byClass(m.app, "filt").find((c) => new RegExp(aria, "i").test(c.getAttribute("aria-label")));
+    assert.ok(chip, "no " + aria + " chip on screen for " + full);
+    click(chip); await m.settle();
+    const h = m.ctx.location.hash;
+    assert.doesNotMatch(h, new RegExp("[?&]" + gone + "="), gone + "= must be gone from " + h);
+    for (const keep of ["state", "ws", "source", "age"].filter((x) => x !== gone)) assert.match(h, new RegExp("[?&]" + keep + "="), keep + "= must survive in " + h);
+    assert.equal(byClass(m.app, "filt").length, 3, "the other three chips are still there");
+  }
+});
+
+test("Phase 1b/4: a runs-per-day bar's tooltip says it is hover only", async () => {
+  const { ui } = await mount();
+  const t = fromRealm(ui.tipText("runs", { day: "2026-10-15", count: 5 }));
+  assert.match(t.lines[t.lines.length - 1], /hover only — no list behind a day's count/);
+  assert.equal(t.lines[0], "5 commands run");
+});
+
+test("Phase 1b/5: the header refresh re-reads /api/baseline when the Never-verified chip is open, and /graph on the Graph view", async () => {
+  const baseline = { buckets: { baselineable: 6, noCoCommit: 253, boundReached: 1, ineligibleCrossRepo: 64, examinedAndDeferred: 33 }, total: 357, accountedFor: true, unaccounted: 0, error: null };
+  const count = (m, p) => m.calls.filter((c) => c === p).length;
+  const m = await mount({ routes: { "/api/baseline": baseline } });
+  click(btnText(m.app, /Never verified/)); await m.settle();
+  assert.equal(count(m, "/api/baseline"), 1);
+  click(btnText(m.app, /^refresh$/)); await m.settle();
+  assert.equal(count(m, "/api/baseline"), 2, "an open Never chip's split is re-read by refresh");
+  // closed chip: nothing asked for it, so refresh does not fetch it
+  const c = await mount({ routes: { "/api/baseline": baseline } });
+  click(btnText(c.app, /^refresh$/)); await c.settle();
+  assert.equal(count(c, "/api/baseline"), 0, "a chip that is not open is not fetched by refresh");
+  // Graph
+  const g = await mount({ hash: "#/graph", routes: { "/graph": rawText(200, "<html>g</html>") } });
+  assert.equal(count(g, "/graph"), 1);
+  click(btnText(g.app, /^refresh$/)); await g.settle();
+  assert.equal(count(g, "/graph"), 2, "refresh re-renders the graph");
 });

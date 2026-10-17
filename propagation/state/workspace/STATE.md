@@ -1,6 +1,32 @@
 # propagate — State
 
 
+## The web UI is built from one Kpi, one DataTable, one chart and one banner — 2026-10-16, `v0.15.28` (Phases 0, 1 and 1b of the design review)
+Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section; Phases 2–5 next).
+- **Phase 0, loading states.** A pending read says "loading…" and a failed one says "could not read" with
+  the reason beneath (`readState`, `surfaceVelocity`, `velocityNote` in `commands/ui.client.js`). "unknown" is no
+  longer used for either. Before this, "Judged today" read "unknown" for the ~4 s `/api/surface` waits behind
+  `/api/inbox` (`firstLanded`), the same word a failed read used.
+- **`Kpi`** `{label, value, sub, route, tip}`: `route` is required; a card with none is `inert` and `tip` is
+  its reason. Unblock's three bare figures are cards now (blocked and roots go to the roots list or Judge on
+  the top root; "need several" to the settle-together groups, via the new `?focus=` hash parameter).
+- **`DataTable`**: sortable headers, every row focusable, Enter or click routes or acts, the page's tooltip on
+  hover and focus. Unblock roots, Health (fail, accepted and warn rows; warn grouped by section), Registers,
+  Reminders and the Overview sources table all render through it. Registers rows copy `file:line`; Reminders
+  rows copy `registerPath`, else the reminder id (`/api/conflicts` carries no file:line).
+- **One chart.** `Velocity`, `Spark` and `Bars` are deleted; every chart is `PlotChart`. The verdict chart is one
+  component (`VerdictsChart`) on the Overview (bars open Activity) and on Activity (bars open Judge). Never
+  verified buckets are a Plot chart: "examined and parked" opens the Parked chip, "baselineable now" copies the
+  bulk command, the other three say in their tooltip that there is no list behind them.
+- **One banner.** Every error is `ErrorBanner` with "retry". Two hand-written banners stay on purpose: the
+  focused-section note (a status) and the stale-server notice (a restart is the cure).
+- **Tests rewritten on purpose, not patched:** the markup they pinned was replaced (hand-built columns,
+  sparkline, `.sitem`/`.hrow`/`.root`, bare `.kpi`, the `.bar`/`.hit` CSS guards). New cases cover each
+  guard above; each was mutated red and restored.
+- **Phase 1b, touch-point fixes (same day).** Overview "To judge"/"Blocked" use `readState` on the inbox; a focused Judge row takes Enter/Space; clearing a Judge filter chip rewrites the hash (`hashWithout`); the runs-per-day tooltip says it is hover only; the header refresh re-reads `/api/baseline` (Never chip open) and `/graph` via a `refreshTick` counter. Each has a test mutated red and restored.
+- **Not done here (later phases):** DESIGN.md §4 still lists the deleted classes (`.root`, `.hrow`, `.vel`,
+  `.vcol`, `.vaxis`, `.shead`, `.hit`) and has no Kpi/DataTable row; that is Phase 5.
+
 ## The UI token is stable, in a 0600 file, with a cookie session — 2026-10-16, `v0.15.27`
 `<state dir>/ui-token` replaces the per-start token; `/?token=` sets an `HttpOnly; SameSite=Strict` cookie;
 every response has `no-store`, `no-referrer`, `frame-ancestors 'none'`, `X-Frame-Options: DENY`;

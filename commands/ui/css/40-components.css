@@ -15,6 +15,8 @@
   flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
   padding: 2px 5px; border-radius: var(--r1); color: var(--on-fill);
   min-width: 22px; text-align: center; margin-top: 1px;
+  /* A two-word badge (NEVER VERIFIED) in a narrow DataTable kind column broke onto two lines. */
+  white-space: nowrap;
 }
 .badge.none { background: var(--line); color: var(--dim); }
 .badge.DRIFTED { background: var(--edge-drift); }
@@ -73,10 +75,7 @@
 /* Not a failure, so not a colour. The duplicate guard working correctly must
    not carry DIVERGE crimson, which is the loudest hue in the file. */
 .badge.already-inserted                { background: var(--dim); }
-.sitem.quiet { color: var(--dim); }
-.streamlist { display: flex; flex-direction: column; }
-.sitem { display: flex; gap: var(--s2); padding: var(--s2) 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
-.sitem:last-child { border-bottom: 0; }
+.dt-row.quiet td { color: var(--dim); }
 .vin { font-size: 10px; padding: 1px 6px; border-radius: var(--r1); display: inline-block; margin-top: 3px; }
 .vin-absent { background: var(--field); color: var(--dim); border: 1px dashed var(--line); }
 .vin-unresolved { background: var(--warn-quiet); color: var(--st-warn); }
@@ -170,22 +169,6 @@ button kbd { background: oklch(from var(--on-fill) l c h / .22); border-color: t
 .chart { background: var(--card); border: 1px solid var(--line); border-radius: var(--r3); padding: var(--s4); box-shadow: var(--lift-1); }
 .chart h3 { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; }
 .chart .cov { font-size: 10.5px; color: var(--dim); margin-bottom: var(--s3); }
-.chart svg { width: 100%; height: 132px; display: block; overflow: visible; }
-.chart .axis { stroke: var(--line); stroke-width: 1; }
-.chart .gridline { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; opacity: .6; }
-.chart .lbl { fill: var(--dim); font-size: 9.5px; font-family: ui-monospace, Menlo, monospace; }
-.chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round;
-                 animation: draw var(--t-draw) var(--ease) forwards; }
-/* --len is each path's measured length; only the browser knows it, so the
-   client sets it per-path. The fallback is 0 so an unset --len draws the line
-   immediately rather than leaving it invisible — a missing custom property
-   would otherwise render as a chart with no series and no error. */
-@keyframes draw { from { stroke-dashoffset: var(--len, 0); } to { stroke-dashoffset: 0; } }
-.chart .area { opacity: .13; }
-/* A break in the data renders as a BREAK. A line drawn across days when
-   nothing ran asserts a measurement that was never taken. */
-.chart .gap { stroke-dasharray: 2 3; opacity: .45; }
-
 
 
 /* ── the redesign (2026-10-15): Judge, Unblock, Health, Activity ──────────────
@@ -233,38 +216,27 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
 .cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: var(--field); border: 1px solid var(--line); border-radius: var(--r1); padding: 3px 7px; word-break: break-all; user-select: all; }
 
 /* the stat row and the root rows (Unblock) */
-.kpis { display: flex; flex-wrap: wrap; gap: var(--s5); margin: var(--s3) 0 var(--s2); }
-.kpi { display: flex; flex-direction: column; }
+/* ONE KPI card (the Kpi component): label above, figure, sub-line. Live cards are .pick (a
+   pointer, a lift on hover); an .inert one has no destination, says why in the tooltip, and
+   gets no pointer, so it never looks clickable. Unblock's row of three used a bare, inert
+   variant of this before the unification (2026-10-16). */
+.kpis { display: flex; flex-wrap: wrap; gap: var(--s3); margin: var(--s3) 0 var(--s4); }
+.kpi { display: flex; flex-direction: column; min-width: 150px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r3);
+       padding: var(--s3) var(--s4); box-shadow: var(--lift-1); transition: box-shadow var(--t-fast) var(--ease); }
 .kpi b { font-size: 26px; font-weight: 600; line-height: 1.1; }
 .kpi span { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
-.root { display: flex; gap: var(--s3); align-items: flex-start; padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
-.root .itxt { flex: 1 1 auto; }
-.root > button { flex: 0 0 auto; }
-.fgroup { border: 1px solid var(--line); border-radius: var(--r2); padding: 0 var(--s3); margin-bottom: var(--s3); background: var(--card); }
-.fgroup .root:last-child { border-bottom: 0; }
-.fhead { padding: var(--s2) 0 0; font-size: 12.5px; }
+.kpi.inert b { color: var(--dim); }
+.fgroup { border: 1px solid var(--line); border-radius: var(--r2); padding: 0 var(--s3) var(--s3); margin-bottom: var(--s3); background: var(--card); }
+.fgroup .t { box-shadow: none; }
+.fhead { padding: var(--s2) 0; font-size: 12.5px; }
 
 /* Health: one line, then one list */
 .hline { font-size: 13px; margin: var(--s2) 0 var(--s4); display: flex; flex-wrap: wrap; gap: var(--s1); align-items: center; }
 .hline.okline { color: var(--st-ok); }
-.hrow { display: flex; gap: var(--s2); padding: var(--s3) 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
-.hrow .itxt { flex: 1 1 auto; }
 .wsec { border-bottom: 1px solid var(--line); padding: var(--s2) 0; }
 .wsec summary { cursor: pointer; font-size: 12.5px; }
 
-/* Activity: verdicts per day as a stacked bar, quiet segment beside the changed one */
-.vel { display: flex; align-items: flex-end; gap: 3px; height: 132px; border-bottom: 1px solid var(--line); }
-.vcol { flex: 1 1 0; height: 100%; display: flex; align-items: flex-end; min-width: 0; }
-.vcol.vgap { border-bottom: 2px dashed var(--line); }
-.vstack { width: 100%; display: flex; flex-direction: column; min-height: 2px; transition: height var(--t-slow) var(--ease); }
-.vseg-changed { background: var(--st-accent); min-height: 0; }
-.vseg-quiet { background: var(--seg-quiet); min-height: 0; }
-.vleg { font-size: 11px; color: var(--dim); margin-top: var(--s2); display: flex; align-items: center; gap: var(--s1); flex-wrap: wrap; }
-.key { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-left: var(--s2); }
-.key-changed { background: var(--st-accent); }
-.key-quiet { background: var(--seg-quiet); }
-
-.rgroup .sitem { padding: var(--s2) 0; }
+.rgroup .t { margin-bottom: var(--s3); }
 .detail.wide { grid-column: 2 / -1; }
 .frame { display: block; }
 
@@ -272,7 +244,8 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
    are marked with the accent ground, never with a new colour; the banner is the status ground,
    not a warning, because arriving at a healthy section is not bad news. */
 .banner.focus { background: var(--accent-quiet); }
-.hrow.focus { background: var(--accent-quiet); box-shadow: inset 2px 0 0 var(--st-accent); padding-left: var(--s2); }
+.dt-row.focus td { background: var(--accent-quiet); }
+.dt-row.focus td:first-child { box-shadow: inset 2px 0 0 var(--st-accent); }
 .wsec.focus > summary { font-weight: 600; }
 .chip.filt { border-style: dashed; }
 
@@ -291,11 +264,6 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
 /* AFFORDANCE ONLY. A pointer and a soft ground say "this takes a click"; the fact stays in
    the tooltip, never in the hover. */
 .pick { cursor: pointer; }
-.vcol.pick:hover { background: var(--accent-quiet); }
-.bar.pick { padding: 2px var(--s1); margin-left: calc(-1 * var(--s1)); border-radius: var(--r1); transition: background var(--t-fast) var(--ease); }
-.bar.pick:hover { background: var(--field); }
-.hit { fill: transparent; }
-.hit:hover { fill: var(--accent-quiet); }
 
 /* A meta line is a block: as an inline span it ran into whatever followed it. */
 .itxt .meta { display: block; }
@@ -305,14 +273,6 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
 .vopt { display: flex; flex-direction: column; gap: 3px; max-width: 200px; }
 .vmean { font-size: 10.5px; line-height: 1.35; color: var(--dim); }
 
-/* the day axis under the verdict bars, and the scale note under the sparkline */
-.vaxis { display: flex; gap: 3px; margin-top: 3px; }
-.vtick { flex: 1 1 0; min-width: 0; text-align: center; font-size: 9.5px; color: var(--dim); white-space: nowrap; font-family: ui-monospace, Menlo, monospace; }
-.axnote { display: flex; justify-content: space-between; gap: var(--s2); font-size: 10px; color: var(--dim); margin-top: 3px; font-family: ui-monospace, Menlo, monospace; }
-
-/* the column head over a register list */
-.shead { display: flex; gap: var(--s2); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); padding-bottom: 2px; border-bottom: 1px solid var(--line); }
-.sh-p { min-width: 26px; }
 .badge.open { min-width: 26px; }
 
 /* ── the Overview (2026-10-16) ────────────────────────────────────────────────
@@ -322,8 +282,6 @@ input[type="checkbox"] { accent-color: var(--st-accent); width: 15px; height: 15
    (resolveToken in the client). The mini "what moved" bar uses the badge colours so a state
    is the same colour in the list, the chart and the table. */
 .kpis.ov { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--s3); margin: var(--s3) 0 var(--s4); }
-.kpi.pick { background: var(--card); border: 1px solid var(--line); border-radius: var(--r3); padding: var(--s3) var(--s4); box-shadow: var(--lift-1);
-            transition: box-shadow var(--t-fast) var(--ease); }
 .kpi.pick:hover { box-shadow: var(--lift-2); }
 .kpi.warn b { color: var(--st-warn); }
 .kpi b { font-variant-numeric: tabular-nums; }
@@ -352,3 +310,16 @@ table.t { width: 100%; border-collapse: separate; border-spacing: 0; background:
 .mix i.REVERSED { background: var(--edge-reverse); }
 .mix i.DIVERGED { background: var(--edge-diverge); }
 .mix i.UNMATCHED { background: var(--dim); }
+
+/* ── the DataTable (Phase 1, 2026-10-16) ──────────────────────────────────────
+   table.t above is the base; these are the row states every table shares. A live row (.pick) has
+   a pointer and the hover ground; an .inert row has neither, because a row that looks clickable
+   and is not is the defect this component exists to end. Every row takes focus, and the focus
+   ring is the page's, so a keyboard user can see where Enter will act. */
+/* The base ring (20-base.css) stays; inset like .item's, because table.t clips overflow and an outside ring at the table edge would be cut. */
+.dt-row:focus-visible { outline-offset: -2px; }
+.dt-row.inert:hover td { background: transparent; }
+.dt-row .itxt { min-width: 0; }
+.dt-row .badge { margin-top: 0; }
+.dt-flash { font-size: 10.5px; color: var(--st-ok); font-weight: 600; }
+.t td .ttl { -webkit-line-clamp: 3; }

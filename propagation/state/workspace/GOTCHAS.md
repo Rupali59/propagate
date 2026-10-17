@@ -1874,3 +1874,18 @@ snapshot.
 **Instead:** take boundaries from `scanStructure(text).fenced` (`lib/docs/tokens.mjs`, 1-based) — the scanner
 `registers.mjs` already routes through — and verify by a DIFFERENT route than the one that cut: every kept
 heading keeps its fenced status before and after, and fence delimiters stay balanced.
+### G78 · `$B wait <ms>` does not wait: its argument is a CSS selector
+The gstack browse binary's `wait` takes a **selector**, not a duration. `$B wait 8000` prints an error about
+parsing the selector `8000` to stderr and returns at once. Redirect stderr, as a headless pass usually does,
+and a "poll every 5 s for 30 s" loop finishes in under a second while reading like a measurement.
+**Trigger:** `(browse|\$B)\s+wait\s+\d+`
+**Fires on:** `~/.claude/skills/gstack/browse/dist/browse wait 5000`
+**Signal:** a view that "never loads" in a headless pass while its API answers 200 in under a second. Or a
+loop that slept for a while and finished far too fast.
+**Cost:** 2026-10-16. A design review was published reporting "Activity never finishes loading, stuck 30 s".
+It was a false defect, and it was written into the plan as Phase 0. Caught only when an in-app
+navigation printed the selector error unredirected. Correcting it took a republish and a plan rewrite.
+**Instead:** wait on the element that proves the view rendered (`$B wait ".dtitle"`, `$B wait "table.t"`).
+Also note `screenshot --full` is not a flag either. Assert on what the page shows (`$B js`/`$B text`), not on the
+time you think passed.
+

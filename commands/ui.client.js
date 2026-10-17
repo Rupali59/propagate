@@ -189,6 +189,27 @@ function ageLabel(ms) {
 }
 const plural = (n, one, many) => n + " " + (n === 1 ? one : (many || one + "s"));
 
+/**
+ * How one resource read looks to a FIGURE (Phase 0, 2026-10-16). Three states, three sentences.
+ *
+ * WHY. `/api/surface` is gated behind `/api/inbox` (`firstLanded` in App), so for about four
+ * seconds on a cold start "Judged today" read "unknown" -- the very word a FAILED read used. A
+ * reader could not tell "the page has not asked yet" from "it asked and the server could not
+ * answer", and only one of those needs them to do anything. So a pending read says "loading…",
+ * a failed one says "could not read — <reason>", and "unknown" is not used for either
+ * (rule:discernment-checks 2: absence must be attributable, and a wait is not an absence).
+ * `idle` counts as pending: it is a lazy resource whose gate has not opened yet.
+ */
+const LOADING = "loading…";
+function readState(st) {
+  if (!st || st.status === "idle" || st.status === "loading") return { kind: "loading", reason: null, text: LOADING };
+  if (st.status === "error") {
+    const reason = st.kind === "token" ? TOKEN_EXPIRED : (st.error || "the server gave no reason");
+    return { kind: "error", reason: reason, text: "could not read — " + reason };
+  }
+  return { kind: "ok", reason: null, text: null };
+}
+
 /** POSIX single-quote, for a value that goes into a command a person will paste (disposition.mjs shellQuote). */
 function shellQuote(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'";
@@ -311,7 +332,7 @@ function remindersTimeoutText(why) {
   if (!/timed out/i.test(s)) return null;
   const m = /after (\d+)\s*ms/i.exec(s);
   const secs = m ? Math.round(+m[1] / 1000) : null;
-  return "Reminders did not answer" + (secs ? " in " + secs + "s" : "") + ". Open Reminders once and allow access, then Retry.";
+  return "Reminders did not answer" + (secs ? " in " + secs + "s" : "") + ". Open Reminders once and allow access, then retry.";
 }
 
 /**
@@ -330,13 +351,8 @@ function tipText(kind, v) {
   if (!v) return null;
   const num = (x) => (typeof x === "number" && isFinite(x) ? x : 0);
   const share = (n, d) => { const r = ratio(n, d); return r === null ? null : pct(r); };
-  if (kind === "verdicts") {
-    if (!(num(v.total) > 0)) return { title: dayLabel(v.day), lines: ["no verdicts recorded", "click to open Judge"] };
-    return { title: dayLabel(v.day), lines: [plural(num(v.total), "verdict"),
-      num(v.changed) + " changed something · " + num(v.noChange) + " no change needed", "click to open Judge"] };
-  }
   if (kind === "runs") {
-    return { title: dayLabel(v.day), lines: [num(v.count) > 0 ? plural(num(v.count), "command") + " run" : "no commands run"] };
+    return { title: dayLabel(v.day), lines: [num(v.count) > 0 ? plural(num(v.count), "command") + " run" : "no commands run", "hover only — no list behind a day's count"] };
   }
   if (kind === "command") {
     const p = share(v.count, v.total);
@@ -345,24 +361,27 @@ function tipText(kind, v) {
   }
   if (kind === "bucket") {
     const p = share(v.value, v.total);
-    return { title: v.label, lines: [plural(num(v.value), "edge"), p ? p + " of " + num(v.total) + " never verified" : null].filter(Boolean) };
+    return { title: v.label, lines: [plural(num(v.value), "edge"), p ? p + " of " + num(v.total) + " never verified" : null, v.hint || null].filter(Boolean) };
   }
   if (kind === "root") {
     if (v.unknown) return { title: v.edge_id, lines: ["not in the queue any more"] };
     return { title: v.source + " → " + v.downstream, lines: ["frees " + num(v.freesNow) + " now",
       v.upstreamOf != null ? "upstream of " + num(v.upstreamOf) : null,
-      v.inQueue ? "click to judge this root" : "never verified: copy the command to baseline it"].filter(Boolean) };
+      v.inQueue ? "click to judge this root" : "never verified: click to copy the command to baseline it"].filter(Boolean) };
   }
   if (kind === "edge") {
     return { title: v.sourceShort + " → " + v.downstreamShort,
       lines: [dot(v.state, boundaryLabel(v.boundary)), v.parked ? "parked" : (v.judgedCount ? "judged " + plural(v.judgedCount, "time") : "never judged"), "click to open the evidence"].filter(Boolean) };
   }
   if (kind === "health") {
-    return { title: v.label, lines: [v.section, v.tag === "fail" ? "failing check" : "accepted, not fixed",
-      v.action ? "next step: " + v.action.target : "no action mapped"].filter(Boolean) };
+    return { title: v.label, lines: [v.section, v.tag === "fail" ? "failing check" : v.tag === "warn" ? "warning, not failing" : "accepted, not fixed",
+      v.action ? "next step: " + v.action.target : (v.tag === "warn" ? "doctor maps no next step for a warning" : "no action mapped"),
+      v.action ? "click to copy the next step" : null].filter(Boolean) };
   }
   if (kind === "register") {
-    return { title: v.id || v.short || "item", lines: [dot(v.priority != null ? "priority " + priorityLabel(v) : "no priority", v.short, v.line ? "line " + v.line : null, v.date)] };
+    const loc = registerLocator(v);
+    return { title: v.id || v.short || "item", lines: [dot(v.priority != null ? "priority " + priorityLabel(v) : "no priority", v.short, v.line ? "line " + v.line : null, v.date),
+      loc ? "click to copy " + loc : "no file recorded for this item"] };
   }
   if (kind === "qbar") {
     const p = share(v.n, v.wsTotal);
@@ -374,7 +393,9 @@ function tipText(kind, v) {
   }
   if (kind === "vbar") {
     return { title: dayLabel(v.day) + " · " + (v.kind || "verdicts"),
-      lines: [num(v.n) > 0 ? plural(num(v.n), "verdict") : "none recorded", num(v.total) > 0 ? "of " + plural(num(v.total), "verdict") + " that day" : null, "click to open Activity"].filter(Boolean) };
+      lines: [num(v.n) > 0 ? plural(num(v.n), "verdict") : "none recorded", num(v.total) > 0 ? "of " + plural(num(v.total), "verdict") + " that day" : null,
+      // `go` is where wireChart says this bar leads: Judge on the Activity page, Activity from the Overview.
+      "click to open " + (v.go === "judge" ? "Judge" : "Activity")].filter(Boolean) };
   }
   if (kind === "source") {
     return { title: baseName(v.short) || "source", lines: [plural(num(v.edges), "edge") + (num(v.blocked) > 0 ? ", " + num(v.blocked) + " blocked" : ""),
@@ -525,24 +546,6 @@ function pruneTicked(ticked, allIds) {
   const out = new Set();
   for (const id of ticked) if (allIds.has(id)) out.add(id);
   return out.size === ticked.size ? ticked : out;
-}
-
-/**
- * A path that BREAKS on null.
- *
- * A gap in the timeline is a day nobody measured. Drawing a line across it
- * asserts a reading that was never taken -- the same defect as an empty result
- * rendering identically to a failed one, one plane over.
- */
-function linePath(points, x, y) {
-  let d = "";
-  let pen = false;
-  (points || []).forEach((p, i) => {
-    if (p.value == null) { pen = false; return; }
-    d += (pen ? "L" : "M") + x(i).toFixed(1) + " " + y(p.value).toFixed(1) + " ";
-    pen = true;
-  });
-  return d.trim();
 }
 
 /** The Unblock model: roots that free something now first, then joint blockers grouped by file. */
@@ -736,16 +739,10 @@ function overviewModel(inbox, now) {
   };
 }
 
-/** Table order. Ties fall to the source path so a re-sort never shuffles equals between renders. */
-const SORT_DEFAULT_DIR = { source: "asc", ws: "asc", edges: "desc", blocked: "desc", oldest: "desc" };
+/** Table order for the sources: the generic sortRows over a source's own fields, ties to the source path. */
 function sortSources(list, key, dir) {
-  const sign = dir === "asc" ? 1 : -1;
   const val = (g) => (key === "source" ? baseName(g.short).toLowerCase() : key === "ws" ? String(g.ws).toLowerCase() : g[key]);
-  return list.slice().sort((a, b) => {
-    const x = val(a), y = val(b);
-    const c = typeof x === "string" ? x.localeCompare(y) : (x - y);
-    return c !== 0 ? sign * c : (a.source < b.source ? -1 : a.source > b.source ? 1 : 0);
-  });
+  return sortRows(list, val, dir, (g) => g.source);
 }
 
 /**
@@ -766,7 +763,7 @@ function routeForKpi(key, model) {
  * testable without a chart. A DIVERGED bar opens the Both-sides-moved chip (state= only filters
  * To judge, where a diverged edge is never listed). Null for a datum it cannot route.
  */
-function routeForBar(chart, d) {
+function routeForBar(chart, d, from) {
   if (!d) return null;
   const enc = encodeURIComponent;
   if (chart === "queue") {
@@ -776,7 +773,25 @@ function routeForBar(chart, d) {
     return JUDGE_STATES.indexOf(d.state) >= 0 ? q + "&state=" + enc(d.state) : q;
   }
   if (chart === "wait") return AGE_KEYS.indexOf(d.bucket) >= 0 ? "judge?age=" + enc(d.bucket) : null;
-  if (chart === "verdicts") return "activity";
+  // ONE chart, two homes. On the Overview a verdict bar opens Activity (the place to read verdicts
+  // over time); on Activity itself that would be a no-op, so the same bar opens Judge, where
+  // verdicts are made. The tooltip names whichever it is (tipText "vbar"), so the click is never a surprise.
+  if (chart === "verdicts") return from === "activity" ? "judge" : "activity";
+  // The buckets carry their own destination (or none: the inbox has no row per edge to open).
+  if (chart === "buckets") return d.route || null;
+  return null;
+}
+
+/**
+ * What a click on a chart shape DOES: {route} to navigate, {copy} to put a command on the
+ * clipboard, or null when nothing is behind it (a per-day command count, a bucket with no list).
+ * One place, so the pointer cursor, the tooltip and the click cannot disagree about it.
+ */
+function barTarget(chart, d, from) {
+  const route = routeForBar(chart, d, from);
+  if (route) return { route: route };
+  if (chart === "usage" && d && d.command) return { copy: "propagate " + d.command };
+  if (chart === "buckets" && d && d.copy) return { copy: d.copy };
   return null;
 }
 
@@ -816,93 +831,89 @@ function verdictBars(velocity) {
   return bars;
 }
 
-/** The five cards. A figure that is not known says so; it is never a zero. */
-function overviewKpis(model, velocity, health, now) {
+/**
+ * The velocity the Overview and Activity read, whatever state the surface is in. A loaded
+ * surface hands back its own `velocity` (which may itself say it could not be read); a pending
+ * or failed `/api/surface` read becomes the same shape, so every consumer branches on ONE field
+ * and the two cases cannot be given the same word (Phase 0).
+ */
+function surfaceVelocity(surfaceSt) {
+  const rs = readState(surfaceSt);
+  if (rs.kind === "loading") return { status: "loading", reason: null };
+  if (rs.kind === "error") return { status: "error", reason: rs.reason };
+  const v = surfaceSt.data && surfaceSt.data.velocity;
+  return v && typeof v === "object" ? v : { status: "error", reason: "the surface sent no velocity" };
+}
+
+/** What a figure or a chart says in place of a number that is not (yet) there. Null when the velocity is readable. */
+function velocityNote(v) {
+  if (v && v.status === "ok") return null;
+  if (v && v.status === "loading") return LOADING;
+  return "could not read — " + ((v && v.reason) || "the surface sent no velocity");
+}
+
+/**
+ * The five cards. A figure that is not known says so; it is never a zero. And "not known" has
+ * two causes that must not share a word: still being read ("loading…") and failed to read
+ * ("could not read", with the reason beneath it). Phase 0, 2026-10-16.
+ */
+function overviewKpis(model, velocity, health, now, inbox) {
   const num = (v) => (typeof v === "number" ? v : null);
-  let today = null, todayWhy = null;
+  // "To judge" and "Blocked" come out of /api/inbox. A number already held wins (a refresh keeps the old
+  // figure on screen); only a MISSING one is told apart: still reading, failed, or read fine but not sent.
+  const is = readState(inbox);
+  const inboxNote = (what) => is.kind === "loading" ? { text: LOADING, sub: "reading the queue" }
+    : is.kind === "error" ? { text: "could not read", sub: is.reason }
+    : { text: "could not read", sub: "the queue sent no " + what };
+  let today = null, todayText, todaySub;
   if (velocity && velocity.status === "ok" && Array.isArray(velocity.days)) {
     const hit = velocity.days.find((d) => d.day === localDay(now));
     today = hit ? (hit.total || 0) : 0;
-  } else todayWhy = (velocity && velocity.reason) || "the surface sent no velocity";
-  let fails = null, healthWhy = null;
-  if (health && health.status === "ok" && health.data && health.data.ok !== false) fails = healthModel(health.data).fail;
-  else if (health && (health.status === "error" || (health.data && health.data.ok === false))) healthWhy = "doctor's snapshot could not be read";
-  else healthWhy = "reading doctor's snapshot…";
+    todayText = String(today);
+    todaySub = "verdicts recorded today";
+  } else if (velocity && velocity.status === "loading") {
+    todayText = LOADING;
+    todaySub = "reading today's verdicts";
+  } else {
+    todayText = "could not read";
+    todaySub = (velocity && velocity.reason) || "the surface sent no velocity";
+  }
+  let fails = null, healthText, healthSub;
+  const hs = readState(health);
+  if (hs.kind === "ok" && health.data && health.data.ok !== false) {
+    fails = healthModel(health.data).fail;
+    healthText = fails + " fail";
+    healthSub = fails ? "open Health for the next step" : "nothing failing";
+  } else if (hs.kind === "loading") {
+    healthText = LOADING;
+    healthSub = "reading doctor's snapshot";
+  } else {
+    healthText = "could not read";
+    healthSub = hs.kind === "error" ? hs.reason : (health.data.reason || health.data.error || "doctor's snapshot could not be read");
+  }
   const oldest = model.oldest;
   return [
-    { key: "judge", label: "To judge", value: num(model.toJudge), text: model.toJudge == null ? "unknown" : String(model.toJudge),
-      sub: "of " + plural(model.edges, "edge") + " in the queue, from " + plural(model.nSources, "source file"), warn: false,
+    { key: "judge", label: "To judge", value: num(model.toJudge), text: model.toJudge == null ? inboxNote("worklist count").text : String(model.toJudge),
+      sub: model.toJudge == null ? inboxNote("worklist count").sub : "of " + plural(model.edges, "edge") + " in the queue, from " + plural(model.nSources, "source file"), warn: false,
       tip: "edges you can write a verdict on now. Click to open Judge" },
-    { key: "blocked", label: "Blocked", value: num(model.blocked), text: model.blocked == null ? "unknown" : String(model.blocked),
-      sub: "waiting on an upstream edge", warn: false, tip: "edges held back until an upstream edge is settled. Click to open Unblock" },
+    { key: "blocked", label: "Blocked", value: num(model.blocked), text: model.blocked == null ? inboxNote("blocked count").text : String(model.blocked),
+      sub: model.blocked == null ? inboxNote("blocked count").sub : "waiting on an upstream edge", warn: false, tip: "edges held back until an upstream edge is settled. Click to open Unblock" },
     { key: "oldest", label: "Oldest wait", value: oldest, text: oldest == null ? "none" : oldest + " d",
       sub: oldest == null ? "no queued edge has been judged yet" : "since that edge was last judged", warn: oldest != null && oldest > 28,
       tip: "the longest any queued edge has gone without a verdict. Click to open the edges in that age band" },
-    { key: "today", label: "Judged today", value: today, text: today == null ? "unknown" : String(today),
-      sub: today == null ? todayWhy : "verdicts recorded today", warn: false, tip: "verdicts written since midnight, local time. Click to open Activity" },
-    { key: "health", label: "Health", value: fails, text: fails == null ? "…" : fails + " fail",
-      sub: fails == null ? healthWhy : (fails ? "open Health for the next step" : "nothing failing"), warn: fails != null && fails > 0,
+    { key: "today", label: "Judged today", value: today, text: todayText,
+      sub: todaySub, warn: false, tip: "verdicts written since midnight, local time. Click to open Activity" },
+    { key: "health", label: "Health", value: fails, text: healthText,
+      sub: healthSub, warn: fails != null && fails > 0,
       tip: "doctor's failing checks. Click to open Health" },
   ].map((k) => Object.assign(k, { route: routeForKpi(k.key, model) }));
 }
 
-/* -- charts: inline SVG, no library --------------------------------------- */
-
-function Spark({ points, stroke, label, unit, tipKind }) {
-  const ref = useRef(null);
-  const pts = points || [];
-  const vals = pts.filter((p) => p.value != null).map((p) => p.value);
-  const max = vals.length ? Math.max(...vals) : 1;
-  const W = 300;
-  const H = 110;
-  const PAD = 6;
-  const x = (i) => PAD + (i / Math.max(1, pts.length - 1)) * (W - PAD * 2);
-  const y = (v) => H - PAD - (v / (max || 1)) * (H - PAD * 2);
-  const d = linePath(pts, x, y);
-
-  // --len is each path's measured length; only the browser knows it. The CSS
-  // draw-in reads it as a dash offset, and falls back to 0 without it.
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof el.getTotalLength !== "function") return;
-    const len = el.getTotalLength();
-    el.style.setProperty("--len", String(len));
-    el.style.strokeDasharray = String(len);
-  }, [d]);
-
-  if (!vals.length) return html`<div class="reason">no readings in this series</div>`;
-  const gaps = pts.filter((p) => p.value == null).length;
-  return html`
-    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label=${label || "series"}>
-      <line class="axis" x1=${PAD} y1=${H - PAD} x2=${W - PAD} y2=${H - PAD} />
-      <line class="gridline" x1=${PAD} y1=${y(max)} x2=${W - PAD} y2=${y(max)} />
-      <path ref=${ref} class="series" d=${d} style=${{ stroke: stroke }} />
-      ${/* One hit circle per reading, so every day answers a hover: a 2px line is not a target. A gap has no reading and so no circle. */ ""}
-      ${pts.map((p, i) => p.value == null ? null : html`<circle key=${i} class="hit" cx=${x(i).toFixed(1)} cy=${y(p.value).toFixed(1)} r="7"
-          ...${tipProps(tipText(tipKind || "runs", { day: p.day, count: p.value }))} />`)}
-    </svg>
-    ${/* The scale and the window sit OUTSIDE the svg. The max used to be an svg <text> at y=2, which floated above the plot as a bare "621" with no unit. */ ""}
-    <div class="axnote"><span>${"dashed line: max " + max + (unit || "")}</span>${gaps ? html`<span>${gaps} day(s) with no run</span>` : null}</div>
-    ${pts.length > 1 && pts[0].day && pts[pts.length - 1].day ? html`<div class="axnote"><span>${dayShort(pts[0].day)}</span><span>${dayShort(pts[pts.length - 1].day)}</span></div>` : null}`;
-}
-
-/**
- * Horizontal bars. `tipOf(row)` gives each row its tooltip; `onPick(row)` makes the row a
- * click target (and a keyboard one), with `doneLabel` naming the row that just acted so its
- * figure can say "copied". A row with neither is a plain, non-interactive bar.
- */
-function Bars({ rows, colorOf, tipOf, onPick, doneLabel }) {
-  const total = rows.reduce((n, r) => n + r.value, 0);
-  return html`<div>
-    ${rows.map((r) => html`
-      <div key=${r.label} class=${"bar" + (onPick ? " pick" : "")} ...${tipOf ? tipProps(tipOf(r, total)) : {}}
-        ...${onPick ? { onClick: () => onPick(r), tabIndex: 0, role: "button", onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(r); } } } : {}}>
-        <span class="bar-l">${r.label}</span>
-        <span class="bar-t"><span class="bar-f" style=${{ width: (total > 0 ? 100 * r.value / total : 0).toFixed(1) + "%", background: colorOf(r) }} /></span>
-        <span class="bar-v">${doneLabel === r.label ? "copied" : r.value}</span>
-      </div>`)}
-  </div>`;
-}
+/* -- charts: ONE implementation (Observable Plot, below) --------------------------
+ * Four chart implementations used to live here (Plot on the Overview, flex columns for
+ * Velocity, an SVG Spark, div Bars) and "verdicts per day" was drawn twice by two of them with
+ * two different click targets. Phase 1 (2026-10-16) moved every chart to PlotChart; this card is
+ * only the frame around one. */
 
 function Chart({ title, coverage, children }) {
   return html`<div class="chart">
@@ -919,14 +930,25 @@ const Skeleton = ({ rows }) => html`<div>${Array.from({ length: rows || 3 }, (_,
 /**
  * An error with a way out. A 401 has nothing to retry -- the token in this tab is
  * dead -- so it offers the instruction instead of a button that cannot work.
+ *
+ * THE ONE ERROR BANNER (Phase 1, 2026-10-16). About ten hand-written `div.banner` blocks used
+ * to say a read failed with no way to try again, beside the few that used this; each is now this
+ * component so the wording, the role and the retry are the same everywhere. `note` is a
+ * follow-on sentence (what the reader can still do); `extra` is a control that belongs beside
+ * the message (a copyable command). A banner with no `retry` is one where trying again would
+ * change nothing -- the data was read and is itself the problem.
  */
-function ErrorBanner({ what, st, retry }) {
+function ErrorBanner({ what, st, retry, note, extra }) {
   const token = st && st.kind === "token";
   return html`<div class="banner" role="alert">
-    <b>${what}</b> ${token ? TOKEN_EXPIRED : (st && st.error) || "failed for a reason the server did not give"}
+    ${what ? html`<b>${what}</b>` : null}${what ? " " : null}${token ? TOKEN_EXPIRED : (st && st.error) || "failed for a reason the server did not give"}${note ? " " + note : null}
     ${token || !retry ? null : html` <button class="ghost" onClick=${retry}>retry</button>`}
+    ${extra || null}
   </div>`;
 }
+
+/** Stop a click or key inside a control from also activating the row or card around it. */
+const stop = (e) => { if (e && typeof e.stopPropagation === "function") e.stopPropagation(); };
 
 /** Put text on the clipboard; `ok` runs once it landed. A blocked clipboard leaves the text visible to select. */
 function copyText(text, ok) {
@@ -941,8 +963,20 @@ function copyText(text, ok) {
 
 function Copy({ text, label }) {
   const [done, setDone] = useState(false);
-  const copy = () => copyText(text, () => { setDone(true); setTimeout(() => setDone(false), 1500); });
+  // stop(): a Copy button inside a DataTable row must not ALSO fire the row's own action.
+  const copy = (e) => { stop(e); copyText(text, () => { setDone(true); setTimeout(() => setDone(false), 1500); }); };
   return html`<button class="ghost" onClick=${copy}>${done ? "copied" : (label || "copy")}</button>`;
+}
+
+/**
+ * Which key was copied a moment ago, so its row or bar can say "copied". `copy(key, text)` writes
+ * the clipboard and flags the key for 1.5 s; a blocked clipboard flags nothing, which is
+ * honest: the text is still visible to select (copyText).
+ */
+function useCopyFlash() {
+  const [done, setDone] = useState(null);
+  const copy = useCallback((key, text) => copyText(text, () => { setDone(key); setTimeout(() => setDone(null), 1500); }), []);
+  return [done, copy];
 }
 
 /* -- the one tooltip ------------------------------------------------------ */
@@ -985,7 +1019,103 @@ function TipLayer() {
 }
 
 /** A command a person pastes: the text is always visible, so a blocked clipboard still leaves something to select. */
-const Cmd = ({ text, label }) => html`<div class="cmdrow"><code class="cmd">${text}</code><${Copy} text=${text} label=${label} /></div>`;
+const Cmd = ({ text, label }) => html`<div class="cmdrow" onClick=${stop} onKeyDown=${stop}><code class="cmd">${text}</code><${Copy} text=${text} label=${label} /></div>`;
+
+/* -- the two shared pieces every view is built from (Phase 1, 2026-10-16) ------- */
+
+/**
+ * One KPI card. {label, value, sub, route, tip} -- and `route` is REQUIRED: a figure a person
+ * can see and cannot click is a dead end the page never explained. When a figure genuinely
+ * leads nowhere (nothing is blocked, so there is no list to open), `route` is null and `tip`
+ * is the REASON, shown by the same tooltip a live card uses. A null route with no reason
+ * renders KPI_NO_REASON, a sentence that reads as a defect on purpose and that a test asserts
+ * never appears.
+ *
+ * Label on top, value, then the sub-line -- the Overview's markup. The Unblock stat row used a
+ * different one (value on top, inert), which is the inconsistency this replaces.
+ */
+const KPI_NO_REASON = "this figure goes nowhere, and nothing says why";
+function Kpi({ label, value, sub, route, tip, warn, nav }) {
+  const live = !!(route && nav);
+  const text = live ? tip : (tip || KPI_NO_REASON);
+  const props = live
+    ? { role: "button", onClick: () => nav(route), onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); nav(route); } } }
+    : { role: "group" };
+  // Both kinds take focus: an inert card's reason is a tooltip, and focus is how a keyboard user gets one.
+  return html`<div class=${"kpi " + (live ? "pick" : "inert") + (warn ? " warn" : "")} tabIndex="0" ...${props}
+      ...${tipProps(tipText("note", { title: label, text: text }))}>
+    <span>${label}</span><b>${value}</b><div class="ksub">${sub}</div>
+  </div>`;
+}
+
+/**
+ * Rows ordered by one column's value. Null and undefined sort LAST in both directions (a figure
+ * that is not there is not the smallest figure), ties fall to `tie(row)` so a re-sort never
+ * shuffles equals between renders. Pure, so the order is testable without a table.
+ */
+function sortRows(rows, value, dir, tie) {
+  const sign = dir === "asc" ? 1 : -1;
+  const byTie = (a, b) => {
+    if (!tie) return 0;
+    const x = tie(a), y = tie(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  };
+  return (rows || []).slice().sort((a, b) => {
+    const x = value(a), y = value(b);
+    if (x == null || y == null) return x == null && y == null ? byTie(a, b) : (x == null ? 1 : -1);
+    const c = typeof x === "string" || typeof y === "string" ? String(x).localeCompare(String(y)) : (x - y);
+    return c !== 0 ? sign * c : byTie(a, b);
+  });
+}
+
+/**
+ * The ONE table. Generalised from the Overview's sources table; Unblock's roots, Health,
+ * Registers and Reminders all render through it, so a row looks, sorts, focuses and explains
+ * itself the same way everywhere.
+ *
+ *   columns   [{key, label, num?, value?(row), cell(row)}] -- `value` makes the header sortable
+ *             (aria-sort, Enter or Space on the header); a number column sorts largest-first
+ *             on the first click, text A to Z.
+ *   rowKey    row -> stable key
+ *   route     row -> "view?query" | null: Enter or a click navigates (needs `nav`)
+ *   act       row -> function | null: Enter or a click runs it (a copy, in Registers and Reminders)
+ *   tip       row -> {title, lines} | null: the page's one tooltip, on hover AND on focus
+ *   rowClass  row -> extra class names; flashKey names the row that was just acted on ("copied")
+ *
+ * EVERY row is keyboard-focusable, even an inert one, because focus is how a keyboard user gets
+ * the tooltip. A row with neither `route` nor `act` is `inert`, and then `tip` is its reason; with
+ * no tip at all it says ROW_NO_REASON, which a test asserts never appears. A control INSIDE a cell
+ * (Copy, Cmd, a button) stops its own click, and a key press only acts when the row itself has
+ * focus, so Enter on a button never also fires the row.
+ */
+const ROW_NO_REASON = "this row goes nowhere, and nothing says why";
+function DataTable({ columns, rows, rowKey, initialSort, tie, route, act, tip, rowClass, flashKey, label, nav }) {
+  const [sort, setSort] = useState(initialSort || null);
+  const col = sort ? columns.find((c) => c.key === sort.key && c.value) : null;
+  const list = col ? sortRows(rows, col.value, sort.dir, tie) : rows;
+  const pickSort = (c) => setSort((s) => (s && s.key === c.key ? { key: c.key, dir: s.dir === "asc" ? "desc" : "asc" } : { key: c.key, dir: c.num ? "desc" : "asc" }));
+  return html`<table class="t dt" aria-label=${label || null}>
+    <thead><tr>${columns.map((c) => c.value
+      ? html`<th key=${c.key} class=${(c.num ? "num " : "") + "sortable"} tabIndex="0" role="columnheader" scope="col"
+          aria-sort=${sort && sort.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+          onClick=${() => pickSort(c)} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickSort(c); } }}>${c.label}${sort && sort.key === c.key ? (sort.dir === "asc" ? " ▴" : " ▾") : ""}</th>`
+      : html`<th key=${c.key} class=${c.num ? "num" : ""} scope="col">${c.label}</th>`)}</tr></thead>
+    <tbody>${list.map((r) => {
+      const to = route ? route(r) : null;
+      const run = !to && act ? act(r) : null;
+      const live = !!((to && nav) || run);
+      const go = () => { if (to && nav) nav(to); else if (run) run(); };
+      const k = rowKey(r);
+      const t = tip ? tip(r) : null;
+      return html`<tr key=${k} class=${"dt-row " + (live ? "pick" : "inert") + (flashKey != null && flashKey === k ? " flash" : "") + (rowClass ? " " + (rowClass(r) || "") : "")}
+          tabIndex="0" onClick=${live ? go : null}
+          onKeyDown=${live ? (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); go(); } } : null}
+          ...${tipProps(t || (live ? null : { title: "No action", lines: [ROW_NO_REASON] }))}>
+        ${columns.map((c, i) => html`<td key=${c.key} class=${c.num ? "num" : ""}>${c.cell(r)}${i === 0 && flashKey != null && flashKey === k ? html` <span class="dt-flash" role="status">copied</span>` : null}</td>`)}
+      </tr>`;
+    })}</tbody>
+  </table>`;
+}
 
 /**
  * A request-backed value with the staleness rule built in (F8). Every call to
@@ -1067,7 +1197,7 @@ function EvidencePane({ entry, row }) {
     return html`<div class="evgrid" aria-busy="true"><${EvidenceBox} side="source" ev=${null} file=${row.source} /><${EvidenceBox} side="downstream" ev=${null} file=${row.downstream} /></div>`;
   }
   if (entry.status === "error") {
-    return html`<div class="banner" role="alert"><b>evidence</b> ${entry.error} — you can still give a verdict, but you will be judging without the diff.</div>`;
+    return html`<${ErrorBanner} what="evidence" st=${entry} note="— you can still give a verdict, but you will be judging without the diff." />`;
   }
   const d = entry.data || {};
   return html`<div class="evgrid">
@@ -1096,6 +1226,8 @@ function ReasonBox({ id, label, value, onInput, placeholder }) {
 function Row({ r, sel, ticked, isNew, onSelect, onTick }) {
   const label = r.sourceShort + " → " + r.downstreamShort;
   return html`<div class=${"item" + (sel ? " sel" : "") + (ticked ? " ticked" : "")} onClick=${onSelect} tabIndex="0"
+      ${/* Enter/Space select it like a click, but only when the ROW has focus: the checkbox inside keeps its own Space (DataTable uses the same target guard). */ ""}
+      onKeyDown=${(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onSelect(e); } }}
       role="option" aria-selected=${sel ? "true" : "false"} ...${tipProps(tipText("edge", r))}>
     <input type="checkbox" class="tick" checked=${ticked} aria-label=${"select " + label}
       onClick=${(e) => e.stopPropagation()} onChange=${onTick} />
@@ -1111,7 +1243,7 @@ function Row({ r, sel, ticked, isNew, onSelect, onTick }) {
 
 function JudgeView({ app, route }) {
   const { inboxSt, retryInbox, model, seen, ev, loadEvidence, evTick, reasons, bulkReason, hold, pending, undo, say,
-    msg, reduced, markSeen, rendered } = app;
+    msg, reduced, markSeen, rendered, nav } = app;
   const [chip, setChip] = useState("judge");
   // ?state= narrows To judge to one edge state; ?chip= opens a chip ("both" is the widget's word
   // for the Both sides moved chip). Both are re-applied when the hash changes.
@@ -1153,6 +1285,10 @@ function JudgeView({ app, route }) {
   const curAt = (list, i) => list[Math.min(i, Math.max(0, list.length - 1))] || null;
   const cur = curAt(flat, idx);
   const baseline = useResource("/api/baseline", chip === "never");
+  // Header refresh (App's refreshTick): re-read the split only while the chip that shows it is open;
+  // a closed chip has not asked for it and reads fresh data the next time it is opened first.
+  const refreshTick = app.refreshTick;
+  useEffect(() => { if (refreshTick && chip === "never") baseline[1](); }, [refreshTick]);
 
   // ?edge=<id>: Unblock's "Judge root" lands here. The edge may be in any
   // population (a DIVERGED root sits under its own chip), so find it rather than assume.
@@ -1278,7 +1414,7 @@ function JudgeView({ app, route }) {
   }
   if (!model) {
     if (inboxSt.data && inboxSt.data.fatal) {
-      return html`<div class="list"><div class="banner" role="alert">${inboxSt.data.fatal}</div></div><div class="detail"><div class="empty">Nothing is shown until the queue loads.</div></div>`;
+      return html`<div class="list"><${ErrorBanner} what="the queue could not be reconciled —" st=${{ error: inboxSt.data.fatal }} retry=${retryInbox} /></div><div class="detail"><div class="empty">Nothing is shown until the queue loads.</div></div>`;
     }
     return html`<div class="list"><${Skeleton} rows=${5} /></div><div class="detail"><${Skeleton} rows=${2} /></div>`;
   }
@@ -1289,7 +1425,16 @@ function JudgeView({ app, route }) {
   const counts4 = { judge: scoped(model.toJudge).length, diverged: scoped(model.diverged).length, parked: scoped(model.parked).length, never: model.gapTotal };
   // One clearable control per active filter, like the state one beside it. The source's tooltip
   // carries the full path: the chip shows the file name only.
-  const clearF = (k) => { setFilters((f) => Object.assign({}, f, { [k]: null })); setIdx(0); };
+  // The filters ride in the hash (a reload restores them), so a clear that only touched local state
+  // came back on reload. Clearing rewrites the hash without that one parameter and goes through nav, so
+  // `route` (which the effect above re-reads) agrees with the address bar. The open chip is written into
+  // the hash when it is not the default, or the effect would reset it to "To judge" when a filter remains.
+  const dropFromHash = (k) => {
+    const keep = chip === "judge" ? null : (chip === "diverged" ? "both" : chip);
+    nav(hashWithout(location.hash, k, keep));
+    setIdx(0);
+  };
+  const clearF = (k) => dropFromHash(k);
   const filterChips = [
     filters.ws ? { k: "ws", text: "only " + filters.ws, name: "workspace" } : null,
     filters.age ? { k: "age", text: "only waited " + ageWords(filters.age), name: "waiting time" } : null,
@@ -1300,7 +1445,7 @@ function JudgeView({ app, route }) {
     ${CHIPS.map((c) => html`<button key=${c.key} class=${"chip" + (chip === c.key ? " on" : "")} aria-pressed=${chip === c.key ? "true" : "false"}
         onClick=${() => { setChip(c.key); setIdx(0); }}>${c.label} <b>${counts4[c.key] == null ? "" : counts4[c.key]}</b></button>`)}
     ${stateFilter && chip === "judge" ? html`<button class="chip on filt" aria-label=${"clear the " + stateFilter.toLowerCase() + " filter"}
-        onClick=${() => { setStateFilter(null); setIdx(0); }}>only ${stateFilter.toLowerCase()} <b>${rows.length}</b> ✕</button>` : null}
+        onClick=${() => dropFromHash("state")}>only ${stateFilter.toLowerCase()} <b>${rows.length}</b> ✕</button>` : null}
     ${filterChips.map((c) => html`<button key=${c.k} class="chip on filt" aria-label=${"clear the " + c.name + " filter"}
         onClick=${() => clearF(c.k)} ...${c.full ? tipProps(tipText("note", { title: "Source", text: c.full })) : {}}>${c.text} <b>${rows.length}</b> ✕</button>`)}
     <button class="ghost chip-seen" disabled=${!rendered.current || !flat.length || unseenCount === 0} onClick=${() => markSeen(renderedKeys.current)}
@@ -1320,7 +1465,7 @@ function JudgeView({ app, route }) {
   const divErr = chip === "parked" ? model.errors.parked : chip === "never" ? null : model.errors.worklist;
   let listBody;
   if (divErr) {
-    listBody = html`<div class="banner" role="alert"><b>${chip === "parked" ? "parked" : "the worklist"}</b> could not be computed — ${divErr}</div>`;
+    listBody = html`<${ErrorBanner} what=${(chip === "parked" ? "parked" : "the worklist") + " could not be computed —"} st=${{ error: divErr }} retry=${retryInbox} />`;
   } else if (chip === "never") {
     listBody = html`<div class="empty"><b>${model.gapTotal == null ? "unknown" : model.gapTotal} never verified.</b><br />
       They are read-only here: a baseline pins the current bytes of both files as correct without a verdict, which is a different operation from judging. The detail pane has the command.</div>`;
@@ -1352,7 +1497,7 @@ function JudgeView({ app, route }) {
         ? html`<${BulkPanel} rows=${tickedRows} allowed=${bulkAllowed} bulkReason=${bulkReason} onVerdict=${judgeBulk} onClear=${clear} inputRef=${bulkRef}
             pending=${pending} undo=${undo} reduced=${reduced} msg=${msg} />`
         : html`<${JudgeDetail} chip=${chip} cur=${cur} model=${model} entry=${evEntry} evSettled=${evSettled} reasons=${reasons} judgeOne=${judgeOne}
-            baseline=${baseline[0]} pending=${pending} undo=${undo} reduced=${reduced} msg=${msg} evTick=${evTick} />`}
+            baseline=${baseline[0]} pending=${pending} undo=${undo} reduced=${reduced} msg=${msg} evTick=${evTick} nav=${nav} />`}
     </div>`;
 }
 
@@ -1378,8 +1523,8 @@ function VerdictBar({ allowed, disabled, onPick, note }) {
   </div>`;
 }
 
-function JudgeDetail({ chip, cur, model, entry, evSettled, reasons, judgeOne, baseline, pending, undo, reduced, msg }) {
-  if (chip === "never") return html`<${NeverVerified} model=${model} st=${baseline} />`;
+function JudgeDetail({ chip, cur, model, entry, evSettled, reasons, judgeOne, baseline, pending, undo, reduced, msg, nav }) {
+  if (chip === "never") return html`<${NeverVerified} model=${model} st=${baseline} nav=${nav} />`;
   if (!cur) return html`<div class="empty">Nothing selected.</div>`;
   const r = cur;
   const allowed = r.allowed || [];
@@ -1425,8 +1570,33 @@ function BulkPanel({ rows, allowed, bulkReason, onVerdict, onClear, inputRef, pe
   </div>`;
 }
 
-function NeverVerified({ model, st }) {
+/**
+ * The five never-verified buckets as bars, each one as clickable as the data allows. The inbox
+ * carries a COUNT per bucket and not a row per edge (see the detail text), so only two buckets
+ * lead anywhere: "examined and parked" are the Parked chip, and "baselineable now" is the one
+ * with a command. The other three have no list behind them, and each says that in its tooltip
+ * rather than being a bar that looks clickable and is not (Phase 1, 2026-10-16).
+ */
+const BASELINE_CMD = "propagate bootstrap --baseline-from-git";
+function bucketBars(k, total) {
+  const NO_LIST = "no list to open: the inbox carries a count for this bucket, not one row per edge";
+  const rows = [
+    { id: "baselineable", label: "baselineable now", value: k.baselineable, tone: "open", copy: BASELINE_CMD,
+      hint: "click to copy: " + BASELINE_CMD + " (a dry run)" },
+    { id: "noCoCommit", label: "no co-commit found", value: k.noCoCommit, tone: "open", hint: NO_LIST },
+    { id: "boundReached", label: "walk bound reached", value: k.boundReached, tone: "open", hint: NO_LIST },
+    { id: "ineligibleCrossRepo", label: "cross-repo, PERMANENT", value: k.ineligibleCrossRepo, tone: "permanent",
+      hint: "structural: two independent histories cannot share a commit, so this never clears. " + NO_LIST },
+    { id: "examinedAndDeferred", label: "examined and parked", value: k.examinedAndDeferred, tone: "open", route: "judge?chip=parked",
+      hint: "click to open the Parked chip in Judge" },
+  ];
+  return rows.map((r) => Object.assign(r, { key: "b:" + r.id, total: total }));
+}
+
+function NeverVerified({ model, st, nav }) {
   const k = st && st.status === "ok" && st.data && st.data.buckets;
+  const [copied, copy] = useCopyFlash();
+  const bars = useMemo(() => (k ? bucketBars(k, model.gapTotal) : []), [k, model.gapTotal]);
   return html`<div>
     <h2 class="dtitle">${model.gapTotal == null ? "unknown" : model.gapTotal} never verified</h2>
     <div class="dmeta">Read-only here. The inbox carries the count and the baseline buckets, not one row per edge.</div>
@@ -1435,65 +1605,116 @@ function NeverVerified({ model, st }) {
     <div class="sec">Where they stand</div>
     ${!st || st.status === "idle" || st.status === "loading" ? html`<${Skeleton} rows=${2} />`
       : st.status === "error" ? html`<${ErrorBanner} what="the baseline split could not be read —" st=${st} />`
-      : st.data && st.data.error ? html`<div class="banner" role="alert">${st.data.error}</div>`
+      : st.data && st.data.error ? html`<${ErrorBanner} what="the baseline split could not be computed —" st=${{ error: st.data.error }} />`
       : html`<div>
-          <${Bars} rows=${[
-            { label: "baselineable now", value: k.baselineable },
-            { label: "no co-commit found", value: k.noCoCommit },
-            { label: "walk bound reached", value: k.boundReached },
-            { label: "cross-repo, PERMANENT", value: k.ineligibleCrossRepo },
-            { label: "examined and parked", value: k.examinedAndDeferred },
-          ]} colorOf=${(r) => (/PERMANENT/.test(r.label) ? "var(--dim)" : "var(--st-accent)")}
-            tipOf=${(r) => tipText("bucket", { label: r.label, value: r.value, total: model.gapTotal })} />
+          <${PlotChart} chart="buckets" data=${{ bars: bars }} bars=${bars} nav=${nav} copy=${(text, d) => copy(d.key, text)} />
+          ${copied ? html`<div class="cov" role="status">copied: ${bars.find((b) => b.key === copied) ? bars.find((b) => b.key === copied).copy : ""}</div>` : null}
           <div class="caveat">${k.ineligibleCrossRepo} are cross-repo. Two independent histories cannot share a commit, so that slice is structural and will never clear. It is not a backlog.</div>
-          ${st.data.accountedFor ? null : html`<div class="banner" role="alert">the buckets do not sum to the total — ${st.data.unaccounted} unaccounted</div>`}
+          ${st.data.accountedFor ? null : html`<${ErrorBanner} what="the buckets do not sum to the total —" st=${{ error: st.data.unaccounted + " unaccounted" }} />`}
         </div>`}
     <div class="sec">The bulk command</div>
-    <${Cmd} text="propagate bootstrap --baseline-from-git" label="copy" />
+    <${Cmd} text=${BASELINE_CMD} label="copy" />
     <div class="hint">A dry run. Add <b>--apply</b> to write; every applied write is a <b>baselined</b> event with its evidence.</div>
   </div>`;
 }
 
 /* -- Unblock -------------------------------------------------------------- */
 
-function RootRow({ r, go }) {
-  const label = r.unknown ? r.edge_id : (r.source + " → " + r.downstream);
-  return html`<div class="root" ...${tipProps(tipText("root", r))}>
-    <span class=${"badge " + (r.inQueue ? "DRIFTED" : "NEVER_VERIFIED")}>${r.inQueue ? "root" : "NEVER VERIFIED"}</span>
-    <div class="itxt">
-      <span class="ttl">${label}</span>
-      <span class="meta">${dot(r.unknown ? null : "frees " + r.freesNow + " now", r.upstreamOf != null && !r.unknown ? "upstream of " + r.upstreamOf : null, r.edge_id)}</span>
-      ${r.inQueue || r.unknown ? null : html`<div class="note">Not in the queue: it has never been verified, and the UI does not write a baseline. Run it where you can read it first.</div>
-        <${Cmd} text=${baselineCommand(r.edge_id)} label="copy command" />`}
-    </div>
-    ${r.inQueue ? html`<button onClick=${() => go(r.edge_id)}>Judge root</button>` : null}
-  </div>`;
+/**
+ * The three figures over the Unblock list, each with a destination or a stated reason it has
+ * none (Phase 1, 2026-10-16). Unblock IS the page they describe, so "go to the Unblock page"
+ * would be a no-op; each goes to the PART of it that answers the figure instead:
+ *   blocked      -> the roots that free those edges (`focus=roots`), or the joint groups when no
+ *                   single root frees anything alone. Why: a blocked edge cannot be judged, the
+ *                   only thing a person can DO about one is settle what holds it back.
+ *   roots        -> Judge, on the top root that is in the queue: the first root to settle. The
+ *                   count of roots is only useful as "start here", and Judge is where it is settled.
+ *                   Falls back to the root list when the top root was never verified (not judgeable).
+ *   need several -> the "settle together" groups (`focus=together`): those edges are not freed by
+ *                   one root, so that is the section that lists the sets to settle.
+ * Judge has no "blocked" chip (it lists only edges that can be settled now), which is why blocked
+ * does not go there. A figure of 0 has no list to open, so it is inert and says so.
+ */
+function unblockKpis(m) {
+  const enc = encodeURIComponent;
+  const top = m.ranked.find((r) => r.inQueue);
+  const rootsRoute = m.ranked.length ? "unblock?focus=roots" : (m.byFile.length ? "unblock?focus=together" : null);
+  const none = (what) => "no " + what + ", so there is nothing to open";
+  return [
+    { key: "blocked", label: "Blocked", value: m.blocked, sub: "edges waiting on an upstream edge",
+      route: m.blocked > 0 ? rootsRoute : null,
+      tip: m.blocked > 0 ? "edges held back until what they depend on is settled. Click to jump to the roots that free them" : none("blocked edge") },
+    { key: "roots", label: "Roots", value: m.rootsTotal, sub: "unsettled edges that hold others back",
+      route: m.rootsTotal > 0 ? (top ? "judge?edge=" + enc(top.edge_id) : rootsRoute) : null,
+      tip: m.rootsTotal > 0 ? (top ? "edges that must be settled first. Click to judge the one that frees the most" : "edges that must be settled first. Click to jump to the list")
+        : none("root") },
+    { key: "several", label: "Need several", value: m.needAllRoots, sub: "blocked edges that need more than one root settled",
+      route: m.needAllRoots > 0 && m.byFile.length ? "unblock?focus=together" : null,
+      tip: m.needAllRoots > 0 ? "edges that no single root frees. Click to jump to the sets of roots to settle together" : none("edge that needs several roots") },
+  ];
 }
 
-function UnblockView({ app }) {
-  const { inboxSt, retryInbox } = app;
+/** Columns for a list of roots. Two numbers, sortable, beside the edge and the one thing to do. */
+function rootColumns(nav) {
+  return [
+    { key: "kind", label: "kind", cell: (r) => html`<span class=${"badge " + (r.inQueue ? "DRIFTED" : "NEVER_VERIFIED")}>${r.inQueue ? "root" : "NEVER VERIFIED"}</span>` },
+    { key: "edge", label: "edge", value: (r) => (r.unknown ? r.edge_id : r.source + " → " + r.downstream),
+      cell: (r) => html`<div class="itxt">
+        <span class="ttl">${r.unknown ? r.edge_id : (r.source + " → " + r.downstream)}</span>
+        <span class="meta">${r.edge_id}</span>
+        ${r.inQueue || r.unknown ? null : html`<div class="note">Not in the queue: it has never been verified, and the UI does not write a baseline. Run it where you can read it first.</div>
+          <${Cmd} text=${baselineCommand(r.edge_id)} label="copy command" />`}
+      </div>` },
+    { key: "frees", label: "frees now", num: true, value: (r) => (r.unknown ? null : r.freesNow), cell: (r) => (r.unknown ? "–" : r.freesNow) },
+    { key: "up", label: "upstream of", num: true, value: (r) => (r.unknown ? null : r.upstreamOf), cell: (r) => (r.unknown || r.upstreamOf == null ? "–" : r.upstreamOf) },
+    { key: "do", label: "", cell: (r) => (r.inQueue ? html`<button onClick=${(e) => { stop(e); nav("judge?edge=" + encodeURIComponent(r.edge_id)); }}>Judge root</button>` : null) },
+  ];
+}
+
+/**
+ * One list of roots. A root in the queue opens Judge on its edge; one that was never verified is
+ * not judgeable here, so its row copies the baseline command instead; one the payload no longer
+ * knows is inert, and its tooltip says so.
+ */
+function RootsTable({ roots, nav, label }) {
+  const [copied, copy] = useCopyFlash();
+  const columns = useMemo(() => rootColumns(nav), [nav]);
+  return html`<${DataTable} columns=${columns} rows=${roots} rowKey=${(r) => r.edge_id} nav=${nav} label=${label} flashKey=${copied}
+    route=${(r) => (r.inQueue ? "judge?edge=" + encodeURIComponent(r.edge_id) : null)}
+    act=${(r) => (!r.inQueue && !r.unknown ? () => copy(r.edge_id, baselineCommand(r.edge_id)) : null)}
+    tip=${(r) => tipText("root", r)} />`;
+}
+
+function UnblockView({ app, route }) {
+  const { inboxSt, retryInbox, nav } = app;
+  const top = useRef(null);
+  // ?focus=roots|together: a KPI above the lists lands on the list that answers it. After render,
+  // because the target exists only once the model has loaded; keyed on the route OBJECT, so a
+  // second click on the same card scrolls again.
+  useEffect(() => {
+    if (!route || (route.focus !== "roots" && route.focus !== "together") || !top.current || typeof top.current.querySelector !== "function") return;
+    const el = top.current.querySelector('[data-focus="' + route.focus + '"]');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "start" });
+  }, [route, inboxSt.status]);
   if (inboxSt.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="the queue could not be read —" st=${inboxSt} retry=${retryInbox} /></div>`;
   const m = unblockModel(inboxSt.data);
   if (!m) {
-    return html`<div class="detail wide">${inboxSt.data && inboxSt.data.fatal ? html`<div class="banner" role="alert">${inboxSt.data.fatal}</div>` : html`<${Skeleton} rows=${4} />`}</div>`;
+    return html`<div class="detail wide">${inboxSt.data && inboxSt.data.fatal ? html`<${ErrorBanner} what="the queue could not be reconciled —" st=${{ error: inboxSt.data.fatal }} retry=${retryInbox} />` : html`<${Skeleton} rows=${4} />`}</div>`;
   }
   const wlErr = inboxSt.data && inboxSt.data.divisions && inboxSt.data.divisions.worklist && inboxSt.data.divisions.worklist.error;
-  const goJudge = (id) => { location.hash = "#/judge?edge=" + encodeURIComponent(id); app.go("judge", id); };
-  return html`<div class="detail wide">
+  return html`<div class="detail wide" ref=${top}>
     <h2 class="dtitle">Unblock</h2>
-    ${wlErr ? html`<div class="banner" role="alert">the worklist could not be computed — ${wlErr}; the figures below may be incomplete</div>` : null}
+    ${wlErr ? html`<${ErrorBanner} what="the worklist could not be computed —" st=${{ error: wlErr }} retry=${retryInbox} note="The figures below may be incomplete." />` : null}
     <div class="kpis">
-      <div class="kpi"><b>${m.blocked}</b><span>blocked</span></div>
-      <div class="kpi"><b>${m.rootsTotal}</b><span>roots</span></div>
-      <div class="kpi"><b>${m.needAllRoots}</b><span>need several</span></div>
+      ${unblockKpis(m).map((k) => html`<${Kpi} key=${k.key} label=${k.label} value=${k.value} sub=${k.sub} route=${k.route} tip=${k.tip} nav=${nav} />`)}
     </div>
     ${m.blocked === 0 ? html`<div class="empty"><b>Nothing is blocked${m.checked == null ? "" : " (" + plural(m.checked, "edge") + " checked)"}.</b></div>` : html`<div>
-      <div class="sec">Settle these first</div>
-      ${m.ranked.length ? m.ranked.map((r) => html`<${RootRow} key=${r.edge_id} r=${r} go=${goJudge} />`)
+      <div class="sec" data-focus="roots">Settle these first</div>
+      ${m.ranked.length ? html`<${RootsTable} roots=${m.ranked} nav=${nav} label="roots that free blocked edges" />`
         : html`<div class="reason">No single root frees an edge on its own. Every blocked edge needs several roots settled together, below.</div>`}
-      ${m.byFile.length ? html`<div class="sec">Settle together</div>${m.byFile.map((g) => html`<div class="fgroup" key=${g.file}>
+      ${m.byFile.length ? html`<div class="sec" data-focus="together">Settle together</div>${m.byFile.map((g) => html`<div class="fgroup" key=${g.file}>
         <div class="fhead">${plural(g.blockedEdges, "blocked edge")} ${g.blockedEdges === 1 ? "flows" : "flow"} into ${g.files.map((f, i) => html`${i ? (i === g.files.length - 1 ? " and " : ", ") : ""}<b key=${f}>${f}</b>`)}; settle these roots together</div>
-        ${g.roots.map((r) => html`<${RootRow} key=${r.edge_id} r=${r} go=${goJudge} />`)}
+        <${RootsTable} roots=${g.roots} nav=${nav} label=${"roots to settle together for " + g.file} />
       </div>`)}` : null}
     </div>`}
   </div>`;
@@ -1506,19 +1727,32 @@ function ActionCell({ action }) {
   // ("...path(s))no action mapped"), because both were inline children of one column.
   if (!action) return html`<div class="meta none-mapped">no action mapped</div>`;
   if (action.kind === "command") return html`<${Cmd} text=${action.target} label="copy command" />`;
-  if (action.kind === "link") return html`<div class="cmdrow"><span class="meta">see ${action.target}</span><${Copy} text=${action.target} label="copy path" /></div>`;
+  if (action.kind === "link") return html`<div class="cmdrow" onClick=${stop} onKeyDown=${stop}><span class="meta">see ${action.target}</span><${Copy} text=${action.target} label="copy path" /></div>`;
   return html`<${Cmd} text=${action.target} label="copy path" />`;
 }
 
-function HealthRow({ e, tag, hl }) {
-  return html`<div class=${"hrow" + (hl ? " focus" : "")} ...${tipProps(tipText("health", { label: e.label, section: e.section, tag: tag, action: e.action }))}>
-    <span class=${"badge " + tag}>${tag === "fail" ? "FAIL" : "ACCEPTED"}</span>
-    <div class="itxt">
+const HEALTH_TAG = { fail: "FAIL", accepted: "ACCEPTED", warn: "WARN" };
+/**
+ * Health's two lists share these columns. A warn row has no "no action mapped" line: doctor maps a
+ * next step for failures and accepted findings, and a warning that carries none is the normal
+ * case, not a gap to flag on every row. (Its TOOLTIP still says so, so the row is never silent.)
+ */
+const HEALTH_COLUMNS = [
+  { key: "tag", label: "status", cell: (e) => html`<span class=${"badge " + (e.tag === "warn" ? "none" : e.tag)}>${HEALTH_TAG[e.tag]}</span>` },
+  { key: "check", label: "check", value: (e) => e.label, cell: (e) => html`<div class="itxt">
       <span class="ttl">${e.label}</span>
       <span class="meta">${dot(e.section, e.detail)}</span>
-      <${ActionCell} action=${e.action} />
-    </div>
-  </div>`;
+      ${e.tag === "warn" && !e.action ? null : html`<${ActionCell} action=${e.action} />`}
+    </div>` },
+];
+
+/** One Health list. A row with a mapped next step copies it; a row without one is inert and its tooltip says so. */
+function HealthTable({ rows, focus, label }) {
+  const [copied, copy] = useCopyFlash();
+  return html`<${DataTable} columns=${HEALTH_COLUMNS} rows=${rows} rowKey=${(e) => e._k} label=${label} flashKey=${copied}
+    rowClass=${(e) => (inFocus(focus, e.section) && e.tag !== "warn" ? "focus" : "")}
+    act=${(e) => (e.action ? () => copy(e._k, e.action.target) : null)}
+    tip=${(e) => tipText("health", { label: e.label, section: e.section, tag: e.tag, action: e.action })} />`;
 }
 
 // ?section=<doctor section name, or a prefix such as "Workspace:">: the widget's health chip
@@ -1536,12 +1770,14 @@ function HealthView({ st, retry, focus }) {
   if (st.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="health could not be read —" st=${st} retry=${retry} /></div>`;
   const data = st.data || {};
   if (data.ok === false) {
-    return html`<div class="detail wide"><div class="banner" role="alert"><b>doctor snapshot unreadable:</b> ${data.reason || data.error || "no reason given"}.
-      Re-run doctor: <${Cmd} text="propagate doctor" label="copy" /></div></div>`;
+    return html`<div class="detail wide"><${ErrorBanner} what="doctor snapshot unreadable:" st=${{ error: data.reason || data.error || "no reason given" }} retry=${retry}
+      note="— re-run doctor:" extra=${html`<${Cmd} text="propagate doctor" label="copy" />`} /></div>`;
   }
   const m = healthModel(data);
   const focused = focus ? (data.sections || []).filter((s) => inFocus(focus, s.name)) : [];
   const sum = (k) => focused.reduce((n, s) => n + (s[k] || 0), 0);
+  const listed = m.rows.fail.map((e, i) => Object.assign({ tag: "fail", _k: "f" + i }, e))
+    .concat(m.rows.accepted.map((e, i) => Object.assign({ tag: "accepted", _k: "a" + i }, e)));
   return html`<div class="detail wide" ref=${top}>
     <h2 class="dtitle">Health</h2>
     ${focus ? html`<div class="banner focus" role="status"><b>${focus.replace(/:$/, "")}</b> · ${focused.length
@@ -1550,84 +1786,17 @@ function HealthView({ st, retry, focus }) {
     <div class=${"hline" + (m.fail === 0 ? " okline" : "")}>${dot(
       m.fail + " fail", m.accepted + " accepted", m.warn + " warn in " + plural(m.warnSections, "section"), "snapshot " + ageLabel(m.ageMs))} ·
       <${Copy} text="propagate doctor" label="re-run doctor" /></div>
-    ${m.rows.fail.length + m.rows.accepted.length === 0
+    ${listed.length === 0
       ? html`<div class="empty"><b>0 fail</b> · snapshot ${ageLabel(m.ageMs)}. Nothing failing and nothing accepted.</div>`
-      : html`<div>
-          ${m.rows.fail.map((e, i) => html`<${HealthRow} key=${"f" + i} e=${e} tag="fail" hl=${inFocus(focus, e.section)} />`)}
-          ${m.rows.accepted.map((e, i) => html`<${HealthRow} key=${"a" + i} e=${e} tag="accepted" hl=${inFocus(focus, e.section)} />`)}
-        </div>`}
+      : html`<${HealthTable} rows=${listed} focus=${focus} label="failing and accepted checks" />`}
     ${m.warnBySection.length ? html`<div class="sec">Warnings, by section</div>${m.warnBySection.map((s) => html`<details key=${s.name} class=${"wsec" + (inFocus(focus, s.name) ? " focus" : "")} open=${inFocus(focus, s.name)}>
       <summary>${s.name} <span class="gn">${s.entries.length}</span></summary>
-      ${s.entries.map((e, i) => html`<div class="hrow" key=${i}><span class="badge none">WARN</span><div class="itxt"><span class="ttl">${e.label}</span><span class="meta">${e.detail || ""}</span></div></div>`)}
+      <${HealthTable} rows=${s.entries.map((e, i) => Object.assign({ tag: "warn", section: s.name, _k: "w:" + s.name + ":" + i }, e))} focus=${focus} label=${"warnings in " + s.name} />
     </details>`)}` : null}
   </div>`;
 }
 
-/* -- Activity ------------------------------------------------------------- */
-
-function Velocity({ v, go }) {
-  if (!v || v.status !== "ok") {
-    return html`<div class="reason">unknown: ${(v && v.reason) || "the surface sent no velocity"}</div>`;
-  }
-  const days = v.days || [];
-  const peak = days.reduce((n, d) => Math.max(n, d.total || 0), 0);
-  if (!v.events) return html`<div class="reason">No verdicts in ${v.windowDays} days (event store read).</div>`;
-  const share = ratio(v.noChangeEvents, v.events);
-  return html`<div>
-    <div class="vel" role="group" aria-label=${v.events + " verdicts in " + v.windowDays + " days"}>
-      ${days.map((d) => {
-        const h2 = peak > 0 ? 100 * (d.total || 0) / peak : 0;
-        // The column is the hit area, and it is full chart height, so an EMPTY day (a 2px
-        // stub) still answers a hover and a click. Mouse-only on purpose: thirty tab stops
-        // would bury the keyboard path, and Judge is one rail key away.
-        return html`<div class=${"vcol pick" + (d.total ? "" : " vgap")} key=${d.day} onClick=${go} ...${tipProps(tipText("verdicts", d))}>
-          <div class="vstack" style=${{ height: h2.toFixed(1) + "%" }}>
-            <span class="vseg-changed" style=${{ flexGrow: String(d.changed || 0) }} />
-            <span class="vseg-quiet" style=${{ flexGrow: String(d.noChange || 0) }} />
-          </div>
-        </div>`;
-      })}
-    </div>
-    ${/* The day axis. The bars had none, so the only way to learn which day a bar was was to guess from the window length. */ ""}
-    <div class="vaxis" aria-hidden="true">${days.map((d, i) => html`<span class="vtick" key=${d.day}>${axisTicks(days.length).indexOf(i) >= 0 ? dayShort(d.day) : ""}</span>`)}</div>
-    <div class="vleg"><span class="key key-changed" /> changed something <span class="key key-quiet" /> no change needed</div>
-    <div class="caveat">${pct(share)} of ${v.events} verdicts in ${v.windowDays} days recorded that nothing needed doing</div>
-  </div>`;
-}
-
-function Usage({ u }) {
-  // Which command row was just copied, so its figure can say so for a moment.
-  const [copied, setCopied] = useState(null);
-  if (!u || (u.status !== "ok")) {
-    return html`<div class="reason">${u && u.status === "none-recorded" ? "None recorded: " : "unknown: "}${(u && u.reason) || "the surface sent no usage"}</div>`;
-  }
-  const pts = (u.days || []).map((d) => ({ day: d.day, value: d.count }));
-  return html`<div>
-    <${Bars} rows=${(u.top || []).map((t) => ({ label: t.command, value: t.count }))} colorOf=${() => "var(--st-accent)"}
-      tipOf=${(r, total) => tipText("command", { command: r.label, count: r.value, total: u.total })}
-      doneLabel=${copied}
-      onPick=${(r) => copyText("propagate " + r.label, () => { setCopied(r.label); setTimeout(() => setCopied(null), 1500); })} />
-    <${Spark} points=${pts} stroke="var(--st-accent)" label="commands per day" unit="/day" />
-    <div class="cov">${dot(plural(u.total, "run") + " in " + u.windowDays + " days", u.failures ? plural(u.failures, "failure") : null, u.refusals ? plural(u.refusals, "refusal") : null, "origin " + u.origin)}</div>
-  </div>`;
-}
-
-function ActivityView({ st, retry, go }) {
-  if (st.status === "idle" || st.status === "loading") {
-    return html`<div class="detail wide"><div class="charts">${[0, 1].map((i) => html`<div class="chart" key=${i}><div class="skel"><i /><i /></div></div>`)}</div></div>`;
-  }
-  if (st.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="activity could not be read —" st=${st} retry=${retry} /></div>`;
-  const s = st.data || {};
-  return html`<div class="detail wide">
-    <h2 class="dtitle">Activity</h2>
-    <div class="charts">
-      <${Chart} title="Verdicts per day" coverage="judgements recorded in the event store, per local day"><${Velocity} v=${s.velocity} go=${() => go("judge")} /><//>
-      <${Chart} title="Commands you ran" coverage="interactive runs only, from the runs store"><${Usage} u=${s.usage} /><//>
-    </div>
-  </div>`;
-}
-
-/* -- Overview: Observable Plot (vendored d3 + Plot), tokens for every colour ---- */
+/* -- Charts: Observable Plot (vendored d3 + Plot), tokens for every colour. EVERY chart in the UI is one of these. ---- */
 
 /**
  * Why the charts cannot draw, or null when they can. It NAMES the cause: a blank card tells
@@ -1685,10 +1854,41 @@ function buildPlot(P, chart, data, tok, width) {
       x: { domain: AGE_BUCKETS.map((b) => AGE_TICK[b.key]), label: null }, y: { label: "edges", grid: true },
       marks: [P.barY(data.bars, { x: "label", y: "n", fill: "state", ariaLabel: keyOf }), P.ruleY([0])] });
   }
+  // The single-series charts colour by a one-value categorical field rather than a literal fill:
+  // Plot reads a string `fill` as a colour only when it parses as one, and a token that could not
+  // be resolved is the text "var(--x)", which does not -- it would be taken for a FIELD NAME and
+  // draw nothing. A scale with one entry has no such ambiguity.
+  if (chart === "usage") {
+    return P.plot({ style: style, width: width, height: Math.max(90, 28 * data.bars.length + 40), marginLeft: 90,
+      color: { domain: ["runs"], range: [tok("--st-accent")] },
+      y: { domain: data.bars.map((b) => b.command), label: null }, x: { label: "runs", grid: true },
+      marks: [P.barX(data.bars, { x: "count", y: "command", fill: "tone", ariaLabel: keyOf }), P.ruleX([0])] });
+  }
+  if (chart === "runs") {
+    const keep = axisLabels(data.days);
+    return P.plot({ style: style, width: width, height: 150, color: { domain: ["runs"], range: [tok("--st-accent")] },
+      x: { type: "band", domain: data.days, label: null, tickFormat: (d) => (keep.has(d) ? dayShort(d) : "") }, y: { label: "commands", grid: true },
+      marks: [P.barY(data.bars, { x: "day", y: "count", fill: "tone", ariaLabel: keyOf }), P.ruleY([0])] });
+  }
+  if (chart === "buckets") {
+    return P.plot({ style: style, width: width, height: 190, marginLeft: 150,
+      color: { domain: ["open", "permanent"], range: [tok("--st-accent"), tok("--dim")] },
+      y: { domain: data.bars.map((b) => b.label), label: null }, x: { label: "edges", grid: true },
+      marks: [P.barX(data.bars, { x: "value", y: "label", fill: "tone", ariaLabel: keyOf }), P.ruleX([0])] });
+  }
+  const keep = axisLabels((data.days) || data.bars.map((d) => d.day).filter((d, i, a) => a.indexOf(d) === i));
   return P.plot({ style: style, width: width, height: 190,
     color: { domain: VERDICT_KINDS, range: [tok("--st-accent"), tok("--seg-quiet")], legend: true },
-    x: { type: "band", label: null, tickFormat: (d) => String(d).slice(8) }, y: { label: "verdicts", grid: true },
+    x: { type: "band", label: null, tickFormat: (d) => (keep.has(d) ? String(d).slice(8) : "") }, y: { label: "verdicts", grid: true },
     marks: [P.barY(data.bars, { x: "day", y: "n", fill: "kind", ariaLabel: keyOf }), P.ruleY([0])] });
+}
+
+/** The days of an axis that carry a label: 30 labels would overlap into one smear (axisTicks picks which). */
+function axisLabels(days) {
+  const list = days || [];
+  const keep = new Set();
+  for (const i of axisTicks(list.length)) keep.add(list[i]);
+  return keep;
 }
 
 /**
@@ -1696,27 +1896,35 @@ function buildPlot(P, chart, data, tok, width) {
  * matched, so the caller can say so when the answer is none (a chart that draws and answers
  * nothing is worse than one that says it cannot).
  */
-function wireChart(node, chart, bars, nav) {
+const CHART_TIP = { queue: "qbar", wait: "wbar", verdicts: "vbar", usage: "command", runs: "runs", buckets: "bucket" };
+function wireChart(node, chart, bars, nav, extra) {
   if (!node || typeof node.querySelectorAll !== "function") return 0;
   const byKey = new Map(bars.map((b) => [b.key, b]));
-  const kind = chart === "queue" ? "qbar" : chart === "wait" ? "wbar" : "vbar";
+  const kind = CHART_TIP[chart] || "vbar";
+  const from = extra && extra.from;
   let wired = 0;
   node.querySelectorAll("[aria-label]").forEach((el) => {
     const d = byKey.get(el.getAttribute("aria-label"));
     if (!d) return;
     wired += 1;
-    const tip = tipText(kind, d);
-    if (el.style) el.style.cursor = "pointer";
+    const target = barTarget(chart, d, from);
+    // `go` lets a tooltip name where a verdict bar leads (Judge on Activity, Activity elsewhere).
+    const tip = tipText(kind, Object.assign({}, d, { go: target && target.route ? target.route : null }));
+    if (el.style && target) el.style.cursor = "pointer";
     const at = (e) => tipShow(tip, e.clientX, e.clientY);
     el.addEventListener("mouseenter", at);
     el.addEventListener("mousemove", at);
     el.addEventListener("mouseleave", tipHide);
-    el.addEventListener("click", () => { const to = routeForBar(chart, d); if (to) nav(to); });
+    el.addEventListener("click", () => {
+      if (!target) return;
+      if (target.route) nav(target.route);
+      else if (extra && extra.copy) extra.copy(target.copy, d);
+    });
   });
   return wired;
 }
 
-function PlotChart({ chart, data, bars, nav }) {
+function PlotChart({ chart, data, bars, nav, from, copy }) {
   const host = useRef(null);
   const [res, setRes] = useState({ fail: null, note: null });
   const [tick, setTick] = useState(0);
@@ -1741,7 +1949,7 @@ function PlotChart({ chart, data, bars, nav }) {
       const node = buildPlot(Plot, chart, data, resolveToken, el.clientWidth || (chart === "queue" ? 470 : 360));
       el.textContent = "";
       el.appendChild(node);
-      const wired = wireChart(node, chart, bars, nav);
+      const wired = wireChart(node, chart, bars, nav, { from: from, copy: copy });
       setRes({ fail: null, note: wired ? null : "hover and click are unavailable on this chart" });
     } catch (e) {
       setRes({ fail: String((e && e.message) || e), note: null });
@@ -1753,13 +1961,86 @@ function PlotChart({ chart, data, bars, nav }) {
   return html`<div><div class="plot" ref=${host}></div>${res.note ? html`<div class="cov">${res.note}</div>` : null}</div>`;
 }
 
+/** The top commands as bars: a click copies `propagate <command>`. */
+function usageBars(u) {
+  return ((u && u.top) || []).map((t) => ({ key: "u:" + t.command, command: t.command, count: t.count, total: u.total, tone: "runs" }));
+}
+
+/**
+ * Commands per day. A day the store has NO reading for (count null) is a gap, not a zero: it is
+ * left out of the bars and counted, so the chart never asserts a run count nobody measured -- the
+ * property the old sparkline's broken path guarded, kept now that the line is bars.
+ */
+function runBars(u) {
+  const days = ((u && u.days) || []).map((d) => d.day);
+  const bars = [];
+  let gaps = 0, max = 0;
+  for (const d of (u && u.days) || []) {
+    if (d.count == null) { gaps += 1; continue; }
+    bars.push({ key: "r:" + d.day, day: d.day, count: d.count, tone: "runs" });
+    if (d.count > max) max = d.count;
+  }
+  return { days: days, bars: bars, gaps: gaps, max: max };
+}
+
+/**
+ * Verdicts per day -- the ONE verdict chart, used by the Overview and by Activity (it was drawn
+ * twice by two implementations with two click targets). `from` says which page it sits on, and
+ * with it where a bar leads (routeForBar). A velocity that is not readable says why instead of
+ * drawing an empty axis: pending reads "loading…", failed reads "could not read — <reason>".
+ */
+function VerdictsChart({ velocity, nav, from, share }) {
+  const bars = useMemo(() => verdictBars(velocity), [velocity]);
+  const note = velocityNote(velocity);
+  if (note) return html`<div class="reason">${note}</div>`;
+  if (!velocity.events) return html`<div class="reason">No verdicts in ${velocity.windowDays} days (event store read).</div>`;
+  return html`<div>
+    <${PlotChart} chart="verdicts" data=${{ bars: bars }} bars=${bars} nav=${nav} from=${from} />
+    ${share ? html`<div class="caveat">${pct(ratio(velocity.noChangeEvents, velocity.events))} of ${velocity.events} verdicts in ${velocity.windowDays} days recorded that nothing needed doing</div>` : null}
+  </div>`;
+}
+
+function UsageBody({ u, nav }) {
+  const [copied, copy] = useCopyFlash();
+  const ok = !!(u && u.status === "ok");
+  const ub = useMemo(() => (ok ? usageBars(u) : []), [u]);
+  const rb = useMemo(() => (ok ? runBars(u) : { days: [], bars: [], gaps: 0, max: 0 }), [u]);
+  if (!ok) {
+    const why = (u && u.reason) || "the surface sent no usage";
+    return html`<div class="reason">${u && u.status === "none-recorded" ? "None recorded: " + why : "could not read — " + why}</div>`;
+  }
+  return html`<div>
+    <${PlotChart} chart="usage" data=${{ bars: ub }} bars=${ub} nav=${nav} copy=${(text, d) => copy(d.command, text)} />
+    ${copied ? html`<div class="cov" role="status">copied: propagate ${copied}</div>` : null}
+    <${PlotChart} chart="runs" data=${{ days: rb.days, bars: rb.bars }} bars=${rb.bars} nav=${nav} />
+    <div class="cov">${dot("most in a day: " + rb.max, rb.gaps ? plural(rb.gaps, "day") + " with no run recorded" : null)}</div>
+    <div class="cov">${dot(plural(u.total, "run") + " in " + u.windowDays + " days", u.failures ? plural(u.failures, "failure") : null, u.refusals ? plural(u.refusals, "refusal") : null, "origin " + u.origin)}</div>
+  </div>`;
+}
+
+function ActivityView({ st, retry, nav }) {
+  if (st.status === "idle" || st.status === "loading") {
+    return html`<div class="detail wide"><div class="charts">${[0, 1].map((i) => html`<div class="chart" key=${i}><div class="skel"><i /><i /></div></div>`)}</div></div>`;
+  }
+  if (st.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="activity could not be read —" st=${st} retry=${retry} /></div>`;
+  const s = st.data || {};
+  return html`<div class="detail wide">
+    <h2 class="dtitle">Activity</h2>
+    <div class="charts">
+      <${Chart} title="Verdicts per day" coverage="judgements recorded in the event store, per local day · click a bar to open Judge"><${VerdictsChart} velocity=${surfaceVelocity(st)} nav=${nav} from="activity" share=${true} /><//>
+      <${Chart} title="Commands you ran" coverage="interactive runs only, from the runs store · click a command to copy it"><${UsageBody} u=${s.usage} nav=${nav} /><//>
+    </div>
+  </div>`;
+}
+
 const SRC_COLS = [
-  { key: "source", label: "source" },
-  { key: "edges", label: "edges", num: true },
-  { key: null, label: "what moved" },
-  { key: "blocked", label: "blocked", num: true },
-  { key: "oldest", label: "oldest", num: true },
-  { key: "ws", label: "workspace" },
+  { key: "source", label: "source", value: (g) => baseName(g.short).toLowerCase(),
+    cell: (g) => html`<div><div class="nm">${baseName(g.short)}</div><div class="dr">${String(g.short).split("/").slice(0, -1).slice(-2).join("/")}</div></div>` },
+  { key: "edges", label: "edges", num: true, value: (g) => g.edges, cell: (g) => html`<b>${g.edges}</b>` },
+  { key: "mix", label: "what moved", cell: (g) => html`<${MixBar} g=${g} />` },
+  { key: "blocked", label: "blocked", num: true, value: (g) => g.blocked, cell: (g) => g.blocked },
+  { key: "oldest", label: "oldest", num: true, value: (g) => g.oldest, cell: (g) => (g.oldest < 0 ? "never" : g.oldest + " d") },
+  { key: "ws", label: "workspace", value: (g) => String(g.ws).toLowerCase(), cell: (g) => g.ws },
 ];
 
 function MixBar({ g }) {
@@ -1773,32 +2054,14 @@ function sourceRoute(g) {
 }
 
 function SourcesTable({ model, nav }) {
-  const [sort, setSort] = useState({ key: "edges", dir: "desc" });
-  const list = sortSources(model.top, sort.key, sort.dir);
-  const pickSort = (key) => setSort((s) => (s.key === key ? { key: key, dir: s.dir === "asc" ? "desc" : "asc" } : { key: key, dir: SORT_DEFAULT_DIR[key] || "desc" }));
   // A source whose edges are ALL blocked has nothing Judge can list (Judge shows only edges that
   // can be settled now), so its row opens Unblock, where its blockers are. Found on the live
   // render 2026-10-16: MEASUREMENT.md, 14 edges, all 14 blocked, opened an empty Judge.
-  const open = (g) => nav(sourceRoute(g));
   return html`<div>
     <div class="h2"><b>Sources with the most waiting edges</b><span>one source change can settle all its edges at once</span>
       <button class="ghost go" onClick=${() => nav("judge")}>all ${model.nSources} sources →</button></div>
-    <table class="t">
-      <thead><tr>${SRC_COLS.map((c) => c.key
-        ? html`<th key=${c.key} class=${(c.num ? "num " : "") + "sortable"} tabIndex="0" role="columnheader" scope="col"
-            aria-sort=${sort.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-            onClick=${() => pickSort(c.key)} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickSort(c.key); } }}>${c.label}${sort.key === c.key ? (sort.dir === "asc" ? " ▴" : " ▾") : ""}</th>`
-        : html`<th key=${c.label} scope="col">${c.label}</th>`)}</tr></thead>
-      <tbody>${list.map((g) => html`<tr key=${g.source} class="pick" tabIndex="0" onClick=${() => open(g)}
-          onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); open(g); } }} ...${tipProps(tipText("source", g))}>
-        <td><div class="nm">${baseName(g.short)}</div><div class="dr">${String(g.short).split("/").slice(0, -1).slice(-2).join("/")}</div></td>
-        <td class="num"><b>${g.edges}</b></td>
-        <td><${MixBar} g=${g} /></td>
-        <td class="num">${g.blocked}</td>
-        <td class="num">${g.oldest < 0 ? "never" : g.oldest + " d"}</td>
-        <td>${g.ws}</td>
-      </tr>`)}</tbody>
-    </table>
+    <${DataTable} columns=${SRC_COLS} rows=${model.top} rowKey=${(g) => g.source} initialSort=${{ key: "edges", dir: "desc" }} tie=${(g) => g.source}
+      route=${sourceRoute} tip=${(g) => tipText("source", g)} nav=${nav} label="sources with the most waiting edges" />
   </div>`;
 }
 
@@ -1806,27 +2069,21 @@ function OverviewView({ app, surfaceSt, healthSt, nav }) {
   const { inboxSt, retryInbox } = app;
   const now = Date.now();
   const model = useMemo(() => overviewModel(inboxSt.data, now), [inboxSt.data]);
-  const charts = useMemo(() => (model && !model.error ? {
-    queue: queueBars(model.rows), wait: waitBars(model.rows),
-    verdicts: verdictBars(surfaceSt.status === "ok" && surfaceSt.data ? surfaceSt.data.velocity : null),
-  } : null), [model, surfaceSt.data]);
+  const charts = useMemo(() => (model && !model.error ? { queue: queueBars(model.rows), wait: waitBars(model.rows) } : null), [model]);
   if (inboxSt.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="the queue could not be read —" st=${inboxSt} retry=${retryInbox} /></div>`;
   if (!model) {
-    if (inboxSt.data && inboxSt.data.fatal) return html`<div class="detail wide"><div class="banner" role="alert">${inboxSt.data.fatal}</div></div>`;
+    if (inboxSt.data && inboxSt.data.fatal) return html`<div class="detail wide"><${ErrorBanner} what="the queue could not be reconciled —" st=${{ error: inboxSt.data.fatal }} retry=${retryInbox} /></div>`;
     return html`<div class="detail wide"><${Skeleton} rows=${4} /></div>`;
   }
-  if (model.error) return html`<div class="detail wide"><div class="banner" role="alert"><b>the worklist</b> could not be computed — ${model.error}</div></div>`;
-  const velocity = surfaceSt.status === "ok" && surfaceSt.data ? surfaceSt.data.velocity : { status: "unknown", reason: surfaceSt.status === "error" ? "the surface could not be read" : "reading the surface…" };
-  const kpis = overviewKpis(model, velocity, healthSt, now);
-  const vSub = velocity && velocity.status === "ok" ? "last " + velocity.windowDays + " days · changed vs no change needed · click a bar for Activity" : "unknown: " + ((velocity && velocity.reason) || "no velocity");
+  if (model.error) return html`<div class="detail wide"><${ErrorBanner} what="the worklist could not be computed —" st=${{ error: model.error }} retry=${retryInbox} /></div>`;
+  // Pending and failed are different sentences (Phase 0): surfaceVelocity gives each its own status.
+  const velocity = surfaceVelocity(surfaceSt);
+  const kpis = overviewKpis(model, velocity, healthSt, now, inboxSt);
+  const vSub = velocity.status === "ok" ? "last " + velocity.windowDays + " days · changed vs no change needed · click a bar for Activity" : velocityNote(velocity);
   return html`<div class="detail wide">
     <h2 class="dtitle">Overview</h2>
     <div class="kpis ov">
-      ${kpis.map((k) => html`<div key=${k.key} class=${"kpi pick" + (k.warn ? " warn" : "")} role="button" tabIndex="0"
-          onClick=${() => nav(k.route)} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); nav(k.route); } }}
-          ...${tipProps(tipText("note", { title: k.label, text: k.tip }))}>
-        <span>${k.label}</span><b>${k.text}</b><div class="ksub">${k.sub}</div>
-      </div>`)}
+      ${kpis.map((k) => html`<${Kpi} key=${k.key} label=${k.label} value=${k.text} sub=${k.sub} route=${k.route} tip=${k.tip} warn=${k.warn} nav=${nav} />`)}
     </div>
     <div class="charts charts3">
       <${Chart} title="Queue by workspace" coverage="edges in the queue, by what moved · click a bar to judge it">
@@ -1834,7 +2091,7 @@ function OverviewView({ app, surfaceSt, healthSt, nav }) {
       <${Chart} title="How long edges have waited" coverage="since each was last judged · click a bar for that age band">
         <${PlotChart} chart="wait" data=${{ bars: charts.wait }} bars=${charts.wait} nav=${nav} /><//>
       <${Chart} title="Verdicts per day" coverage=${vSub}>
-        <${PlotChart} chart="verdicts" data=${{ bars: charts.verdicts }} bars=${charts.verdicts} nav=${nav} /><//>
+        <${VerdictsChart} velocity=${velocity} nav=${nav} from="overview" /><//>
     </div>
     ${model.nSources ? html`<${SourcesTable} model=${model} nav=${nav} />` : html`<div class="empty"><b>Nothing waiting.</b> No source file has an edge in the queue.</div>`}
   </div>`;
@@ -1842,16 +2099,37 @@ function OverviewView({ app, surfaceSt, healthSt, nav }) {
 
 /* -- Explore: registers, reminders, graph --------------------------------- */
 
+/**
+ * Where a register item lives, as a path a terminal or editor can open: `file:line`. /api/registers
+ * sends the absolute `file` and the `line`; the shortened `short` is the fallback when a row has
+ * no `file`. Null when there is nothing to locate, which makes the row inert.
+ */
+function registerLocator(r) {
+  const where = r.file || r.short;
+  if (!where) return null;
+  return r.line ? where + ":" + r.line : where;
+}
+
+const REGISTER_COLUMNS = [
+  { key: "priority", label: "priority",
+    // 0 is a priority and the most urgent one; null/"" are no priority and sort last (sortRows).
+    value: (r) => (typeof r.priority === "number" ? r.priority : (r.priority ? String(r.priority) : null)),
+    // P0 is a priority, and it is the most urgent one: the old test was truthiness, so 0 fell through to the id and rendered as a dot.
+    cell: (r) => html`<span class=${"badge " + (r.priority !== null && r.priority !== undefined && r.priority !== "" ? "open" : "none")}>${priorityLabel(r)}</span>` },
+  { key: "item", label: "item", value: (r) => String(r.text || ""),
+    cell: (r) => html`<div><div>${inlineMd(r.text).map((seg, j) => seg.k === "bold" ? html`<b key=${j}>${seg.s}</b>` : seg.k === "code" ? html`<code class="mono" key=${j}>${seg.s}</code>` : seg.s)}</div>${r.date ? html`<div class="dmeta">${r.date}</div>` : null}</div>` },
+  { key: "where", label: "where", value: (r) => registerLocator(r), cell: (r) => html`<span class="mono">${dot(r.short, r.line ? "line " + r.line : null)}</span>` },
+];
+
 function RegisterList({ title, rows }) {
   const shown = (rows || []).slice(0, 50);
+  const [copied, copy] = useCopyFlash();
   return html`<div class="rgroup">
     <div class="sec">${title} <span class="gn">${(rows || []).length}</span></div>
-    ${!(rows || []).length ? html`<div class="reason">None open.</div>` : html`<div class="shead"><span class="sh-p">priority</span><span>item</span></div>`}
-    ${shown.map((r, i) => html`<div class="sitem" key=${i} ...${tipProps(tipText("register", r))}>
-      ${/* P0 is a priority, and it is the most urgent one: the old test was truthiness, so 0 fell through to the id and rendered as a dot. */ ""}
-      <span class=${"badge " + (r.priority !== null && r.priority !== undefined && r.priority !== "" ? "open" : "none")}>${priorityLabel(r)}</span>
-      <div><div>${inlineMd(r.text).map((seg, j) => seg.k === "bold" ? html`<b key=${j}>${seg.s}</b>` : seg.k === "code" ? html`<code class="mono" key=${j}>${seg.s}</code>` : seg.s)}</div><div class="dmeta">${dot(r.short, r.line ? "line " + r.line : null, r.date)}</div></div>
-    </div>`)}
+    ${!(rows || []).length ? html`<div class="reason">None open.</div>`
+      : html`<${DataTable} columns=${REGISTER_COLUMNS} rows=${shown} rowKey=${(r) => r.kind + ":" + registerLocator(r) + ":" + r.text} label=${title} flashKey=${copied}
+          act=${(r) => { const loc = registerLocator(r); return loc ? () => copy(r.kind + ":" + loc + ":" + r.text, loc) : null; }}
+          tip=${(r) => tipText("register", r)} />`}
     ${(rows || []).length > shown.length ? html`<div class="trunc">showing the first ${shown.length} of ${rows.length}</div>` : null}
   </div>`;
 }
@@ -1860,10 +2138,10 @@ function RegistersView({ st, retry }) {
   if (st.status === "idle" || st.status === "loading") return html`<div class="detail wide"><${Skeleton} rows=${4} /></div>`;
   if (st.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="registers could not be read —" st=${st} retry=${retry} /></div>`;
   const r = st.data || {};
-  if (r.error) return html`<div class="detail wide"><div class="banner" role="alert">registers could not be computed — ${r.error}</div></div>`;
+  if (r.error) return html`<div class="detail wide"><${ErrorBanner} what="registers could not be computed —" st=${{ error: r.error }} retry=${retry} /></div>`;
   return html`<div class="detail wide">
     <h2 class="dtitle">Registers</h2>
-    <div class="dmeta">Read-only. Opening or closing an item stays on the command line until the register write flow has its own design pass.</div>
+    <div class="dmeta">Read-only. Opening or closing an item stays on the command line until the register write flow has its own design pass. Click a row to copy its file and line.</div>
     <${RegisterList} title="Issues" rows=${r.issues} />
     <${RegisterList} title="Todos" rows=${r.todos} />
     <${RegisterList} title="Handovers" rows=${r.handovers} />
@@ -1920,6 +2198,42 @@ function conflictsEmptyLine(data) {
   return "all " + total + " reminder(s) routed. Nothing held.";
 }
 
+/**
+ * The best locator a held reminder has. /api/conflicts rows (lib/reminders/sync.mjs) carry NO
+ * file:line: `registerPath` is set only when a register was found for the reminder's tag, and
+ * even then it is a path, not a line (checked 2026-10-16 against every `rows.push` in
+ * sync.mjs). So the row copies the register path when there is one, and the reminder's id
+ * otherwise -- the one thing that names the reminder in the Reminders app. `kind` says which.
+ */
+function reminderLocator(r) {
+  if (r.registerPath) return { kind: "register", text: r.registerPath };
+  if (r.reminderId) return { kind: "reminder id", text: String(r.reminderId) };
+  return null;
+}
+
+const REMINDER_COLUMNS = [
+  { key: "disposition", label: "held because", value: (r) => r.disposition, cell: (r) => html`<span class=${"badge " + r.disposition}>${String(r.disposition).replace("held-", "")}</span>` },
+  { key: "reminder", label: "reminder", value: (r) => (r.prId ? r.prId + " · " : "") + (r.project || r.tag || "untagged"),
+    cell: (r) => html`<div>
+      <div>${(r.prId ? r.prId + " · " : "") + (r.project || r.tag || "untagged")}</div>
+      ${r.reason ? html`<div class="dmeta">${r.reason}</div>` : null}
+    </div>` },
+  { key: "where", label: "where", value: (r) => { const l = reminderLocator(r); return l ? l.text : null; },
+    cell: (r) => { const l = reminderLocator(r); return html`<span class="mono">${l ? dot(l.kind, l.kind === "register" ? short(l.text) : l.text) : "no locator"}</span>`; } },
+];
+
+function ReminderGroup({ grp, rows }) {
+  const [copied, copy] = useCopyFlash();
+  return html`<div>
+    <div class="sec">${grp.label} — ${grp.hint} · ${rows.length}</div>
+    <${DataTable} columns=${REMINDER_COLUMNS} rows=${rows} rowKey=${(r) => r.reminderId} label=${grp.label} flashKey=${copied}
+      rowClass=${() => (grp.key === "quiet" ? "quiet" : "")}
+      act=${(r) => { const l = reminderLocator(r); return l ? () => copy(r.reminderId, l.text) : null; }}
+      tip=${(r) => { const l = reminderLocator(r); return { title: (r.prId ? r.prId + " · " : "") + (r.project || r.tag || "untagged"),
+        lines: [r.reason || r.disposition, l ? "click to copy the " + l.kind : "no register or id to copy"] }; }} />
+  </div>`;
+}
+
 function RemindersView({ st, retry }) {
   if (st.status === "idle" || st.status === "loading") return html`<div class="detail wide"><div class="reason">reading the reminders list…</div></div>`;
   if (st.status === "error") return html`<div class="detail wide"><h2 class="dtitle">Reminders</h2><${ErrorBanner} what="the reminders list could not be read —" st=${st} retry=${retry} />
@@ -1936,8 +2250,8 @@ function RemindersView({ st, retry }) {
     return html`<div class="detail wide">
       <h2 class="dtitle">Reminders</h2>
       ${friendly
-        ? html`<div class="banner" role="alert">${friendly} <button class="ghost" onClick=${retry}>Retry</button></div><div class="dmeta">${why}</div>`
-        : html`<div class="banner" role="alert">could not read the reminders list — ${why}</div>`}
+        ? html`<${ErrorBanner} st=${{ error: friendly }} retry=${retry} /><div class="dmeta">${why}</div>`
+        : html`<${ErrorBanner} what="could not read the reminders list —" st=${{ error: why }} retry=${retry} />`}
       ${data.reasonDetail ? html`<div class="dmeta">${data.reasonDetail}</div>` : null}
       <div class="reason">This is not "nothing held". Nothing was examined, so nothing can be reported.</div>
     </div>`;
@@ -1951,19 +2265,7 @@ function RemindersView({ st, retry }) {
     ${!held ? html`<div class="sec">${conflictsEmptyLine(data)}</div>` : CONFLICT_GROUPS.map((grp) => {
       const rows = g[grp.key];
       if (!rows.length) return null;
-      return html`<div key=${grp.key}>
-        <div class="sec">${grp.label} — ${grp.hint} · ${rows.length}</div>
-        <div class="streamlist">
-          ${rows.map((r) => html`
-            <div class=${"sitem" + (grp.key === "quiet" ? " quiet" : "")} key=${r.reminderId}>
-              <span class=${"badge " + r.disposition}>${r.disposition.replace("held-", "")}</span>
-              <div>
-                <div>${(r.prId ? r.prId + " · " : "") + (r.project || r.tag || "untagged")}</div>
-                ${r.reason ? html`<div class="dmeta">${r.reason}</div>` : null}
-              </div>
-            </div>`)}
-        </div>
-      </div>`;
+      return html`<${ReminderGroup} key=${grp.key} grp=${grp} rows=${rows} />`;
     })}
   </div>`;
 }
@@ -1973,7 +2275,7 @@ function RemindersView({ st, retry }) {
  * 500: the error page loads as a document and the pane looks "loaded". Fetching
  * first gives the failure a sentence and a retry, then srcdoc hands the page over.
  */
-function GraphView() {
+function GraphView({ tick }) {
   const [st, setSt] = useState({ status: "loading" });
   const seq = useRef(0);
   const run = useCallback(async () => {
@@ -1984,6 +2286,8 @@ function GraphView() {
     setSt(r.ok ? { status: "ok", page: r.data } : { status: "error", kind: r.kind, error: r.error });
   }, []);
   useEffect(() => { run(); }, [run]);
+  // The header's refresh bumps `tick`; 0 is the initial mount, which the effect above already ran for.
+  useEffect(() => { if (tick) run(); }, [tick]);
   if (st.status === "loading") return html`<div class="detail wide"><div class="reason" aria-busy="true">rendering the graph — this runs <b>graph --html</b>, a few seconds…</div></div>`;
   if (st.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="the graph could not be rendered —" st=${st} retry=${run} /></div>`;
   return html`<div class="detail wide"><iframe class="frame" srcdoc=${st.page} aria-label="dependency graph" /></div>`;
@@ -2006,10 +2310,25 @@ function parseHash(hash) {
   const params = q >= 0 ? raw.slice(q + 1) : "";
   const get = (k) => { const m = new RegExp("(?:^|&)" + k + "=([^&]*)").exec(params); if (!m) return null; try { return decodeURIComponent(m[1]); } catch { return null; } };
   const age = get("age");
-  return { view: name === "" ? "overview" : (HASH_TO_VIEW[name] || "judge"), edge: get("edge"), section: get("section"), state: get("state"), chip: get("chip"),
+  // `focus=` (Unblock, 2026-10-16) names the part of the page to scroll to; the view ignores a value it does not know.
+  return { view: name === "" ? "overview" : (HASH_TO_VIEW[name] || "judge"), edge: get("edge"), section: get("section"), state: get("state"), chip: get("chip"), focus: get("focus"),
     ws: get("ws") || null, age: AGE_KEYS.indexOf(age) >= 0 ? age : null, source: get("source") || null };
 }
 function readHash() { return parseHash(location.hash); }
+
+/**
+ * The destination text for `nav` ("judge?ws=a&age=b") from a hash, minus the parameter `drop`, every
+ * other parameter kept in its order. `chip`, when given, replaces any chip= already there (so the
+ * open chip survives the rewrite). Pure so a test can feed it any hash.
+ */
+function hashWithout(hash, drop, chip) {
+  const raw = (hash || "").slice(1).replace(/^[/]+/, "");
+  const q = raw.indexOf("?");
+  const name = q >= 0 ? raw.slice(0, q) : raw;
+  const parts = (q >= 0 ? raw.slice(q + 1) : "").split("&").filter((x) => x && x.split("=")[0] !== drop && !(chip && x.split("=")[0] === "chip"));
+  if (chip) parts.push("chip=" + encodeURIComponent(chip));
+  return name + (parts.length ? "?" + parts.join("&") : "");
+}
 
 function App() {
   const [route, setRoute] = useState(readHash());
@@ -2216,7 +2535,14 @@ function App() {
 
   // Refresh re-fetches what the CURRENT view reads, and the badges with it, so a
   // number in the rail cannot disagree with the list beside it (#70.7).
+  //
+  // Two views own a read that is not App's: Judge's Never-verified chip (/api/baseline) and the Graph
+  // (/graph). Their fetches live inside the view, so App cannot call a retry it does not hold. Least
+  // invasive wiring: a counter that refresh bumps and the view watches in an effect, instead of
+  // lifting those resources up here (which would fetch them on every view).
+  const [refreshTick, setRefreshTick] = useState(0);
   const refresh = () => {
+    setRefreshTick((t) => t + 1);
     retryInbox(); retrySurface();
     if (view === "health" || view === "overview") retryHealth();
     if (view === "registers") retryReg();
@@ -2224,7 +2550,7 @@ function App() {
   };
 
   const model = useMemo(() => judgeModel(inboxSt.data, heldIds), [inboxSt.data, heldIds]);
-  const app = { inboxSt, retryInbox, model, seen, ev, loadEvidence, evTick, reasons, bulkReason, hold, pending, undo, say, msg, reduced, markSeen, rendered, go };
+  const app = { refreshTick, inboxSt, retryInbox, model, seen, ev, loadEvidence, evTick, reasons, bulkReason, hold, pending, undo, say, msg, reduced, markSeen, rendered, go, nav };
 
   const surfaceHealth = surfaceSt.status === "ok" && surfaceSt.data && surfaceSt.data.health && surfaceSt.data.health.ok
     ? surfaceSt.data.health.sections.reduce((a, s) => a + (s.fail || 0), 0) : null;
@@ -2233,12 +2559,12 @@ function App() {
   let body;
   if (view === "overview") body = html`<${OverviewView} app=${app} surfaceSt=${surfaceSt} healthSt=${healthSt} nav=${nav} />`;
   else if (view === "judge") body = html`<${JudgeView} app=${app} route=${route} />`;
-  else if (view === "unblock") body = html`<${UnblockView} app=${app} />`;
+  else if (view === "unblock") body = html`<${UnblockView} app=${app} route=${route} />`;
   else if (view === "health") body = html`<${HealthView} st=${healthSt} retry=${retryHealth} focus=${route.section} />`;
-  else if (view === "activity") body = html`<${ActivityView} st=${surfaceSt} retry=${retrySurface} go=${go} />`;
+  else if (view === "activity") body = html`<${ActivityView} st=${surfaceSt} retry=${retrySurface} nav=${nav} />`;
   else if (view === "registers") body = html`<${RegistersView} st=${regSt} retry=${retryReg} />`;
   else if (view === "reminders") body = html`<${RemindersView} st=${remSt} retry=${retryRem} />`;
-  else body = html`<${GraphView} />`;
+  else body = html`<${GraphView} tick=${refreshTick} />`;
 
   const inbox = inboxSt.data;
   return html`
@@ -2272,11 +2598,13 @@ function App() {
  * bundler in this repo's suite, so without this the shaping logic -- grouping,
  * the gap-breaking path builder, the rail counts -- has no check at all. */
 if (typeof globalThis !== "undefined") {
-  globalThis.__ui = { sourceRoute, counts, linePath, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody, judgeModel, groupRows, workspaceOf,
+  globalThis.__ui = { sourceRoute, counts, KEYS, keyFor, DIVISIONS, UNDO_MS, readHash, disposeBody, judgeModel, groupRows, workspaceOf,
     intersectAllowed, pruneTicked, unblockModel, healthModel, parkedAllowed, baselineCommand, gitDiffCommand, shellQuote, pct, ratio, dot, ageLabel,
     conflictGroup, groupConflicts, conflictsEmptyLine, CONFLICT_GROUPS, TOKEN_EXPIRED, HASH_TO_VIEW, FIRST_EXPLORE, request,
-    parseHash, AGE_BUCKETS, AGE_KEYS, ageKey, ageDaysOf, judgeFilterRows, overviewModel, overviewKpis, sortSources, routeForKpi, routeForBar,
+    parseHash, hashWithout, AGE_BUCKETS, AGE_KEYS, ageKey, ageDaysOf, judgeFilterRows, overviewModel, overviewKpis, sortSources, routeForKpi, routeForBar,
     queueBars, waitBars, verdictBars, buildPlot, wireChart, plotUnavailable, resolveToken, localDay,
+    readState, surfaceVelocity, velocityNote, sortRows, unblockKpis, barTarget, bucketBars, usageBars, runBars, axisLabels, registerLocator, reminderLocator,
+    KPI_NO_REASON, ROW_NO_REASON, Kpi, DataTable,
     tipText, tipPlace, inlineMd, dayLabel, dayShort, axisTicks, priorityLabel, remindersTimeoutText, boundaryLabel, VERDICT_MEANING };
 }
 
