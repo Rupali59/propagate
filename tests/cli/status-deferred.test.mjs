@@ -25,6 +25,7 @@
  * never run this file with a bare `node --test`, only via `npm test` or with
  * PROPAGATE_STATE_DIR set explicitly).
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

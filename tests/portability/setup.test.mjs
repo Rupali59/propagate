@@ -25,6 +25,7 @@
  * PROPAGATE_STATE_DIR. A test for install-time behaviour that could write the real
  * ~/.propagate/config.yml would be both wrong and dangerous.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

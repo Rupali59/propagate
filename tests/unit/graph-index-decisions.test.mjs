@@ -24,6 +24,7 @@
  * project-tier test exists specifically so that reverting defect 2 goes red rather
  * than being masked by the projects that are legitimately present.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

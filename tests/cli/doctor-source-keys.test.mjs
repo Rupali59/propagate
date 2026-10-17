@@ -37,6 +37,7 @@
  * double-print — and they are deliberately built from literals rather than folded
  * into `workspace()` above, for that reason.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

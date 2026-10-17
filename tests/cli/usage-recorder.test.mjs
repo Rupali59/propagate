@@ -9,6 +9,7 @@
  *   - the store is $PROPAGATE_STATE_DIR/runs/<YYYY-MM>.jsonl; every child gets a
  *     fresh temp dir so nothing here can touch ~/.propagate (G56).
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

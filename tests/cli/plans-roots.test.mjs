@@ -10,6 +10,7 @@
  *
  * Run: `npm test` (G56 — never bare `node --test`).
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

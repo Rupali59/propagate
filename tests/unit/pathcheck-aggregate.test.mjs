@@ -15,6 +15,7 @@
  * per-entry failures but there are warnings, the aggregate keeps its
  * existing pass-with-warn-count behaviour, unchanged.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

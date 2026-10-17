@@ -16,6 +16,7 @@
  * because the vulnerability lived in `check()`'s argv handling and the
  * `execFileSync` call itself — the exact path a git hook would take.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

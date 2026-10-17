@@ -14,6 +14,7 @@
  * `verify-ordering.test.mjs` — nothing here may touch the real `~/.propagate`
  * store (G54).
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

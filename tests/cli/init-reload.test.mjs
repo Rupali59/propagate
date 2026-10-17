@@ -22,6 +22,7 @@
  *   - regeneratePlist's actual write behavior (the machinery `reload` calls)
  *     is covered separately, launchctl-free, in tests/plist-watch-roots.test.mjs.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

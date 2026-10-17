@@ -7,6 +7,7 @@
  * and tests/check.test.mjs. PROPAGATE_SEARCH_ROOTS / PROPAGATE_STATE_DIR are
  * scoped per test so nothing touches ~/.propagate or the real ledgers (G21).
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -34,6 +34,7 @@
  * measuring the actual side effect (not just grepping for the shape of a
  * write call) is both safe and strictly stronger.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

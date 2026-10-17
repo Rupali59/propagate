@@ -28,6 +28,7 @@
  * foldWindow/refVintage take explicit file paths or plain data and are
  * tested in-process, without a subprocess.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

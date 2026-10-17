@@ -11,6 +11,7 @@
  * closes: not implementing glob-code expansion (a larger change), but refusing to let an
  * unenforceable edge read as an enforced one. This is the fix N6 itself specifies.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

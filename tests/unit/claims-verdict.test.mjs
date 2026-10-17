@@ -15,6 +15,7 @@
  * silently-closed worklist items. So these assert the STORE, byte for byte,
  * rather than asserting that the output contains the word "would".
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -23,6 +23,7 @@
  * cli.mjs (they are what those tools promise to do), isolated only by HOME /
  * PROPAGATE_STATE_DIR so nothing here can touch the real install.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
@@ -275,6 +276,51 @@ test("NEGATIVE CONTROL: a non-zero fail count must fail, not pass", () => {
     const g = gateSuite({ skillDir: dir });
     assert.equal(g.status, "failed", g.detail);
     assert.equal(g.failed, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+// The suite run doubles as the test-impact map refresh (DECISIONS 2026-10-17). A fixture that carries
+// a stub map builder proves both directions: green records and rebuilds, red records and does NOT.
+// TESTIMPACT_DIR is stripped from the env passed in, because this file itself runs under the
+// recorder during a real release --check, and the gate (rightly) never nests a second recording.
+function impactFixture(testScript) {
+  const dir = suiteFixture(testScript);
+  mkdirSync(path.join(dir, "scripts", "test-impact"), { recursive: true });
+  writeFileSync(path.join(dir, "scripts", "test-impact", "record.mjs"), "// stub preload\n");
+  writeFileSync(path.join(dir, "scripts", "test-impact", "map.mjs"),
+    `import fs from "node:fs";\nfs.writeFileSync("map-ran.txt", JSON.stringify(process.argv.slice(2)));\n`);
+  return dir;
+}
+const noRecordEnv = () => { const e = { ...process.env }; delete e.TESTIMPACT_DIR; return e; };
+
+test("gate 2: a green run records under TESTIMPACT_DIR and rebuilds the impact map from it", () => {
+  const dir = impactFixture(
+    `node -e "require('fs').writeFileSync('seen-dir.txt', process.env.TESTIMPACT_DIR || ''); console.log('ℹ tests 1'); console.log('ℹ pass 1'); console.log('ℹ fail 0')"`,
+  );
+  try {
+    const g = gateSuite({ skillDir: dir, env: noRecordEnv() });
+    assert.equal(g.status, "passed", g.detail);
+    const seen = readFileSync(path.join(dir, "seen-dir.txt"), "utf8");
+    assert.ok(seen.length > 0, "the suite ran without TESTIMPACT_DIR, so nothing was recorded");
+    assert.ok(existsSync(path.join(dir, "map-ran.txt")), "a green run did not rebuild the map");
+    assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "map-ran.txt"), "utf8")), ["--reuse", "--dir", seen]);
+    assert.match(g.detail, /test-impact map refreshed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 2: a red run does NOT rebuild the impact map, and says so", () => {
+  const dir = impactFixture(
+    `node -e "console.log('ℹ tests 2'); console.log('ℹ pass 1'); console.log('ℹ fail 1'); process.exit(1)"`,
+  );
+  try {
+    const g = gateSuite({ skillDir: dir, env: noRecordEnv() });
+    assert.equal(g.status, "failed", g.detail);
+    assert.ok(!existsSync(path.join(dir, "map-ran.txt")), "a red run rebuilt the map from a partial recording");
+    assert.match(g.detail, /map NOT refreshed \(suite not green\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }

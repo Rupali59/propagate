@@ -20,6 +20,7 @@
  * afterwards — verified by re-reading the ledger, not by trusting the command's
  * own success message.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

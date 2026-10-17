@@ -19,6 +19,7 @@
  *
  * Sandboxed by construction: HOME and PROPAGATE_STATE_DIR are per-case temp dirs.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

@@ -27,6 +27,7 @@
  * that NO state path resolves inside the skill directory
  * (tests/state-isolation.test.mjs).
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

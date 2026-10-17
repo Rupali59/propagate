@@ -10,6 +10,7 @@
  * - `--apply` writes exactly one event, read back by id, carrying `executed_by`
  *   and `session_id`; `by_kind` keeps meaning who DECIDED.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

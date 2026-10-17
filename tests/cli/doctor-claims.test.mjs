@@ -14,6 +14,7 @@
  * degradation lane exists to avoid, because it reads as "looked, found
  * nothing" when the truth is "nobody looked".
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

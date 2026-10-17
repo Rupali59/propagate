@@ -11,6 +11,7 @@
  * read as "not configured", never as a failed check. A red tick for an absent optional
  * component is the same lie as a green tick for a broken one.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

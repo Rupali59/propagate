@@ -13,6 +13,7 @@
  * v1 would demand rewriting an append-only file, which is the one thing that
  * must never happen to it.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

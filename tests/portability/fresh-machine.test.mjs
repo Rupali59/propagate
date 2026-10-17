@@ -20,6 +20,7 @@
  * "behaviour on a machine with no repos" that could touch the real $HOME would be
  * both wrong and dangerous.
  */
+// @size large — longest tests in the recorded suite run; release and merge only
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";

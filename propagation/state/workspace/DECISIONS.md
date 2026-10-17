@@ -1510,3 +1510,53 @@ browser.
 **Affects:** propagate
 
 **Refs:** plan `ticklish-gathering-brook.md` Parts 6 and 7 (findings T1-T5), `rule:safety-flag-needs-a-test`.
+
+## 2026-10-17: tests are selected by a map of what each one depends on, recorded and static together
+
+Rupali: *"which tests should actually be run, we should know when we work on a particular module. When we
+release/merge, then you run the integration tests right? Can we have test annotations"*. Supersedes the same
+day's first design ("derive from imports, annotate the gaps"), which the research below overturned.
+
+**Decision.** `tests/impact-map.json` records, per test file, the repo files it depends on: the UNION of the
+static import closure (`scripts/test-impact/static.mjs`) and what a Node preload saw the test and every process
+it spawned load or read (`scripts/test-impact/record.mjs`, merged by `map.mjs`). `npm run test:affected` selects
+the tests whose deps contain a changed file, plus the cheap whole-tree checks, and falls back to the FULL suite,
+saying why, when the map is missing, was recorded on a non-ancestor commit, or meets a file it does not know.
+Release, merge and CI still run everything. The one annotation is `// @size small|medium|large` (default small),
+measured from the recorded run, not guessed; `large` is skipped by the dev tier and reported as skipped.
+
+**Why this and not the alternatives.** The field calls it test impact analysis. The standard is the union of a
+static graph and recorded dependencies, because each covers the other's blind spot:
+- static import graphs (Jest `--findRelatedTests`, Vitest `--changed`, Bazel reverse dependencies) cannot see a
+  test that starts `cli.mjs` and so reaches every module `cli.mjs` lazy-loads, or one that reads a CSS file as text;
+- recorded file dependencies (Ekstazi, Gligoric et al. 2015; Hammant, "Test Impact Analysis", martinfowler.com;
+  Microsoft's TIA) see those, and miss any branch no recorded run exercised.
+Sizes follow Bazel's `small|medium|large` test sizes; Google TAP runs affected targets per change and the full
+suite continuously, which is the shape of the two tiers here.
+
+**Rejected.**
+- **Annotate every test (`@covers`, `@module`).** A hand-kept list is curation: forgetting an entry fails
+  silently (`rule:derive-dont-curate`). It also rots the moment a module splits.
+- **Static graph plus hand-written `@covers` for the spawn tests.** The recorder produces exactly what the
+  `@covers` lines would say, and cannot go stale.
+- **Recorded only.** Misses a test whose first run on a new file path was never recorded, and has no answer for
+  a new test; the static half is free and independent.
+- **A local result cache keyed on file hashes.** Answers "did this run already" and not "which tests", so it
+  does not tell a person working on one module what to run; it also hides a stale map behind a green.
+- **`NODE_V8_COVERAGE` as the recorder.** Inherited by children and one JSON per process, but it sees only
+  executed JS: a CSS or markdown file read as text is invisible, and about 38 test files do that.
+
+**Not done.** `release --check` does not yet rewrite the map; the recorder's overhead was measured first
+(`scripts/test-impact/map.mjs` against a plain `node --test` of the same globs) and the gate change is the
+parent's call. Native test tags (Node v26.2+, early development) would replace the `@size` comment; the floor
+is `>=22` and this machine runs 25.x, so the comment parser says so where it is.
+
+**Verified vs inferred.** Verified: the map, its floors and the recorder's attribution are asserted by
+`tests/unit/test-impact.test.mjs`, each mutated red (owner propagation removed; empty map; unknown-file fallback
+removed). Verified by mutation on `commands/surface.mjs`: every test the full suite failed was in the selection.
+Inferred: that a branch no recorded run exercised cannot hide a dependency. It can; see GOTCHAS G79.
+
+**Affects:** propagate
+
+**Refs:** plan `ticklish-gathering-brook.md` "Test selection by module", `rule:derive-dont-curate`,
+`rule:enforcement-watches-itself`, G56 (store scoping), G76 (new files).

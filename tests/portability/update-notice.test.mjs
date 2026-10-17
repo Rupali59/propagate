@@ -16,6 +16,7 @@
  * the two commands a person types most, so a failure here must degrade to silence rather
  * than take the CLI down with it.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

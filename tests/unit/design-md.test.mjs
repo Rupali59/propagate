@@ -8,6 +8,7 @@
  * eng review, E5, 2026-10-13). A doc whose verification step is dead reads as
  * verified. This runs the block exactly as written.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -21,6 +21,7 @@
  * real interface — rather than importing internals, so they test delivery and
  * not just parsing.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

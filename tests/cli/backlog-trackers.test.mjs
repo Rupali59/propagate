@@ -17,6 +17,7 @@
  * is untested by construction (rule:name-what-no-test-executes); PR-034's closure
  * in TODOS.md records the one real run, checked against an independent gh count.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

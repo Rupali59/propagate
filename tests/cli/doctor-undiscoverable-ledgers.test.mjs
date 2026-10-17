@@ -28,6 +28,7 @@
  * so planting there isolates the two mechanisms and lets this test assert
  * what it is actually testing.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

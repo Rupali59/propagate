@@ -4,6 +4,7 @@
  * Exercises the real subprocess, not the library function directly (that's
  * tests/unit/relocate-ledger.test.mjs), so the exact CLI usage stays honest.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";

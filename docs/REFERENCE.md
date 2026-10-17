@@ -54,6 +54,23 @@ For "what do I do right now," go back to `SKILL.md`.
   `watcher.stderr.log`.
 - Tests: `${CLAUDE_PLUGIN_ROOT}/tests/` — run with `npm test`.
 
+## Testing — which tests to run
+
+This repo has no `CLAUDE.md`, so the tiers live here. Three tiers, cheapest first:
+
+| Tier | Command | When |
+|---|---|---|
+| working | `npm run test:affected` | while editing: the tests the change can reach, each with the dependency that pulled it in |
+| release | `npm test`, `release --check` | before a release or merge: everything, `curate-docs` included |
+| CI | `.github/workflows/test.yml` | every push, across the node matrix |
+
+`test:affected` reads `tests/impact-map.json` (static imports plus a recorded preload,
+`scripts/test-impact/`; why: DECISIONS 2026-10-17). `--files a,b` names the changes, `--base <ref>` diffs against a
+ref, `--all` runs everything, `--large` includes the `// @size large` tests it skips by default. It runs the FULL
+suite, and says why, when the map is missing, was recorded on a non-ancestor commit, or meets a file it does not
+know. After adding or moving a test, run `npm run test:record` (a full recorded run) to rebuild the map. What it
+can still miss: GOTCHAS G79. Always run `npm test` or `npm run test:propagate`, never a bare `node --test` (G56).
+
 ## Watcher cadence (post-2026-06-08) — historical, watcher RETIRED 2026-08-14
 
 This section describes v1 behaviour that no longer runs in production. Kept

@@ -15,6 +15,7 @@
  *      different severities (directory is always a bug; missing may be
  *      declare-ahead for `kind: code`, per v1's existing, unchanged allowance).
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

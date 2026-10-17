@@ -29,6 +29,7 @@
  * So these assert the EXIT CODE and the BYTES, never the wording. A test that
  * matched on "does not exist yet" would have passed against the broken build.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";

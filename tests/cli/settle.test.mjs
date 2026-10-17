@@ -13,6 +13,7 @@
  * test needs an edge both INTO and OUT of one file, `bothEdited` also edits B:
  * A->B becomes DIVERGED and B->C DRIFTED, blocked by A->B.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

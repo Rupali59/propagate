@@ -11,6 +11,7 @@
  * folder, and the script computes its own with shasum. A pass therefore also
  * proves the two implementations agree on the same bytes.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

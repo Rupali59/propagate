@@ -8,6 +8,7 @@
  * cases) relies on lib/events.mjs's own EVENTS_DIR only being read, never
  * asserted to be the production path.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -32,6 +32,7 @@
  * out and `true` restored, and is recorded in the session's verification log rather
  * than re-executed here against production every test run.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

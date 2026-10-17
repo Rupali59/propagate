@@ -9,6 +9,7 @@
  * See docs/DECISIONS.md 2026-08-13 "a schema constraint must not be able to
  * disable a file that previously worked" for the rule this restores.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

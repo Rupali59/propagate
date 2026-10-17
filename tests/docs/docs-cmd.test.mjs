@@ -31,6 +31,7 @@
  * (`docs` is read-only over workspaces, and `--reference` only ever writes
  * to an injected tmp path in these tests), but the house rule is blanket.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";

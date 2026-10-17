@@ -19,6 +19,7 @@
  * documented pattern) — a fresh subprocess per case is required, not an
  * in-process re-import. Same helper as tests/portability/config-state-dir.test.mjs.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

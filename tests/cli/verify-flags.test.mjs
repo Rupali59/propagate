@@ -20,6 +20,7 @@
  * performed, and the override was recorded nowhere. `0 of 2771` events carried
  * it, so a forced CLEAN and an ordinary CLEAN read identically forever after.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";

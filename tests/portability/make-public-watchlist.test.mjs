@@ -15,6 +15,7 @@
  * PROPAGATE_STATE_DIR per test; nothing here touches the real identity map or
  * the real $HOME.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

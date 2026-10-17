@@ -1,6 +1,6 @@
 {
   "name": "claude-propagate",
-  "version": "0.15.27",
+  "version": "0.15.28",
   "private": false,
   "type": "module",
   "description": "Use when a change to one file needs to reach files that must move with it — across branches, worktrees, or repos. Declares those couplings in a sidecar, derives drift from content on demand, and records every verification in an append-only ledger. Never edits a downstream; it tells a human.",
@@ -16,7 +16,9 @@
     "setup": "node cli.mjs setup",
     "doctor": "node cli.mjs doctor",
     "test:propagate": "PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs' 'hooks/**/*.test.mjs'",
-    "test:curate-docs": "npm test --prefix skills/curate-docs"
+    "test:curate-docs": "npm test --prefix skills/curate-docs",
+    "test:affected": "node scripts/test-impact/affected.mjs",
+    "test:record": "node scripts/test-impact/map.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

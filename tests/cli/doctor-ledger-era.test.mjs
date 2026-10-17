@@ -17,6 +17,7 @@
  * Without the second case the check could never fail and would report success
  * forever (GOTCHAS G1, rule:discernment-checks §1).
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

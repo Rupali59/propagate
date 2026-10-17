@@ -26,6 +26,7 @@
  * module load bricks watcher, CLI and UI simultaneously." So `null` — never an
  * exception, and never a guess.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

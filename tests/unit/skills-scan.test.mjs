@@ -12,6 +12,7 @@
  * symlink; a classifier that checked SKILL.md first would silently label every
  * npx skill as gstack and the provenance join would then find nothing.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

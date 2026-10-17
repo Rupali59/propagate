@@ -16,6 +16,7 @@
  * Run via `npm test` (G56 — never bare `node --test`, that writes to the
  * production event ledger).
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

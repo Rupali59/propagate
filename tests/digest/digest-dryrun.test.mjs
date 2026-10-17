@@ -17,6 +17,7 @@
  * of reap() itself (archives first, refuses when disarmed) is covered by
  * skills-lifecycle's own tests.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";

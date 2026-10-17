@@ -18,6 +18,7 @@
  * folding by last-status-per-id reported 501 open where the truth was 8 — a 62x
  * error that has already been published once.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

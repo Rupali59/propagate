@@ -15,6 +15,7 @@
  * (lib/reminders/read.mjs) so this suite runs the same on a machine with no
  * Reminders access and never triggers a TCC prompt.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

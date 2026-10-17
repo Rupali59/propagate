@@ -10,6 +10,7 @@
  *   G38  `drain` printed a green tick while derived edges sat unresolved
  *   G30  ANSI stripping was duplicated inline instead of shared
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

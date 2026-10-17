@@ -27,6 +27,14 @@ Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section; Phases 2–
 - **Not done here (later phases):** DESIGN.md §4 still lists the deleted classes (`.root`, `.hrow`, `.vel`,
   `.vcol`, `.vaxis`, `.shead`, `.hit`) and has no Kpi/DataTable row; that is Phase 5.
 
+## Test selection: `npm run test:affected` — 2026-10-17, `v0.15.28`
+`npm run test:affected` runs only the tests a change can reach, from the committed `tests/impact-map.json` (static
+imports plus a recorded preload, `scripts/test-impact/`), and falls back to the full suite saying why. The map is
+refreshed by `release --check`'s own suite run (`gateSuite()`), or by `npm run test:record`. Safety was shown by
+mutation for `commands/ui.client.js`, `commands/surface.mjs` and `40-components.css`: every test file that failed in
+the full run was in the selection. Decision: DECISIONS 2026-10-17; what still escapes: G79.
+
+
 ## The UI token is stable, in a 0600 file, with a cookie session — 2026-10-16, `v0.15.27`
 `<state dir>/ui-token` replaces the per-start token; `/?token=` sets an `HttpOnly; SameSite=Strict` cookie;
 every response has `no-store`, `no-referrer`, `frame-ancestors 'none'`, `X-Frame-Options: DENY`;

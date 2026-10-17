@@ -15,6 +15,7 @@
  * because EVENTS_DIR/STATE_DIR are module-level consts resolved at import
  * time from PROPAGATE_STATE_DIR (same pattern as tests/watcher/events.test.mjs).
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

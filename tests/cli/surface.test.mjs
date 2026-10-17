@@ -9,6 +9,7 @@
  * null value reads as "could not derive"), not about this machine's live
  * doctor/queue/registers state.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

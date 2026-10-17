@@ -9,6 +9,7 @@
  * removed a file. The result was right and the output said it had failed.
  * This runs the actual CLI in a throwaway repo — the arm no other test reaches.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

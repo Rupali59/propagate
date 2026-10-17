@@ -14,6 +14,7 @@
  * that same root (so `walk(root, 0)` finds the marker at depth 0), and cwd set
  * to the root so `currentWorkspace()` matches it without needing --all.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

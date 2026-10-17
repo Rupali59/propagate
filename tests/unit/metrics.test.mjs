@@ -8,6 +8,7 @@
  * unless PROPAGATE_STATE_DIR is set. Same discipline as tests/state-gc.test.mjs
  * and tests/config-state-dir.test.mjs; see GOTCHAS G10.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

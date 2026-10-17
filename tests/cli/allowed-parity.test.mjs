@@ -14,6 +14,7 @@
  *   A edited:       A->B DRIFTED (unblocked)   B->C CLEAN   (blocked by A->B)
  *   A and B edited: A->B DIVERGED (unblocked)  B->C DRIFTED (blocked by A->B)
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";

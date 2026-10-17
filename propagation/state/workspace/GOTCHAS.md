@@ -1874,6 +1874,7 @@ snapshot.
 **Instead:** take boundaries from `scanStructure(text).fenced` (`lib/docs/tokens.mjs`, 1-based) — the scanner
 `registers.mjs` already routes through — and verify by a DIFFERENT route than the one that cut: every kept
 heading keeps its fenced status before and after, and fence delimiters stay balanced.
+
 ### G78 · `$B wait <ms>` does not wait: its argument is a CSS selector
 The gstack browse binary's `wait` takes a **selector**, not a duration. `$B wait 8000` prints an error about
 parsing the selector `8000` to stderr and returns at once. Redirect stderr, as a headless pass usually does,
@@ -1889,3 +1890,19 @@ navigation printed the selector error unredirected. Correcting it took a republi
 Also note `screenshot --full` is not a flag either. Assert on what the page shows (`$B js`/`$B text`), not on the
 time you think passed.
 
+### G79 · `test:affected` can still miss a test: a branch no recorded run exercised, and a test that clears its env
+Selection by `tests/impact-map.json` is safe only for dependencies some run actually showed it. Two gaps remain,
+and both look identical to a correct selection from the outside.
+- **An unexercised branch.** The recorder logs what a test loaded or read in the run that built the map. A test
+  that reads `lib/x.mjs` only when an env var is set, or only on a failing path, has no recorded dep on it if that
+  run never took the branch. The static import graph covers a literal `import`, not a branch that builds a path.
+- **A test that clears `env`.** A child spawned with `env: { PATH }` loses `NODE_OPTIONS` and `TESTIMPACT_OWNER`, so
+  it cannot record under its test. The recorder flags the SPAWN SITE (a `c` row) and `map.mjs` marks the test
+  `partial`, which `affected.mjs` selects on any source change. A clean-env spawn through a path the wrapper does
+  not see (a shell script that starts another shell, `exec` of a string the wrapper cannot read) is not flagged.
+**Signal:** `test:affected` green, the full suite red on a test whose reason is a change to a file it never named.
+**Cost:** none yet, and that is luck rather than design; found by reading the recorder, not by a miss. A miss
+blocks shipping by the plan's own bar.
+**Instead:** treat `test:affected` as the working tier only; `npm test` / `release --check` and CI still run
+everything. After adding a test, run `npm run test:record` so its deps are recorded rather than defaulted. Derive
+the current partial count from `tests/impact-map.json` (`header.partial`), never from this entry.

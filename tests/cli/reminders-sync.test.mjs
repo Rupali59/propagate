@@ -36,6 +36,7 @@
  * that is ambiguous. The full insert/idempotency/write-order matrix, hermetic
  * against injected paths, lives in tests/unit/reminders-sync.test.mjs.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

@@ -27,6 +27,7 @@
  * Subprocess-based with PROPAGATE_STATE_DIR + PROPAGATE_SEARCH_ROOTS scoped to
  * a fresh tmpdir — nothing here may touch the real ~/.propagate store.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

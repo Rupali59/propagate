@@ -13,6 +13,7 @@
  * and the doctor check that consumes it (cli.mjs, "at most one live ledger
  * file per workspace").
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";

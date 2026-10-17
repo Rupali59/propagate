@@ -16,6 +16,7 @@
  * a fresh tmpdir, same isolation discipline as tests/verify.test.mjs — nothing
  * here may touch the real ~/.propagate store.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

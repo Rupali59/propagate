@@ -27,6 +27,7 @@
  * makes the violating input inexpressible, and the test then asserts nothing
  * while looking thorough — rule:mutate-behind-the-fixture-builder.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

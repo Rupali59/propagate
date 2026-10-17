@@ -19,6 +19,7 @@
  * (rule:safety-flag-needs-a-test): a guard that threw after writing would
  * satisfy every status-code assertion.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";

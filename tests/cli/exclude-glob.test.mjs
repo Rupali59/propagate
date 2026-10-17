@@ -11,6 +11,7 @@
  *   reconcile about what exists;
  * - doctor FAILS on an exemption that cannot fire (literal path, stale entry).
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";

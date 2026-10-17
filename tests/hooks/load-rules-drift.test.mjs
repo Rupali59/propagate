@@ -15,6 +15,7 @@
  * "fires on a real restatement" and "silent on a clean tree" are equally
  * required, and the second is the one that would rot first.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

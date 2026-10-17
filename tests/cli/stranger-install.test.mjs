@@ -20,6 +20,7 @@
  * to write even one event — doctor's "event store non-empty" check can never pass on
  * an empty sidecar, independent of the ledger-creation bug this test targets.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";

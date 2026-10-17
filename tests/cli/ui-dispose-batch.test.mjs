@@ -20,6 +20,7 @@
  * move it, and G56 records what running the write path against the wrong
  * (production) store costs.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

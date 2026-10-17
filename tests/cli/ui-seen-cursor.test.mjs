@@ -12,6 +12,7 @@
  * EVENTS_DIR). So every case that touches disk runs in a subprocess with the
  * variable already set; setting it in-process would be read too late.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

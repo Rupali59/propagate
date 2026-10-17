@@ -12,6 +12,7 @@
  * Dry-run by default, mirroring `relocateLedger` and `migrate` rather than
  * inventing a third preview mechanism.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

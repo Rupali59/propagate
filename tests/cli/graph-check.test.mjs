@@ -17,6 +17,7 @@
  * the actual `execSync` + `timeout` wiring works and that PROPAGATE_STATE_DIR
  * is honoured for the cache file's location.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

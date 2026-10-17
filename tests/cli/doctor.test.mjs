@@ -12,6 +12,7 @@
  * `decisionsAttributionReport`, exported from cli.mjs for exactly this reason
  * — no need to shell out or touch the skill's real docs/DECISIONS.md.
  */
+// @size large — longest tests in the recorded suite run; release and merge only
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -18,6 +18,7 @@
  * checks. A metrics summary printed under the word `doctor` otherwise reads as
  * "doctor ran and is happy", which is N87's failure in a new command.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

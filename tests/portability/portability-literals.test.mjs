@@ -21,6 +21,7 @@
  *     discovery did not. Two copies of one list is the drift this skill exists to
  *     detect, sitting inside the detector.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

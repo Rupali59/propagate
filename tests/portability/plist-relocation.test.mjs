@@ -14,6 +14,7 @@
  *      proving SKILL_DIR (and therefore the node/script paths) are derived,
  *      not hardcoded.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, cp, symlink, realpath } from "node:fs/promises";

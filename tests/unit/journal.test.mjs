@@ -14,6 +14,7 @@
  * The second is why `commitsIn` throws on a bare date rather than quietly accepting it:
  * this module's whole purpose is producing a number someone will trust.
  */
+// @size medium — starts processes (CLI or script); run when affected
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

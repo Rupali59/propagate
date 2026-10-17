@@ -1,3 +1,4 @@
+// @size medium — starts processes (CLI or script); run when affected
 /**
  * `propagate rollup --dry-run` must never write `ECOSYSTEM.md` — under ANY
  * flag combination, and against EVERY reachable state of the artifact.

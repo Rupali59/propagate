@@ -11,6 +11,7 @@
  * Unit-tested directly here (pure, given a synthetic sidecarsByWsRoot map),
  * plus one subprocess `doctor` run proving the report itself is deduped.
  */
+// @size medium — starts processes (CLI or script); run when affected
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
