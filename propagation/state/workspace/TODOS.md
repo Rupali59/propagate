@@ -1,7 +1,8 @@
 # TODOS — propagate workspace
 
-Open work for propagate. **`STATE.md` is narrative — what is true now; `ISSUES.md` records
-defects with severities; this file is the task list.** Created 2026-09-23, because propagate
+**Open work lives in [GitHub issues](https://github.com/Rupali59/propagate/issues?q=label:project:propagate) on Project #7 — not in this file.**
+Since 2026-10-17 this file is the record of entries before that move: finished ones, and one pointer line per moved
+entry. File new work as an issue. Created 2026-09-23, because propagate
 was carrying open work in three places that were not a task list: prose inside `STATE.md`,
 N-entries in `ISSUES.md`, and a session's findings that lived nowhere at all.
 
@@ -66,7 +67,7 @@ work nobody has done — and N26 gained live evidence today that it is real.
 
 _Original entry:_
 
-### PR-005 · Give the undispositioned `ISSUES.md` entries a marker
+**PR-005 as first written** · Give the undispositioned `ISSUES.md` entries a marker
 
 Measured 2026-09-23: `ISSUES.md` holds 55 `###` headings — 29 marked `**OPEN**`, 8 marked with a
 terminal word, and **18 carrying neither**. Those 18 are indistinguishable from "nobody said",
@@ -121,7 +122,7 @@ every new mount-based test inherited one shared sleep. The corpus grew; the bug 
 
 _Original entry, kept for the reasoning that led here:_
 
-### PR-008 · Chase the intermittent `ui-client` failure — the 91 "missing" tests were the ruler
+**PR-008 as first written** · Chase the intermittent `ui-client` failure — the 91 "missing" tests were the ruler
 
 **Half of this landed 2026-09-25.** `package.json`'s `test` script no longer short-circuits:
 both sub-suites run unconditionally and both exit codes print, verified by planting a

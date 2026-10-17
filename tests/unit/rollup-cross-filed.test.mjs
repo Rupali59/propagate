@@ -159,3 +159,10 @@ test("the window is injectable, so the test does not drift as the wall clock mov
   assert.equal(out.get("Keerti").dated.length, 0, "nothing is within 30 days of 2030");
   assert.equal(typeof RESOLVED_WINDOW_DAYS, "number");
 });
+
+test("a **MOVED** heading is a finished entry here too: one vocabulary with registers.mjs (R1)", () => {
+  const text = "### N90 · went to the tracker — **MOVED 2026-08-29** → #7\n\nAlso touched Keerti/moved.md.\n";
+  const out = resolvedElsewhereByOwner({ issueFiles: [{ file: RESOLVED_FILE }] }, K, NOW, () => text);
+  assert.equal(out.get("Keerti").dated.length, 1);
+  assert.equal(out.get("Keerti").dated[0].resolvedISO, "2026-08-29");
+});

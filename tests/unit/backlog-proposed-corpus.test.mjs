@@ -140,6 +140,36 @@ function loadOldClassifier() {
   return { scratchFile, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+/**
+ * R1 (2026-10-17): the classifier now closes an item whose heading or first
+ * body line carries the bold marker `**MOVED**` (HEAD's did not), so a register
+ * that holds `### X-1 · **MOVED** → #12` stubs legitimately flips those items
+ * open -> closed between HEAD and the working tree.
+ *
+ * This predicate admits EXACTLY that and nothing wider: same format, every item
+ * HEAD counted open that the new parse no longer does carries `**MOVED**` in its
+ * heading text or its first non-empty body line, nothing else changed (no item
+ * appeared, open fell by exactly the flipped count, closed rose by the same).
+ * Any other open -> closed flip is still a regression: that is the silent
+ * reclassification this whole test exists to catch.
+ */
+export function isMovedOnlyFlip(before, after, text) {
+  if (before.format !== after.format) return false;
+  const key = (i) => JSON.stringify([i.id ?? null, i.line ?? null, i.text]);
+  const afterKeys = new Set(after.items.map(key));
+  const flipped = before.items.filter((i) => !afterKeys.has(key(i)));
+  if (flipped.length === 0) return false;
+  const beforeKeys = new Set(before.items.map(key));
+  if (after.items.some((i) => !beforeKeys.has(key(i)))) return false; // something appeared or changed
+  if (before.open - after.open !== flipped.length || after.closed - before.closed !== flipped.length) return false;
+  const lines = String(text).split("\n");
+  return flipped.every((i) => {
+    if (/\*\*MOVED\*\*/.test(i.text ?? "")) return true;
+    const body = lines.slice(i.line ?? 0, (i.line ?? 0) + 3).filter((l) => !/^#{1,6}\s/.test(l)).find((l) => l.trim()) ?? "";
+    return /\*\*MOVED\*\*/.test(body);
+  });
+}
+
 test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed heading parses identically old vs new", async () => {
   const { scratchFile, cleanup } = loadOldClassifier();
   let parseTodoLikeFileOld;
@@ -227,6 +257,9 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
         // classifier change and the test update separately. That is a real
         // limitation of comparing against HEAD, not a property of the change.
         recognised.push({ file, to: after.format });
+      } else if (isMovedOnlyFlip(before, after, text)) {
+        // See isMovedOnlyFlip: only `**MOVED**` stubs, nothing else, may flip.
+        recognised.push({ file, to: after.format + " (moved stubs closed)" });
       } else if (
         after.format === "delegated" &&
         before.items.filter((i) => !i.closed).every((i) => /\*\*(MOVED|ACCEPTED)\*\*/.test(i.text))
@@ -404,4 +437,42 @@ test("R4 sharp case, DISCHARGED: both formerly-unparsed registers now parse, eac
       `${rel}: expected format ${EXPECTED_FORMAT[rel]}, got ${after.format}`,
     );
   }
+});
+
+/* -- isMovedOnlyFlip: the exemption is as narrow as claimed ------------------ */
+
+test("isMovedOnlyFlip admits an open->closed flip only for **MOVED** items, via the real classifier", () => {
+  // > 40 lines, or isPointerStubText reads any `moved` heading as a signpost file.
+  const pad = Array.from({ length: 45 }, (_, n) => `\nSome real text about work item number ${n}.\n`).join("");
+  const mk = (h1, body1) => `# TODOS\n\n### AB-001 · ${h1}\n\n${body1}\n\n### AB-002 · Beta thing\n\nstill open work.\n${pad}`;
+  const moved = mk("Alpha **MOVED** → #12", "Details of the alpha work.");
+  const plain = mk("Alpha", "Details of the alpha work.");
+  const prose = mk("Alpha", "the file moved to another repo, details follow.");
+
+  // HEAD's classifier would parse `moved` text as two OPEN items, with the
+  // heading text intact. Simulate that from the new parse of the same text.
+  const afterMoved = parseTodoLikeFileNew(moved, "TODOS.md");
+  const plainParse = parseTodoLikeFileNew(plain, "TODOS.md");
+  const headText = (t) => t.split("\n").find((l) => l.includes("AB-001")).replace(/^#+\s+/, "");
+  const headOpen = { ...plainParse, items: plainParse.items.map((i) => (i.id === "AB-001" ? { ...i, text: headText(moved) } : i)) };
+  // control: the classifier really closes the **MOVED** item and keeps AB-002.
+  assert.deepEqual(plainParse.items.map((i) => i.id), ["AB-001", "AB-002"]);
+  assert.deepEqual(afterMoved.items.map((i) => i.id), ["AB-002"]);
+  assert.equal(isMovedOnlyFlip(headOpen, afterMoved, moved), true);
+
+  // Same flip, marker absent from heading and body: still a regression.
+  assert.equal(isMovedOnlyFlip(plainParse, afterMoved, plain), false, "a flip without **MOVED** must not be exempt");
+  // Prose "moved" in the first body line closes nothing, so there is no flip to admit.
+  const proseAfter = parseTodoLikeFileNew(prose, "TODOS.md");
+  assert.deepEqual(proseAfter.items.map((i) => i.id), ["AB-001", "AB-002"], "prose 'moved' must not close an item");
+  assert.equal(isMovedOnlyFlip(plainParse, proseAfter, prose), false);
+  // A lowercase/unbolded marker does not close either.
+  const lower = parseTodoLikeFileNew(mk("Alpha **moved** → #12", "x"), "TODOS.md");
+  assert.deepEqual(lower.items.map((i) => i.id), ["AB-001", "AB-002"]);
+  // A flip plus an unrelated appearance is not exempt.
+  const extra = { ...afterMoved, items: [...afterMoved.items, { id: "ZZ-099", line: 99, text: "new" }] };
+  assert.equal(isMovedOnlyFlip(headOpen, extra, moved), false);
+  // Marker on the first body line (not the heading) is admitted too.
+  const bodyMoved = mk("Alpha", "**MOVED** → #12");
+  assert.equal(isMovedOnlyFlip(plainParse, parseTodoLikeFileNew(bodyMoved, "TODOS.md"), bodyMoved), true);
 });

@@ -2397,11 +2397,12 @@ function RegistersView({ st, retry }) {
  * reader can DO, and a flat list makes you read all of them to find the two you
  * can act on. `held-untagged` and `held-unknown-tag` come from the ROUTING layer
  * and sit in CONFIGURATION because they are fixable the same way the other two
- * are: add a tag, or add the tag to the table.
+ * are: add a tag, or add the tag to the table. `held-delegated` is configuration too: the
+ * register says its open work lives on GitHub, so the reminder belongs there as an issue.
  */
 const CONFLICT_GROUPS = [
   { key: "config", label: "CONFIGURATION", hint: "you can fix these",
-    of: ["held-no-register", "held-ambiguous-register", "held-untagged", "held-unknown-tag"] },
+    of: ["held-no-register", "held-ambiguous-register", "held-untagged", "held-unknown-tag", "held-delegated"] },
   { key: "content", label: "CONTENT", hint: "the tool refused to touch a file",
     of: ["held-unrecognized-shape", "held-would-change-classification", "held-illegal-boundary"] },
   { key: "quiet", label: "NOT A FAILURE", hint: "the duplicate guard working", of: ["already-inserted"] },

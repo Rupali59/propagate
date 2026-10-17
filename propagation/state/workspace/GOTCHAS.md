@@ -1924,3 +1924,15 @@ run `/reload-plugins`.
 **Also:** for an in-place plugin, `installed_plugins.json`'s `installPath` and `gitCommitSha` describe the install-time
 cache copy Claude Code still writes, not the tree being served. Do not read them as what is running; `doctor`'s
 `# Delivery` section decides in-place from `known_marketplaces.json` instead.
+
+### G81 · Adding a test file deadlocks the release gate: the map test is red until the map is rewritten, and the map is not rewritten while red
+`tests/unit/test-impact.test.mjs` asserts every test file is in `tests/impact-map.json`. `npm run test:record` and
+`release --check` both refuse to write the map while the suite is red. So a release that adds a test file fails on
+exactly that one test, re-recording fails the same way, and re-running either changes nothing.
+**Signal:** `suite: … 1 fail`, the one failure is "every test file is in the map", and its message names only the
+new test files; `test-impact map NOT refreshed (suite not green)`.
+**Cost:** 2026-10-17, v0.15.35: two full gate runs and one full record run (~13 minutes) before the loop was seen.
+**Instead:** confirm the map test is the ONLY failure in the record run's suite log, then build the map from that
+run without re-running it — `node scripts/test-impact/map.mjs --dir <record dir> --reuse --allow-red` (the dir is
+printed on the `suite:` line). That is the one case `--allow-red` is safe: the red test is an assertion over the map
+and aborts nothing, so no test lost its recorded deps. Any second failure means the map really would be incomplete.

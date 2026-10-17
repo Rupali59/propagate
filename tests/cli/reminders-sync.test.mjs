@@ -292,3 +292,36 @@ test("reminders (no subverb) still works after adding the sync subverb", async (
   assert.equal(payload.ok, true);
   assert.equal(payload.summary.total, 4);
 });
+
+// ---------------------------------------------------------------------------
+// held-delegated, end to end: a register whose head delegates its work to a
+// tracker is refused in dry-run AND --apply; register + state dir untouched.
+// ---------------------------------------------------------------------------
+
+test("reminders sync (dry-run and --apply): a delegated register is held-delegated and nothing on disk changes", async (t) => {
+  const stateDir = await setup();
+  const hubDir = await makeHub();
+  t.after(() => cleanup(stateDir, hubDir));
+  const reg = path.join(hubDir, "Rupali", "propagation", "state", "claude-usage-widget", "TODOS.md");
+  const original = readFileSync(reg, "utf8");
+  await writeFile(reg, [
+    "# TODOS",
+    "",
+    "Open work lives in the GitHub issues tracker: [open](https://github.com/Rupali59/claude-usage-widget/issues). Not in this file.",
+    "",
+    original,
+  ].join("\n"));
+  const fixturePath = await writeFixture(stateDir, "fixture.json", { status: 0, stdout: JSON.stringify([RECORDS[0]]), stderr: "" });
+
+  const regBefore = readFileSync(reg, "utf8");
+  const stateBefore = fullStateSnapshot(stateDir);
+  for (const argv of [["reminders", "sync", "--json"], ["reminders", "sync", "--apply", "--json"]]) {
+    const r = runCli(argv, { stateDir, hubDir, fixturePath });
+    assert.equal(r.status, 0, r.stderr);
+    const row = JSON.parse(r.stdout.trim()).rows.find((x) => x.reminderId === "id-1");
+    assert.equal(row.disposition, "held-delegated", JSON.stringify(row));
+    assert.match(row.reason, /github\.com\/Rupali59\/claude-usage-widget\/issues/);
+    assert.equal(readFileSync(reg, "utf8"), regBefore, `${argv.join(" ")} changed the register`);
+    assert.equal(fullStateSnapshot(stateDir), stateBefore, `${argv.join(" ")} changed the state dir`);
+  }
+});

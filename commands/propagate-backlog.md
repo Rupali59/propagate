@@ -16,3 +16,5 @@ explicitly if present:
   are unknown — never fold them into a total as zero.
 - **`unknown`** handover sections have neither a `Done when:` nor a `Resolved:` marker.
   Nobody has said what would finish them; that is not the same as done.
+- **`moved`** handover sections carry `**Moved:** <date> → <url>`: the work left for a GitHub
+  issue. It is not finished, and it is not counted as closed.

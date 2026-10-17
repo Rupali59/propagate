@@ -21,7 +21,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, chmodSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,5 +184,90 @@ test("backlog --trackers adds the tracker's count beside the total; an unreadabl
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+/* -- R1: `?q=label:` filters, counted once per (repo, filter) ---------------- */
+
+/** A fake gh that appends its argv (one line per call) to `log`. */
+function loggingGh(dir, stdout) {
+  const n = ++fakeSeq;
+  const bin = path.join(dir, `gh-${n}`);
+  const log = path.join(dir, `gh-${n}-args.log`);
+  writeFileSync(bin, `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\nprintf '%s' ${JSON.stringify(stdout)}\nexit 0\n`);
+  chmodSync(bin, 0o755);
+  return { bin, calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
+}
+
+test("parseGithubIssuesUrl reads label: filters in every encoding gh users paste", () => {
+  const u = "https://github.com/o/r/issues";
+  assert.deepEqual(parseGithubIssuesUrl(`${u}?q=label:project:propagate`), { repo: "o/r", labels: ["project:propagate"] });
+  assert.deepEqual(parseGithubIssuesUrl(`${u}?q=label%3Aproject%3Apropagate`), { repo: "o/r", labels: ["project:propagate"] });
+  assert.deepEqual(parseGithubIssuesUrl(`${u}?q=is:open+label:"a b"`), { repo: "o/r", labels: ["a b"] });
+  assert.deepEqual(parseGithubIssuesUrl(`${u}?q=is%3Aopen%20label%3A%22a%20b%22`), { repo: "o/r", labels: ["a b"] });
+  assert.deepEqual(parseGithubIssuesUrl(`${u}?q=label:x+label:y`), { repo: "o/r", labels: ["x", "y"] });
+  assert.deepEqual(parseGithubIssuesUrl(`${u}?q=-label:x`), { repo: "o/r" }, "a negated label is not a --label");
+  assert.deepEqual(parseGithubIssuesUrl(`${u}?q=is%3Aopen`), { repo: "o/r" }, "no label term -> no labels key");
+});
+
+test("a label filter becomes `gh issue list --label`, one flag per label", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "pr034-gh-"));
+  try {
+    const gh = loggingGh(dir, "[{},{}]");
+    const [r] = readDelegatedTrackers(
+      [{ file: "f", delegatedTo: `${ISSUES}?q=label:project:propagate+label:"two words"` }],
+      { gh: gh.bin },
+    );
+    assert.deepEqual([r.status, r.open], ["counted", 2]);
+    const [call] = gh.calls();
+    assert.match(call, /--label project:propagate --label two words/);
+    assert.match(call, /--repo o\/r/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two registers on the same repo AND filter count once; different filters each count", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "pr034-gh-"));
+  try {
+    const gh = loggingGh(dir, "[{},{},{}]");
+    const rows = readDelegatedTrackers(
+      [
+        { file: "a", delegatedTo: `${ISSUES}?q=label:project:p` },
+        { file: "b", delegatedTo: `${ISSUES}?q=label%3Aproject%3Ap` }, // same filter, other spelling
+        { file: "c", delegatedTo: `${ISSUES}?q=label:project:q` },
+      ],
+      { gh: gh.bin },
+    );
+    assert.equal(gh.calls().length, 2, "gh ran once per unique (repo, filter)");
+    const sum = rows.filter((x) => x.status === "counted" && x.inSum !== false).reduce((n, x) => n + x.open, 0);
+    assert.equal(sum, 6, "3 (p, once) + 3 (q); a naive per-register sum would say 9");
+    assert.equal(rows[1].sharedWith, "a");
+    assert.equal(rows[1].inSum, false);
+    assert.equal(rows[2].inSum, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a bare repo link plus a filtered link on the same repo: both reported, the filtered one flagged as included", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "pr034-gh-"));
+  try {
+    const gh = loggingGh(dir, "[{},{}]");
+    const rows = readDelegatedTrackers(
+      [
+        { file: "bare", delegatedTo: ISSUES },
+        { file: "filt", delegatedTo: `${ISSUES}?q=label:project:p` },
+      ],
+      { gh: gh.bin },
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(rows.every((x) => x.status === "counted"), true, "both reported");
+    assert.deepEqual(rows[0].includes, [`${ISSUES}?q=label:project:p`]);
+    assert.equal(rows[1].includedIn, "bare");
+    assert.equal(rows[1].inSum, false, "the filtered count is inside the bare one: not summed twice");
+    assert.equal(rows[0].inSum, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

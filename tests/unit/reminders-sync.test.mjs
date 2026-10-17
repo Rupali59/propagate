@@ -148,6 +148,8 @@ test("codeToDisposition maps every insert.mjs refusal code onto the lane's vocab
   assert.equal(codeToDisposition("illegal-boundary"), "held-illegal-boundary");
   assert.equal(codeToDisposition("anchor-moved"), "held-illegal-boundary");
   assert.equal(codeToDisposition("would-change-classification"), "held-would-change-classification");
+  assert.equal(codeToDisposition("delegated-register"), "held-delegated");
+  assert.equal(codeToDisposition("pointer-stub-register"), "held-unrecognized-shape");
   assert.equal(codeToDisposition("bad-content"), "held-unrecognized-shape");
   assert.equal(codeToDisposition("read-failed"), "held-unrecognized-shape");
 });
@@ -572,4 +574,67 @@ test("an inconclusive read is passed straight through -- never treated as zero r
   assert.equal(result.ok, false);
   assert.equal(result.reason, "tcc-denied");
   assert.equal(existsSync(identityMapPath(stateDir)), false);
+});
+
+// ---------------------------------------------------------------------------
+// held-delegated -- a register whose open work lives in a tracker parses as
+// items: [], so an insert would pass A3 and then be invisible to every count.
+// The safety test measures the SIDE EFFECT (register, identity map, insert log
+// bytes), never the disposition text alone.
+// ---------------------------------------------------------------------------
+
+const DELEGATED_HEAD = [
+  "# TODOS",
+  "",
+  "Open work now lives in the GitHub issues tracker: [open items](https://github.com/Rupali59/propagate/issues?q=label%3Aproject%3Apropagate). Not in this file.",
+  "",
+].join("\n");
+const DELEGATED_REGISTER = DELEGATED_HEAD + REGISTER_BASIC + "\n";
+const PLAIN_REGISTER = "# TODOS\n\n" + REGISTER_BASIC + "\n";
+
+async function runSyncAgainst(registerText, { apply }) {
+  const stateDir = await freshDir("sync-state-");
+  const githubRoot = await freshDir("sync-gh-");
+  const registerDir = path.join(githubRoot, "TestProject", "propagation", "state", "workspace");
+  await mkdir(registerDir, { recursive: true });
+  const registerPath = path.join(registerDir, "TODOS.md");
+  await writeFile(registerPath, registerText);
+  const rawRecords = [{ id: "id-1", name: "a new ccusage item", body: "#ccusage", completed: false, completionDate: null, modificationDate: null }];
+  const beforeRegister = await readFile(registerPath, "utf8");
+  const beforeState = fullStateSnapshot(stateDir);
+  const result = await syncReminders({
+    readRemindersFn: readRemindersFnFor(rawRecords),
+    stateDir, apply, now: NOW, githubRoot,
+    resolveTagFn: fakeResolveTagFn(githubRoot),
+  });
+  return { stateDir, githubRoot, registerPath, result, beforeRegister, beforeState };
+}
+
+for (const apply of [false, true]) {
+  test(`held-delegated (apply=${apply}): register, identity map and insert log are byte-identical, and the row names the tracker`, async (t) => {
+    const r = await runSyncAgainst(DELEGATED_REGISTER, { apply });
+    t.after(() => cleanup(r.stateDir, r.githubRoot));
+    assert.equal(r.result.ok, true, JSON.stringify(r.result));
+    assert.equal(r.result.rows[0].disposition, "held-delegated", JSON.stringify(r.result.rows[0]));
+    assert.match(r.result.rows[0].reason, /github\.com\/Rupali59\/propagate\/issues/);
+    assert.match(r.result.rows[0].delegatedTo, /github\.com\/Rupali59\/propagate\/issues/);
+    assert.equal(await readFile(r.registerPath, "utf8"), r.beforeRegister, "register must be byte-identical");
+    assert.equal(fullStateSnapshot(r.stateDir), r.beforeState, "state dir (identity map, insert log) must be byte-identical");
+    assert.equal(existsSync(identityMapPath(r.stateDir)), false, "no identity map may be created");
+    assert.equal(existsSync(insertLogPath(r.stateDir)), false, "no insert log may be created");
+  });
+}
+
+test("held-delegated control: the same register WITHOUT the delegated head inserts", async (t) => {
+  const r = await runSyncAgainst(PLAIN_REGISTER, { apply: true });
+  t.after(() => cleanup(r.stateDir, r.githubRoot));
+  assert.equal(r.result.rows[0].disposition, "new", JSON.stringify(r.result.rows[0]));
+  assert.notEqual(await readFile(r.registerPath, "utf8"), r.beforeRegister);
+  assert.match(await readFile(r.registerPath, "utf8"), /### PR-\d+ · a new ccusage item/);
+  assert.notEqual(fullStateSnapshot(r.stateDir), r.beforeState);
+});
+
+test("REFUSAL_DISPOSITIONS lists held-delegated", async () => {
+  const { REFUSAL_DISPOSITIONS } = await import("../../lib/reminders/sync.mjs");
+  assert.ok(REFUSAL_DISPOSITIONS.includes("held-delegated"));
 });

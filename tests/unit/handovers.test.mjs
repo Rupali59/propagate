@@ -102,7 +102,7 @@ test("a section with NEITHER marker is `unknown` — never closed", async () => 
 test("totals count all three states, and they sum to the section count", async () => {
   await withDoc(DOC, (p) => {
     const r = parseHandovers(p);
-    assert.deepEqual(r.totals, { open: 1, closed: 1, unknown: 1 });
+    assert.deepEqual(r.totals, { open: 1, closed: 1, unknown: 1, moved: 0 });
     const sum = r.totals.open + r.totals.closed + r.totals.unknown;
     assert.equal(sum, r.sections.length, "a section that fell out of the tally would be invisible");
   });
@@ -137,7 +137,7 @@ test("an unreadable file is attributable, never an empty success", async () => {
   const r = parseHandovers("/definitely/not/here/HANDOVERS.md");
   assert.equal(r.sections.length, 0);
   assert.ok(r.error, "must report WHY there are no sections");
-  assert.notDeepEqual(r.totals, { open: 0, closed: 0, unknown: 0 }, "totals must be null on error, not zeroes");
+  assert.notDeepEqual(r.totals, { open: 0, closed: 0, unknown: 0, moved: 0 }, "totals must be null on error, not zeroes");
 });
 
 test("a file with no ## sections at all is distinguishable from an unreadable one", async () => {
@@ -145,7 +145,7 @@ test("a file with no ## sections at all is distinguishable from an unreadable on
     const r = parseHandovers(p);
     assert.equal(r.error, null, "readable");
     assert.equal(r.sections.length, 0);
-    assert.deepEqual(r.totals, { open: 0, closed: 0, unknown: 0 }, "a real zero, not an error");
+    assert.deepEqual(r.totals, { open: 0, closed: 0, unknown: 0, moved: 0 }, "a real zero, not an error");
   });
 });
 
@@ -187,4 +187,55 @@ More discussion.
     const proper = r.sections.find((x) => x.date === "2026-08-10");
     assert.equal(proper.status, "closed", "a marker under the heading still counts");
   });
+});
+
+/* -- `moved` (R1, 2026-10-17): work that left is not work that finished ------- */
+
+test("a section with **Moved:** <date> → <url> reads `moved`, and moved is never counted closed", async () => {
+  const doc = `# Handovers
+
+## 2026-10-01 · Went to the tracker
+
+**Moved:** 2026-10-17 → https://github.com/o/r/issues/12
+
+Body.
+
+## 2026-10-02 · Finished
+
+**Resolved:** 2026-10-03 — done.
+`;
+  await withDoc(doc, (p) => {
+    const r = parseHandovers(p);
+    assert.equal(r.sections[0].status, "moved");
+    assert.equal(r.sections[0].moved, "2026-10-17 → https://github.com/o/r/issues/12");
+    assert.deepEqual(r.totals, { open: 0, closed: 1, unknown: 0, moved: 1 }, "moved is its own bucket, closed stays 1");
+  });
+});
+
+test("Moved vs Done when vs Resolved: Resolved > Moved > Done when, in either line order", async () => {
+  const mv = "**Moved:** 2026-10-17 → https://github.com/o/r/issues/12";
+  const dw = "**Done when:** the thing is clean.";
+  const rs = "**Resolved:** 2026-10-18 — finished.";
+  const status = (lines) => withDoc(`## 2026-10-01 · T\n\n${lines.join("\n")}\n`, (p) => parseHandovers(p).sections[0].status);
+  assert.equal(await status([mv, dw]), "moved");
+  assert.equal(await status([dw, mv]), "moved");
+  assert.equal(await status([mv, rs]), "closed");
+  assert.equal(await status([dw]), "open");
+});
+
+test("a Moved line without a date and destination is prose, not a marker", async () => {
+  await withDoc("## 2026-10-01 · T\n\n**Moved:** to the other repo\n", (p) => {
+    assert.equal(parseHandovers(p).sections[0].status, "unknown");
+  });
+  await withDoc("## 2026-10-01 · T\n\n**Moved:** 2026-10-17 to the other repo\n", (p) => {
+    assert.equal(parseHandovers(p).sections[0].status, "unknown", "a date with no arrow and destination is prose");
+  });
+});
+
+test("a FENCED **Moved:** line does not count, and a Moved line past the window does not either", async () => {
+  const fence = "```";
+  const fenced = `## 2026-10-01 · T\n\n${fence}\n**Moved:** 2026-10-17 → https://github.com/o/r/issues/12\n${fence}\n`;
+  const late = "## 2026-10-01 · T\n\nl1\n\nl2\n\nl3\n\n**Moved:** 2026-10-17 → https://github.com/o/r/issues/12\n";
+  await withDoc(fenced, (p) => assert.equal(parseHandovers(p).sections[0].status, "unknown"));
+  await withDoc(late, (p) => assert.equal(parseHandovers(p).sections[0].status, "unknown"));
 });

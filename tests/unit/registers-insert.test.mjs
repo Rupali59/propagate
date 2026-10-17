@@ -278,3 +278,44 @@ test("refuses an anchorLine past the end of the file", async () => {
     assert.match(r.error, /past the end/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A0 -- delegated / pointer-stub registers are refused before anything is read
+// for the race check. A delegated file parses as items: [], so A3 alone passes.
+// ---------------------------------------------------------------------------
+
+const DELEGATED = [
+  "# TODOS",
+  "",
+  "Open work lives in the GitHub issues tracker: [open](https://github.com/Rupali59/propagate/issues). Not in this file.",
+  "",
+  "## From Reminders (unreviewed)",
+  "",
+  "## Finished",
+  "",
+  "### PR-000 · closed",
+  "done 2026-01-01",
+  "",
+].join("\n");
+
+test("A0: a delegated register is refused with delegated-register naming the tracker, and the file is byte-identical", async () => {
+  await withFile(DELEGATED, async (file) => {
+    assert.equal(parseTodoLikeFile(DELEGATED, file).format, "delegated", "fixture must elect delegated");
+    const r = await applyInsert({ file, anchorLine: lineNo(DELEGATED, ""), anchorExpected: "", insertText: "### PR-001 · x" });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "delegated-register");
+    assert.match(r.error, /github\.com\/Rupali59\/propagate\/issues/);
+    assert.equal(r.delegatedTo, "https://github.com/Rupali59/propagate/issues");
+    assert.equal(readFileSync(file, "utf8"), DELEGATED);
+  });
+});
+
+test("A0: a pointer-stub register is refused with pointer-stub-register, file byte-identical", async () => {
+  const STUB = "# TODOS — moved\n\nThis is a pointer stub, not the register. It lives at `propagation/state/workspace/TODOS.md`.\n\n## From Reminders (unreviewed)\n\n";
+  await withFile(STUB, async (file) => {
+    assert.equal(parseTodoLikeFile(STUB, file).format, "pointer-stub", "fixture must elect pointer-stub");
+    const r = await applyInsert({ file, anchorLine: 7, anchorExpected: "", insertText: "### PR-001 · x" });
+    assert.equal(r.code, "pointer-stub-register");
+    assert.equal(readFileSync(file, "utf8"), STUB);
+  });
+});

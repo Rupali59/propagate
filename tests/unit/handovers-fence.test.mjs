@@ -95,7 +95,7 @@ test("a REAL marker directly under a heading still works — the fix must not br
   ].join("\n");
   withFile(body, (f) => {
     const r = parseHandovers(f);
-    assert.deepEqual(r.totals, { open: 1, closed: 1, unknown: 0 });
+    assert.deepEqual(r.totals, { open: 1, closed: 1, unknown: 0, moved: 0 });
   });
 });
 

@@ -4369,10 +4369,12 @@ async function backlogCmd() {
   if (delegated.length) {
     const short = (p) => (HUB_ROOT && p.startsWith(HUB_ROOT + "/") ? p.slice(HUB_ROOT.length + 1) : p);
     if (trackers) {
-      const counted = trackers.filter((t) => t.status === "counted");
+      // A tracker another register already counted (same repo + filter, or a filter inside a
+      // bare repo link) carries inSum:false — summing it would count one repo twice.
+      const counted = trackers.filter((t) => t.status === "counted" && t.inSum !== false);
       const sum = counted.reduce((n, t) => n + t.open, 0);
       const floor = counted.some((t) => t.capped) ? "≥" : "";
-      const notRead = trackers.length - counted.length;
+      const notRead = trackers.filter((t) => t.status === "unreadable" || t.status === "unsupported").length;
       // No "+ 0" header when nothing was counted: an unread tracker must never
       // render as a zero (rule:discernment-checks §2, §6).
       if (counted.length) {
@@ -4388,7 +4390,12 @@ async function backlogCmd() {
             : t.status === "unreadable"
               ? `${RED}unreadable${RESET} ${DIM}— ${t.reason}${RESET}`
               : `${YELLOW}unsupported${RESET} ${DIM}— ${t.reason}${RESET}`;
-        console.log(`    delegated  ${short(t.file)} → ${t.delegatedTo}  ${what}`);
+        const overlap = t.sharedWith
+          ? `  ${DIM}(same tracker as ${short(t.sharedWith)} — counted once)${RESET}`
+          : t.includedIn
+            ? `  ${DIM}(inside ${short(t.includedIn)}'s count)${RESET}`
+            : "";
+        console.log(`    delegated  ${short(t.file)} → ${t.delegatedTo}  ${what}${overlap}`);
       }
     } else {
       console.log(
@@ -4417,12 +4424,12 @@ async function backlogCmd() {
   const hoFiles = result.handovers?.files ?? [];
   if (hoFiles.length) {
     const secs = hoFiles.flatMap((f) => f.sections ?? []);
-    const tally = { open: 0, closed: 0, unknown: 0 };
+    const tally = { open: 0, closed: 0, unknown: 0, moved: 0 };
     for (const sec of secs) tally[sec.status] = (tally[sec.status] ?? 0) + 1;
     console.log();
     console.log(
       `  ${BOLD}handovers${RESET} ${DIM}${hoFiles.length} file(s), ${secs.length} section(s) — ` +
-        `${tally.open} open / ${tally.closed} closed / ${tally.unknown} unscoped${RESET}`,
+        `${tally.open} open / ${tally.closed} closed / ${tally.moved} moved / ${tally.unknown} unscoped${RESET}`,
     );
     for (const f of hoFiles) {
       if (f.error) {
@@ -5478,6 +5485,11 @@ if (_invokedDirectly) {
     // is dry-run unless `--apply` is passed.
     const { remindersCmd } = await import("./commands/reminders.mjs");
     process.exitCode = await remindersCmd(process.argv.slice(3));
+  } else if (mode === "tasks") {
+    // Dynamic, same reason as reminders (D5). R1 is a read-only plan: the only external
+    // call is `gh repo view`; `--apply` is refused inside tasksCmd.
+    const { tasksCmd } = await import("./commands/tasks.mjs");
+    process.exitCode = await tasksCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
     console.error(renderUsage());

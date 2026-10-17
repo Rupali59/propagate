@@ -1657,3 +1657,37 @@ reloads meanwhile. None yet; accepted. See GOTCHAS G80.
 **Affects:** propagate
 
 **Refs:** STATE "`release --check` records its per-gate result", `lib/core/release-record.mjs`, `cli.mjs` `releaseCmd`, `lib/report/machinery.mjs` `shapeReleaseHistory`, `docs/RELEASE.md`, supersedes the Phase 4b entry's "Rejected: add persistence".
+
+## 2026-10-17 · Open tasks live on GitHub, and propagate becomes the thing that moves and reads them
+
+**Decision.** GitHub issues, on the board linked to each workspace repo, are the source of truth for open tasks.
+Markdown registers (`TODOS.md`, `ISSUES.md`, open `HANDOVERS.md` sections) stop being task lists: each moved entry
+leaves a pointer line, and the file's head delegates to its tracker. propagate gains `tasks export` to do the move
+and, in a later release, reads open work back from GitHub. Rupali, 2026-10-17: *"move the handovers and issues on
+github also, we need to make this into the propagation, change the current implementation"*, after choosing
+"Boards everywhere" and "Pointer line".
+
+**Five releases, guards first.** R1 (0.15.35) writes nothing to GitHub: it makes the move safe before any register
+is delegated. R2 export `--apply`, R3 handovers, R4 the reader (network posture changes then, with its own entry),
+R5 Reminders files issues. The order is the design review's: the first finding was that Reminders sync would have
+inserted items into a delegated register where no count sees them (A3 compares two empty parses and passes).
+
+**Rejected.** (1) *One scratch script per workspace*, as the pilot did: it left two phantom open items and no
+delegated head, which is the evidence for building the guards into the tool. (2) *Target the project's own repo*:
+the boards were created on the workspace repos at Rupali's "Hub + every workspace repo", and `project:<name>` labels
+carry the project. (3) *Network reads inside `backlog()`*: it is synchronous and doctor, monitor, digest and the UI
+call it — R4 reads through an async refresher into a cache instead. (4) *Treat a moved handover as Resolved*:
+`closed` is the one state that makes work disappear, and moving is not finishing — hence the `moved` state.
+
+**Also decided in R1.** `insert.mjs` refuses a delegated or pointer-stub register before A1–A3 (call it A0): PR-021's
+guarantee is over the parse, and a register with no item model has no parse to guarantee. `**MOVED**` (bold,
+uppercase only) closes a TODOS/ISSUES entry; the bare word does not, because the first body line is prose.
+
+**Cost:** none yet in writes. The pilot's two phantoms (PR-005, PR-008 `_Original entry:_` headings) were fixed by
+hand. 539 STATE.md `Now/Active` bullets still read as backlog items — a known gap, not moved.
+
+**Affects:** propagate, every workspace with a register
+
+**Refs:** plan `~/.claude/plans/ticklish-gathering-brook.md`; `lib/tasks/plan.mjs`, `commands/tasks.mjs`,
+`lib/registers/insert.mjs`, `lib/reminders/sync.mjs`, `lib/report/handovers.mjs`, `lib/report/backlog.mjs`
+`readDelegatedTrackers`, `lib/report/registers.mjs` `REGISTER_FINISHED_RE`; issues #72–#85; supersedes nothing

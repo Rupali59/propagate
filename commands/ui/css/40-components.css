@@ -102,6 +102,7 @@ a.go { color: var(--fg); text-decoration: underline; font-size: 12px; margin-lef
 .badge.held-ambiguous-register         { background: var(--st-caution); }
 .badge.held-untagged,
 .badge.held-unknown-tag                { background: var(--st-accent); }
+.badge.held-delegated                  { background: var(--st-accent); }
 .badge.held-unrecognized-shape         { background: var(--edge-drift); }
 .badge.held-would-change-classification { background: var(--edge-reverse); }
 .badge.held-illegal-boundary           { background: var(--edge-diverge); }

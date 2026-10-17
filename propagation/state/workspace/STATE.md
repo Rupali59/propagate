@@ -1,9 +1,29 @@
 # propagate — State
 
-## `release --check` records its per-gate result, and History shows it — 2026-10-17 (unreleased, not committed)
+## Open tasks move to GitHub: R1, guards and a read-only plan — 2026-10-17 (0.15.35)
+
+**What is true now.** propagate's own TODOS.md and ISSUES.md delegate to [GitHub issues](https://github.com/Rupali59/propagate/issues?q=label:project:propagate)
+(65 open, every one labelled `task` + `project:propagate`). 18 boards (#6–#23) exist and are linked to each workspace repo; only #7 has items.
+`propagate tasks export --all` prints the plan for the rest of the tree, writing nothing — derive its numbers rather than reading them here:
+
+```sh
+node cli.mjs tasks export --all --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s).summary.repos;const t=k=>r.reduce((a,x)=>a+x[k],0);console.log({items:t("items"),held:t("held"),planned:t("planned"),writes:t("estimatedWrites")})})'
+```
+
+On 2026-10-17 that read 304 items, 39 held (`Vbidhat/astro-studio` other-owner, AuroraV3 issues-disabled, 20 unknown-status
+handover sections), 265 planned, ~598 writes — over GitHub's 500/hour, so R2 runs twice.
+
+**Shipped in R1.** Reminders sync refuses a delegated register (`held-delegated`, nothing written); `insert.mjs` refuses delegated
+and pointer-stub registers; handovers have a `moved` state; `**MOVED**` closes a TODOS/ISSUES entry through one shared
+`REGISTER_FINISHED_RE`; `--trackers` honours `?q=label:` filters and counts each (repo, filter) once.
+
+**Next.** R2 `tasks export --apply` (one file first, checked against an independent `gh` count), R3 handovers, R4 the reader, R5
+Reminders files issues. Known gap: STATE.md bullets still read as backlog items. Decision: DECISIONS 2026-10-17 "Open tasks live on GitHub".
+
+## `release --check` records its per-gate result, and History shows it — 2026-10-17, `v0.15.34`
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (ACTIVE section). `releaseCmd` appends one line per run to `release-checks.jsonl` in the state dir (`lib/core/release-record.mjs`; `runReleaseCheck` never writes). History (`shapeReleaseHistory`) reads it beside the command ledger: recorded runs show their gates, older ledger runs stay as "exit status only", a corrupt line is a row. Format and behaviour: `docs/RELEASE.md` §`release --check`; DECISIONS 2026-10-17 "release --check records its per-gate result". This supersedes the Phase 4b finding below that persistence was not added.
 
-## Dashboard Phase 4b: paging, Backlog, Goals & Plans and History — 2026-10-17 (unreleased, not committed)
+## Dashboard Phase 4b: paging, Backlog, Goals & Plans and History — 2026-10-17, `v0.15.33`
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; this pass is 4b, the rest of the read-first views). Built on 4a below.
 - **DataTable pages itself** (`commands/ui.client.js`, `TABLE_PAGE_SIZE`, `pageWindow`): a table of more rows than one page shows
   "showing a-b of N" with prev and next, and `[` and `]` page while a row has focus (PageUp and PageDown are left to scroll).
@@ -28,7 +48,7 @@ Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; th
 - **Phase 5 (docs) done 2026-10-17:** `DESIGN.md` §4 and `docs/REFERENCE.md` ("the machinery and page endpoints") now describe Kpi, DataTable and paging, PlotChart, ErrorBanner, the page endpoints and the hash parameters.
 - **Not done / open:** no browser pass (not asked for). Registers can be deleted in a later, deliberate pass. Plans cover the propagate repo, not the hub.
 
-## Dashboard Phase 4a: Claims, Rules, Caps and Skills pages, and the regrouped rail — 2026-10-17 (unreleased, not committed)
+## Dashboard Phase 4a: Claims, Rules, Caps and Skills pages, and the regrouped rail — 2026-10-17, `v0.15.32`
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 4; this pass is only the four machinery pages and the rail).
 Backlog, Goals and Plans, and the Release/Monitor/Doctor history are Phase 4b and untouched. Built on Phases 0 to 3 above.
 - **One computation feeds the tile and the page.** `lib/report/machinery.mjs` gained pure shape functions (`shapeClaims`,
@@ -56,7 +76,7 @@ Backlog, Goals and Plans, and the Release/Monitor/Doctor history are Phase 4b an
   word, so the page states the constant. `lastUsedAt` comes from the usage counter only, so a transcript-only skill reads active
   with no date. No browser pass (not asked for).
 
-## Dashboard Phase 3: group actions in Judge and Unblock — 2026-10-17 (unreleased, not committed)
+## Dashboard Phase 3: group actions in Judge and Unblock — 2026-10-17, `v0.15.31`
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 3, Decision 1). Built on Phases 0 to 2 above.
 - **Judge node header** (`.nhead`, `tickNode` in `commands/ui.client.js`) ticks every edge of its node and opens the existing
   bulk panel; it sends nothing. The verdict then goes through `judgeBulk` and the `{edges}` body: reason of 12+ characters,
@@ -72,7 +92,7 @@ Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 3, De
   passed; hostile `tick=` values are literals. Each guard was mutated red for its stated reason and restored.
 - **Not done:** the server's `node_id` batch has no UI caller now, only tests; no browser pass (not asked for).
 
-## Dashboard Phase 2: the Overview leads with a next step, and shows the machinery — 2026-10-17 (unreleased, not committed)
+## Dashboard Phase 2: the Overview leads with a next step, and shows the machinery — 2026-10-17, `v0.15.30`
 Plan: `~/.claude/plans/ticklish-gathering-brook.md` (paused section, Phase 2). Built on Phases 0 to 1b above.
 - **Next-step strip** (`nextAction`, `NextStrip` in `commands/ui.client.js`) above the five KPIs, from the inbox's own
   `leverage.allRoots[0]`: a root in the queue opens `#/judge?edge=`; a never-verified one offers the baseline command to copy
