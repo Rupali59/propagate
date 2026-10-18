@@ -5486,8 +5486,8 @@ if (_invokedDirectly) {
     const { remindersCmd } = await import("./commands/reminders.mjs");
     process.exitCode = await remindersCmd(process.argv.slice(3));
   } else if (mode === "tasks") {
-    // Dynamic, same reason as reminders (D5). R1 is a read-only plan: the only external
-    // call is `gh repo view`; `--apply` is refused inside tasksCmd.
+    // Dynamic, same reason as reminders (D5). Without `--apply` this is a read-only plan whose only
+    // external call is `gh repo view`; `--apply` (R2) is built in lib/tasks/export.mjs.
     const { tasksCmd } = await import("./commands/tasks.mjs");
     process.exitCode = await tasksCmd(process.argv.slice(3));
   } else {

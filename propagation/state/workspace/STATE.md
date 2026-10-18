@@ -1,5 +1,16 @@
 # propagate — State
 
+## Open tasks move to GitHub: R2, `tasks export --apply` — 2026-10-18 (0.15.36)
+
+**What is true now.** `tasks export --apply (--file F | --all) [--budget N]` moves TODOS.md and ISSUES.md registers to GitHub issues;
+handover files are still planned only (R3). Per file it decides first — any held item and the file creates nothing — then labels,
+issue, journal (`<stateDir>/tasks-export.jsonl`), board add, and rewrites the register only when every item has a URL, after a
+verify that re-parses it as delegated and checks fences and bytes. A rerun creates nothing: keys come from the journal and from the
+repo's own issues. Routes for repos that cannot take their own issues live in `~/.propagate/config.yml` `tasks.routes`, never in code.
+
+**Not yet run on the real tree.** The dry run reads 308 items, 11 held (reference handover sections), and ~258 TODOS/ISSUES items
+`--apply` would move, in more than one run at GitHub's 500 writes/hour. Derive it with the R1 command above, not from here.
+
 ## Open tasks move to GitHub: R1, guards and a read-only plan — 2026-10-17 (0.15.35)
 
 **What is true now.** propagate's own TODOS.md and ISSUES.md delegate to [GitHub issues](https://github.com/Rupali59/propagate/issues?q=label:project:propagate)

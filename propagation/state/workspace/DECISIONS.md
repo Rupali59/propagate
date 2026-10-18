@@ -1691,3 +1691,44 @@ hand. 539 STATE.md `Now/Active` bullets still read as backlog items — a known 
 **Refs:** plan `~/.claude/plans/ticklish-gathering-brook.md`; `lib/tasks/plan.mjs`, `commands/tasks.mjs`,
 `lib/registers/insert.mjs`, `lib/reminders/sync.mjs`, `lib/report/handovers.mjs`, `lib/report/backlog.mjs`
 `readDelegatedTrackers`, `lib/report/registers.mjs` `REGISTER_FINISHED_RE`; issues #72–#85; supersedes nothing
+
+## 2026-10-17 · Task routing exceptions, and the handover triage
+
+**Decision.** Two repos cannot take their own register's issues, so they are routed explicitly. Rupali, answering
+R2's held items:
+- **`Vbidhat/astro-studio` (18 items) → `Rupali59/vipin-kaushik-content`**, label `project:astro-studio`. She chose
+  this over issues on Vbidhat's repo, the Poker precedent, which would have kept the issues beside the code but put
+  them on a repo she does not own and off every board of hers.
+- **AuroraV3 fork (9 items, Issues disabled) → `Rupali59/divyansh-workspace`**, where the other 20 AuroraV3 items
+  already go. Turning Issues on for the fork was rejected, because it would split Aurora work across two repos.
+
+**Handover triage.** 20 sections carried neither a `Done when:` nor a `Resolved:` line. Rupali confirmed the split:
+- **9 are open work** and got a `**Done when:**` line directly under the heading: 8 in the hub `HANDOVERS.md`, plus
+  AuroraV3 `HANDOVER-frontend.md` §3 "What is open". The insert was verified by re-parsing: exactly those 9 went
+  from unknown to open, and the other sections read the same.
+- **11 are reference text** (endpoint contracts, conventions, hazards) and stay unmarked. The export keeps listing
+  them as held, so none becomes a fake task.
+
+**Cost:** none yet. R2 must implement the two routes as an explicit override table, never as a fallback it infers.
+
+**Affects:** propagate `tasks export`, workspaces Vipin Kaushik and Divyansh
+
+**Refs:** DECISIONS 2026-10-17 "Open tasks live on GitHub"; plan `~/.claude/plans/ticklish-gathering-brook.md` R2
+
+## 2026-10-18 · `delegated` is read before `pointer-stub`
+
+**Decision.** `parseTodoLikeFile` tests the delegated head before the pointer-stub shape. A register of 40 lines
+or fewer, once R2 rewrote it, carries a `### Moved to GitHub <date>` heading. The stub detector matches any short
+file with a "moved" heading, so it read the file as a pointer stub. R2's own verifier refused the rewrite, which is
+how this was found.
+
+**Rejected:** renaming the pointer heading to avoid the word "moved". That matches the pilot's text, but it leaves
+the order bug for the next heading that happens to say "moved". The delegated head is the stronger, explicit signal,
+so it is read first.
+
+**Cost:** none. `backlog --json` on the real tree gave the same format and open count for every file, before and
+after. `tests/unit/backlog-pointer-stub-order.test.mjs` pins both directions.
+
+**Affects:** propagate
+
+**Refs:** `lib/report/backlog.mjs`; DECISIONS 2026-10-17 "Open tasks live on GitHub"

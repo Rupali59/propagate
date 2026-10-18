@@ -1,5 +1,5 @@
 /**
- * tasks-export.test.mjs — `propagate tasks export` end to end (R1: read-only).
+ * tasks-export.test.mjs — `propagate tasks export` end to end (dry run).
  *
  * rule:safety-flag-needs-a-test. The unsafe path is "writes to a register, the state dir or
  * GitHub". Pinned by measuring the SIDE EFFECT, not the output:
@@ -122,16 +122,15 @@ test("--file plans exactly one register", () => {
   assert.equal(JSON.parse(r.stdout).files.length, 1);
 });
 
-test("--apply is refused with exit 2 and 'not built yet — R2', before gh is called or anything is written", () => {
+test("--apply with no population is a usage error and --budget needs --apply: nothing is written, gh is never called", () => {
   rmSync(ghLog, { force: true });
   const before = snapshot(hub, state);
-  for (const argv of [["export", "--all", "--apply"], ["export", "--apply"], ["export", "--file", path.join(hub, "propagation/state/beta/TODOS.md"), "--apply"]]) {
+  for (const argv of [["export", "--apply"], ["export", "--all", "--budget", "5"]]) {
     const r = run(argv);
     assert.equal(r.status, 2, `${argv.join(" ")} -> ${r.status}`);
-    assert.match(r.stderr, /not built yet — R2/);
   }
-  assert.equal(snapshot(hub, state), before, "a refused --apply must write nothing");
-  assert.equal(existsSync(ghLog), false, "a refused --apply must not even ask gh");
+  assert.equal(snapshot(hub, state), before, "a refused invocation must write nothing");
+  assert.equal(existsSync(ghLog), false, "a refused invocation must not even ask gh");
 });
 
 test("no population is a usage error naming --file and --all, not an empty plan", () => {
