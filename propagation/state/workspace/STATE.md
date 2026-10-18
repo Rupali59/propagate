@@ -1,5 +1,17 @@
 # propagate — State
 
+## R3 handovers move to GitHub, and `bin/` leaves the plugin root — 2026-10-18 (0.15.37)
+
+**What is true now.** `tasks export --apply` also exports open HANDOVER sections: one `kind:handover` issue per `open` section,
+and a `**Moved:** <date> → <url>` line inserted directly under its heading, verified by re-parsing a same-named temp copy
+(section count, every other section unchanged, original lines an in-order subsequence). Sections are independent, so a
+partial run marks only the sections that got a URL; the file stays an append-only log with no delegated head.
+`unknown` sections stay held. New handovers are issues from now on (#100); HANDOVERS.md is a context log.
+
+`bin/make-public.mjs` and `bin/propagate-update-check` moved to `scripts/` (#96): Claude Code puts a plugin's `bin/` on
+every session's PATH, and claude.ai and Cowork refuse a plugin that has one. `tests/portability/plugin-layout.test.mjs`
+keeps it gone. Remaining plugin conventions: #97 commands/ layout, #98 `validate --strict`, #99 README state dir.
+
 ## Open tasks move to GitHub: R2, `tasks export --apply` — 2026-10-18 (0.15.36)
 
 **What is true now.** `tasks export --apply (--file F | --all) [--budget N]` moves TODOS.md and ISSUES.md registers to GitHub issues;

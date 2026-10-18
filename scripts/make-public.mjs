@@ -19,8 +19,8 @@
  * mistake.
  *
  * Usage:
- *   node bin/make-public.mjs --out /tmp/propagate-public          # build + verify
- *   node bin/make-public.mjs --out /tmp/propagate-public --check  # verify only, no write
+ *   node scripts/make-public.mjs --out /tmp/propagate-public          # build + verify
+ *   node scripts/make-public.mjs --out /tmp/propagate-public --check  # verify only, no write
  */
 
 import { execFileSync } from "node:child_process";
@@ -131,7 +131,7 @@ const checkOnly = args.includes("--check");
 const outIdx = args.indexOf("--out");
 const OUT = outIdx >= 0 ? path.resolve(args[outIdx + 1]) : null;
 if (!OUT) {
-  console.error("usage: node bin/make-public.mjs --out <dir> [--check]");
+  console.error("usage: node scripts/make-public.mjs --out <dir> [--check]");
   process.exit(2);
 }
 

@@ -78,8 +78,8 @@ test("the check script is present and executable — the wiring has something to
   // The failure this whole file exists for: the notice code can be perfect while the
   // script it shells out to is missing, renamed, or not +x, and the only symptom is
   // silence — which is also what "up to date" looks like.
-  const script = path.join(REPO, "bin", "propagate-update-check");
-  assert.ok(existsSync(script), "bin/propagate-update-check must exist");
+  const script = path.join(REPO, "scripts", "propagate-update-check");
+  assert.ok(existsSync(script), "scripts/propagate-update-check must exist");
   const r = spawnSync(script, [], { encoding: "utf8", env: { ...process.env, PROPAGATE_UPDATE_CHECK: "off" } });
   assert.equal(r.status, 0, "must exit 0 even when disabled");
 });

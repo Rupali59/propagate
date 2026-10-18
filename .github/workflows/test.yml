@@ -125,7 +125,7 @@ jobs:
       # scrubbed would have failed every run forever, and a permanently-red check is one
       # people stop looking at.
       #
-      # The scrub is enforced where it actually matters: bin/make-public.mjs exits 1 if any
+      # The scrub is enforced where it actually matters: scripts/make-public.mjs exits 1 if any
       # forbidden pattern survives into the built public tree, and it runs at publish time,
       # which is the only moment the distinction between the two repos is real.
       - name: the public build would be clean
@@ -135,7 +135,7 @@ jobs:
         # half-scrubbed publish, not a missing one.
         run: |
           set +e
-          PROPAGATE_STATE_DIR="$(mktemp -d)" node bin/make-public.mjs --out /tmp/pub --check
+          PROPAGATE_STATE_DIR="$(mktemp -d)" node scripts/make-public.mjs --out /tmp/pub --check
           code=$?
           if [ "$code" -ne 2 ]; then
             echo "::error::make-public should exit 2 without an identity map, got $code"; exit 1

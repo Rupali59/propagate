@@ -1,16 +1,16 @@
 {
  "header": {
-  "recordedAt": "2026-10-18T04:39:00.395Z",
-  "commit": "f73c8b191b1b558fca6f6748a403cf9b0b48ce8f",
+  "recordedAt": "2026-10-18T16:24:43.411Z",
+  "commit": "0cf90243f92a5f2a2cabe3cc3dfbd8ad46439957",
   "node": "v25.9.0",
-  "tests": 254,
-  "withStaticDeps": 194,
+  "tests": 256,
+  "withStaticDeps": 195,
   "withRecordedSpawnDeps": 89,
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 1413,
-  "unresolvedStaticSpecifiers": 28
+  "recordedProcesses": 1507,
+  "unresolvedStaticSpecifiers": 29
  },
  "tests": {
   "hooks/gotcha-guard.test.mjs": {
@@ -1436,6 +1436,7 @@
     "tests/portability/paths-migration.test.mjs",
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
+    "tests/portability/plugin-layout.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -1566,6 +1567,7 @@
     "tests/unit/stream.test.mjs",
     "tests/unit/surface-cmd.test.mjs",
     "tests/unit/surface.test.mjs",
+    "tests/unit/tasks-export-handover.test.mjs",
     "tests/unit/tasks-export.test.mjs",
     "tests/unit/tasks-plan.test.mjs",
     "tests/unit/test-impact.test.mjs",
@@ -1599,7 +1601,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -1690,6 +1691,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "tests/cli/doctor-claims.test.mjs"
    ],
    "size": "medium"
@@ -1701,7 +1703,6 @@
     "GOTCHAS.md",
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -1788,6 +1789,7 @@
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
     "propagation/state/workspace/GOTCHAS.md",
+    "scripts/propagate-update-check",
     "tests/cli/doctor-glob-code.test.mjs"
    ],
    "size": "medium"
@@ -1799,7 +1801,6 @@
     "GOTCHAS.md",
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -1886,6 +1887,7 @@
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
     "propagation/state/workspace/GOTCHAS.md",
+    "scripts/propagate-update-check",
     "tests/cli/doctor-ledger-era.test.mjs"
    ],
    "size": "medium"
@@ -1894,7 +1896,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -1979,6 +1980,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "tests/cli/doctor-lifecycle-era.test.mjs"
    ],
    "size": "medium"
@@ -1987,7 +1989,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -2072,6 +2073,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "tests/cli/doctor-multi-ledger.test.mjs"
    ],
    "size": "medium"
@@ -2083,7 +2085,6 @@
     "GOTCHAS.md",
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -2170,6 +2171,7 @@
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
     "propagation/state/workspace/GOTCHAS.md",
+    "scripts/propagate-update-check",
     "tests/cli/doctor-source-keys.test.mjs"
    ],
    "size": "medium"
@@ -2178,7 +2180,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -2319,6 +2320,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "skills/curate-docs/lib/evidence.mjs",
     "skills/curate-docs/lib/link-graph.mjs",
     "skills/curate-docs/lib/state.mjs",
@@ -2330,7 +2332,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -2471,6 +2472,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "skills/curate-docs/lib/evidence.mjs",
     "skills/curate-docs/lib/link-graph.mjs",
     "skills/curate-docs/lib/state.mjs",
@@ -2582,7 +2584,6 @@
     "GOTCHAS.md",
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -2725,6 +2726,7 @@
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
     "propagation/state/workspace/GOTCHAS.md",
+    "scripts/propagate-update-check",
     "skills/curate-docs/lib/evidence.mjs",
     "skills/curate-docs/lib/link-graph.mjs",
     "skills/curate-docs/lib/state.mjs",
@@ -2737,7 +2739,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -2878,6 +2879,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "skills/curate-docs/lib/evidence.mjs",
     "skills/curate-docs/lib/link-graph.mjs",
     "skills/curate-docs/lib/state.mjs",
@@ -3043,7 +3045,6 @@
     "DESIGN.md",
     "README.md",
     "SKILL.md",
-    "bin/",
     "cli.mjs",
     "commands/",
     "commands/ansi.mjs",
@@ -3315,8 +3316,6 @@
     "SKILL.md",
     "SKILLS_LIFECYCLE.jsonl",
     "VERSION",
-    "bin/make-public.mjs",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/setup.mjs",
@@ -3413,6 +3412,8 @@
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
     "propagation/state/workspace/GOTCHAS.md",
+    "scripts/make-public.mjs",
+    "scripts/propagate-update-check",
     "scripts/test-impact/map.mjs",
     "tests/cli/release-record.test.mjs"
    ],
@@ -3426,8 +3427,6 @@
     "SKILL.md",
     "SKILLS_LIFECYCLE.jsonl",
     "VERSION",
-    "bin/make-public.mjs",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/setup.mjs",
@@ -3524,6 +3523,8 @@
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
     "propagation/state/workspace/GOTCHAS.md",
+    "scripts/make-public.mjs",
+    "scripts/propagate-update-check",
     "tests/cli/release.test.mjs"
    ],
    "size": "medium"
@@ -3901,7 +3902,6 @@
   "tests/cli/status-coverage.test.mjs": {
    "deps": [
     "SKILL.md",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/status.mjs",
@@ -3944,6 +3944,7 @@
     "lib/report/usage.mjs",
     "package.json",
     "propagates.schema.json",
+    "scripts/propagate-update-check",
     "tests/cli/status-coverage.test.mjs"
    ],
    "size": "medium"
@@ -3951,7 +3952,6 @@
   "tests/cli/status-deferred.test.mjs": {
    "deps": [
     "SKILL.md",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/status.mjs",
@@ -3993,6 +3993,7 @@
     "lib/report/usage.mjs",
     "package.json",
     "propagates.schema.json",
+    "scripts/propagate-update-check",
     "tests/cli/status-deferred.test.mjs"
    ],
    "size": "medium"
@@ -4005,7 +4006,6 @@
     "SKILL.md",
     "SKILLS_LIFECYCLE.jsonl",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/setup.mjs",
@@ -4100,6 +4100,7 @@
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
     "propagation/state/workspace/GOTCHAS.md",
+    "scripts/propagate-update-check",
     "tests/cli/stranger-install.test.mjs"
    ],
    "size": "medium"
@@ -4672,7 +4673,6 @@
   "tests/cli/usage-recorder.test.mjs": {
    "deps": [
     "SKILL.md",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/settle.mjs",
@@ -4721,6 +4721,7 @@
     "lib/skills/skills-scan.mjs",
     "package.json",
     "propagates.schema.json",
+    "scripts/propagate-update-check",
     "tests/cli/usage-recorder.test.mjs"
    ],
    "size": "medium"
@@ -6807,7 +6808,6 @@
   "tests/portability/cross-ledger-cascade.test.mjs": {
    "deps": [
     "SKILL.md",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/status.mjs",
@@ -6850,6 +6850,7 @@
     "lib/report/usage.mjs",
     "package.json",
     "propagates.schema.json",
+    "scripts/propagate-update-check",
     "tests/helpers/print-config-paths.mjs",
     "tests/portability/cross-ledger-cascade.test.mjs"
    ],
@@ -6936,21 +6937,6 @@
     "STATE.md",
     "TODOS.md",
     "VERSION",
-    "bin",
-    "bin/",
-    "bin/.propagates-cross.yml",
-    "bin/.propagates.yml",
-    "bin/CLAUDE.md",
-    "bin/GOALS.md",
-    "bin/GOTCHAS.md",
-    "bin/ISSUES.md",
-    "bin/MEMORY.md",
-    "bin/STATE.md",
-    "bin/TODOS.md",
-    "bin/docs",
-    "bin/docs/GOTCHAS.md",
-    "bin/docs/ISSUES.md",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands",
     "commands/",
@@ -7434,6 +7420,7 @@
     "scripts/docs",
     "scripts/docs/GOTCHAS.md",
     "scripts/docs/ISSUES.md",
+    "scripts/propagate-update-check",
     "scripts/test-impact",
     "scripts/test-impact/",
     "scripts/test-impact/CLAUDE.md",
@@ -7807,8 +7794,6 @@
     "README.md",
     "SKILL.md",
     "VERSION",
-    "bin/make-public.mjs",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -8010,6 +7995,8 @@
     "propagation/state/workspace/TODOS.md",
     "propagation/state/workspace/archive/ISSUES-2026-08.md",
     "propagation/state/workspace/archive/STATE-2026-09.md",
+    "scripts/make-public.mjs",
+    "scripts/propagate-update-check",
     "scripts/test-impact/affected.mjs",
     "scripts/test-impact/lib.mjs",
     "scripts/test-impact/map.mjs",
@@ -8172,6 +8159,7 @@
     "tests/portability/paths-migration.test.mjs",
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
+    "tests/portability/plugin-layout.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -8302,6 +8290,7 @@
     "tests/unit/stream.test.mjs",
     "tests/unit/surface-cmd.test.mjs",
     "tests/unit/surface.test.mjs",
+    "tests/unit/tasks-export-handover.test.mjs",
     "tests/unit/tasks-export.test.mjs",
     "tests/unit/tasks-plan.test.mjs",
     "tests/unit/test-impact.test.mjs",
@@ -8349,8 +8338,6 @@
     "README.md",
     "SKILL.md",
     "VERSION",
-    "bin/make-public.mjs",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -8563,6 +8550,8 @@
     "propagation/state/workspace/TODOS.md",
     "propagation/state/workspace/archive/ISSUES-2026-08.md",
     "propagation/state/workspace/archive/STATE-2026-09.md",
+    "scripts/make-public.mjs",
+    "scripts/propagate-update-check",
     "scripts/test-impact/affected.mjs",
     "scripts/test-impact/lib.mjs",
     "scripts/test-impact/map.mjs",
@@ -8725,6 +8714,7 @@
     "tests/portability/paths-migration.test.mjs",
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
+    "tests/portability/plugin-layout.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -8855,6 +8845,7 @@
     "tests/unit/stream.test.mjs",
     "tests/unit/surface-cmd.test.mjs",
     "tests/unit/surface.test.mjs",
+    "tests/unit/tasks-export-handover.test.mjs",
     "tests/unit/tasks-export.test.mjs",
     "tests/unit/tasks-plan.test.mjs",
     "tests/unit/test-impact.test.mjs",
@@ -9086,6 +9077,15 @@
     "tests/portability/plist-watch-roots.test.mjs"
    ],
    "size": "medium"
+  },
+  "tests/portability/plugin-layout.test.mjs": {
+   "deps": [
+    "bin",
+    "scripts/make-public.mjs",
+    "scripts/propagate-update-check",
+    "tests/portability/plugin-layout.test.mjs"
+   ],
+   "size": "small"
   },
   "tests/portability/portability-literals.test.mjs": {
    "deps": [
@@ -9334,6 +9334,7 @@
     "tests/portability/paths-migration.test.mjs",
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
+    "tests/portability/plugin-layout.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -9464,6 +9465,7 @@
     "tests/unit/stream.test.mjs",
     "tests/unit/surface-cmd.test.mjs",
     "tests/unit/surface.test.mjs",
+    "tests/unit/tasks-export-handover.test.mjs",
     "tests/unit/tasks-export.test.mjs",
     "tests/unit/tasks-plan.test.mjs",
     "tests/unit/test-impact.test.mjs",
@@ -9499,7 +9501,6 @@
     "GOTCHAS.md",
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/status.mjs",
@@ -9587,6 +9588,7 @@
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
     "propagation/state/workspace/GOTCHAS.md",
+    "scripts/propagate-update-check",
     "tests/portability/update-notice.test.mjs"
    ],
    "size": "medium"
@@ -9781,16 +9783,6 @@
     "SKILL.md",
     "STATE.md",
     "TODOS.md",
-    "bin/",
-    "bin/CLAUDE.md",
-    "bin/GOALS.md",
-    "bin/GOTCHAS.md",
-    "bin/ISSUES.md",
-    "bin/MEMORY.md",
-    "bin/STATE.md",
-    "bin/TODOS.md",
-    "bin/docs/GOTCHAS.md",
-    "bin/docs/ISSUES.md",
     "commands/",
     "commands/CLAUDE.md",
     "commands/GOALS.md",
@@ -11328,7 +11320,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -11469,6 +11460,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "skills/curate-docs/lib/evidence.mjs",
     "skills/curate-docs/lib/link-graph.mjs",
     "skills/curate-docs/lib/state.mjs",
@@ -11755,7 +11747,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -11841,6 +11832,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "tests/helpers/plain.mjs",
     "tests/unit/journal.test.mjs"
    ],
@@ -11950,7 +11942,6 @@
   "tests/unit/metrics-since.test.mjs": {
    "deps": [
     "SKILL.md",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "lib/core/commands.mjs",
@@ -11991,6 +11982,7 @@
     "lib/report/usage.mjs",
     "package.json",
     "propagates.schema.json",
+    "scripts/propagate-update-check",
     "tests/unit/metrics-since.test.mjs"
    ],
    "size": "medium"
@@ -11999,7 +11991,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -12084,6 +12075,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "tests/unit/metrics.test.mjs"
    ],
    "size": "medium"
@@ -12230,7 +12222,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -12315,6 +12306,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "tests/unit/pathcheck-aggregate.test.mjs"
    ],
    "size": "medium"
@@ -12926,17 +12918,6 @@
     "STATE.md",
     "TODOS.md",
     "VERSION",
-    "bin/",
-    "bin/.propagates.yml",
-    "bin/CLAUDE.md",
-    "bin/GOALS.md",
-    "bin/GOTCHAS.md",
-    "bin/ISSUES.md",
-    "bin/MEMORY.md",
-    "bin/STATE.md",
-    "bin/TODOS.md",
-    "bin/docs/GOTCHAS.md",
-    "bin/docs/ISSUES.md",
     "commands/",
     "commands/.propagates.yml",
     "commands/CLAUDE.md",
@@ -13491,7 +13472,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/claims.mjs",
@@ -13632,6 +13612,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "skills/curate-docs/lib/evidence.mjs",
     "skills/curate-docs/lib/link-graph.mjs",
     "skills/curate-docs/lib/state.mjs",
@@ -13643,7 +13624,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "cross-allow.yml",
@@ -13728,6 +13708,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "tests/unit/sidecar-prune.test.mjs"
    ],
    "size": "medium"
@@ -13927,6 +13908,36 @@
     "lib/report/usage.mjs",
     "package.json",
     "tests/unit/surface.test.mjs"
+   ],
+   "size": "small"
+  },
+  "tests/unit/tasks-export-handover.test.mjs": {
+   "deps": [
+    "SKILL.md",
+    "lib/core/config.mjs",
+    "lib/core/discovery.mjs",
+    "lib/core/git-context.mjs",
+    "lib/core/package.json",
+    "lib/core/paths.mjs",
+    "lib/core/public-forbidden.mjs",
+    "lib/core/public-scrub.mjs",
+    "lib/core/v3-layout.mjs",
+    "lib/core/worktrees.mjs",
+    "lib/docs/tokens.mjs",
+    "lib/edges/edges.mjs",
+    "lib/edges/frontmatter.mjs",
+    "lib/edges/refs.mjs",
+    "lib/migrate/workspace.mjs",
+    "lib/package.json",
+    "lib/refs/active-lines.mjs",
+    "lib/refs/snapshot.mjs",
+    "lib/report/backlog.mjs",
+    "lib/report/handovers.mjs",
+    "lib/tasks/export.mjs",
+    "lib/tasks/plan.mjs",
+    "package.json",
+    "propagates.schema.json",
+    "tests/unit/tasks-export-handover.test.mjs"
    ],
    "size": "small"
   },
@@ -14277,6 +14288,7 @@
     "tests/portability/paths-migration.test.mjs",
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
+    "tests/portability/plugin-layout.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -14428,6 +14440,7 @@
     "tests/unit/stream.test.mjs",
     "tests/unit/surface-cmd.test.mjs",
     "tests/unit/surface.test.mjs",
+    "tests/unit/tasks-export-handover.test.mjs",
     "tests/unit/tasks-export.test.mjs",
     "tests/unit/tasks-plan.test.mjs",
     "tests/unit/test-impact.test.mjs",
@@ -14884,7 +14897,6 @@
    "deps": [
     "SKILL.md",
     "VERSION",
-    "bin/propagate-update-check",
     "cli.mjs",
     "commands/ansi.mjs",
     "commands/status.mjs",
@@ -14970,6 +14982,7 @@
     "package.json",
     "propagates.schema.json",
     "propagation/state/workspace/DECISIONS.md",
+    "scripts/propagate-update-check",
     "tests/helpers/plain.mjs",
     "tests/unit/whole-project-ledger.test.mjs"
    ],
@@ -15099,7 +15112,6 @@
     "./",
     ".propagates.yml",
     "SKILL.md",
-    "bin/.propagates.yml",
     "commands/.propagates.yml",
     "docs",
     "docs/.propagates.yml",

@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const MAKE_PUBLIC = path.join(REPO_ROOT, "bin", "make-public.mjs");
+const MAKE_PUBLIC = path.join(REPO_ROOT, "scripts", "make-public.mjs");
 
 /** Build a throwaway SEARCH_ROOTS dir with the given depth-1 subdirectory names,
  *  a throwaway PROPAGATE_STATE_DIR, and write `map` as identity-map.json there. */

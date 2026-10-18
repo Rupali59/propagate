@@ -1846,7 +1846,7 @@ deeper chain).
 ### G76 · A green suite before `git add` says nothing about NEW files — the release check reads only tracked ones
 **Trigger:** `git\s+commit\b`
 **Fires on:** `git commit -q -F -`
-`bin/make-public.mjs` lists its population with `git ls-files`, and `tests/portability/make-public-watchlist.test.mjs`
+`scripts/make-public.mjs` (was `bin/`, moved 2026-10-18 for #96) lists its population with `git ls-files`, and `tests/portability/make-public-watchlist.test.mjs`
 runs it against this repo. So an untracked file is invisible to the suite: it passes, you commit, and the
 committed tree is red the moment the file becomes tracked. Nothing about the run says which files it could
 not see.
@@ -1936,3 +1936,15 @@ new test files; `test-impact map NOT refreshed (suite not green)`.
 run without re-running it — `node scripts/test-impact/map.mjs --dir <record dir> --reuse --allow-red` (the dir is
 printed on the `suite:` line). That is the one case `--allow-red` is safe: the red test is an assertion over the map
 and aborts nothing, so no test lost its recorded deps. Any second failure means the map really would be incomplete.
+
+### G82 · A batch commit-and-push across repos publishes every unpushed commit already sitting there, not just yours
+`git push` sends the whole branch. Checking a repo is not BEHIND its upstream (`HEAD..@{u}`) says nothing about
+whether it is AHEAD. A repo with local commits that someone chose not to push yet publishes them along with the
+one-file commit you came to make. Staging only your paths limits what you COMMIT, not what you PUSH.
+**Signal:** a pre-push hook reports far more changed files than your commit has (38 for a 1-file commit), or
+`git rev-list --count <old origin>..origin/main` after the push is more than 1.
+**Cost:** 2026-10-18, the R2 register commits across 11 repos published 5 earlier local commits in 3 repos
+(PanditPawanKaushik 3, Anushka 1, Sindhu 1) — the owner's own work to her own private repos, nothing lost, but
+published without being asked.
+**Instead:** before a batch push, require `git rev-list --count @{u}..HEAD` to be 0 for each repo; a repo already
+ahead gets the commit and NO push, listed for the owner to push herself.

@@ -59,7 +59,7 @@ before tagging a release.
 
 ### 3 · `make-public --check`
 
-`bin/make-public.mjs --out <dir> --check` builds the scrub in memory (never
+`scripts/make-public.mjs --out <dir> --check` builds the scrub in memory (never
 writing) and refuses if any forbidden pattern — a home-dir username, an
 absolute macOS path — survives, or if the identity map's watchlist is
 incomplete (a client-workspace directory with no pseudonym). It reads

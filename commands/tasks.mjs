@@ -8,7 +8,7 @@
  *
  * WITH --apply it creates labels and issues, adds them to the repo's linked project, journals each
  * issue in `<state dir>/tasks-export.jsonl`, and rewrites a register only when every open item in
- * it has an issue. Handover files are skipped with a printed reason until R3. See lib/tasks/export.mjs.
+ * it has an issue. Handover files (since R3) get one `**Moved:**` line per exported open section instead. See lib/tasks/export.mjs.
  *
  * EXIT CODES: 0 plan printed / apply finished or stopped cleanly at the budget (held items are a
  * result, not a failure); 1 apply left a file failed or refused; 2 usage error or a population that
@@ -156,6 +156,7 @@ function renderApply(res, io) {
     const line = `${f.status.toUpperCase().padEnd(14)} ${f.file}`;
     io.log(line);
     if (f.reason) io.log(`    ${f.reason}`);
+    else if (f.status === "marked") io.log(`    ${f.moved} of ${f.total} section(s) marked **Moved:** → ${f.repo} (${f.created} created, ${f.matched} matched)`);
     else if (f.status === "rewritten") io.log(`    ${f.moved} of ${f.total} moved to ${f.repo} (${f.created} created, ${f.matched} matched); register rewritten`);
     for (const n of f.notes ?? []) io.log(`    note: ${n}`);
   }

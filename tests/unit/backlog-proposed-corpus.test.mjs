@@ -388,7 +388,11 @@ test("R4 sharp case, DISCHARGED: both formerly-unparsed registers now parse, eac
   // different correct classification, so asserting against the old path would
   // quietly change what this test measures while still passing.
   const EXPECTED_FORMAT = {
-    "Rupali/Experiments/HandReader/TODOS.md": "id-keyed",
+    // HandReader moved id-keyed -> delegated 2026-10-18: the R2 pilot exported HR-001 to
+    // Rupali59/HandReader#1 and rewrote the head (`tasks export --apply`, commit 36a3265 there).
+    // Same story as obsidian-vk-publish below: the file changed shape deliberately, and the pin
+    // follows the content. A regression to id-keyed or unrecognised still fails here.
+    "Rupali/Experiments/HandReader/TODOS.md": "delegated",
     "Vipin Kaushik/obsidian-vk-publish/propagation/state/workspace/TODOS.md": "delegated",
   };
   const targets = Object.keys(EXPECTED_FORMAT);
@@ -417,7 +421,8 @@ test("R4 sharp case, DISCHARGED: both formerly-unparsed registers now parse, eac
     //                                  bare prose heading, which the reader has
     //                                  no branch for and should not grow one:
     //                                  treating every `##` as an item would count
-    //                                  section headings as work.
+    //                                  section headings as work. Then
+    //                                  `delegated` from 2026-10-18 (R2 pilot).
     //   obsidian-vk-publish TODOS.md   now `delegated` — it declares its open
     //                                  work lives in GitHub issues. See
     //                                  backlog-delegated.test.mjs.

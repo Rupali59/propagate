@@ -1732,3 +1732,25 @@ after. `tests/unit/backlog-pointer-stub-order.test.mjs` pins both directions.
 **Affects:** propagate
 
 **Refs:** `lib/report/backlog.mjs`; DECISIONS 2026-10-17 "Open tasks live on GitHub"
+
+## 2026-10-18 · Handover export marks sections one at a time, and does not delegate the file
+
+**Decision.** R3 treats a handover file differently from a register in two ways.
+1. **Sections are marked independently.** A run that stops partway, at the budget or on a failed create, marks only
+   the sections that got a URL. A rerun does the rest.
+2. **The file gets no delegated head and loses no text.** It is an append-only log, and its sections stay as the
+   record.
+
+A register is different on both counts. It is rewritten only once every one of its items has a URL, because a
+half-moved register is two task lists. A half-moved handover file is just a log with some sections marked `moved`
+and some still `open`, and the parser counts each section correctly either way.
+
+**Rejected:** all-or-nothing per file, matching registers. It would buy nothing, because sections share no list
+whose count can go wrong, and the cost is that one failed create holds back every other section in the file.
+
+**Cost:** none yet. One check was dropped: a byte-count test that could not fail independently of the
+subsequence and extra-lines checks. A check that cannot fail is worse than no check (`rule:discernment-checks` §1).
+
+**Affects:** propagate `tasks export`; every HANDOVER file
+
+**Refs:** `lib/tasks/export.mjs` `buildHandoverMarkers` / `verifyHandoverMarkers`; issue #100 (the handover model)

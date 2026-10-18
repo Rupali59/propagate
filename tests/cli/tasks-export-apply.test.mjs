@@ -7,7 +7,7 @@
  *   - the issue is journaled BEFORE the register is touched;
  *   - the write budget is never exceeded, and a rerun continues;
  *   - a heading quoted inside a fence is not an entry and survives byte-identical;
- *   - handover files are skipped, untouched;
+ *   - a handover file is edited only by inserted `**Moved:**` lines, on open sections that have an issue;
  *   - a rerun creates nothing.
  * Dry run staying INERT is pinned in tasks-export.test.mjs (unchanged).
  *
@@ -57,6 +57,7 @@ if (a === "repo" && b === "view") {
   save();
 } else if (a === "issue" && b === "create") {
   st.createCalls++;
+  if (ctl.appendOnCreate) fs.appendFileSync(ctl.appendOnCreate, "\\nconcurrent edit\\n");
   if (ctl.failIssueCreateAtCall === st.createCalls) { save(); process.stderr.write("simulated create failure\\n"); process.exit(1); }
   const repo = flag("-R");
   const list = (st.issues[repo] = st.issues[repo] || []);
@@ -336,15 +337,156 @@ test("FENCE: a heading quoted inside a fence is not an entry and survives the re
   }
 });
 
-test("HANDOVER: --apply skips a handover file with a printed reason and leaves it untouched", () => {
-  const ho = "# Handovers\n\n## 2026-10-01 · Thing 1\n\n**Done when:** it works\n\nbody\n";
-  const s = scenario({ registers: { "HANDOVERS.md": ho } });
+const HO = "HANDOVERS.md";
+const HO_TEXT = [
+  "# Handovers", "",
+  "## 2026-10-01 · Alpha", "", "**Done when:** a works", "", "body a", "",
+  "## 2026-10-02 · Beta", "", "**Done when:** b works", "", "body b", "",
+  "## 2026-10-03 · Gamma", "", "prose with no marker", "",
+  "## 2026-10-04 · Delta", "", "**Resolved:** 2026-10-05 — done", "",
+].join("\n");
+
+function hoParse(file) {
+  const r = spawnSync(process.execPath, ["-e", `import("${new URL("../../lib/report/handovers.mjs", import.meta.url).href}").then((m)=>{const p=m.parseHandovers(process.argv[1]);console.log(JSON.stringify(p.sections.map((s)=>({t:s.title,s:s.status,m:s.moved}))))})`, file], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+const creates = (s) => s.calls().filter((c) => c[0] === "issue" && c[1] === "create").length;
+
+test("HANDOVER CONTROL: 2 open + 1 unknown + 1 closed -> 2 issues (kind:handover), 2 Moved lines, unknown/closed untouched, statuses re-parse", () => {
+  const s = scenario({ registers: { [HO]: HO_TEXT } });
   try {
     const r = s.run(["export", "--all", "--apply"]);
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.equal(s.read("HANDOVERS.md"), ho);
+    const made = s.ghState().issues["hubowner/hub"];
+    assert.equal(made.length, 2);
+    for (const i of made) assert.match(i.labels, /kind:handover/);
+    const after = s.read(HO);
+    const today = new Date().toISOString().slice(0, 10);
+    assert.ok(after.includes(`## 2026-10-01 · Alpha\n**Moved:** ${today} → https://github.com/hubowner/hub/issues/1\n\n\n**Done when:** a works`), after);
+    assert.ok(after.includes(`## 2026-10-02 · Beta\n**Moved:** ${today} → https://github.com/hubowner/hub/issues/2\n`));
+    // unknown and closed sections are byte-identical
+    assert.ok(after.includes("## 2026-10-03 · Gamma\n\nprose with no marker\n\n## 2026-10-04 · Delta\n\n**Resolved:** 2026-10-05 — done\n"));
+    assert.equal((after.match(/\*\*Moved:\*\*/g) || []).length, 2);
+    const st = hoParse(path.join(s.hub, HO));
+    assert.deepEqual(st.map((x) => x.s), ["moved", "moved", "unknown", "closed"]);
+    assert.equal(st[0].m, `${today} → https://github.com/hubowner/hub/issues/1`);
+    assert.equal(s.journal().filter((j) => j.matched === false && j.board === false).length, 2);
+    assert.match(r.stdout, /MARKED/);
+    assert.match(r.stdout, /Gamma|2026-10-03-1/, "the held unknown section is named");
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("HANDOVER RERUN: a second --apply writes nothing (moved sections are not exported again)", () => {
+  const s = scenario({ registers: { [HO]: HO_TEXT } });
+  try {
+    assert.equal(s.run(["export", "--all", "--apply"]).status, 0);
+    const w = s.writes().length, text = s.read(HO), j = s.journal().length;
+    const r = s.run(["export", "--all", "--apply"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(s.writes().length, w, "no gh write");
+    assert.equal(s.read(HO), text, "file byte-identical");
+    assert.equal(s.journal().length, j);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("HANDOVER PARTIAL: create fails on the 2nd -> exactly 1 marker, journal 1; a fixed rerun completes the 2nd", () => {
+  const s = scenario({ registers: { [HO]: HO_TEXT }, control: { failIssueCreateAtCall: 2 } });
+  try {
+    const r = s.run(["export", "--all", "--apply"]);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.equal((s.read(HO).match(/\*\*Moved:\*\*/g) || []).length, 1, "only the section with a URL is marked");
+    assert.deepEqual(hoParse(path.join(s.hub, HO)).map((x) => x.s), ["moved", "open", "unknown", "closed"]);
+    assert.equal(new Set(s.journal().map((j) => j.key)).size, 1);
+
+    s.setControl({ failIssueCreateAtCall: 0 });
+    const c0 = creates(s);
+    const r2 = s.run(["export", "--all", "--apply"]);
+    assert.equal(r2.status, 0, r2.stdout + r2.stderr);
+    assert.equal(creates(s) - c0, 1, "only the second is created");
+    assert.equal((s.read(HO).match(/\*\*Moved:\*\*/g) || []).length, 2);
+    assert.deepEqual(hoParse(path.join(s.hub, HO)).map((x) => x.s), ["moved", "moved", "unknown", "closed"]);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("HANDOVER FENCE: a heading-looking line inside a fence is no section, creates no issue and survives byte-identical", () => {
+  const fenceBlock = ["```", "## 2026-01-01 · x", "**Done when:** quoted", "```"].join("\n");
+  const text = ["# Handovers", "", "## 2026-10-01 · Real", "", "**Done when:** it works", "", "Example:", "", fenceBlock, "", "end", ""].join("\n");
+  const s = scenario({ registers: { [HO]: text } });
+  try {
+    const r = s.run(["export", "--all", "--apply"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(s.ghState().issues["hubowner/hub"].length, 1, "no issue for the fenced heading");
+    assert.ok(s.read(HO).includes(fenceBlock), "fenced block byte-identical");
+    assert.deepEqual(hoParse(path.join(s.hub, HO)).map((x) => x.s), ["moved"]);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("HANDOVER WINDOW: a section opening with a long Done-when paragraph still reads moved after the insert", () => {
+  const text = ["# H", "", "## 2026-10-01 · Long", "", "**Done when:** condition line one", "line two", "line three", "line four", "", "tail", ""].join("\n");
+  const s = scenario({ registers: { [HO]: text } });
+  try {
+    const r = s.run(["export", "--all", "--apply"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(hoParse(path.join(s.hub, HO)).map((x) => x.s), ["moved"]);
+    assert.ok(s.read(HO).includes("line two\nline three\nline four\n\ntail"), "the paragraph is untouched");
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("HANDOVER ROUTED: a handover in an other-owner repo with a route lands on the routed repo", () => {
+  const nested = { dir: "AuroraV3", origin: "https://github.com/someoneelse/AuroraV3.git", registers: { "HANDOVER-2026-10-02.md": "# H\n\n## 1 · Do it\n\n**Done when:** done\n\nbody\n" } };
+  const config = "tasks:\n  routes:\n    someoneelse/AuroraV3: hubowner/aurora\n";
+  const s = scenario({ registers: {}, nested, config, control: { projects: { "hubowner/aurora": { number: 9, owner: "hubowner" } } } });
+  try {
+    const r = s.run(["export", "--all", "--apply"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const issues = s.ghState().issues["hubowner/aurora"];
+    assert.equal(issues.length, 1);
+    assert.match(issues[0].labels, /kind:handover/);
+    assert.equal(s.ghState().issues["someoneelse/AuroraV3"], undefined);
+    const file = path.join(s.hub, "AuroraV3/HANDOVER-2026-10-02.md");
+    assert.match(readFileSync(file, "utf8"), /## 1 · Do it\n\*\*Moved:\*\* \d{4}-\d\d-\d\d → https:\/\/github.com\/hubowner\/aurora\/issues\/1\n/);
+    assert.deepEqual(hoParse(file).map((x) => x.s), ["moved"]);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("HANDOVER CONCURRENT EDIT: a file changed while its issues were being created gets no Moved line; the issues stay journaled", () => {
+  const s = scenario({ registers: { [HO]: HO_TEXT } });
+  try {
+    s.setControl({ appendOnCreate: path.join(s.hub, HO) });
+    const r = s.run(["export", "--all", "--apply"]);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(s.read(HO).startsWith(HO_TEXT), "the original text is intact");
+    assert.equal((s.read(HO).match(/\*\*Moved:\*\*/g) || []).length, 0, "no marker was written over a changed file");
+    assert.ok(s.journal().length >= 1, "issues are journaled");
+    assert.match(r.stdout, /changed while issues were being created/);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("HANDOVER HELD-ONLY: a file whose only sections are unknown-status is held, byte-identical, and creates nothing", () => {
+  // The verify guards themselves are pinned in tests/unit/tasks-export-handover.test.mjs with hand-written hostile outputs.
+  const only = "# H\n\n## 2026-10-01 · Prose\n\njust prose\n";
+  const s = scenario({ registers: { [HO]: only } });
+  try {
+    const r = s.run(["export", "--all", "--apply"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(s.read(HO), only);
     assert.equal(s.writes().length, 0);
-    assert.match(r.stdout, /planned-only until R3/);
+    assert.match(r.stdout, /unknown-status/);
   } finally {
     s.cleanup();
   }

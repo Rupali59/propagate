@@ -19,7 +19,7 @@
  * reading manifests, gate 2 shells to `npm test` in a caller-supplied
  * `skillDir` (a tiny fixture project here, never the real 700+-test suite —
  * running the real suite from inside the suite would double every `npm test`
- * invocation), gates 3 and 4 exercise the REAL bin/make-public.mjs and
+ * invocation), gates 3 and 4 exercise the REAL scripts/make-public.mjs and
  * cli.mjs (they are what those tools promise to do), isolated only by HOME /
  * PROPAGATE_STATE_DIR so nothing here can touch the real install.
  */
@@ -337,7 +337,7 @@ test("gate 2: output with no parseable node:test summary is could-not-run, not a
 });
 
 // ---------------------------------------------------------------------------
-// Gate 3 — make-public --check (the REAL bin/make-public.mjs, isolated HOME)
+// Gate 3 — make-public --check (the REAL scripts/make-public.mjs, isolated HOME)
 // ---------------------------------------------------------------------------
 
 test("gate 3: no identity map is a legitimate could-not-run, not a failure and not a pass", () => {
