@@ -1,5 +1,13 @@
 # propagate — State
 
+## Plugin conventions #98 and #99 — 2026-10-18 (0.15.38)
+
+`claude plugin validate` passes with exactly one known warning: `skills/propagate/SKILL.md` is a symlink to the root SKILL.md,
+which cannot move (config.mjs finds the root by it; SKILL.md links `sections/` relative to skills/propagate/).
+`tests/portability/plugin-validate.test.mjs` pins that warning and fails on any other; it skips with a stated reason where
+the claude CLI is absent (CI). `--strict` is therefore not the gate. README now says where state lives and why it is not
+in `${CLAUDE_PLUGIN_DATA}`. Left of #95: #97, the `commands/` layout.
+
 ## R3 handovers move to GitHub, and `bin/` leaves the plugin root — 2026-10-18 (0.15.37)
 
 **What is true now.** `tasks export --apply` also exports open HANDOVER sections: one `kind:handover` issue per `open` section,

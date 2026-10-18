@@ -1,15 +1,15 @@
 {
  "header": {
-  "recordedAt": "2026-10-18T16:24:43.411Z",
-  "commit": "0cf90243f92a5f2a2cabe3cc3dfbd8ad46439957",
+  "recordedAt": "2026-10-18T16:52:13.083Z",
+  "commit": "cb40c6a18f1b41898921bb325b6a4b53cbe70319",
   "node": "v25.9.0",
-  "tests": 256,
+  "tests": 257,
   "withStaticDeps": 195,
   "withRecordedSpawnDeps": 89,
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 1507,
+  "recordedProcesses": 1508,
   "unresolvedStaticSpecifiers": 29
  },
  "tests": {
@@ -1437,6 +1437,7 @@
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
     "tests/portability/plugin-layout.test.mjs",
+    "tests/portability/plugin-validate.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -8160,6 +8161,7 @@
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
     "tests/portability/plugin-layout.test.mjs",
+    "tests/portability/plugin-validate.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -8715,6 +8717,7 @@
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
     "tests/portability/plugin-layout.test.mjs",
+    "tests/portability/plugin-validate.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -9087,6 +9090,13 @@
    ],
    "size": "small"
   },
+  "tests/portability/plugin-validate.test.mjs": {
+   "deps": [
+    ".",
+    "tests/portability/plugin-validate.test.mjs"
+   ],
+   "size": "small"
+  },
   "tests/portability/portability-literals.test.mjs": {
    "deps": [
     "SKILL.md",
@@ -9335,6 +9345,7 @@
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
     "tests/portability/plugin-layout.test.mjs",
+    "tests/portability/plugin-validate.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",
@@ -14289,6 +14300,7 @@
     "tests/portability/plist-relocation.test.mjs",
     "tests/portability/plist-watch-roots.test.mjs",
     "tests/portability/plugin-layout.test.mjs",
+    "tests/portability/plugin-validate.test.mjs",
     "tests/portability/portability-literals.test.mjs",
     "tests/portability/public-forbidden.test.mjs",
     "tests/portability/public-scrub.test.mjs",

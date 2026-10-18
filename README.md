@@ -93,6 +93,18 @@ time. Before that edge existed, the same mistake produced silence.
 `docs/GOTCHAS.md` is the unusual one: ~50 entries, each with the signal you'd see and what
 it cost. Most of this tool's design is downstream of something in that file.
 
+## Where its state lives
+
+Everything propagate records is in `~/.propagate/`: the append-only verification ledger, `config.yml`, the
+identity map used to scrub the public tree, and the journals of runs such as `release --check` and
+`tasks export`. Set `PROPAGATE_STATE_DIR` to put it elsewhere; the test suite does, so tests never touch your
+real store.
+
+It is deliberately **not** in Claude Code's `${CLAUDE_PLUGIN_DATA}`. That directory is meant for caches and
+installed dependencies and is deleted when the plugin is uninstalled, while the ledger is a record that has to
+survive an uninstall — and propagate also runs outside Claude Code (from a shell, or on a schedule), where that
+variable does not exist.
+
 ## Requirements
 
 Node — see `engines` in `package.json`. `fs.globSync` is the binding constraint.
