@@ -11,7 +11,7 @@
  *   migrate-refs "Vipin Kaushik"    -> previous: absent, 0 projects, 0 refs, exit 0
  *   migrate-refs "/Users/…/Vipin Kaushik" -> previous: v2, 9 projects, 38 refs
  *
- * `commands/manifest.mjs` had already solved this correctly. Rather than a
+ * `cli/manifest.mjs` had already solved this correctly. Rather than a
  * second copy, the resolution moved here and BOTH commands use it — the same
  * "two forks of one traversal" this repo has paid for before.
  *

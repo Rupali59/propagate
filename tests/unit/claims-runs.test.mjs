@@ -37,7 +37,7 @@ test("lib/claims/runs.mjs makes no network call and spawns no subprocess", () =>
   }
 });
 
-test("lib/claims/runs.mjs does not print — rendering stays in commands/claims.mjs", () => {
+test("lib/claims/runs.mjs does not print — rendering stays in cli/claims.mjs", () => {
   assert.doesNotMatch(CODE_ONLY, /console\.(log|error|warn|info)\s*\(/, "lib/claims/runs.mjs must not print");
 });
 

@@ -3,7 +3,7 @@
  * allowlist ACCEPTS (ISSUES N120).
  *
  * The allowlist in lib/core/commands.mjs was built 2026-09-26 by "sweeping what
- * commands/*.mjs actually reads from argv". Commands implemented in cli.mjs were
+ * cli/*.mjs actually reads from argv". Commands implemented in cli.mjs were
  * outside that population, so their flags were never seen: `backlog --brief`,
  * `--verbose` and `--affects` were REFUSED for eight days, `monitor --install`
  * (the documented generator of an ARMED launchd agent's plist, docs/SYSTEMS.md)
@@ -12,7 +12,7 @@
  *
  * So the population is DERIVED here, from the same source the flags live in: the
  * dispatch in cli.mjs, the handler each branch calls (in cli.mjs or in the
- * commands/*.mjs module it imports), and the `"--flag"` literals in that
+ * cli/*.mjs module it imports), and the `"--flag"` literals in that
  * handler's body. rule:derive-dont-curate — a derived population grows for free.
  *
  * LIMITS, stated rather than hidden:
@@ -55,7 +55,7 @@ const CLI = readFileSync(path.join(ROOT, "cli.mjs"), "utf8");
  * stale-exemption test removed them.)
  */
 const EXEMPT = {
-  ui: { "--html": "argument to the spawned `cli.mjs graph --html <out>` (commands/ui.mjs); graph declares it" },
+  ui: { "--html": "argument to the spawned `cli.mjs graph --html <out>` (cli/ui.mjs); graph declares it" },
   "skills-promote": { "--apply": "skillsLifecycleCmd is shared; promote/demote return before :4094, so --apply is read on the skills-reap path only" },
   "skills-demote": { "--apply": "skillsLifecycleCmd is shared; promote/demote return before :4094, so --apply is read on the skills-reap path only" },
 };
@@ -87,7 +87,7 @@ function handlersByMode() {
     const open = DISPATCH.indexOf("{", marks[i].index);
     const next = marks.find((m) => m.index > open);
     const block = DISPATCH.slice(marks[i].index, next ? next.index : open + 1500);
-    const mod = /import\("\.\/(commands\/[a-z0-9-]+\.mjs)"\)/.exec(block);
+    const mod = /import\("\.\/(cli\/[a-z0-9-]+\.mjs)"\)/.exec(block);
     const modSrc = mod && existsSync(path.join(ROOT, mod[1])) ? readFileSync(path.join(ROOT, mod[1]), "utf8") : null;
     const found = out.get(mode) ?? [];
     for (const [, name] of block.matchAll(/\b([a-z][A-Za-z0-9]*Cmd)\(/g)) {

@@ -82,8 +82,8 @@ test("lib/claims/check.mjs's only subprocess call is a local, read-only git ref 
   assert.match(CODE, /"rev-parse"/, "expected the local rev-parse --verify pattern");
 });
 
-test("lib/claims/check.mjs does not print — rendering stays in commands/claims.mjs", () => {
-  // commands/ansi.mjs's own header: "zero of 58 lib/ modules contain an
+test("lib/claims/check.mjs does not print — rendering stays in cli/claims.mjs", () => {
+  // cli/ansi.mjs's own header: "zero of 58 lib/ modules contain an
   // ANSI escape, and none of them print." This module is lib/, so it holds
   // to the same rule this repo already enforces elsewhere.
   assert.doesNotMatch(CODE, /console\.(log|error|warn|info)\s*\(/, "lib/claims/check.mjs must not print");
@@ -139,7 +139,7 @@ for (const modPath of ALL_CLAIMS_MODULES) {
     }
   });
 
-  test(`${label} does not print — rendering stays in commands/claims.mjs`, () => {
+  test(`${label} does not print — rendering stays in cli/claims.mjs`, () => {
     assert.doesNotMatch(code, /console\.(log|error|warn|info)\s*\(/, `${label} must not print`);
   });
 }

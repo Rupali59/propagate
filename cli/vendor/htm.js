@@ -2,9 +2,9 @@
  *
  * Copied from the npm tarball, not installed. propagate ships two ways — npm,
  * and a marketplace symlink that never runs `npm install` — so node_modules
- * cannot be assumed present. package.json already ships commands/.
+ * cannot be assumed present. package.json already ships cli/.
  *
- * The UMD build specifically: commands/ui.client.js is executed by
+ * The UMD build specifically: cli/ui.client.js is executed by
  * tests/unit/ui-client.test.mjs inside node:vm, and `new Script()` cannot
  * resolve `import`. UMD attaches to the global instead — verified, this file
  * defines globalThis.htm.

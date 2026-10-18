@@ -99,12 +99,12 @@ done
 port_of_url() { printf '%s' "$1" | sed -n 's#^http://127\.0\.0\.1:\([0-9][0-9]*\)/.*#\1#p'; }
 port_holder() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -n1; }
 
-PORT=4599   # commands/ui.mjs default; overridden by the remembered URL
+PORT=4599   # cli/ui.mjs default; overridden by the remembered URL
 [ -s "$URL_FILE" ] && { p="$(port_of_url "$(cat "$URL_FILE")")"; [ -n "$p" ] && PORT="$p"; }
 
 # The build id of the files on disk, or empty when they cannot be read (cannot tell).
 disk_build() {
-  local c; c="$(dirname "$CLI")/commands"
+  local c; c="$(dirname "$CLI")/cli"
   [ -f "$c/ui.mjs" ] && [ -f "$c/ui.client.js" ] && ls "$c"/ui/css/*.css >/dev/null 2>&1 || return 0
   ( export LC_ALL=C; cat "$c/ui.mjs" "$c/ui.client.js" "$c"/ui/css/*.css | shasum -a 256 | cut -c1-16 ) 2>/dev/null
 }

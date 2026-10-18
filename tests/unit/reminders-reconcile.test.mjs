@@ -15,7 +15,7 @@
  *
  * NOT CLI-LEVEL, AND THAT IS A DELIBERATE, REPORTED GAP. The spec's F2
  * pseudocode shows `runCli(["reminders", "--reconcile"], env)`. No such
- * subcommand exists: `commands/reminders.mjs` (L4) has no --apply/--reconcile
+ * subcommand exists: `cli/reminders.mjs` (L4) has no --apply/--reconcile
  * path, and `cli.mjs`'s dispatch does not route one — both files are
  * explicitly outside this lane's ownership. `reconcileReminders()` is
  * exercised directly instead; wiring a `reminders reconcile` CLI verb is

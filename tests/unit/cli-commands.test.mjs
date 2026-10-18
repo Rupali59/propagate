@@ -40,7 +40,7 @@ import { COMMANDS, renderUsage, validateFlags, resolveCommand } from "../../lib/
  * `backlog [--json] [--brief] [--verbose] [--affects <scope>] [--trackers]`.
  * `--trackers` is new (PR-034). The other three were READ by cli.mjs since
  * 2026-08-27/28 and REFUSED by this table since 2026-09-26: the sweep that built
- * the allowlist read `commands/*.mjs`, and backlog is implemented in cli.mjs, so
+ * the allowlist read `cli/*.mjs`, and backlog is implemented in cli.mjs, so
  * its flags were never in the population. `backlog --brief` exited 2 ("unknown
  * flag") for eight days. The derivation, not the flags, is what was wrong — N120.
  *
@@ -103,7 +103,7 @@ test("every flag that APPEARS in a command's usage text is declared in its flags
 
 /**
  * Accepted by the CLI, absent from every usage string. Measured 2026-09-26 by
- * sweeping what `commands/*.mjs` actually reads from argv.
+ * sweeping what `cli/*.mjs` actually reads from argv.
  *
  * THIS LIST IS THE FINDING, not an exemption. `--out-of-order` was in exactly
  * this state — read from argv, documented nowhere — and that is half of why an

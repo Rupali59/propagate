@@ -1,5 +1,5 @@
 /**
- * `commands/docs.mjs` — the `propagate docs` command surface.
+ * `cli/docs.mjs` — the `propagate docs` command surface.
  *
  * Zero coverage existed for this module before this file (plan
  * `~/.claude/plans/i-saw-it-what-starry-sparkle.md` §4/T4). Under test:
@@ -41,7 +41,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { docsCmd, guessKind } from "../../commands/docs.mjs";
+import { docsCmd, guessKind } from "../../cli/docs.mjs";
 import { KINDS, kindOf } from "../../lib/report/doc-kind.mjs";
 import { REFERENCE_BODY_MARK, REFERENCE_FOOTER_MARK, bodyHash } from "../../lib/report/doc-reference.mjs";
 

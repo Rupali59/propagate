@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { validateSeenBody } from "../../commands/ui.mjs";
+import { validateSeenBody } from "../../cli/ui.mjs";
 
 const STREAM_URL = pathToFileURL(fileURLToPath(new URL("../../lib/report/stream.mjs", import.meta.url))).href;
 

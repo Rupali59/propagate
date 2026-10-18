@@ -4,7 +4,7 @@
  *
  * WHAT THIS PINS, AND WHY IT IS NOT A VERSION COMPARISON. On 2026-09-16 the served
  * plugin was 0.5.0 while source was 0.6.1 — four merged PRs authored and not
- * delivered, with `commands/goals.mjs` and `lib/claims/restate.mjs` absent from the
+ * delivered, with `cli/goals.mjs` and `lib/claims/restate.mjs` absent from the
  * served tree. Every check in the repo stayed green because every check reads SOURCE.
  *
  * On 2026-09-24 (N78) BOTH manifests read `0.6.2` while `cli.mjs` still differed —

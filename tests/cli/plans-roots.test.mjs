@@ -1,6 +1,6 @@
 /**
  * `node cli.mjs plans --check` — root handling and the JSON contract, exercised
- * as a real subprocess so the argv parsing in commands/plans.mjs and the
+ * as a real subprocess so the argv parsing in cli/plans.mjs and the
  * dispatch arm in cli.mjs are covered, not just the pure lib functions.
  *
  * Fixtures only, never the live tree — the default (no --root) corpus is

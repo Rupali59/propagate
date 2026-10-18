@@ -6,7 +6,7 @@
  * Rendering only. All derivation lives in `lib/claims/check.mjs`, which
  * takes the tree as input and returns structured findings — this file is
  * the only place in the `claims` command surface allowed to print, per
- * `commands/ansi.mjs`'s own rule ("zero of 58 lib/ modules contain an ANSI
+ * `cli/ansi.mjs`'s own rule ("zero of 58 lib/ modules contain an ANSI
  * escape, and none of them print").
  *
  * `--json`: ONLY JSON on stdout. N65 (`propagation/state/workspace/STATE.md`)
@@ -19,7 +19,7 @@
  *
  * Import prefix is `../lib/…` from here, not `./lib/…` — G60: a specifier
  * copied out of cli.mjs is relative to the repo root and resolves to a
- * different, non-existent file from inside `commands/`.
+ * different, non-existent file from inside `cli/`.
  */
 
 import path from "node:path";
@@ -653,7 +653,7 @@ async function restateSub(rest, json) {
  *
  * WHY THIS EXISTS. `claims restate` poses questions and `claims judge` reports
  * which blocks await one, but until now NOTHING could record an answer: there
- * was no `appendClaim` caller anywhere in `commands/`. A lane that poses
+ * was no `appendClaim` caller anywhere in `cli/`. A lane that poses
  * questions nobody can answer does not converge — every run re-reports the same
  * 15 entries forever, which is a worklist that reads as coverage.
  *

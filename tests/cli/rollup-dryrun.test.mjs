@@ -12,7 +12,7 @@
  * `tests/digest/digest-dryrun.test.mjs` is the sister case for the exact
  * defect this rule was written about: a `dryRun` parameter that gated the
  * top-level function while a NESTED call ignored it, so a documented preview
- * ran an armed write. `commands/rollup.mjs` has exactly one `writeFileSync`
+ * ran an armed write. `cli/rollup.mjs` has exactly one `writeFileSync`
  * call and it is gated on `!dryRun` — this file is what proves that gate
  * actually holds under every combination the CLI accepts, not just the one
  * that was reasoned about.
@@ -67,7 +67,7 @@ import { fileURLToPath } from "node:url";
 import { renderRollup, rollup } from "../../lib/report/rollup.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
-const ROLLUP_MJS_PATH = fileURLToPath(new URL("../../commands/rollup.mjs", import.meta.url));
+const ROLLUP_MJS_PATH = fileURLToPath(new URL("../../cli/rollup.mjs", import.meta.url));
 
 /** Distinguishable from "empty string" and from "file exists" — see header. */
 const ABSENT = Symbol.for("propagate:rollup-test:absent");
@@ -208,7 +208,7 @@ test("absent fixture specifically: a zero-byte file is a DIFFERENT value from AB
 
 const ROLLUP_CMD_SRC = readFileSync(ROLLUP_MJS_PATH, "utf8");
 
-test("commands/rollup.mjs contains exactly one writeFileSync call", () => {
+test("cli/rollup.mjs contains exactly one writeFileSync call", () => {
   const matches = ROLLUP_CMD_SRC.match(/\bwriteFileSync\s*\(/g) || [];
   assert.equal(matches.length, 1, `expected exactly one writeFileSync call, found ${matches.length}`);
 });
@@ -249,7 +249,7 @@ test("mutating the dry-run guard makes the safety tests fail, for the stated rea
   assert.notEqual(
     mutated,
     ROLLUP_CMD_SRC,
-    "the guard-mutation replace() matched nothing — commands/rollup.mjs's shape changed; update this test's search string",
+    "the guard-mutation replace() matched nothing — cli/rollup.mjs's shape changed; update this test's search string",
   );
   // .replace() without a global flag touches the FIRST match only — confirm
   // that was the intended one (the write guard) and not some other, earlier
@@ -258,20 +258,20 @@ test("mutating the dry-run guard makes the safety tests fail, for the stated rea
   assert.equal(guardCount, 1, `expected exactly one \`if (!dryRun) {\` block, found ${guardCount} — this mutation would hit the wrong one`);
   assert.match(mutated, /if \(true\) \{/, "the mutated source must actually contain the disarmed guard");
 
-  // Shadow tree: only commands/rollup.mjs is swapped for the mutated text;
-  // everything it imports (lib/, commands/ansi.mjs) is the REAL code, via a
+  // Shadow tree: only cli/rollup.mjs is swapped for the mutated text;
+  // everything it imports (lib/, cli/ansi.mjs) is the REAL code, via a
   // symlinked lib/ and a byte-for-byte copy of ansi.mjs — never a second
   // stand-in for the module under test, which would test the copy and not
   // the guard.
   const tmpRepo = await mkdtemp(path.join(tmpdir(), "rollup-mutation-"));
   const roots = await scopedRoots();
   try {
-    const commandsDir = path.join(tmpRepo, "commands");
+    const commandsDir = path.join(tmpRepo, "cli");
     await mkdir(commandsDir, { recursive: true });
     await writeFile(path.join(commandsDir, "rollup.mjs"), mutated);
     await writeFile(
       path.join(commandsDir, "ansi.mjs"),
-      readFileSync(fileURLToPath(new URL("../../commands/ansi.mjs", import.meta.url)), "utf8"),
+      readFileSync(fileURLToPath(new URL("../../cli/ansi.mjs", import.meta.url)), "utf8"),
     );
     const { symlink } = await import("node:fs/promises");
     await symlink(fileURLToPath(new URL("../../lib", import.meta.url)), path.join(tmpRepo, "lib"));
@@ -279,7 +279,7 @@ test("mutating the dry-run guard makes the safety tests fail, for the stated rea
     const artifact = path.join(roots.searchRoot, "ECOSYSTEM.md");
     const before = snap(artifact);
     // Invoke the MUTATED command module directly — never through cli.mjs's
-    // own dispatch, which would import the real, unmutated commands/rollup.mjs.
+    // own dispatch, which would import the real, unmutated cli/rollup.mjs.
     const invokePath = path.join(tmpRepo, "invoke.mjs");
     await writeFile(
       invokePath,

@@ -3,7 +3,7 @@
  *
  * WHY THIS IS A TEST AND NOT A DOC FIX. The Phase 1/2a lane added `answer`,
  * `restate` and `verdict` across two PRs and documented none of them. Measured
- * when this file was written: `commands/claims.mjs` dispatched six subcommands
+ * when this file was written: `cli/claims.mjs` dispatched six subcommands
  * plus `check`, while `cli.mjs`'s usage string named two, `docs/REFERENCE.md`
  * named one, and `sections/routing.md` — the doc whose entire job is "which
  * cli.mjs command answers what" — mentioned `claims` zero times. Worst of the
@@ -31,7 +31,7 @@ const read = (rel) => readFileSync(path.join(ROOT, rel), "utf8");
  * added explicitly — it has no `sub === "check"` arm to find.
  */
 function dispatchedSubcommands() {
-  const src = read("commands/claims.mjs");
+  const src = read("cli/claims.mjs");
   const found = [...src.matchAll(/sub === "([a-z]+)"/gu)].map((m) => m[1]);
   return [...new Set([...found, "check"])].sort();
 }
@@ -74,7 +74,7 @@ test("the command's OWN usage text names every subcommand it dispatches", () => 
   // The sharpest case: `verdict` is the only claims subcommand that WRITES,
   // and it was absent from the usage block printed on an unknown subcommand —
   // so the write path was undiscoverable from the tool itself.
-  const src = read("commands/claims.mjs");
+  const src = read("cli/claims.mjs");
   // BOUNDED TO THE HELP BLOCK, and that bound is load-bearing. Slicing to
   // end-of-file swept in `verdictSub`s own usage string 600 lines later, so
   // this test passed while the help block genuinely omitted `verdict` — green

@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const src = readFileSync(path.join(REPO, "commands", "ui.client.js"), "utf8");
+const src = readFileSync(path.join(REPO, "cli", "ui.client.js"), "utf8");
 
 /** The DIVISIONS literal, as the shipped file declares it. */
 function divisions() {

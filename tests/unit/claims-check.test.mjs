@@ -108,7 +108,7 @@ test("findExpiredDates: counters NEVER change what is returned — suppression s
 });
 
 // ── units: findings vs scanned lines ────────────────────────────────────────
-// On 2026-09-10 `commands/claims.mjs` subtracted a scanned-LINE counter from a
+// On 2026-09-10 `cli/claims.mjs` subtracted a scanned-LINE counter from a
 // FINDING total and published "17 not past-tense" where the like-for-like answer
 // was 48. rule:discernment-checks §5 — compare like with like. These pin the
 // units so the subtraction cannot silently return.

@@ -1,6 +1,6 @@
 /**
  * The digest's ECOSYSTEM section (Phase 1 Task E) — the change notice for
- * `ECOSYSTEM.md` (`lib/report/rollup.mjs` / `commands/rollup.mjs`).
+ * `ECOSYSTEM.md` (`lib/report/rollup.mjs` / `cli/rollup.mjs`).
  *
  * Two INDEPENDENT facts are covered here, on purpose, because the task
  * brief and `rollupSnapshot()`'s own doc comment both insist they never be
@@ -288,7 +288,7 @@ test("formatDigest renders the hand-edited line when the artifact was edited by 
 test("source: digest.mjs contains no writeFileSync call anywhere", () => {
   // digest.mjs uses ONLY the async fs/promises `writeFile` (for its own
   // digest-state file and DAILY.md, both via atomic temp+rename) — never the
-  // synchronous `writeFileSync` commands/rollup.mjs uses for ECOSYSTEM.md.
+  // synchronous `writeFileSync` cli/rollup.mjs uses for ECOSYSTEM.md.
   // If this ever matches, something started writing synchronously, which is
   // not a pattern used anywhere else in this file and is worth a second
   // look regardless of what it targets.

@@ -30,9 +30,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { validateBatchWrite, validateEdgesBatch, observedRefusal } from "../../commands/ui.mjs";
+import { validateBatchWrite, validateEdgesBatch, observedRefusal } from "../../cli/ui.mjs";
 
-const UI_URL = pathToFileURL(fileURLToPath(new URL("../../commands/ui.mjs", import.meta.url))).href;
+const UI_URL = pathToFileURL(fileURLToPath(new URL("../../cli/ui.mjs", import.meta.url))).href;
 const EVENTS_URL = pathToFileURL(fileURLToPath(new URL("../../lib/edges/events.mjs", import.meta.url))).href;
 const DISPOSITION_URL = pathToFileURL(fileURLToPath(new URL("../../lib/edges/disposition.mjs", import.meta.url))).href;
 
@@ -48,7 +48,7 @@ async function storeSnapshot(stateDir) {
 }
 
 /**
- * Run the REAL two-step sequence commands/ui.mjs's /api/dispose route runs
+ * Run the REAL two-step sequence cli/ui.mjs's /api/dispose route runs
  * for a batch body — `validateBatchWrite` gates, and only a null result
  * reaches `applyBatchDispose` (the real write) — against an isolated store.
  */

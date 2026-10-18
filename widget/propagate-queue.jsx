@@ -219,7 +219,7 @@ export const className = `
   --track: rgba(60, 60, 67, 0.13);
   --tip-bg: rgba(255, 255, 255, 0.97);
 
-  /* THE WHEEL, the SAME wheel commands/ui/css and lib/graph/graph-html.mjs use,
+  /* THE WHEEL, the SAME wheel cli/ui/css and lib/graph/graph-html.mjs use,
      asserted identical by tests/unit/theme.test.mjs. OKLCH so lightness and
      chroma stay separable. Übersicht is WebKit; Safari 16.4+ has relative
      colour. */

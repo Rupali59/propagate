@@ -1,5 +1,14 @@
 # propagate — State
 
+## Implementation code leaves `commands/` for `cli/` (#97) — 2026-10-18 (0.15.39)
+
+`commands/` holds only the four slash-command `.md` files; the 18 command modules, `ui.client.js`, `ui/css/` and `vendor/`
+live in `cli/` (same depth, so no `../lib` import changed). Claude Code turns every `.md` under `commands/` into a slash
+command, which is how `vendor/README.md` once became `/propagate:vendor:README`. Guards: `tests/portability/plugin-layout.test.mjs`
+(commands/ flat *.md only) and `tests/portability/cli-imports.test.mjs` (imports every cli/ module and resolves every dynamic
+`import("./cli/...")` in cli.mjs and digest.mjs, floor 17 — G60 says a broken dynamic import is silent). Sidecars updated in
+the same change (propagate and hub `.propagates.yml`). All four plugin conventions in #95 are now closed.
+
 ## Plugin conventions #98 and #99 — 2026-10-18 (0.15.38)
 
 `claude plugin validate` passes with exactly one known warning: `skills/propagate/SKILL.md` is a symlink to the root SKILL.md,

@@ -24,7 +24,7 @@
  * `reconcile` when it cannot touch a register ships a command that cannot do
  * what it says — `propagation/state/workspace/STATE.md` 2026-09-25).
  * DRY-RUN BY DEFAULT, `--apply` REQUIRED TO WRITE — same posture as
- * `claims render`/`claims verdict` (`commands/claims.mjs`), and for the same
+ * `claims render`/`claims verdict` (`cli/claims.mjs`), and for the same
  * reason: this writes into a project's register, prose a person wrote.
  */
 import { readReminders, DEFAULT_LIST } from "../lib/reminders/read.mjs";

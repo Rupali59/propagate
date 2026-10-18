@@ -335,10 +335,10 @@ check is the reader's, so make it one command:
 
 ```sh
 grep -n 'mode === ' cli.mjs          # the dispatch chain
-ls commands/*.mjs                    # command bodies extracted out of it
+ls cli/*.mjs                    # command bodies extracted out of it
 ```
 
-Command *implementations* now live in `commands/`; the dispatch that routes to
+Command *implementations* now live in `cli/`; the dispatch that routes to
 them stays in `cli.mjs`.
 
 | Command | What it does |
@@ -485,7 +485,7 @@ it is untouched by this view and the two should not be conflated.
 
 ## `propagate ui`: the machinery and page endpoints (2026-10-16/17)
 
-Source of truth: the `/api/` branch of `commands/ui.mjs` and `lib/report/machinery.mjs`, not this list. Every one is
+Source of truth: the `/api/` branch of `cli/ui.mjs` and `lib/report/machinery.mjs`, not this list. Every one is
 `GET`, read-only and behind the token and Origin checks above. **They never run a write or a verdict**; a page that offers a
 command copies it.
 
@@ -519,7 +519,7 @@ characters (letters, digits, `_`, `-`; each id at most 64 long; at most 200 ids)
 piece**; ids Judge does not list are named in a note, not dropped silently. `#/unblock?focus=together` opens Unblock at the
 settle-together groups. A pre-tick **ticks and sends nothing**; the verdict still goes through the guarded bulk path (reason of
 12+ characters, the 5 s hold, `u` undo). Other deep links in use are `section=` (Health), `state=`, `chip=`, `ws=`, `age=`,
-`source=` (Judge); parsing is `parseHash` in `commands/ui.client.js`, and a value the view does not know is ignored.
+`source=` (Judge); parsing is `parseHash` in `cli/ui.client.js`, and a value the view does not know is ignored.
 
 ## What each verdict means
 
@@ -595,7 +595,7 @@ does. That is the whole point of the command: the failure it exists to prevent i
 
 Each outcome names its own fix, because they need different ones. The set is split
 across two modules — `lib/core/setup.mjs` returns all but `no-roots`, which
-`commands/setup.mjs` returns when nothing was given to walk:
+`cli/setup.mjs` returns when nothing was given to walk:
 
 | `reason` | Means | Fix |
 |---|---|---|

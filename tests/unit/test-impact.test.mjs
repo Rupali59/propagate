@@ -33,7 +33,7 @@ const fixtureMap = () => ({
   header: { commit: "abc" },
   tests: {
     "tests/unit/a.test.mjs": entry(["tests/unit/a.test.mjs", "lib/a.mjs", "lib/shared.mjs"]),
-    "tests/unit/b.test.mjs": entry(["tests/unit/b.test.mjs", "lib/shared.mjs", "commands/ui/css/"]),
+    "tests/unit/b.test.mjs": entry(["tests/unit/b.test.mjs", "lib/shared.mjs", "cli/ui/css/"]),
     "tests/cli/c.test.mjs": entry(["tests/cli/c.test.mjs", "cli.mjs"], { size: "medium" }),
     "tests/cli/clean.test.mjs": entry(["tests/cli/clean.test.mjs"], { size: "medium", partial: true }),
     "tests/unit/tree.test.mjs": entry(["tests/unit/tree.test.mjs"], { tree: true }),
@@ -176,7 +176,7 @@ test("affected: a known file selects exactly its dependents, each with the dep t
 });
 
 test("affected: directory listings and recursive trees match files beneath them", () => {
-  const css = selectTests({ map: fixtureMap(), changed: ["commands/ui/css/new.css"] });
+  const css = selectTests({ map: fixtureMap(), changed: ["cli/ui/css/new.css"] });
   assert.ok(css.selected.some((x) => x.test === "tests/unit/b.test.mjs" && /dir listing/.test(x.why)));
   const doc = selectTests({ map: fixtureMap(), changed: ["docs/anything/deep.md"] });
   assert.ok(doc.selected.some((x) => x.test === "tests/unit/e.test.mjs" && /tree docs\/\*\*/.test(x.why)));

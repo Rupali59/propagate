@@ -25,7 +25,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 
-import { artifactPath, ARTIFACT_NAME } from "../../commands/rollup.mjs";
+import { artifactPath, ARTIFACT_NAME } from "../../cli/rollup.mjs";
 
 const HUB = "/tmp/hub";
 const NESTED = "/tmp/hub/Rupali/Experiments";

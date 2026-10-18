@@ -3,7 +3,7 @@
  * `docs/ISSUES.md` §A4 asked for verbatim: "extract the nearest-owner
  * assignment into a shared helper (`lib/discovery.mjs` is the natural
  * home)". Three copies of this logic already existed (`cli.mjs`'s
- * `assignSidecarsToWorkspaces`, `commands/status.mjs`'s `nestedUnderOf`,
+ * `assignSidecarsToWorkspaces`, `cli/status.mjs`'s `nestedUnderOf`,
  * `lib/core/config.mjs`'s `currentWorkspace`) and a FOURTH, wrong, one was
  * found in the wild while scoping this work: `groupForBrief`'s `workspaceOf`
  * used `String(f).split("/")[0]` — a bare string-prefix split that would

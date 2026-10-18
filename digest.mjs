@@ -59,13 +59,13 @@ import {
   parseFooter as parseRollupFooter,
   compareInputs as compareRollupInputs,
 } from "./lib/report/rollup.mjs";
-// `artifactPath()` only — never anything that writes. commands/rollup.mjs is
+// `artifactPath()` only — never anything that writes. cli/rollup.mjs is
 // the one file in this codebase allowed to call writeFileSync on
 // ECOSYSTEM.md (its own header says so); importing its READ-ONLY path helper
 // avoids a second, driftable copy of "SEARCH_ROOTS[0] + ARTIFACT_NAME" (the
 // same two-ledger reasoning backlog.mjs:836-846 already gives for not
 // copying an item between registers, one layer down at a single constant).
-import { artifactPath as rollupArtifactPath } from "./commands/rollup.mjs";
+import { artifactPath as rollupArtifactPath } from "./cli/rollup.mjs";
 
 const HOME = os.homedir();
 const DIGEST_STATE_PATH = path.join(HOME, ".claude", "propagate-digest-state.json");
@@ -1036,14 +1036,14 @@ function adoptionSnapshot() {
 }
 
 /**
- * Mirrors `commands/rollup.mjs`'s `detectHandEdit` test EXACTLY — recompute
+ * Mirrors `cli/rollup.mjs`'s `detectHandEdit` test EXACTLY — recompute
  * the on-disk body hash via the SAME `bodyHash` function `renderRollup`
  * itself uses to write the footer, and compare it to the footer's stored
  * `body:` field. That function is not exported (this lane does not touch
- * `commands/`, per the plan's build sequence: Lane C owns that file), so the
+ * `cli/`, per the plan's build sequence: Lane C owns that file), so the
  * three-way test is restated here against the same imported primitives
  * (`parseFooter`, `bodyHash`) rather than re-derived a second, subtly
- * different way. If `commands/rollup.mjs`'s test ever changes, this one must
+ * different way. If `cli/rollup.mjs`'s test ever changes, this one must
  * change with it by hand — there is no shared call site to keep the two
  * honest beyond both importing the same `lib/report/rollup.mjs` functions.
  */
@@ -1072,7 +1072,7 @@ function rollupIsHandEdited(existingText) {
  * cannot fail — the file it just wrote would always match a fresh
  * derivation, because it IS that derivation, computed moments earlier. That
  * is the exact failure this file's own header was written about ("reading
- * 'Watcher healthy' for a month while frozen"), one layer up. `commands/
+ * 'Watcher healthy' for a month while frozen"), one layer up. `cli/
  * rollup.mjs` is the only file in this codebase permitted to write
  * ECOSYSTEM.md — see its own header — and the "helpful" auto-regenerate
  * refactor that collapses the two is a two-line change someone will propose
@@ -1714,7 +1714,7 @@ export function computeDiff(snapshot, prior) {
   //       — DIFF-based, same idiom as SKILLS/METRICS/INVENTORY above:
   //       last digest's stored `rollup.inputs` (this file's own lean prior,
   //       `toStateRollup`) vs the current snapshot's, via the SAME
-  //       `compareInputs()` `commands/rollup.mjs --check` uses — never a
+  //       `compareInputs()` `cli/rollup.mjs --check` uses — never a
   //       second, hand-rolled diff. Suppressed on firstRun (no prior to
   //       diff against, same as every other diff-based section); a single
   //       "online" line the first time a prior digest state exists but

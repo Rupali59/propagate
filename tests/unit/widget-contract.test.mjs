@@ -259,7 +259,7 @@ test("no backtick survives inside the className template literal", () => {
 
 test("SERVED_VIEWS matches what the ui page can ACTUALLY render", () => {
   // THE COUPLING THIS WORK CREATED, made mechanical rather than remembered.
-  // `SERVED_VIEWS` is a promise in lib/report/surface.mjs that commands/ui.mjs
+  // `SERVED_VIEWS` is a promise in lib/report/surface.mjs that cli/ui.mjs
   // has to keep: every row's CTA availability is stamped from it, so a view
   // listed here but not routed there puts a DEAD BUTTON on the desktop — the
   // exact failure the list exists to prevent, arriving through the list itself.
@@ -286,7 +286,7 @@ test("SERVED_VIEWS matches what the ui page can ACTUALLY render", () => {
   // A guard can be blind by matching NOTHING or by matching MORE, and only the
   // first was defended against. So the literal is located first and the keys are
   // read from inside it — the same extraction ui-rail-separator.test.mjs uses.
-  const ui = readFileSync(path.join(import.meta.dirname, "../../commands/ui.client.js"), "utf8");
+  const ui = readFileSync(path.join(import.meta.dirname, "../../cli/ui.client.js"), "utf8");
   const lit = /const DIVISIONS\s*=\s*\[([\s\S]*?)\];/.exec(ui);
   assert.ok(lit, "could not find the DIVISIONS literal in ui.client.js — this check has gone blind, which is worse than failing");
   const keys = [...lit[1].matchAll(/key:\s*"([a-z]+)"/g)].map((m) => m[1]);

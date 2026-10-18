@@ -11,7 +11,7 @@ they have diverged before.
 
 ```sh
 node -e 'import("./lib/report/color.mjs").then(async({declarations,resolveColor,contrast,rgbToOklch})=>{
-  const c=require("fs").readFileSync("commands/ui/css/10-tokens.css","utf8");
+  const c=require("fs").readFileSync("cli/ui/css/10-tokens.css","utf8");
   const l=declarations(c.slice(0,c.indexOf("@media (prefers-color-scheme: dark)")));
   for(const t of ["--st-ok","--st-caution","--st-warn","--st-accent","--edge-drift","--edge-reverse","--edge-diverge"])
     console.log(t, resolveColor(l.get(t),l), contrast(resolveColor(l.get(t),l),"#fbfaf8").toFixed(2));
@@ -28,7 +28,7 @@ the details. It is not a landing page and must not acquire the manners of one.
 
 ## 1 · Colour
 
-Authored in **OKLCH with relative derivation** (`commands/ui/css/10-tokens.css`). Lightness and
+Authored in **OKLCH with relative derivation** (`cli/ui/css/10-tokens.css`). Lightness and
 chroma are separable there, which is the entire reason: an earlier fix scaled hex
 toward black to gain contrast and dragged chroma down with it, which is what made
 these surfaces brown.
@@ -68,7 +68,7 @@ exists to prevent.
 
 **Refusal kinds are that third set, and they spend every hue but one.** Six
 kebab-case dispositions, six hues, and `--st-ok` is deliberately never among
-them: green means *this is fine* everywhere else in `commands/ui/css/`, so putting
+them: green means *this is fine* everywhere else in `cli/ui/css/`, so putting
 a refusal on it inverts the one association a reader has without being taught.
 What frees that hue is muting `already-inserted` — the single row in the panel
 that is **not** a failure takes `--dim` rather than a colour, so the hue that
@@ -79,7 +79,7 @@ peers, which is why it needed deciding rather than assuming.
 
 **Two things keep this honest, because prose cannot.** `tests/unit/theme.test.mjs`
 derives the disposition list from `lib/reminders/sync.mjs` and
-`lib/reminders/reconcile.mjs` and asserts the stylesheet (`commands/ui/css/*.css`, joined) styles each one — a
+`lib/reminders/reconcile.mjs` and asserts the stylesheet (`cli/ui/css/*.css`, joined) styles each one — a
 disposition with no rule renders as ink on no background, which is invisible
 rather than wrong. And the same file's both-themes check reads every `var()` the
 stylesheet uses, so these rules were covered the moment they were written. The
@@ -149,7 +149,7 @@ and this one is between two *foregrounds*.
 
 ## 2 · Space, radius, elevation
 
-`--s1`…`--s6` (4–32px) and `--r1`…`--r3` (3/6/10px) in `commands/ui/css/10-tokens.css`.
+`--s1`…`--s6` (4–32px) and `--r1`…`--r3` (3/6/10px) in `cli/ui/css/10-tokens.css`.
 
 **The widget keeps its own tighter 3/6/9/12/15 scale.** Its ground is a 300px
 card on a desktop, not a three-column page; sharing one scale would be
@@ -199,7 +199,7 @@ information survives; the movement does not.
 Every view specifies **loading · empty · error · success · partial**, and the table
 that makes that a requirement rather than an intention is the plan's *Interaction
 states* (ticklish-gathering-brook, F5). The client holds to it with one transport
-(`api()` in `commands/ui.client.js`): a 401, a non-2xx, a rejected fetch and a
+(`api()` in `cli/ui.client.js`): a 401, a non-2xx, a rejected fetch and a
 non-JSON body each end in a sentence on screen. None leaves a skeleton — the old
 wrapper was `fetch().then(r => r.json())`, and each way it could fail was a
 different silent defect.
@@ -212,7 +212,7 @@ strings. **"Unknown" is never zero:** a velocity that could not be read says
 *gap*, not as a bar of zero height.
 
 **Views (superseded 2026-10-17).** The rail is five groups, derived from each division's `group`
-and never from a position (`railGroups`, `DIVISIONS` in `commands/ui.client.js`): **TODAY** (Overview),
+and never from a position (`railGroups`, `DIVISIONS` in `cli/ui.client.js`): **TODAY** (Overview),
 **SETTLE** (Judge, Unblock — the two that write), **MACHINERY** (Health, Claims, Rules, Caps, Skills),
 **WORK** (Backlog, Goals, Registers, Reminders) and **HISTORY** (Activity, History, Graph). The 2026-10-15
 "four task views and an Explore set" split, and its `explore` flag, are gone. Only Judge and Unblock write; every
@@ -245,7 +245,7 @@ The 2026-10-15 table listed one-off classes (`.root`, `.hrow`, `.vel`, `.vcol`, 
 `.hit`, `.bar`) that the 2026-10-16 rebuild deleted; `tests/unit/theme.test.mjs` asserts there is no `.bar` rule and
 no native `title=`. The page is now built from a few shared components, each of which enforces the rules below.
 **Derive the class list, never copy it:** the classes the client emits that the stylesheet defines are those in
-`commands/ui/css/*.css` which `commands/ui.client.js` names in a `class=` (or a string it builds a class from);
+`cli/ui/css/*.css` which `cli/ui.client.js` names in a `class=` (or a string it builds a class from);
 the `.badge` state modifiers, `pl-`, `pri-`, `r-`, `s-`, `k-`, `c-`, `g-` and `vin-` families are composed at
 runtime from a row's value, so a grep for the full name finds nothing. A value the client can emit and the stylesheet
 has no rule for renders as ink on no background; a test renders every view and checks each class it saw.
@@ -290,8 +290,8 @@ list sits above the detail.
   visualisations (a stacked bar per workspace, a waiting-time histogram, verdicts per
   day, all clickable), and hand-drawing a band axis, a legend and a stacked-bar layout
   three times is the larger cost. So `d3` 7.9.0 and `@observablehq/plot` 0.6.17 (both ISC)
-  are vendored in `commands/vendor/` as plain `<script>` globals, with their sha256 and
-  licences in `commands/vendor/README.txt`. **What did not change:** no colour comes from the
+  are vendored in `cli/vendor/` as plain `<script>` globals, with their sha256 and
+  licences in `cli/vendor/README.txt`. **What did not change:** no colour comes from the
   library. Every fill is a palette token resolved at render (`resolveToken` in the client),
   the tooltip is the page's own `.tip`. Phase 1 (2026-10-16) then deleted the hand-drawn
   web charts (`Velocity`, `Spark`, `Bars`), so `PlotChart` is the only chart engine on every web view; the

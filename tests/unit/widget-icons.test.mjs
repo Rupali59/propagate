@@ -8,7 +8,7 @@
  * scripts/vendor-lucide-icons.mjs. `lucide` is not in package.json.
  *
  * A PINNED COPY NOTHING CHECKS IS THE DRIFT THIS PROJECT EXISTS TO DETECT
- * (commands/vendor/preact.js says the same of its own copy). So the header
+ * (cli/vendor/preact.js says the same of its own copy). So the header
  * records package, version, license, the icon list and a sha256 of the block
  * body, and this file proves three things:
  *   1. the recorded sha256 matches the body — a hand edit fails here;

@@ -1,12 +1,12 @@
 /**
- * mount-client.mjs — the ONE way this suite renders `commands/ui.client.js`.
+ * mount-client.mjs — the ONE way this suite renders `cli/ui.client.js`.
  *
  * Extracted from tests/unit/ui-client.test.mjs on 2026-09-25 when a second
  * file needed the same renderer. Copying it would have made two forks of one
  * traversal, which is the defect this repo already paid for inside
  * `lib/report/backlog.mjs` — so the harness moved rather than being duplicated.
  *
- * It loads the three vendored globals exactly as `commands/ui.mjs` serves them
+ * It loads the three vendored globals exactly as `cli/ui.mjs` serves them
  * and evaluates the client in a VM realm over `tests/helpers/minidom.mjs`. The
  * point is that a component which THROWS is caught: the failure a person sees
  * is a blank pane with HTTP 200 and nothing in any log, and only a real render
@@ -165,10 +165,10 @@ export async function mountClient({ inbox, routes = {}, hash = "#ready", reduced
   ctx.self = ctx;
   ctx.window = ctx;
 
-  for (const f of ["commands/vendor/preact.js", "commands/vendor/hooks.js", "commands/vendor/htm.js"]) {
+  for (const f of ["cli/vendor/preact.js", "cli/vendor/hooks.js", "cli/vendor/htm.js"]) {
     new Script(read(f)).runInContext(ctx);
   }
-  new Script(read("commands/ui.client.js")).runInContext(ctx);
+  new Script(read("cli/ui.client.js")).runInContext(ctx);
   // WAIT ON A CONDITION, NOT A CLOCK. This was `await setTimeout(30)` until
   // 2026-09-28, and that one line is the whole of PR-008.
   //

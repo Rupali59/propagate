@@ -1444,10 +1444,12 @@ and working. And per the corollary this entry is itself an instance of
 before publishing it — re-measure a different way, don't just re-read the same output.
 
 ### G65 · Code inside a template literal is escaped TWICE, and the second reader is a browser that cannot report the error
-**Trigger:** `(commands/ui\.mjs|propagate-queue\.jsx)`
-**Fires on:** `Edit commands/ui.mjs`
+**Trigger:** `(cli/ui\.mjs|propagate-queue\.jsx)`
+**Fires on:** `Edit cli/ui.mjs`
 
-`commands/ui.mjs` builds its whole page — including a ~120-line inline `<script>` — as
+(Moved to `cli/` 2026-10-18, #97: `commands/ui.mjs` is now `cli/ui.mjs`; the trigger follows it.)
+
+`cli/ui.mjs` builds its whole page — including a ~120-line inline `<script>` — as
 one template literal. Every escape in that region is therefore consumed twice: once when
 `page()` runs, once by the browser.
 
@@ -1461,7 +1463,7 @@ before:**
 | a comment explaining that hazard, with backticks | same again | `node --check` failed |
 | `.replace(/^\/+/,"")` | `\/` collapsed to `/`, so the regex became `/^/+/` | SyntaxError, script dead |
 
-**Why nothing caught it.** `node --check commands/ui.mjs` passes every time — the MODULE
+**Why nothing caught it.** `node --check cli/ui.mjs` passes every time — the MODULE
 is valid; the string it builds is not. The server returns 200, `/api/registers` answers
 in 130 ms, and no log anywhere records a thing. The only evidence lives in the browser
 console, which nothing in this repo reads. From the outside it is indistinguishable from

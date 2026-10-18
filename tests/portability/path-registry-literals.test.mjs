@@ -48,7 +48,7 @@
  *      HOME-rooted joins must not catch a join rooted in a same-named local
  *      variable. It is also why hand-rolled tilde expansion
  *      (lib/edges/cross-repo.mjs:59, lib/core/setup.mjs:90,
- *      commands/setup.mjs:55,118,170) is out of scope on a second,
+ *      cli/setup.mjs:55,118,170) is out of scope on a second,
  *      independent ground: those join HOME (or os.homedir()) with a RUNTIME
  *      slice of a user-supplied string (`p.slice(1)`, `r.slice(2)`), never a
  *      literal root -- there is no known-root literal on those lines for
@@ -116,7 +116,7 @@ function corpus() {
     .split("\n")
     .filter(Boolean)
     .filter((f) => f.endsWith(".mjs"))
-    .filter((f) => f === "cli.mjs" || /^(lib|commands|hooks)\//.test(f))
+    .filter((f) => f === "cli.mjs" || /^(lib|cli|hooks)\//.test(f))
     .filter((f) => f !== "lib/core/paths.mjs"); // the registry itself
   return files;
 }
@@ -126,14 +126,14 @@ const CORPUS = corpus();
 test("the scan has inputs — an empty corpus must not read as a pass", () => {
   // rule:discernment-checks §1 and §2. G48 (no-literal-nul.test.mjs): a scan
   // that cannot see its own corpus reports health for something it never
-  // looked at. cli.mjs plus everything currently under lib/, commands/ and
+  // looked at. cli.mjs plus everything currently under lib/, cli/ and
   // hooks/ is well over a hundred files; a floor of 50 catches "the filter
   // regex stopped matching" or "corpus() returned the wrong cwd" without
   // being so tight that ordinary file churn trips it.
   assert.ok(CORPUS.length > 50, `only ${CORPUS.length} corpus files found — the filter likely broke`);
   assert.ok(CORPUS.includes("cli.mjs"), "cli.mjs must be in the corpus");
   assert.ok(CORPUS.some((f) => f.startsWith("lib/")), "no lib/ files in the corpus");
-  assert.ok(CORPUS.some((f) => f.startsWith("commands/")), "no commands/ files in the corpus");
+  assert.ok(CORPUS.some((f) => f.startsWith("cli/")), "no cli/ files in the corpus");
   assert.ok(CORPUS.some((f) => f.startsWith("hooks/")), "no hooks/ files in the corpus");
 });
 

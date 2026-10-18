@@ -2,7 +2,7 @@
  * The verdict write path, and the identity that lets an UNPAIRED entry carry one.
  *
  * WHAT WAS MISSING. Phase 2a poses questions; nothing could record an answer.
- * There was no `appendClaim` caller anywhere under `commands/`, and an unpaired
+ * There was no `appendClaim` caller anywhere under `cli/`, and an unpaired
  * corpus entry carried `{rule, file, line, reason}` — no hash, so no verdict
  * could key to it. Together that meant the lane could never converge: the same
  * 15 entries re-report on every run, 10 of them unpairable, with no way to say

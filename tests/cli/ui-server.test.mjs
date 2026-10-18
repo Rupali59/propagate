@@ -35,7 +35,7 @@ process.env.PROPAGATE_STATE_DIR = STATE;
 delete process.env.PROPAGATE_STREAM_CURSOR;
 delete process.env.PROPAGATE_SEEN_EDGES;
 
-const { uiCmd, buildId } = await import("../../commands/ui.mjs");
+const { uiCmd, buildId } = await import("../../cli/ui.mjs");
 const { CURSOR_PATH } = await import("../../lib/report/stream.mjs");
 const { SEEN_PATH } = await import("../../lib/report/seen-edges.mjs");
 const { appendEvent } = await import("../../lib/edges/events.mjs");

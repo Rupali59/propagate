@@ -1,12 +1,12 @@
 /**
- * commands/surface.mjs — the text renderer's CHANGED line (PR-024).
+ * cli/surface.mjs — the text renderer's CHANGED line (PR-024).
  *
  * `lib/report/surface.mjs` derives `changed` as {value, label, tone}, the
  * same shape `headline` uses, and `--json` has carried it since that field
  * was added. The text renderer never read it, so the number was invisible to
  * anyone not passing `--json` — filed as PR-024 and fixed here.
  *
- * `changedLine()` is unit-tested directly (exported from commands/surface.mjs)
+ * `changedLine()` is unit-tested directly (exported from cli/surface.mjs)
  * rather than through `surfaceCmd()` end-to-end, because `surfaceCmd()` calls
  * the real `surfacePayload()` with no injection seam — composing live doctor
  * snapshot, queue, registers and stream state with no fixture layer. That
@@ -17,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { changedLine, surfaceCmd } from "../../commands/surface.mjs";
+import { changedLine, surfaceCmd } from "../../cli/surface.mjs";
 
 // ---------------------------------------------------------------------------
 // changedLine — the null-vs-zero distinction is the load-bearing part
@@ -89,7 +89,7 @@ test("surfaceCmd: --json mode is untouched by this change — one JSON line, cha
 // widgetLines — the text form of the widget sections stays in step (W4)
 // ---------------------------------------------------------------------------
 
-import { widgetLines } from "../../commands/surface.mjs";
+import { widgetLines } from "../../cli/surface.mjs";
 
 test("widgetLines: every absent section says WHY, and none prints a bare zero for 'not measured'", () => {
   const lines = widgetLines({

@@ -22,7 +22,7 @@ import {
 } from "../../lib/edges/disposition.mjs";
 import { DISPOSITIONS } from "../../lib/edges/events.mjs";
 import { buildQueue } from "../../lib/report/queue.mjs";
-import { validateWrite, orderingRefusal } from "../../commands/ui.mjs";
+import { validateWrite, orderingRefusal } from "../../cli/ui.mjs";
 
 const STATES = ["DRIFTED", "REVERSED", "DIVERGED", "UNMATCHED"];
 const BLOCKER = { edge_id: "up00001", from: "/r/up.md", to: "/r/a.md", state: "NEVER_VERIFIED" };

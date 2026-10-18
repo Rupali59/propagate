@@ -41,13 +41,13 @@ const REPO = path.join(DIR, "..", "..");
 // BOTH extracted layers, because the correct prefix DIFFERS between them and
 // that is exactly the mistake this file exists to catch:
 //   from lib/report/doctor/  ->  ../../core/x.mjs
-//   from commands/           ->  ../lib/core/x.mjs
+//   from cli/           ->  ../lib/core/x.mjs
 // A specifier copied out of cli.mjs (`./lib/core/x.mjs`) is wrong in both, and
 // wrong in a DIFFERENT way in each. Scanning only one layer would have left the
 // other unguarded while this suite reported green.
 const SCAN_DIRS = [
   path.join(REPO, "lib", "report", "doctor"),
-  path.join(REPO, "commands"),
+  path.join(REPO, "cli"),
 ];
 
 /** Every `await import("<specifier>")` / `import("<specifier>")` literal in a file. */

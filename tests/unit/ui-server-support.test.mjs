@@ -59,7 +59,7 @@ test("F5: the build id of this checkout equals what open-ui.sh computes with no 
   // widget/open-ui.sh runs; LC_ALL=C is what makes its glob sort match a JS code-unit sort.
   const root = path.resolve(import.meta.dirname, "..", "..");
   const r = spawnSync("/bin/bash", ["-c",
-    `cd "${root}" && cat commands/ui.mjs commands/ui.client.js commands/ui/css/*.css | shasum -a 256 | cut -c1-16`],
+    `cd "${root}" && cat cli/ui.mjs cli/ui.client.js cli/ui/css/*.css | shasum -a 256 | cut -c1-16`],
   { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
   assert.equal(r.stdout.trim(), buildId());
 });

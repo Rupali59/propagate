@@ -7,7 +7,7 @@
  * stale-TOKEN cases; this file covers the build comparison, with the same stubs
  * (curl, lsof, ps, open, and a node that announces a URL and sleeps).
  *
- * The expected id is computed by lib/report/ui-build.mjs on a fixture commands/
+ * The expected id is computed by lib/report/ui-build.mjs on a fixture cli/
  * folder, and the script computes its own with shasum. A pass therefore also
  * proves the two implementations agree on the same bytes.
  */
@@ -33,11 +33,11 @@ function sandbox({ versionBody, files = true, recordedPid, holderPid, psCommands
   mkdirSync(state);
   const stub = (name, body) => { writeFileSync(path.join(bin, name), `#!/bin/bash\n${body}\n`); chmodSync(path.join(bin, name), 0o755); };
   if (files) {
-    mkdirSync(path.join(dir, "commands", "ui", "css"), { recursive: true });
-    writeFileSync(path.join(dir, "commands", "ui.mjs"), "server code\n");
-    writeFileSync(path.join(dir, "commands", "ui.client.js"), "client code\n");
-    writeFileSync(path.join(dir, "commands", "ui", "css", "10-a.css"), "a{}\n");
-    writeFileSync(path.join(dir, "commands", "ui", "css", "90-z.css"), "z{}\n");
+    mkdirSync(path.join(dir, "cli", "ui", "css"), { recursive: true });
+    writeFileSync(path.join(dir, "cli", "ui.mjs"), "server code\n");
+    writeFileSync(path.join(dir, "cli", "ui.client.js"), "client code\n");
+    writeFileSync(path.join(dir, "cli", "ui", "css", "10-a.css"), "a{}\n");
+    writeFileSync(path.join(dir, "cli", "ui", "css", "90-z.css"), "z{}\n");
   }
   writeFileSync(path.join(state, "ui-url"), OLD_URL);
   if (recordedPid) writeFileSync(path.join(state, "ui-pid"), String(recordedPid));
@@ -49,7 +49,7 @@ function sandbox({ versionBody, files = true, recordedPid, holderPid, psCommands
   const psCases = Object.entries(psCommands).map(([pid, cmd]) => `[ "$4" = "${pid}" ] && { echo ${JSON.stringify(cmd)}; exit 0; }`).join("\n");
   stub("ps", `${psCases}\nexit 1`);
   stub("open", `echo "$1" > "${dir}/opened"`);
-  return { dir, bin, state, id: files ? buildId(path.join(dir, "commands")) : null, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, bin, state, id: files ? buildId(path.join(dir, "cli")) : null, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 function run(sb) {

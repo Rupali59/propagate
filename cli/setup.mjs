@@ -5,7 +5,7 @@
  *
  *   lib/**        subject modules. Take input, return data, print NOTHING.
  *                 Measured: 0 of 58 contain an ANSI escape.
- *   commands/**   command implementations. They exist to produce human output,
+ *   cli/**   command implementations. They exist to produce human output,
  *                 so they print, and they own their own exit codes.
  *   cli.mjs       argument dispatch, and the shared renderers doctor's sections
  *                 hand their collected entries to.
@@ -20,10 +20,9 @@
  * putting them in `lib/` would erode the one property that made the doctor
  * split testable.
  *
- * NOTE ON THE DIRECTORY. `commands/` also holds the plugin's slash-command docs
- * (`propagate-*.md`). Claude Code discovers those by extension, so `.mjs`
- * beside them is inert to the loader; the two are unrelated and deliberately
- * co-located rather than given two near-identical directory names.
+ * NOTE ON THE DIRECTORY. Until 2026-10-18 (#97) this lived in `commands/`, beside the
+ * plugin's slash-command docs (`propagate-*.md`). `commands/` now holds only those docs,
+ * because any `.md` under it becomes a slash command; implementations live here in `cli/`.
  *
  * The pure logic this orchestrates already lives in `lib/core/setup.mjs`
  * (probeRoots, parseRootsArg, renderConfig, verifyDiscovery, migrateLegacyState)

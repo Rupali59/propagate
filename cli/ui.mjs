@@ -493,7 +493,7 @@ export async function applyBatchDispose({ body, members, rows, appendEvent, buil
 }
 
 
-// The stylesheet, as the browser receives it: every commands/ui/css/*.css, in NAME order,
+// The stylesheet, as the browser receives it: every cli/ui/css/*.css, in NAME order,
 // joined. The numeric prefix IS the cascade order — 10-tokens first, 90-responsive last, so
 // the media overrides still win. Split out of one 453-line ui.css on 2026-10-08.
 //
@@ -506,14 +506,14 @@ const CSS_FLOOR = 5;
 export function stylesheet() {
   const files = readdirSync(CSS_DIR).filter((f) => f.endsWith(".css")).sort();
   if (files.length < CSS_FLOOR) {
-    throw new Error(`commands/ui/css holds ${files.length} stylesheet(s), expected at least ${CSS_FLOOR} — the page would render unstyled`);
+    throw new Error(`cli/ui/css holds ${files.length} stylesheet(s), expected at least ${CSS_FLOOR} — the page would render unstyled`);
   }
-  return files.map((f) => `/* ── commands/ui/css/${f} ── */\n` + readFileSync(new URL(f, CSS_DIR), "utf8")).join("");
+  return files.map((f) => `/* ── cli/ui/css/${f} ── */\n` + readFileSync(new URL(f, CSS_DIR), "utf8")).join("");
 }
 
 export function page(token, build = buildId()) {
   // THE TEMPLATE LITERAL IS NOW A SHELL, not a program. The CSS and the client
-  // script live in commands/ui/css/*.css (joined by stylesheet()) and commands/ui.client.js and are INLINED
+  // script live in cli/ui/css/*.css (joined by stylesheet()) and cli/ui.client.js and are INLINED
   // here at serve time -- still one self-contained page, no build step, no
   // second request.
   //
@@ -543,7 +543,7 @@ export function page(token, build = buildId()) {
   // d3 then Plot (Overview, 2026-10-16): Plot's UMD build reads the d3 global when it
   // loads, so the order is a dependency, not taste. If either fails to load the client
   // still runs and the Overview says "chart unavailable" in place of its charts; the
-  // KPIs and the table do not need them. Name, version, licence and sha256: vendor/README.txt (not .md: the plugin validator reads every .md under commands/ as a slash command).
+  // KPIs and the table do not need them. Name, version, licence and sha256: vendor/README.txt (kept as .txt for history: while this lived under commands/ a .md there became the slash command /propagate:vendor:README; it is outside commands/ now, so .md would be safe).
   const vendor = ["vendor/preact.js", "vendor/hooks.js", "vendor/htm.js", "vendor/d3.min.js", "vendor/plot.umd.min.js"].map(read);
   return [
     '<!doctype html><html lang="en"><head><meta charset="utf-8">',

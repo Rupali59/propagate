@@ -1,5 +1,5 @@
 /**
- * commands/rollup.mjs — `propagate rollup [--check|--dry-run] [--force] [--json]`
+ * cli/rollup.mjs — `propagate rollup [--check|--dry-run] [--force] [--json]`
  *
  * THE ONLY FILE IN THIS CODEBASE THAT MAY WRITE `ECOSYSTEM.md`, and there is
  * exactly ONE `writeFileSync` call in this whole file, gated on `!dryRun`
@@ -54,7 +54,7 @@
  * Import prefix is `../lib/…` from here, matching every other file in this
  * directory — G60: a specifier copied out of `cli.mjs` is relative to the
  * repo root and resolves to a different, non-existent file from inside
- * `commands/`, failing only at runtime.
+ * `cli/`, failing only at runtime.
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";

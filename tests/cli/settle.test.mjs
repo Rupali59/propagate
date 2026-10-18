@@ -23,7 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { makeChain, runCli, storeSnapshot, cleanup, git } from "../helpers/verify-fixture.mjs";
-import { settleWorklist } from "../../commands/settle.mjs";
+import { settleWorklist } from "../../cli/settle.mjs";
 
 const CLI = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
 

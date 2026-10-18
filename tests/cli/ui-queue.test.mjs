@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { guardRequest, validateWrite } from "../../commands/ui.mjs";
+import { guardRequest, validateWrite } from "../../cli/ui.mjs";
 import { buildQueue, queueSummary, shortPath } from "../../lib/report/queue.mjs";
 
 const item = (over = {}) => ({

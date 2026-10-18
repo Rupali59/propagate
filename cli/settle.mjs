@@ -13,7 +13,7 @@
  * the Claude Code Bash tool has no TTY on stdin besides. The human walkthrough
  * is the /propagate skill's job (skills/propagate/sections/settle.md): it runs
  * `settle <file> --json`, asks ONE question per edge, then runs the printed
- * command. The edge `commands/settle.mjs -> skills/propagate/sections/settle.md`
+ * command. The edge `cli/settle.mjs -> skills/propagate/sections/settle.md`
  * is declared in this repo's `.propagates.yml` so the two stay in step.
  *
  * READ-ONLY, AND TESTED AS SUCH. This module never calls `appendEvent` and never

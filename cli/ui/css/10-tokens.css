@@ -1,5 +1,5 @@
-/* commands/ui/css — the input surface. (One file, ui.css, until 2026-10-08; now five,
-   joined in name order by stylesheet() in commands/ui.mjs. This one comes first.)
+/* cli/ui/css — the input surface. (One file, ui.css, until 2026-10-08; now five,
+   joined in name order by stylesheet() in cli/ui.mjs. This one comes first.)
  *
  * WHY THIS IS A FILE AND NOT A TEMPLATE LITERAL. It used to live inside page()'s
  * backtick string, where every escape is consumed twice and a stray backtick

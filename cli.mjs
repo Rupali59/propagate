@@ -225,9 +225,9 @@ import { migrateLedger } from "./lib/edges/migrate-ledger.mjs";
 import { relocateLedger } from "./lib/edges/relocate-ledger.mjs";
 import { freezeLedgerV1 } from "./lib/edges/freeze-ledger.mjs";
 
-// Colour constants live in the layer that prints — commands/ansi.mjs — so there
+// Colour constants live in the layer that prints — cli/ansi.mjs — so there
 // is ONE definition rather than a copy here and a copy per command module.
-import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./commands/ansi.mjs";
+import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./cli/ansi.mjs";
 import { actionSuffix } from "./lib/report/doctor/structure.mjs";
 import { ACTION_KINDS } from "./lib/report/doctor/reporter.mjs";
 
@@ -3037,9 +3037,9 @@ async function whyCmd() {
 async function drain() {
   const args = process.argv.slice(3);
   const json = args.includes("--json");
-  // The drain family lives in commands/drain.mjs (#31 T5). Dynamic, like the
+  // The drain family lives in cli/drain.mjs (#31 T5). Dynamic, like the
   // other command modules, so `status`/`check` never load it.
-  const { drainList, drainClose } = await import("./commands/drain.mjs");
+  const { drainList, drainClose } = await import("./cli/drain.mjs");
   if (args.includes("--close") || args.includes("--group")) {
     await drainClose(args, json);
   } else {
@@ -4576,7 +4576,7 @@ async function capsCmd() {
   }
 
   const r = capsReport();
-  // `short` lives in commands/registers.mjs and is not in scope here. Caught at
+  // `short` lives in cli/registers.mjs and is not in scope here. Caught at
   // RUNTIME, not by `node --check` — G60: a parse check does not resolve names
   // inside a function body it never calls.
   const shortPath = (f) => String(f).replace(`${HUB_ROOT ?? ""}/`, "").replace(HOME_DIR, "~");
@@ -5237,7 +5237,7 @@ if (_invokedDirectly) {
   }
 
   if (mode === "status") {
-    const { status } = await import("./commands/status.mjs");
+    const { status } = await import("./cli/status.mjs");
     await status();
   } else if (mode === "doctor" && process.argv.includes("--since")) {
     // `doctor --since <t>` — OBSERVABILITY §6 step 4, TODOS PR-028.
@@ -5362,7 +5362,7 @@ if (_invokedDirectly) {
   } else if (mode === "setup") {
     // Dynamic, like doctor's sections (D5): a static import would pull the
     // commands layer into every `propagate status` / `check` invocation.
-    const { setupCmd } = await import("./commands/setup.mjs");
+    const { setupCmd } = await import("./cli/setup.mjs");
     await setupCmd(process.argv.slice(3));
   } else if (mode === "release") {
     await releaseCmd(process.argv.slice(3));
@@ -5403,37 +5403,37 @@ if (_invokedDirectly) {
   } else if (mode === "journal") {
     await journalCmd();
   } else if (mode === "manifest") {
-    const { manifestCmd } = await import("./commands/manifest.mjs");
+    const { manifestCmd } = await import("./cli/manifest.mjs");
     await manifestCmd();
   } else if (mode === "caps") {
     await capsCmd();
   } else if (mode === "registers") {
-    const { registersCmd } = await import("./commands/registers.mjs");
+    const { registersCmd } = await import("./cli/registers.mjs");
     process.exitCode = await registersCmd(process.argv.slice(3));
   } else if (mode === "goals") {
-    const { goalsCmd } = await import("./commands/goals.mjs");
+    const { goalsCmd } = await import("./cli/goals.mjs");
     process.exitCode = await goalsCmd(process.argv.slice(3));
   } else if (mode === "instructions") {
-    const { instructionsCmd } = await import("./commands/instructions.mjs");
+    const { instructionsCmd } = await import("./cli/instructions.mjs");
     process.exitCode = await instructionsCmd(process.argv.slice(3));
   } else if (mode === "queue") {
-    const { queueCmd } = await import("./commands/queue.mjs");
+    const { queueCmd } = await import("./cli/queue.mjs");
     process.exitCode = await queueCmd(process.argv.slice(3));
   } else if (mode === "settle") {
     // Lazy, like queue/surface: the worklist derivation (graph, history, diffs)
     // is not something `status` should pay for. READ-ONLY -- see the module.
-    const { settleCmd } = await import("./commands/settle.mjs");
+    const { settleCmd } = await import("./cli/settle.mjs");
     process.exitCode = await settleCmd(process.argv.slice(3));
   } else if (mode === "surface") {
     // Lazy, like every other command arm: cli.mjs must not pay for a module the
     // invocation does not use.
-    const { surfaceCmd } = await import("./commands/surface.mjs");
+    const { surfaceCmd } = await import("./cli/surface.mjs");
     process.exitCode = await surfaceCmd(process.argv.slice(3));
   } else if (mode === "ui") {
     // Dynamic, same reason as plans/goals/rollup: a static import would pull an
     // http server and the queue model into every `status` invocation, which is
     // the hottest command in this tool.
-    const { uiCmd } = await import("./commands/ui.mjs");
+    const { uiCmd } = await import("./cli/ui.mjs");
     let started;
     try { started = await uiCmd(process.argv.slice(3)); }
     catch (err) {
@@ -5450,10 +5450,10 @@ if (_invokedDirectly) {
     // dependency — into every `propagate status` / `check` invocation. `status`
     // is the hottest command in this tool; doctor alone defers 14 modules for
     // exactly this reason.
-    const { plansCmd } = await import("./commands/plans.mjs");
+    const { plansCmd } = await import("./cli/plans.mjs");
     process.exitCode = await plansCmd(process.argv.slice(3));
   } else if (mode === "docs") {
-    const { docsCmd } = await import("./commands/docs.mjs");
+    const { docsCmd } = await import("./cli/docs.mjs");
     process.exitCode = await docsCmd(process.argv.slice(3));
   } else if (mode === "backlog") {
     await backlogCmd();
@@ -5468,12 +5468,12 @@ if (_invokedDirectly) {
   } else if (mode === "rollup") {
     // Dynamic, like manifest/registers/docs (D5): a static import would pull
     // the commands layer into every `propagate status` / `check` invocation.
-    const { rollupCmd } = await import("./commands/rollup.mjs");
+    const { rollupCmd } = await import("./cli/rollup.mjs");
     process.exitCode = await rollupCmd(process.argv.slice(3));
   } else if (mode === "claims") {
     // Dynamic, same reason as rollup/manifest/registers/docs (D5). Phase 2
     // lane 1 — `check` only; scan/judge/render/contradict are later lanes.
-    const { claimsCmd } = await import("./commands/claims.mjs");
+    const { claimsCmd } = await import("./cli/claims.mjs");
     process.exitCode = await claimsCmd(process.argv.slice(3));
   } else if (mode === "reminders") {
     // Dynamic, same reason as surface/registers/goals/queue (D5): a static
@@ -5483,12 +5483,12 @@ if (_invokedDirectly) {
     // (identity map, insert log, the register itself) are reached only
     // through the `sync` subverb (PR-022, `lib/reminders/sync.mjs`), which
     // is dry-run unless `--apply` is passed.
-    const { remindersCmd } = await import("./commands/reminders.mjs");
+    const { remindersCmd } = await import("./cli/reminders.mjs");
     process.exitCode = await remindersCmd(process.argv.slice(3));
   } else if (mode === "tasks") {
     // Dynamic, same reason as reminders (D5). Without `--apply` this is a read-only plan whose only
     // external call is `gh repo view`; `--apply` (R2) is built in lib/tasks/export.mjs.
-    const { tasksCmd } = await import("./commands/tasks.mjs");
+    const { tasksCmd } = await import("./cli/tasks.mjs");
     process.exitCode = await tasksCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);

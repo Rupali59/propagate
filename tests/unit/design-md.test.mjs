@@ -2,8 +2,8 @@
  * design-md.test.mjs — DESIGN.md's own derivation command must run.
  *
  * DESIGN.md tells the reader to derive its colour numbers with a fenced command
- * instead of trusting a figure in prose. That command read `commands/ui.css` for
- * three weeks after 15c74ab split the stylesheet into `commands/ui/css/*.css`, so
+ * instead of trusting a figure in prose. That command read `cli/ui.css` for
+ * three weeks after 15c74ab split the stylesheet into `cli/ui/css/*.css`, so
  * the one instruction meant to keep the document honest failed (widget redesign
  * eng review, E5, 2026-10-13). A doc whose verification step is dead reads as
  * verified. This runs the block exactly as written.

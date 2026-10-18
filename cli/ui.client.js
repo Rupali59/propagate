@@ -6,7 +6,7 @@
  * nothing in any log. A plain file has nothing to escape, `node --check` parses
  * it, and tests/unit/ui-client.test.mjs runs it in node:vm against a stub DOM.
  *
- * PREACT AND HTM ARRIVE AS GLOBALS, from commands/vendor/*.js. UMD, not ESM,
+ * PREACT AND HTM ARRIVE AS GLOBALS, from cli/vendor/*.js. UMD, not ESM,
  * because `new Script()` cannot resolve `import` and the headless suite depends
  * on this staying a plain script. Verified: the three UMD builds attach
  * preact / preactHooks / htm to globalThis under node:vm.
@@ -1948,7 +1948,7 @@ function HealthView({ st, retry, focus }) {
 /**
  * Why the charts cannot draw, or null when they can. It NAMES the cause: a blank card tells
  * nobody whether to reload, restart the server or file a bug. `Plot` is a global from
- * commands/vendor/plot.umd.min.js; under the headless suite it is simply absent, which is the
+ * cli/vendor/plot.umd.min.js; under the headless suite it is simply absent, which is the
  * path the KPIs and the table must survive.
  */
 function plotUnavailable() {

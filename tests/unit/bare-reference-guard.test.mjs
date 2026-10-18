@@ -93,7 +93,7 @@ function targets() {
     const abs = path.join(REPO, rel);
     if (existsSync(abs)) files.push(abs);
   }
-  const cmds = path.join(REPO, "commands");
+  const cmds = path.join(REPO, "cli");
   if (existsSync(cmds)) {
     for (const rel of readdirSync(cmds, { recursive: true }).map(String)) {
       if (rel.endsWith(".mjs")) files.push(path.join(cmds, rel));
@@ -130,7 +130,7 @@ test("the scan has inputs — an empty corpus must not read as a pass", () => {
   // every assertion below passes vacuously and this file reports health for
   // something it never looked at.
   assert.ok(EXPORTS.size > 50, `only ${EXPORTS.size} lib exports found — the export regex likely stopped matching`);
-  assert.ok(TARGETS.length > 2, `only ${TARGETS.length} target files found — commands/ may have moved`);
+  assert.ok(TARGETS.length > 2, `only ${TARGETS.length} target files found — cli/ may have moved`);
 });
 
 test("the scan CAN fail — a synthetic bare reference is detected", () => {

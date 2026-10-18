@@ -12,7 +12,7 @@
  * appeared in any log. The only evidence was in the browser's console, which
  * nothing in this repo reads.
  *
- * `node --check commands/ui.mjs` passes throughout — the MODULE is valid; it is
+ * `node --check cli/ui.mjs` passes throughout — the MODULE is valid; it is
  * the string it builds that is not. Same family as the backtick that closed the
  * widget's className literal, and as the comment in ui.mjs that closed this very
  * template while explaining the hazard. Three instances in one session.
@@ -23,7 +23,7 @@ import { Script, createContext } from "node:vm";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { page } from "../../commands/ui.mjs";
+import { page } from "../../cli/ui.mjs";
 
 const html = page("deadbeef");
 // A bare realm the way a browser's global looks to a UMD wrapper: self/window/globalThis all point at it.
@@ -64,7 +64,7 @@ test("the script the page emits is the client FILE, unmodified", () => {
   // comments containing quotes. A check that cries wolf gets deleted, which is
   // how a working check becomes no check; deleting it deliberately is better
   // than keeping it and learning to ignore it.
-  const client = readFileSync(path.join(import.meta.dirname, "../../commands/ui.client.js"), "utf8");
+  const client = readFileSync(path.join(import.meta.dirname, "../../cli/ui.client.js"), "utf8");
   assert.ok(script.includes(client.trim().slice(0, 200)), "the emitted script must BE the client file, not a copy that can drift");
   assert.ok(script.length > 5000, "and the whole of it, not a fragment");
 });

@@ -27,7 +27,7 @@ import {
 import { checkInstructions } from "../../lib/report/doctor/instructions.mjs";
 import { Reporter } from "../../lib/report/doctor/reporter.mjs";
 import { EXPECTATIONS, evaluateExpectations, detectVanishedKeys } from "../../lib/report/metrics.mjs";
-import { instructionsCmd } from "../../commands/instructions.mjs";
+import { instructionsCmd } from "../../cli/instructions.mjs";
 
 /** A fake home; returns helpers. `x(n)` is n chars of filler so totals are exact. */
 function fixture() {

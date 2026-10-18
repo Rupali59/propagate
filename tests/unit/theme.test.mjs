@@ -25,9 +25,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-// The stylesheet AS SERVED: commands/ui/css/*.css joined in cascade order (2026-10-08 split).
+// The stylesheet AS SERVED: cli/ui/css/*.css joined in cascade order (2026-10-08 split).
 // Reading one fragment would let every check below pass over a fraction of the rules.
-import { stylesheet } from "../../commands/ui.mjs";
+import { stylesheet } from "../../cli/ui.mjs";
 
 import {
   contrast, deuteranope, rgbDistance, resolveColor, rgbToOklch,
@@ -47,7 +47,7 @@ const used = (css) => new Set([...css.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m
  *
  * THE OBLIGATION THIS CREATES: a token in here that the client does not
  * actually set is a reference to nothing, and the animation silently does not
- * run. commands/ui.client.js is asserted to supply every one of these, below.
+ * run. cli/ui.client.js is asserted to supply every one of these, below.
  */
 const RUNTIME_SET = new Set(["--len"]);
 
@@ -91,7 +91,7 @@ function themes(css, darkStarts) {
 
 const SURFACES = [
   {
-    name: "commands/ui/css (joined)",
+    name: "cli/ui/css (joined)",
     css: stylesheet(),
     darkStarts: ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]'],
     ground: { light: "--bg", dark: "--bg" },
@@ -304,7 +304,7 @@ test("a runtime-set token is supplied by whatever uses it, or has a fallback", (
   // client sets the token, or the CSS declares a fallback so the rule still
   // means something without it. What is forbidden is a bare var(--x) that
   // nothing supplies.
-  const client = read("commands/ui.client.js");
+  const client = read("cli/ui.client.js");
   const css = stylesheet();
   const bare = [];
   for (const tok of RUNTIME_SET) {
@@ -321,7 +321,7 @@ test("if the client draws chart series, it MUST measure and set --len", () => {
   // The fallback above keeps the CSS honest while no charts exist. Once they
   // do, a series drawn without a measured length has no draw-in at all, which
   // is the animation silently not happening rather than being turned off.
-  const client = read("commands/ui.client.js");
+  const client = read("cli/ui.client.js");
   if (!/class="series"|className="series"|\bseries\b.*<path/.test(client)) return;   // no charts yet
   assert.match(client, /getTotalLength\(\)/, "a series path must measure itself");
   assert.match(client, /--len/, "and hand that length to the CSS");
@@ -352,7 +352,7 @@ test("ui.css styles every edge state the graph can emit", () => {
 
 /**
  * N97 / G70. Every colour assertion above iterates SEMANTIC — seven tokens.
- * `commands/ui.css` uses forty-six. The thirty-nine outside that list carry the
+ * `cli/ui.css` uses forty-six. The thirty-nine outside that list carry the
  * actual text of the interface and were checked by nothing, which is how four
  * rules shipped putting --dim on --field at 4.40 and .badge.none at 3.60, in a
  * repo whose DESIGN.md sets the floor at 4.5 and whose suite was green.
@@ -437,8 +437,8 @@ test("every colour/background pair ui.css DECLARES clears 4.5:1, both themes", (
     `${pairs.length} pairs checked in 2 themes; under 4.5:1:\n  ${fails.join("\n  ")}`);
 });
 
-test("the responsive overrides load AFTER the base rules they override (cascade order of commands/ui/css)", () => {
-  // stylesheet() joins commands/ui/css/*.css in NAME order. If the responsive file sorted
+test("the responsive overrides load AFTER the base rules they override (cascade order of cli/ui/css)", () => {
+  // stylesheet() joins cli/ui/css/*.css in NAME order. If the responsive file sorted
   // first, every `@media (max-width …) { .rail { … } }` would be overridden by the base
   // `.rail` rule that follows it, and the narrow layout would silently stop applying. A
   // rename (90- -> 05-) went green against every other test on 2026-10-08; this is the one

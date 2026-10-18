@@ -27,7 +27,7 @@
  * unit-tested without mutating global state and (b) `--json` was silently
  * accepted and ignored: nothing ever read it. Both are fixed in this pass.
  *
- * `--json`: ONLY JSON on stdout, same rule `commands/claims.mjs` states at its
+ * `--json`: ONLY JSON on stdout, same rule `cli/claims.mjs` states at its
  * own top. N65 (`propagation/state/workspace/STATE.md`) was filed for exactly
  * the opposite mistake in a sibling command — a human-facing notice printed to
  * stdout ahead of the JSON broke every `--json` consumer with `Unexpected
@@ -107,7 +107,7 @@ function scanWorkspaceDocs(workspaces) {
 
 function fail(json, msg, extra = {}) {
   // could-not-run / usage error, never "nothing found" — same posture
-  // commands/claims.mjs uses throughout.
+  // cli/claims.mjs uses throughout.
   if (json) console.log(JSON.stringify({ error: msg, ...extra }));
   else console.error(msg);
   return 2;
@@ -172,11 +172,11 @@ async function doctrineCmd(argv, json) {
  * `3` hand-edited — is `lib/report/rollup.mjs`'s own `bodyHash`/`parseFooter`/
  * `compareInputs`, imported via `lib/report/doc-reference.mjs` (which also
  * derives the rendered content). This function is deliberately the SAME
- * shape as `commands/rollup.mjs`'s `runCheck`/`runGenerate` — read-only
+ * shape as `cli/rollup.mjs`'s `runCheck`/`runGenerate` — read-only
  * `--check` never reaches the one `writeFileSync` call site below, which is
  * gated on `!dryRun` exactly the way `rule:safety-flag-needs-a-test` requires.
  *
- * WHY THE HAND-EDIT CHECK IS PORTED, NOT IMPORTED. `commands/rollup.mjs`'s
+ * WHY THE HAND-EDIT CHECK IS PORTED, NOT IMPORTED. `cli/rollup.mjs`'s
  * `detectHandEdit` is scoped to a WHOLE-file artifact (ECOSYSTEM.md) and
  * takes no marks — reusing it here would mean either hardcoding rollup's own
  * marks into REFERENCE.md (wrong artifact) or extracting a new shared
@@ -232,7 +232,7 @@ async function detectReferenceHandEdit(existingText, { bodyHash, parseFooter, BO
   // The generator always places the generated section LAST — nothing may
   // legitimately follow the footer's closing "-->" but the trailing
   // newline the generator itself appends. Same posture and same reasoning
-  // as commands/rollup.mjs's own trailing-content check (see that file's
+  // as cli/rollup.mjs's own trailing-content check (see that file's
   // header: appending after the footer is invisible to the body hash and
   // was silently destroyed by an earlier version with no warning).
   const closeIdx = existingText.lastIndexOf("-->");
@@ -351,7 +351,7 @@ async function referenceCmd(argv, json, artifactOverride) {
       console.log(JSON.stringify({ ok: true, action: "would-write", path: artifact, bytes: Buffer.byteLength(newFullText, "utf8") }));
     } else {
       // The one deliberate exception to "human lines go to stderr", same as
-      // commands/rollup.mjs: this IS the product, not commentary about it.
+      // cli/rollup.mjs: this IS the product, not commentary about it.
       console.log(renderReferenceSection());
     }
     return 0;

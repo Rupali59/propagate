@@ -200,7 +200,7 @@ test("division() reports a clean run as clean, and a throw as a throw", () => {
 
 test("inbox's OWN defaultDeps supplies everything inboxPayload calls", async () => {
   // THE BUG THIS WAS ADDED FOR. Every test above injects deps, so none of them
-  // touches defaultDeps — and commands/ui.mjs handed inboxPayload the deps from
+  // touches defaultDeps — and cli/ui.mjs handed inboxPayload the deps from
   // queue.mjs instead, which has reconcile and loadWorkspaces but no
   // historyByEdge, planBaseline or registerQueue. Result: a 500 on the endpoint
   // that serves the whole page, with a green suite.

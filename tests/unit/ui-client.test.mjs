@@ -45,9 +45,9 @@ const edge = (id, state, over = {}) => ({
   node_id: over.node_id ?? ("propagate:lib/" + id + ".mjs"),
   state,
   source: "/u/Documents/GitHub/propagate/lib/" + id + ".mjs",
-  downstream: "/u/Documents/GitHub/propagate/commands/" + id + ".mjs",
+  downstream: "/u/Documents/GitHub/propagate/cli/" + id + ".mjs",
   sourceShort: "propagate/lib/" + id + ".mjs",
-  downstreamShort: "propagate/commands/" + id + ".mjs",
+  downstreamShort: "propagate/cli/" + id + ".mjs",
   boundary: "propagate",
   side: "propagate",
   why: null,
@@ -73,7 +73,7 @@ const READY = [
 const BLOCKED = [
   edge("e", "DRIFTED", {
     orderIndex: 4, blocked: true,
-    blockedBy: [{ edge_id: "a", from: "/u/Documents/GitHub/propagate/lib/a.mjs", to: "/u/Documents/GitHub/propagate/commands/a.mjs", state: "DIVERGED" }],
+    blockedBy: [{ edge_id: "a", from: "/u/Documents/GitHub/propagate/lib/a.mjs", to: "/u/Documents/GitHub/propagate/cli/a.mjs", state: "DIVERGED" }],
   }),
 ];
 const PARKED = [{
@@ -377,7 +377,7 @@ test("a reason typed on one edge never appears on another, and survives going ba
 
 test("a verdict sends the reason of the edge it was pressed on, with the content ids it SAW (F1)", async () => {
   const m = await mount();
-  typeInto(byTag(m.app, "textarea")[0], "checked lib/b.mjs:1 against commands/b.mjs");
+  typeInto(byTag(m.app, "textarea")[0], "checked lib/b.mjs:1 against cli/b.mjs");
   m.press("j");                       // move away: b's text must stay b's
   await m.settle();
   m.press("k");
@@ -387,7 +387,7 @@ test("a verdict sends the reason of the edge it was pressed on, with the content
   const [call] = disposeCalls(m);
   assert.ok(call, "no dispose request was made");
   assert.deepEqual(fromRealm(JSON.parse(call.body)), {
-    edge_id: "b", disposition: "no-change-needed", reason: "checked lib/b.mjs:1 against commands/b.mjs",
+    edge_id: "b", disposition: "no-change-needed", reason: "checked lib/b.mjs:1 against cli/b.mjs",
     observed: { source: "s-b", downstream: "d-b" },
   });
   assert.equal(call.opts.keepalive, true, "the write must outlive the page (F8)");
@@ -436,10 +436,10 @@ test("a refused single verdict leaves the row and keeps the reason", async () =>
 test("under reduced motion the ring is replaced by a NUMBER, not removed", async () => {
   // The ring IS the clock. Hiding it without a fallback removes the
   // information rather than the animation.
-  const { stylesheet } = await import("../../commands/ui.mjs"); // the CSS as served (commands/ui/css/*.css, joined)
+  const { stylesheet } = await import("../../cli/ui.mjs"); // the CSS as served (cli/ui/css/*.css, joined)
   const css = stylesheet();
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.ring \{ display: none/);
-  assert.match(read("commands/ui.client.js"), /reduced \? left \+ "s" : ""/);
+  assert.match(read("cli/ui.client.js"), /reduced \? left \+ "s" : ""/);
 });
 
 /* -- bulk (D1) ------------------------------------------------------------ */
@@ -1066,7 +1066,7 @@ test("every badge class a rendered view emits has a stylesheet rule", async () =
   // text is not, and nothing errors. The population is what the views actually
   // RENDER, gathered from the DOM -- a source regex went blind here, because most
   // modifiers are built at runtime ("badge " + state), and found one class of nine.
-  const { stylesheet } = await import("../../commands/ui.mjs");
+  const { stylesheet } = await import("../../cli/ui.mjs");
   const css = stylesheet().replace(/\/\*[\s\S]*?\*\//g, "");
   const seen = new Set();
   const unblockItems = [edge("x", "DRIFTED", { orderIndex: 0, blocked: true, blockedBy: [{ edge_id: "gone", from: "/u/Documents/GitHub/k/a.md", to: "/u/Documents/GitHub/k/b.md", state: "NEVER_VERIFIED" }] })];
@@ -1436,7 +1436,7 @@ const OV_READY = [
 ];
 const OV_BLOCKED = [
   ovEdge("x5", "DRIFTED", SRC_B, "crosses the line", { orderIndex: 4, blocked: true, last: { ts: AGO(10) },
-    blockedBy: [{ edge_id: "x3", from: SRC_A, to: "/u/Documents/GitHub/propagate/commands/x3.mjs", state: "DIVERGED" }] }),
+    blockedBy: [{ edge_id: "x3", from: SRC_A, to: "/u/Documents/GitHub/propagate/cli/x3.mjs", state: "DIVERGED" }] }),
 ];
 const OV_INBOX = inboxOf({ ready: OV_READY, blocked: OV_BLOCKED, parked: [] });
 const TODAY = new Date().toLocaleDateString("en-CA");   // YYYY-MM-DD, local: derived without the client's own localDay
@@ -1538,7 +1538,7 @@ test("a source row opens Judge on exactly that source; 'all N sources' opens Jud
   click(srcRows(m.app)[1]); await m.settle();
   assert.equal(m.ctx.location.hash, "#/judge?source=" + encodeURIComponent(SRC_B));
   // It landed: the Judge list shows only that source's judgeable edge, under a clearable control.
-  assert.deepEqual(itemTitles(m.app).map((t) => t.replace(/ new$/, "")), ["WS1/beta.md → propagate/commands/x4.mjs"], "only beta.md's judgeable edge (x5 is blocked)");
+  assert.deepEqual(itemTitles(m.app).map((t) => t.replace(/ new$/, "")), ["WS1/beta.md → propagate/cli/x4.mjs"], "only beta.md's judgeable edge (x5 is blocked)");
   assert.match(textOf(byClass(m.app, "filt")[0]), /only beta\.md/);
   m.setHash("#/overview"); await m.settle();
   click(byClass(m.app, "go")[0]); await m.settle();
@@ -1552,7 +1552,7 @@ const itemTitles = (app) => byClass(app, "item").map((r) => textOf(byClass(r, "t
 
 test("?ws= narrows Judge to one workspace, shows a clearable 'only ...' control, and clearing restores the list", async () => {
   const m = await mount({ hash: "#/judge?ws=WS1", inbox: OV_INBOX });
-  assert.deepEqual(itemTitles(m.app).map((t) => t.replace(/ new$/, "")).sort(), ["WS1/alpha.md → propagate/commands/x1.mjs", "WS1/alpha.md → propagate/commands/x2.mjs"]);
+  assert.deepEqual(itemTitles(m.app).map((t) => t.replace(/ new$/, "")).sort(), ["WS1/alpha.md → propagate/cli/x1.mjs", "WS1/alpha.md → propagate/cli/x2.mjs"]);
   const filt = byClass(m.app, "filt");
   assert.equal(filt.length, 1);
   assert.match(textOf(filt[0]), /only WS1\s*2/);
@@ -2021,7 +2021,7 @@ test("Registers and Reminders rows copy their locator: file:line for a register 
 /* -- one chart implementation, one banner ------------------------------------------ */
 
 test("every chart in every view is Plot: the Velocity columns, the Spark and the div Bars are gone", async () => {
-  const src = read("commands/ui.client.js");
+  const src = read("cli/ui.client.js");
   assert.ok(src.length > 20000, "the scan has gone blind");
   assert.doesNotMatch(src, /function (Velocity|Spark|Bars)\b/, "a deleted chart implementation came back");
   const gone = ["vcol", "vstack", "vseg-changed", "vseg-quiet", "vaxis", "vtick", "axnote", "bar-t", "bar-f", "series", "hit", "vleg"];
@@ -2039,7 +2039,7 @@ test("every chart in every view is Plot: the Velocity columns, the Spark and the
 });
 
 test("a hand-written div.banner is gone: every error is ErrorBanner, and each one that can be retried offers 'retry'", async () => {
-  const src = read("commands/ui.client.js");
+  const src = read("cli/ui.client.js");
   const from = src.indexOf("function ErrorBanner");
   const eb = src.slice(from, src.indexOf("/** Stop a click"));
   assert.ok(from > 0 && eb.length > 200, "ErrorBanner not found: the scan has gone blind");
@@ -2227,7 +2227,7 @@ test("Phase 2 strip: with nothing blocked it shows bottleneckReason, never an em
 
 test("Phase 2 strip: a root that was never verified is not routed to Judge; it offers the baseline command to copy, and says why", async () => {
   const lone = inboxOf({ ready: [], parked: [], blocked: [edge("zb", "DRIFTED", { orderIndex: 0, blocked: true,
-    blockedBy: [{ edge_id: "zz", from: "/u/Documents/GitHub/propagate/lib/zz.mjs", to: "/u/Documents/GitHub/propagate/commands/zz.mjs", state: "NEVER_VERIFIED" }] })] });
+    blockedBy: [{ edge_id: "zz", from: "/u/Documents/GitHub/propagate/lib/zz.mjs", to: "/u/Documents/GitHub/propagate/cli/zz.mjs", state: "NEVER_VERIFIED" }] })] });
   assert.equal(lone.leverage.allRoots[0].inQueue, false, "the fixture root is genuinely not in the queue");
   const m = await mountOv({ inbox: lone });
   const wrote = clipboard(m);
@@ -2245,8 +2245,8 @@ test("Phase 2 strip: blocked edges that no single root frees go to the settle-to
     edge("r1", "DRIFTED", { orderIndex: 0 }), edge("r2", "DRIFTED", { orderIndex: 1 }),
   ];
   const b = edge("b1", "DRIFTED", { orderIndex: 2, blocked: true, blockedBy: [
-    { edge_id: "r1", from: "/u/Documents/GitHub/propagate/lib/r1.mjs", to: "/u/Documents/GitHub/propagate/commands/r1.mjs", state: "DRIFTED" },
-    { edge_id: "r2", from: "/u/Documents/GitHub/propagate/lib/r2.mjs", to: "/u/Documents/GitHub/propagate/commands/r2.mjs", state: "DRIFTED" }] });
+    { edge_id: "r1", from: "/u/Documents/GitHub/propagate/lib/r1.mjs", to: "/u/Documents/GitHub/propagate/cli/r1.mjs", state: "DRIFTED" },
+    { edge_id: "r2", from: "/u/Documents/GitHub/propagate/lib/r2.mjs", to: "/u/Documents/GitHub/propagate/cli/r2.mjs", state: "DRIFTED" }] });
   const m = await mountOv({ inbox: inboxOf({ ready: two, blocked: [b], parked: [] }) });
   assert.match(textOf(strip(m.app)), /no single root frees any of them alone/);
   click(stripBtn(m.app, /See the groups/)); await m.settle();
@@ -2767,7 +2767,7 @@ test("Phase 4a: refresh on a page bypasses the server's cache for that page and 
 });
 
 test("Phase 4a: every badge class the four pages render has its own CSS rule (the UNMATCHED lesson)", async () => {
-  const { stylesheet } = await import("../../commands/ui.mjs");
+  const { stylesheet } = await import("../../cli/ui.mjs");
   const css = stylesheet().replace(/\/\*[\s\S]*?\*\//g, "");
   const seen = new Set();
   for (const [name, payload] of [["claims", CLAIMS_P], ["rules", RULES_P], ["caps", CAPS_P], ["skills", SKILLS_P]]) {
@@ -3276,7 +3276,7 @@ test("Phase 4b: every row of the new pages is focusable and either acts or says 
 });
 
 test("Phase 4b: every badge class the new pages render has its own CSS rule (the UNMATCHED lesson)", async () => {
-  const { stylesheet } = await import("../../commands/ui.mjs");
+  const { stylesheet } = await import("../../cli/ui.mjs");
   const css = stylesheet().replace(/\/\*[\s\S]*?\*\//g, "");
   const seen = new Set();
   for (const [name, payload] of [["backlog", BACKLOG_P], ["goals", GOALS_P], ["history", HISTORY_P]]) {

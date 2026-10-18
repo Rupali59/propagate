@@ -175,7 +175,7 @@ test("N70: the forced count distinguishes a forced CLEAN from an ordinary one", 
   // ledger file, so `status` prints "(no ledger file yet)" and never reaches
   // the summary line. A `doesNotMatch(/forced/)` there was satisfied by output
   // that contained no counts at all.
-  const { coverageFrom } = await import("../../commands/status.mjs");
+  const { coverageFrom } = await import("../../cli/status.mjs");
 
   const clean = (over = {}) => ({ state: "CLEAN", ...over });
   const cov = coverageFrom([
