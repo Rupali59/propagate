@@ -1,3 +1,11 @@
+# MOVED 2026-10-19 (propagate #12): this skill's GOTCHAS.md and DECISIONS.md are no longer in this
+# repo — it is public and carries only the tool. They are in the private hub at
+# propagation/state/curate-docs-skill/ (three levels up from here, reached as `../../../propagation/…`),
+# and propagation/state/curate-docs/ in this repo holds pointer stubs. A lone clone has no hub, so those
+# three paths dangle there by design; `reconcile` at the hub, which surrounds the checkout, resolves them.
+# Repointed in the same change as the move (rule:refactor-updates-sidecar-same-commit); the edge ids
+# changed with the paths, so each was re-baselined.
+#
 # Declared couplings for curate-docs (rule:adversarial-review-reads-the-ledger).
 #
 # The edge that matters is the one to propagate: this skill imports six named exports from
@@ -28,14 +36,14 @@ sources:
         kind: prose
   lib/link-graph.mjs:
     propagates_to:
-      - path: ../../propagation/state/curate-docs/GOTCHAS.md
+      - path: ../../../propagation/state/curate-docs-skill/GOTCHAS.md
         why: >-
           G5, G6 and G7 record exactly why the citation pattern is shaped as it is —
           markdown links stripped before the backtick pass, leading ../ admitted, no slash
           required, external as a fourth bucket. Widening or narrowing the pattern without
           updating them re-opens a defect that has already been paid for.
         kind: prose
-  ../../propagation/state/curate-docs/DECISIONS.md:
+  ../../../propagation/state/curate-docs-skill/DECISIONS.md:
     propagates_to:
       - path: SKILL.md
         why: >-
@@ -55,7 +63,7 @@ sources:
         kind: prose
   lib/state.mjs:
     propagates_to:
-      - path: ../../propagation/state/curate-docs/GOTCHAS.md
+      - path: ../../../propagation/state/curate-docs-skill/GOTCHAS.md
         why: >-
           G13 and G14 record why the archival act is `status:` and not `git mv`, and why
           archiveDirs is separate from skipDirs. Changing the state model without updating

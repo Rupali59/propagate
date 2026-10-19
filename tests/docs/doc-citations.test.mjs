@@ -20,6 +20,8 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { hubAbsentReason, hubStateFile } from "../../lib/core/hub-state.mjs";
+import { isPointerStubText } from "../../lib/migrate/workspace.mjs";
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -60,25 +62,30 @@ test("every tests/… path cited in a current doc resolves", () => {
   );
 });
 
-test("every `Guarded by:` citation in GOTCHAS names something that exists", () => {
-  // Moved to propagation/state/workspace/ 2026-08-23; the legacy path is kept so
-  // an older checkout still resolves rather than silently reading nothing.
-  const gotchasPath = [
-    path.join(REPO, "propagation", "state", "workspace", "GOTCHAS.md"),
-    path.join(REPO, "docs", "GOTCHAS.md"),
-  ].find((c) => existsSync(c));
-  assert.ok(gotchasPath, "GOTCHAS.md not found at either location — a missing file is not zero citations");
-  const body = readFileSync(gotchasPath, "utf8");
-  const claims = [...body.matchAll(/^\*\*Guarded by:\*\* `([^`]+)`/gm)].map((m) => m[1]);
-  assert.ok(claims.length > 0, "no Guarded by: claims parsed — the regex or the file shape changed");
+// Moved to propagation/state/workspace/ 2026-08-23 and to the PRIVATE hub (propagation/state/propagate/)
+// 2026-10-19, leaving a pointer stub. The hub copy is read when present; a stub is never the file.
+// With no real copy the test SKIPS WITH A STATED REASON rather than passing on a signpost.
+const gotchasPath = [
+  hubStateFile(REPO, "GOTCHAS.md"),
+  path.join(REPO, "propagation", "state", "workspace", "GOTCHAS.md"),
+  path.join(REPO, "docs", "GOTCHAS.md"),
+].find((c) => c && existsSync(c) && !isPointerStubText(readFileSync(c, "utf8")));
 
-  const broken = claims.filter((c) => {
-    const p = c.split(/[\s:]/)[0]; // strip a trailing :line-range or trailing prose
-    // A bare identifier (a function name) is not a path; only path-shaped claims are
-    // checkable here, and claiming otherwise would make this test fire on prose.
-    if (!p.includes("/") && !p.endsWith(".mjs")) return false;
-    return !existsSync(path.join(REPO, p));
+test(
+  "every `Guarded by:` citation in GOTCHAS names something that exists",
+  { skip: gotchasPath ? false : hubAbsentReason("propagation/state/propagate/GOTCHAS.md") },
+  () => {
+    const body = readFileSync(gotchasPath, "utf8");
+    const claims = [...body.matchAll(/^\*\*Guarded by:\*\* `([^`]+)`/gm)].map((m) => m[1]);
+    assert.ok(claims.length > 0, "no Guarded by: claims parsed — the regex or the file shape changed");
+
+    const broken = claims.filter((c) => {
+      const p = c.split(/[\s:]/)[0]; // strip a trailing :line-range or trailing prose
+      // A bare identifier (a function name) is not a path; only path-shaped claims are
+      // checkable here, and claiming otherwise would make this test fire on prose.
+      if (!p.includes("/") && !p.endsWith(".mjs")) return false;
+      return !existsSync(path.join(REPO, p));
+    });
+
+    assert.deepEqual(broken, [], `Guarded by: claims naming missing files:\n  ${broken.join("\n  ")}`);
   });
-
-  assert.deepEqual(broken, [], `Guarded by: claims naming missing files:\n  ${broken.join("\n  ")}`);
-});

@@ -4,16 +4,23 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { hubAbsentReason, hubStateFile } from "../../lib/core/hub-state.mjs";
+import { isPointerStubText } from "../../lib/migrate/workspace.mjs";
 import { parseDecisions, normalizeAffectsToken, zeroTokenEntries } from "../../lib/report/decisions.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// The plugin's own artifacts moved to propagation/state/workspace/ on 2026-08-23.
-// Both are tried so an older checkout still resolves and a genuine absence stays
-// distinguishable from a relocation.
+// The plugin's own artifacts moved to propagation/state/workspace/ on 2026-08-23, and to the
+// PRIVATE hub (propagation/state/propagate/) on 2026-10-19 (propagate #12) — what remains in
+// this repo is a pointer stub. The hub copy is read when a hub surrounds the checkout; the
+// in-repo and legacy paths are tried after it, and a pointer stub is never treated as the file.
+// With none of them real the test below SKIPS WITH A STATED REASON — it never passes silently
+// (rule:workspace-docs-layout, rule:discernment-checks §2).
+const REPO = path.join(__dirname, "..", "..");
 const DECISIONS_PATH = [
-  path.join(__dirname, "..", "..", "propagation", "state", "workspace", "DECISIONS.md"),
-  path.join(__dirname, "..", "..", "docs", "DECISIONS.md"),
-].find((c) => existsSync(c));
+  hubStateFile(REPO, "DECISIONS.md"),
+  path.join(REPO, "propagation", "state", "workspace", "DECISIONS.md"),
+  path.join(REPO, "docs", "DECISIONS.md"),
+].find((c) => c && existsSync(c) && !isPointerStubText(readFileSync(c, "utf8")));
 
 test("parses BOTH heading forms (colon + em-dash) — G1", () => {
   const text = `
@@ -64,7 +71,7 @@ Affects: Motherboard
 // synthetic fixtures above all use the bare form and could not have caught this —
 // this test reads the actual live file. Before the fix in lib/decisions.mjs (bare-only
 // regex), every entry here had tokens.length === 0 despite 8 non-empty Affects: lines.
-test("parses the REAL docs/DECISIONS.md — every entry has non-empty tokens (N12)", () => {
+test("parses the REAL docs/DECISIONS.md — every entry has non-empty tokens (N12)", { skip: DECISIONS_PATH ? false : hubAbsentReason("propagation/state/propagate/DECISIONS.md") }, () => {
   const text = readFileSync(DECISIONS_PATH, "utf8");
   const entries = parseDecisions(text);
   assert.ok(entries.length > 0, "DECISIONS.md must yield at least one entry");

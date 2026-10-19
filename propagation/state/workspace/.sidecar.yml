@@ -9,6 +9,8 @@ active_line: main
 ready: true
 note: >-
   propagate's own state. The plugin that installs this convention was exempt from it until 2026-08-26 (rule:enforcement-watches-itself).
+  MOVED 2026-10-19 (propagate #12): this repo is public and carries only the tool. The files listed under `owns`
+  are pointer stubs here; the content is in the private hub at propagation/state/propagate/.
 ledger: ../../ledger.jsonl
 owns:
   - DECISIONS.md GOTCHAS.md ISSUES.md STATE.md 

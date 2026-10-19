@@ -54,6 +54,7 @@ import {
   logLine,
   parseEntries,
   selftestProblems,
+  partitionStubs,
   sourcesFor,
 } from "../lib/gotchas/parse.mjs";
 
@@ -105,6 +106,18 @@ function selftest() {
 
   console.log(`gotcha-guard selftest`);
   console.log(`  sources : ${sources.length}`);
+  // A clone of the public repo with no hub beside it, and no global index, has ONLY pointer stubs
+  // (propagate #12): nothing here can fire, and "the guard can fire" would be a claim about files
+  // that are not present. Say so, and exit 0 — a stub-only tree is a legitimate state, not a failure,
+  // but it must never read as a pass (rule:discernment-checks §1, §2).
+  const { live } = partitionStubs(sources);
+  if (live.length === 0) {
+    for (const p of parsed) console.log(`            ${p.source.replace(HOME, "~")} (pointer stub)`);
+    console.log(`\n○ skipped — no live GOTCHAS source is reachable from ${process.cwd().replace(HOME, "~")}: every source is a pointer stub. ` +
+      `This repo's gotchas live in the private hub (propagation/state/<project>/GOTCHAS.md); without it there is nothing to probe. ` +
+      `This is NOT a pass: the guard was not shown to fire.`);
+    process.exit(0);
+  }
   for (const p of parsed) console.log(`            ${p.source.replace(HOME, "~")} (${p.count} triggered)`);
   console.log(`  entries : ${entryCount} with a **Trigger:** line`);
   console.log(`  log     : ${existsSync(LOG) ? `${readFileSync(LOG, "utf8").split("\n").filter(Boolean).length} invocations recorded` : "never run"}`);

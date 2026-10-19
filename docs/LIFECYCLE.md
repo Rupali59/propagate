@@ -236,7 +236,7 @@ by a count, because a count in a doc rots faster than anything else in it
 
 | Item | Lane |
 |---|---|
-| `gotchas.coverage` ratchet (derivation kept at `docs/deferred/gotchas-census.mjs`) | Code · DETECT |
+| `gotchas.coverage` ratchet (derivation kept in the private hub at `propagation/docs/propagate/deferred/gotchas-census.mjs`; `docs/deferred/` here is a pointer stub) | Code · DETECT |
 | G33 · job-tmp paths cited in durable docs | Code · DETECT |
 | G37 · `[[ -x ]]` githook dispatch hides a missing exec bit | Code · DETECT |
 | `NEW-PROJECT-CHECKLIST` §2 + a first-entry flow | Docs · PROMOTE |

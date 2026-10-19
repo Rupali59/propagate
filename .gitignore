@@ -51,3 +51,12 @@ docs/archive/*watcher*.log*
 
 # gstack design/session artifacts — tool state, not source
 .gstack/
+
+# The branch registry — machine-local DERIVED state, not source (propagate #12, 2026-10-19).
+# snapshot.json and lifecycle.jsonl enumerate every branch of every workspace on the machine that
+# wrote them, which is exactly what a public repo must not publish. They are rewritten by
+# `propagate migrate-refs <workspace> --apply`; a fresh clone has neither, and lib/core/v3-layout.mjs
+# reads that absence as "regenerated on first run" BECAUSE these lines name them (a file absent and
+# not named here is still missing).
+propagation/refs/snapshot.json
+propagation/refs/lifecycle.jsonl

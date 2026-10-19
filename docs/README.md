@@ -18,7 +18,7 @@ one hop deeper, for when you land in `docs/` directly.
 | [`SYSTEMS.md`](./SYSTEMS.md) | What background components exist (watcher, digest), and what state are they in? |
 | [`LIFECYCLE.md`](./LIFECYCLE.md) | What state is a hazard in, how does it leave that state, and how does this work divide into lanes? The hazard machine and how it composes with the edge machine. |
 | **Hub propagation docs** (`~/Documents/GitHub/propagation/docs/`) | `ARCHITECTURE.md` — the end-to-end trace: where a coupling begins, how data accumulates, how it reconciles internally and **across repos** (the only write-up of the cross-repo path). `DEFECTS-2026-08-22.md` — the open findings list. These live with the workspace ledger, not with the tool. |
-| [`AUDIT-2026-08.md`](./AUDIT-2026-08.md) | Which gotchas can stop being things anyone has to remember — the disposition table, and the citation-vs-coverage correction. |
+| [`AUDIT-2026-08.md`](./AUDIT-2026-08.md) | Which gotchas can stop being things anyone has to remember — the disposition table, and the citation-vs-coverage correction. **A pointer stub here; the document is in the private hub** (`propagation/docs/propagate/`), as are `plans/`, `archive/` and `deferred/`. |
 
 ## Routing table (situations, not topics)
 

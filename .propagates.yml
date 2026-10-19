@@ -30,7 +30,8 @@
 # The god-file IS the coverage problem. Once commands move into lib modules (reviewed
 # plan, D7), `lib/core/setup.mjs -> docs/REFERENCE.md` becomes precise and cheap, which is
 # exactly why the three edges below could be declared today and cli.mjs could not.
-# Tracked in propagation/state/workspace/ISSUES.md. (Said `docs/ISSUES.md` until
+# Tracked in propagation/state/workspace/ISSUES.md (a pointer stub since 2026-10-19; the register is in the
+# private hub). (Said `docs/ISSUES.md` until
 # 2026-09-23; that file has never existed at that path. A comment that hands someone a
 # dead path is a referrer too — rule:adversarial-review-reads-the-ledger.)
 
@@ -203,13 +204,6 @@ sources:
           derivation changes, the promise in routing/SKILL.md is the thing that goes
           stale.
         kind: code
-      - path: propagation/state/workspace/DECISIONS.md
-        why: >-
-          The 2026-08-17 entry states layering is longest-path-from-root and that
-          cycles are condensed rather than dropped. Both are decisions the code has
-          to keep; if the code stops keeping one, the record is wrong rather than
-          merely out of date.
-        kind: code
 
   lib/report/metrics.mjs:
     propagates_to:
@@ -220,12 +214,6 @@ sources:
           added or recalibrated in one and not the other is the "looks
           machine-checked and is not" failure.
         kind: code
-      - path: propagation/state/workspace/GOTCHAS.md
-        why: >-
-          Every EXPECTATIONS entry's `basis` cites a dated incident, and the long
-          form of those incidents lives in GOTCHAS. A threshold whose story is only
-          in the code gets re-litigated the first time someone disagrees with it.
-        kind: prose
 
   # Added 2026-08-22 with lib/core/v3-layout.mjs, per
   # rule:refactor-updates-sidecar-same-commit. The module is REFERENCE.md's
@@ -344,52 +332,14 @@ sources:
           quotes them and they are exactly the kind of constant that gets tuned.
         kind: code
 
-  propagation/state/workspace/ISSUES.md:
-    propagates_to:
-      - path: propagation/state/workspace/STATE.md
-        why: >-
-          STATE.md summarises which issues are OPEN; ISSUES.md is where they are actually
-          dispositioned. The two drifted within ONE DAY and in the direction that wastes
-          work: N89 was marked RESOLVED here on 2026-09-21 while STATE.md still called it
-          "the one that matters" under "Open, and filed today". A session opening STATE.md
-          on 2026-09-23 read the stale half, believed a fixed S2 defect was live, and began
-          re-fixing code that already carried its own mutation-gated regression test.
-          Nothing could have caught it: ISSUES.md was modified in that very change and
-          `check --changed` named four coupled files, none of them STATE.md. This is the
-          half-machine-refreshed / half-hand-written failure rule:state-and-decisions names
-          as the second of its two, one level up — not one file going stale, but a SUMMARY
-          outliving the record it summarises.
-        kind: prose
-
-  # Added 2026-09-24, and the divergence was ALREADY STANDING when it was declared.
-  # The sibling ISSUES.md -> STATE.md edge above records N89: a defect marked RESOLVED
-  # in the register while STATE.md still called it live, costing a session's re-fix.
-  # This is the same failure in the same pair of files one register over, so declaring
-  # only ISSUES.md fixed the instance and left the mechanism (§5).
-  propagation/state/workspace/TODOS.md:
-    propagates_to:
-      - path: propagation/state/workspace/STATE.md
-        why: >-
-          STATE.md narrates which PR items are open; TODOS.md is where they are actually
-          dispositioned. Measured the day this was declared, STATE.md was wrong about all
-          THREE things it said in three lines: PR-001 was "open and blocking nothing but
-          itself" after Rupali answered it on 2026-09-24, "three" never-begun workspaces
-          were four, and "produce one `info` line between them" described the mechanism
-          PR-001's implementation REPLACED -- `migrationVerdict` makes never-begun a FAIL.
-          The mechanism claim is the expensive one: a reader trusting it concludes the gate
-          was never wired and rebuilds it, which is exactly the wasted work N89 caused.
-          A count rots fastest (rule:state-and-decisions) but a superseded MECHANISM reads
-          as current indefinitely, because nothing about it looks like a number.
-        kind: prose
-
-  docs/AUDIT-2026-08.md:
-    propagates_to:
-      - path: propagation/state/workspace/GOTCHAS.md
-        why: >-
-          the audit assigns a disposition to each entry and records which are
-          COVERED, RETIRED or DELIVERED. Entries added or superseded in GOTCHAS
-          leave the table describing a corpus that no longer exists.
-        kind: prose
+  # MOVED TO THE HUB 2026-10-19 (propagate #12, the public repo carries only the tool). Five edges
+  # whose source or downstream is a moved state file or working doc are declared in the hub's
+  # .propagates.yml as `propagate/<path>` -> `propagation/state/propagate/<file>`
+  # (rule:refactor-updates-sidecar-same-commit; rule:workspace-docs-layout "an edge between project
+  # code and a moved doc is declared in the WORKSPACE sidecar"): lib/graph/graph.mjs -> DECISIONS.md,
+  # lib/report/metrics.mjs -> GOTCHAS.md, ISSUES.md -> STATE.md, TODOS.md -> STATE.md, and
+  # AUDIT-2026-08.md -> GOTCHAS.md. `check --changed` run inside this repo cannot see them;
+  # `reconcile` at the hub can. New edge ids, so each was re-baselined, not carried over.
 
   # Declared 2026-10-12. REFERENCE.md §"The ten kinds" is the only prose that specifies the
   # doc taxonomy; it was coupled to nothing, while a hub edge claimed rules/conventions/

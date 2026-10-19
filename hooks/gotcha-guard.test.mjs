@@ -269,3 +269,76 @@ test("invoked through a SYMLINK the guard still runs — it must not decide it w
   );
 });
 
+
+// ---------------------------------------------------------------------------
+// A public repo keeps POINTER STUBS where its state used to be (propagate #12)
+// ---------------------------------------------------------------------------
+
+const STUB_TEXT = "# GOTCHAS.md — moved\n\nThis is a **pointer stub**, not the content. It lives in the private hub.\n";
+const LIVE_TEXT = "# live\n\n### L1 · a hazard\n**Trigger:** `dangercmd`\n**Fires on:** `dangercmd --now`\nbody\n";
+
+/** `<ws>/propagate/propagation/state/workspace/GOTCHAS.md` (stub) + optional `<ws>/propagation/state/propagate/GOTCHAS.md`. */
+async function stubTree({ withHub }) {
+  const { mkdir } = await import("node:fs/promises");
+  const ws = await mkdtemp(path.join(tmpdir(), "gg-stub-"));
+  const repo = path.join(ws, "propagate");
+  await mkdir(path.join(repo, "propagation", "state", "workspace"), { recursive: true });
+  await writeFile(path.join(repo, "propagation", "state", "workspace", "GOTCHAS.md"), STUB_TEXT);
+  if (withHub) {
+    await mkdir(path.join(ws, "propagation", "state", "propagate"), { recursive: true });
+    await writeFile(path.join(ws, "propagation", "state", "propagate", "GOTCHAS.md"), LIVE_TEXT);
+  }
+  return { ws, repo };
+}
+
+function selftestIn(cwd, ceiling) {
+  return spawnSync(process.execPath, [GUARD, "--selftest"], {
+    encoding: "utf8",
+    cwd,
+    env: {
+      ...process.env,
+      GOTCHA_GUARD_GLOBAL: path.join(ceiling, "no-such-global-index.md"),
+      GOTCHA_GUARD_CEILING: ceiling,
+      GOTCHA_GUARD_LOG: path.join(ceiling, "log"),
+    },
+  });
+}
+
+test("a stub-only tree SKIPS the selftest with a stated reason — it must not claim the guard can fire", async (t) => {
+  const { ws, repo } = await stubTree({ withHub: false });
+  t.after(() => rm(ws, { recursive: true, force: true }));
+  const r = selftestIn(repo, ws);
+  assert.equal(r.status, 0, `a stub-only tree is a legitimate state, not a failure: ${r.stderr}`);
+  assert.match(r.stdout, /skipped/, "must say it skipped");
+  assert.match(r.stdout, /NOT a pass/, "must say the skip is not a pass");
+  assert.doesNotMatch(r.stdout, /the guard can fire/, "claiming it can fire from stubs alone is the silent pass this prevents");
+});
+
+test("the hub copy is listed BEFORE the nearer pointer stub, and the probe runs on it", async (t) => {
+  const { ws, repo } = await stubTree({ withHub: true });
+  t.after(() => rm(ws, { recursive: true, force: true }));
+  const r = selftestIn(repo, ws);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const hub = r.stdout.indexOf(path.join("propagation", "state", "propagate", "GOTCHAS.md"));
+  const stub = r.stdout.indexOf(path.join("propagate", "propagation", "state", "workspace", "GOTCHAS.md"));
+  assert.ok(hub > -1 && stub > -1, `both sources must be listed:\n${r.stdout}`);
+  assert.ok(hub < stub, "the live hub file must outrank the inert stub (render() truncates by position)");
+  assert.match(r.stdout, /the guard can fire/);
+});
+
+test("a trigger in the hub copy FIRES for a cwd inside the repo", async (t) => {
+  const { ws, repo } = await stubTree({ withHub: true });
+  t.after(() => rm(ws, { recursive: true, force: true }));
+  const r = spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "dangercmd --now" } }),
+    encoding: "utf8",
+    cwd: repo,
+    env: {
+      ...process.env,
+      GOTCHA_GUARD_GLOBAL: path.join(ws, "none.md"),
+      GOTCHA_GUARD_CEILING: ws,
+      GOTCHA_GUARD_LOG: path.join(ws, "log"),
+    },
+  });
+  assert.match(r.stdout, /L1/, `the hazard in propagation/state/propagate/GOTCHAS.md was not delivered: ${r.stdout}`);
+});

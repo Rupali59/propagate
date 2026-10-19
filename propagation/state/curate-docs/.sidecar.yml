@@ -9,6 +9,8 @@ active_line: main
 ready: true
 note: >-
   Clone deleted from disk 2026-08-25 by design; state kept here. Re-clone from the remote if the skill is revived.
+  MOVED 2026-10-19 (propagate #12): this repo is public and carries only the tool. The files listed under `owns`
+  are pointer stubs here; the content is in the private hub at propagation/state/curate-docs-skill/.
 ledger: ../../ledger.jsonl
 owns:
   - DECISIONS.md GOTCHAS.md STATE.md 

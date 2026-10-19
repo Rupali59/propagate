@@ -60,6 +60,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { hubAbsentReason, hubStateDir } from "../../lib/core/hub-state.mjs";
 import { discoverBacklogFiles, parseTodoLikeFile as parseTodoLikeFileNew } from "../../lib/report/backlog.mjs";
 
 /**
@@ -94,6 +95,12 @@ const HERE = fileURLToPath(import.meta.url);
 // tests/unit/<this file> -> tests/unit -> tests -> propagate (repo root) -> hub.
 const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
 const HUB_ROOT = path.resolve(REPO_ROOT, "..");
+// This test measures the LIVE register corpus of the hub that surrounds the checkout. A clone
+// with no hub beside it has no corpus (propagate's own registers moved into the private hub on
+// 2026-10-19, propagate #12), and a floor of "more than 10 registers" would then fail for a
+// reason that is not a regression. It SKIPS with the reason stated, never passes silently
+// (rule:workspace-docs-layout, rule:discernment-checks §2).
+const NO_HUB = hubStateDir(REPO_ROOT) === null ? hubAbsentReason("propagation/state/propagate/") : false;
 
 /**
  * The classifier as it existed at HEAD, before this change -- "the old
@@ -117,22 +124,23 @@ function loadOldClassifier() {
     encoding: "utf8",
   });
 
-  const rewrites = [
-    ['"../core/config.mjs"', JSON.stringify(pathToFileURL(path.join(REPO_ROOT, "lib/core/config.mjs")).href)],
-    ['"./handovers.mjs"', JSON.stringify(pathToFileURL(path.join(REPO_ROOT, "lib/report/handovers.mjs")).href)],
-    ['"../migrate/workspace.mjs"', JSON.stringify(pathToFileURL(path.join(REPO_ROOT, "lib/migrate/workspace.mjs")).href)],
-  ];
-  let rewritten = source;
-  for (const [from, to] of rewrites) {
-    const before = rewritten;
-    rewritten = rewritten.split(from).join(to);
-    assert.notEqual(rewritten, before, `expected to find and rewrite the import specifier ${from} in HEAD's backlog.mjs -- if this fails, HEAD's import shape changed and this rewrite needs updating, not silently skipping`);
-  }
-  // Guard against the mutation this rewrite depends on silently not landing
-  // (rule:discernment-checks §1 / rule:safety-flag-needs-a-test's corollary:
-  // a sed/replace that matches nothing has no error and fails this whole
-  // file's premise invisibly).
-  assert.ok(!rewritten.includes('"../core/config.mjs"'), "a relative import specifier survived the rewrite");
+  // DERIVED, not a curated list of three: HEAD's backlog.mjs gained `../tasks/tracker-cache.mjs`
+  // in 0.15.40 and the old list of three specifiers left it unresolved, so this loader threw
+  // ERR_MODULE_NOT_FOUND and both R4 tests were red on a clean HEAD (rule:derive-dont-curate:
+  // an inclusion list you must remember to extend fails silently). Every relative specifier is
+  // resolved against lib/report/, where the file lives, and the floor below fails loudly if the
+  // scan found nothing to rewrite.
+  let rewrittenCount = 0;
+  const rewritten = source.replace(/(\bfrom\s+|\bimport\s*\(\s*)"(\.{1,2}\/[^"]+)"/g, (_m, lead, spec) => {
+    rewrittenCount += 1;
+    return lead + JSON.stringify(pathToFileURL(path.resolve(REPO_ROOT, "lib", "report", spec)).href);
+  });
+  assert.ok(
+    rewrittenCount >= 3,
+    `rewrote only ${rewrittenCount} relative import(s) in HEAD's backlog.mjs -- the scan has gone blind, it has not found nothing`,
+  );
+  // Guard against the rewrite silently not landing (rule:discernment-checks §1).
+  assert.ok(!/\bfrom\s+"\.{1,2}\//.test(rewritten), "a relative import specifier survived the rewrite");
 
   const dir = mkdtempSync(path.join(tmpdir(), "backlog-old-classifier-"));
   const scratchFile = path.join(dir, "backlog-old.mjs");
@@ -170,7 +178,7 @@ export function isMovedOnlyFlip(before, after, text) {
   });
 }
 
-test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed heading parses identically old vs new", async () => {
+test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed heading parses identically old vs new", { skip: NO_HUB }, async () => {
   const { scratchFile, cleanup } = loadOldClassifier();
   let parseTodoLikeFileOld;
   try {
@@ -360,7 +368,7 @@ test("R4 corpus regression: every discovered TODOS.md/ISSUES.md with no proposed
   );
 });
 
-test("R4 sharp case, DISCHARGED: both formerly-unparsed registers now parse, each for a stated reason", async () => {
+test("R4 sharp case, DISCHARGED: both formerly-unparsed registers now parse, each for a stated reason", { skip: NO_HUB }, async () => {
   // "The two files already fail to parse and must still fail identically" --
   // called out explicitly in the task brief because no hand-written fixture
   // would have included them. Asserted as its own test, not left to the

@@ -175,3 +175,63 @@ test("N82 positive control: one file inside the project dir conforms", async () 
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
+
+// ---------------------------------------------------------------------------
+// A fresh clone of a repo that gitignores its refs registry (propagate #12, 2026-10-19)
+// ---------------------------------------------------------------------------
+
+const REFS = ["refs/snapshot.json", "refs/lifecycle.jsonl"];
+const withoutRefs = [...V3_REQUIRED].filter((i) => !REFS.includes(i));
+
+test("fresh clone: refs absent AND named in the workspace .gitignore read as regenerated, and the workspace conforms", async () => {
+  const root = await makeWorkspace(withoutRefs);
+  try {
+    await writeFile(path.join(root, ".gitignore"), "node_modules/\n/propagation/refs/snapshot.json\npropagation/refs/lifecycle.jsonl\n");
+    const r = conformance(root);
+    assert.equal(r.conforms, true, `a fresh clone must not read as half-migrated; missing: ${r.missing.join(", ")}`);
+    assert.deepEqual(r.missing, []);
+    assert.deepEqual([...r.regenerated].sort(), [...REFS].sort(), "the absence must be attributed, not silent (rule:discernment-checks §2)");
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("fresh clone: a directory rule in .gitignore covers both refs files", async () => {
+  const root = await makeWorkspace(withoutRefs);
+  try {
+    await writeFile(path.join(root, ".gitignore"), "propagation/refs/\n");
+    assert.deepEqual([...conformance(root).regenerated].sort(), [...REFS].sort());
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("the carve-out cannot swallow a real gap: refs absent and NOT gitignored stay MISSING", async () => {
+  // The mutation this guards: treating every absent refs file as regenerated. Built three ways —
+  // no .gitignore at all, a .gitignore that names something else, and one that only names a
+  // COMMENTED-OUT or NEGATED rule — because each is a different way a loose match goes wrong.
+  for (const gitignore of [null, "node_modules/\n", "# propagation/refs/snapshot.json\n!propagation/refs/snapshot.json\n"]) {
+    const root = await makeWorkspace(withoutRefs);
+    try {
+      if (gitignore !== null) await writeFile(path.join(root, ".gitignore"), gitignore);
+      const r = conformance(root);
+      assert.equal(r.conforms, false, `must not conform with .gitignore=${JSON.stringify(gitignore)}`);
+      assert.deepEqual([...r.missing].sort(), [...REFS].sort());
+      assert.deepEqual(r.regenerated, []);
+    } finally {
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    }
+  }
+});
+
+test("fresh clone: only the refs files are carved out — a gitignored README.md is still missing", async () => {
+  const root = await makeWorkspace(["INDEX.md", "state/"]);
+  try {
+    await writeFile(path.join(root, ".gitignore"), "propagation/README.md\npropagation/refs/\n");
+    const r = conformance(root);
+    assert.deepEqual(r.missing, ["README.md"]);
+    assert.equal(r.conforms, false);
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});

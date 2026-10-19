@@ -16,6 +16,7 @@
  * repos scanning) just to test the render/attribution logic.
  */
 
+import { hubAbsentReason, hubStateFile } from "../../lib/core/hub-state.mjs";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
@@ -406,7 +407,18 @@ test("compareInputs: identical maps produce zero entries in every bucket", () =>
 const PROPAGATE_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const LIVE_HUB_ROOT = path.resolve(PROPAGATE_REPO_ROOT, "..");
 
-test("rollup against the live tree: propagate appears in its own output with items.length > 0", { timeout: 60_000 }, () => {
+// Since 2026-10-19 (propagate #12) propagate's own registers live in the PRIVATE hub at
+// propagation/state/propagate/, and the repo holds pointer stubs. The tree-attribution rule
+// (`nearestOwner`) then gives those items to the HUB owner, not to propagate — correctly: the
+// file is in the hub. So the claim "the tool appears in its own output with real items" is made
+// about the hub copy when it exists, and SKIPPED WITH A STATED REASON when it does not. It never
+// passes on a stub (rule:workspace-docs-layout, rule:discernment-checks §2).
+const HUB_PROPAGATE_STATE = hubStateFile(PROPAGATE_REPO_ROOT, "STATE.md");
+
+test(
+  "rollup against the live tree: propagate appears in its own output with items.length > 0",
+  { timeout: 60_000, skip: HUB_PROPAGATE_STATE ? false : hubAbsentReason("propagation/state/propagate/STATE.md") },
+  () => {
   const result = rollup({ searchRoots: [LIVE_HUB_ROOT] });
 
   const propagateOwner = result.owners.find((o) => o.root.endsWith(`${path.sep}propagate`));
@@ -414,9 +426,17 @@ test("rollup against the live tree: propagate appears in its own output with ite
 
   const propagateEntry = result.perOwner.find((o) => o.owner === propagateOwner.key);
   assert.ok(propagateEntry, `no perOwner group for key "${propagateOwner.key}"`);
+  // The items are in propagate's own group when its STATE.md is in the repo, and in the hub
+  // owner's group (file under propagation/state/propagate/) when it has moved. Either way the
+  // tool's own register must be NON-EMPTY and attributed somewhere — the stub case is the one
+  // where "0 items on propagate's group" is the correct attribution, and the count that must be
+  // positive is the one over the moved file.
+  const movedItems = result.perOwner
+    .flatMap((o) => o.items)
+    .filter((i) => path.resolve(i.file) === path.resolve(HUB_PROPAGATE_STATE));
   assert.ok(
-    propagateEntry.items.length > 0,
-    `propagate's own group has 0 items -- the tool does not appear in its own output`,
+    propagateEntry.items.length > 0 || movedItems.length > 0,
+    `neither propagate's own group nor the hub copy of its STATE.md yields any item -- the tool does not appear in its own output`,
   );
 
   // Belt-and-suspenders: the render must show it too, not just the structured

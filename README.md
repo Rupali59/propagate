@@ -100,6 +100,14 @@ identity map used to scrub the public tree, and the journals of runs such as `re
 `tasks export`. Set `PROPAGATE_STATE_DIR` to put it elsewhere; the test suite does, so tests never touch your
 real store.
 
+That is the tool's runtime state. The project's *working* state — its STATE, DECISIONS, GOTCHAS, ISSUES and
+TODOS registers, and its plans and audits — is not in this repository: it is public and carries only the tool,
+so those documents live in a private repo that surrounds a maintainer's checkout. The files you find at
+`propagation/state/workspace/`, `docs/DECISIONS.md` and `docs/plans/` are short pointer stubs saying so; tests that
+read the moved files skip, with the reason printed, when that private copy is not beside the clone. The branch
+registry (`propagation/refs/`) is machine-local and gitignored: `propagate migrate-refs <workspace> --apply`
+writes it.
+
 It is deliberately **not** in Claude Code's `${CLAUDE_PLUGIN_DATA}`. That directory is meant for caches and
 installed dependencies and is deleted when the plugin is uninstalled, while the ledger is a record that has to
 survive an uninstall — and propagate also runs outside Claude Code (from a shell, or on a schedule), where that
