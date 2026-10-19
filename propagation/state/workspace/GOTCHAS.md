@@ -1950,3 +1950,15 @@ one-file commit you came to make. Staging only your paths limits what you COMMIT
 published without being asked.
 **Instead:** before a batch push, require `git rev-list --count @{u}..HEAD` to be 0 for each repo; a repo already
 ahead gets the commit and NO push, listed for the owner to push herself.
+
+### G83 · A rename sweep with `rg` misses every dot-directory, so `.githooks/` keeps the old path
+`rg` skips hidden files and directories by default, separately from `.gitignore` handling, so `--no-ignore` does not
+bring them back; only `--hidden` (or `-uu`) does. propagate keeps live code in dot-directories: `.githooks/post-merge`,
+`.github/workflows/`, `.claude-plugin/`.
+**Signal:** a rename sweep reports "only history left" while a hook still names the old path; nothing fails locally,
+because the post-merge hook runs only on a non-in-place install.
+**Cost:** 2026-10-18, #97 (`commands/` → `cli/`) shipped in v0.15.39 with `.githooks/post-merge:112` still naming
+`commands/claims.mjs` and `commands/goals.mjs`, which would have reported a correct install as INCOMPLETE. Found by
+the plan audit the same evening, not by the sweep or the suite.
+**Instead:** sweep with `rg --hidden --no-ignore -g "!.git/"`, and derive the list a hook checks (#78) instead of
+hand-maintaining it.

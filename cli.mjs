@@ -4262,12 +4262,32 @@ async function journalCmd() {
 }
 
 async function backlogCmd() {
-  const { backlog, repoSegments, filterByAffects, groupForBrief, priorityCaveat, BRIEF_TRUNC, readDelegatedTrackers } = await import("./lib/report/backlog.mjs");
+  const { backlog, repoSegments, filterByAffects, groupForBrief, priorityCaveat, BRIEF_TRUNC } = await import("./lib/report/backlog.mjs");
+  const { refreshTrackers, formatAge } = await import("./lib/tasks/tracker.mjs");
   // HUB_ROOT is used by --brief's path shortener. Imported HERE, not borrowed
   // from capsCmd's scope — `node --check` does not resolve names inside a
   // function body it never calls (G60, third instance today).
   const { HUB_ROOT } = await import("./lib/core/config.mjs");
-  const result = backlog();
+  let result = backlog();
+
+  // GITHUB (#104, R4). The work of every delegated register lives in GitHub issues, so `backlog` reads
+  // them: refresh first (async, bounded -- a hung gh must not hang this command), then re-read, which
+  // merges the cache into `ranked`. --offline reads the cache only and never runs gh. --trackers is the
+  // old opt-in flag and now means what the default means. backlog() itself never spawns gh; THIS command
+  // is one of the three refreshers (with the monitor and the dashboard's button).
+  const offline = process.argv.includes("--offline");
+  const BACKLOG_REFRESH_DEADLINE_MS = 20_000;
+  let refresh = null;
+  if (!offline && (result.totals.delegated ?? []).length) {
+    try {
+      refresh = await refreshTrackers({ delegated: result.totals.delegated, deadlineMs: BACKLOG_REFRESH_DEADLINE_MS });
+    } catch (e) {
+      refresh = { ok: false, fetched: 0, failed: 0, skipped: 0, unsupported: 0, deadlineHit: false, wrote: false, error: `refresh threw: ${String(e?.message ?? e)}` };
+    }
+    // Re-read so the rows reflect the cache just written (or the stale one, if the write failed).
+    result = backlog();
+  }
+  result.refresh = refresh ? { ...refresh, offline: false } : { offline, skipped: offline ? "--offline" : "no delegated registers" };
 
   const brief = process.argv.includes("--brief");
   const verbose = process.argv.includes("--verbose");
@@ -4298,13 +4318,13 @@ async function backlogCmd() {
     affectsStats = filterByAffects(result, hit);
   }
 
-  // PR-034. --trackers is backlog's ONLY network call, so it is opt-in. Without it
-  // a delegated register is still NAMED below, never silently summed as 0.
-  const trackers = process.argv.includes("--trackers") ? readDelegatedTrackers(result.totals.delegated) : null;
+  // The per-register tracker view (counted / unreadable / unsupported / not-fetched), from the cache.
+  // `delegatedTrackers` is the key `--trackers --json` has always carried.
+  const trackers = result.totals.trackers?.entries ?? [];
 
   if (process.argv.includes("--json")) {
     if (affectsStats) result.affects = affectsStats;
-    if (trackers) result.delegatedTrackers = trackers;
+    if (trackers.length) result.delegatedTrackers = trackers;
     console.log(JSON.stringify(result, null, 2));
     return;
   }
@@ -4368,40 +4388,54 @@ async function backlogCmd() {
   const delegated = result.totals.delegated ?? [];
   if (delegated.length) {
     const short = (p) => (HUB_ROOT && p.startsWith(HUB_ROOT + "/") ? p.slice(HUB_ROOT.length + 1) : p);
-    if (trackers) {
-      // A tracker another register already counted (same repo + filter, or a filter inside a
-      // bare repo link) carries inSum:false — summing it would count one repo twice.
-      const counted = trackers.filter((t) => t.status === "counted" && t.inSum !== false);
-      const sum = counted.reduce((n, t) => n + t.open, 0);
-      const floor = counted.some((t) => t.capped) ? "≥" : "";
-      const notRead = trackers.filter((t) => t.status === "unreadable" || t.status === "unsupported").length;
-      // No "+ 0" header when nothing was counted: an unread tracker must never
-      // render as a zero (rule:discernment-checks §2, §6).
-      if (counted.length) {
-        console.log(`  ${BOLD}+ ${floor}${sum}${RESET} open in ${counted.length} delegated tracker(s), not in the total above`);
-      }
-      if (notRead) {
-        console.log(`  ${YELLOW}${notRead} delegated tracker(s) could not be read — not counted, and not 0${RESET}`);
-      }
-      for (const t of trackers) {
-        const what =
-          t.status === "counted"
-            ? `${GREEN}${t.capped ? "≥" : ""}${t.open} open${RESET}`
-            : t.status === "unreadable"
-              ? `${RED}unreadable${RESET} ${DIM}— ${t.reason}${RESET}`
-              : `${YELLOW}unsupported${RESET} ${DIM}— ${t.reason}${RESET}`;
-        const overlap = t.sharedWith
-          ? `  ${DIM}(same tracker as ${short(t.sharedWith)} — counted once)${RESET}`
-          : t.includedIn
-            ? `  ${DIM}(inside ${short(t.includedIn)}'s count)${RESET}`
-            : "";
-        console.log(`    delegated  ${short(t.file)} → ${t.delegatedTo}  ${what}${overlap}`);
-      }
-    } else {
+    const tt = result.totals.trackers ?? {};
+    // A tracker another register already counted (same repo + filter, or a filter inside a bare repo
+    // link) carries inSum:false -- summing it would count one repo twice.
+    const counted = trackers.filter((t) => t.status === "counted" && t.inSum !== false);
+    const sum = counted.reduce((n, t) => n + t.open, 0);
+    const notRead = trackers.filter((t) => t.status !== "counted").length;
+    const asOf = tt.asOf ? `as of ${formatAge(tt.asOfAgeMs)}` : "never fetched";
+    // No "+ 0" header when nothing was counted: an unread tracker must never render as a zero
+    // (rule:discernment-checks §2, §6).
+    if (counted.length) {
       console.log(
-        `  ${YELLOW}${delegated.length} register(s) delegate to an external tracker${RESET} ${DIM}— their open work is NOT in the total above (count it: --trackers)${RESET}`,
+        `  ${BOLD}+ ${sum}${RESET} open on GitHub in ${counted.length} delegated tracker(s) ${DIM}(${asOf}) — ranked below, not in the parsed total above${RESET}`,
       );
-      for (const d of delegated) console.log(`    delegated  ${short(d.file)} → ${d.delegatedTo}`);
+    }
+    if (notRead) {
+      console.log(`  ${YELLOW}${notRead} delegated tracker(s) could not be read — not counted, and not 0${RESET}`);
+    }
+    for (const t of trackers) {
+      const kept = t.stale ? ` ${DIM}— showing the previous read (${t.lastOpen} issue(s), ${formatAge(Date.now() - Date.parse(t.fetchedAt))}), STALE${RESET}` : "";
+      const what =
+        t.status === "counted"
+          ? `${GREEN}${t.open} open${RESET}`
+          : t.status === "unreadable"
+            ? `${RED}unreadable${RESET} ${DIM}— ${t.reason}${RESET}${kept}`
+            : t.status === "not-fetched"
+              ? `${YELLOW}not fetched${RESET} ${DIM}— ${t.reason}${RESET}`
+              : `${YELLOW}unsupported${RESET} ${DIM}— ${t.reason}${RESET}`;
+      const overlap = t.sharedWith
+        ? `  ${DIM}(same tracker as ${short(t.sharedWith)} — counted once)${RESET}`
+        : t.includedIn
+          ? `  ${DIM}(inside ${short(t.includedIn)}'s count)${RESET}`
+          : "";
+      console.log(`    delegated  ${short(t.file)} → ${t.delegatedTo}  ${what}${overlap}`);
+    }
+    // What this run did about freshness, in words: a reader must be able to tell a cache read from a refresh.
+    const rf = result.refresh ?? {};
+    if (rf.offline === true || rf.skipped === "--offline") {
+      console.log(`  ${DIM}--offline: GitHub read from the cache only (${tt.cache?.present ? "last refresh " + formatAge(tt.cache.ageMs) : "no cache yet — run without --offline"})${RESET}`);
+    } else if (rf.error) {
+      console.log(`  ${RED}GitHub refresh failed:${RESET} ${rf.error}`);
+    } else if (rf.fetched !== undefined) {
+      const bits = [`${rf.fetched} fetched`];
+      if (rf.failed) bits.push(`${rf.failed} failed`);
+      if (rf.skipped) bits.push(`${rf.skipped} not attempted (deadline)`);
+      console.log(`  ${DIM}GitHub refresh: ${bits.join(", ")} — read through the REST API, ${Math.round(BACKLOG_REFRESH_DEADLINE_MS / 1000)}s budget${RESET}`);
+    }
+    if (tt.stale) {
+      console.log(`  ${YELLOW}${tt.stale} tracker(s) are showing a previous read (STALE)${RESET}`);
     }
   }
   if (result.dropped.length) {
@@ -4451,12 +4485,20 @@ async function backlogCmd() {
     }
   }
 
+  if ((result.handovers?.github?.open ?? 0) > 0) {
+    console.log(`  ${BOLD}handovers on GitHub${RESET} ${DIM}${result.handovers.github.open} open kind:handover issue(s) — briefings, so not in the ranked list${RESET}`);
+  }
+
   console.log();
   console.log(`  ${BOLD}ranked (${result.ranked.length})${RESET}`);
 
   if (!brief) {
     for (const item of result.ranked) {
       const pri = item.priority !== null && item.priority !== undefined ? `P${item.priority} ` : "";
+      if (item.kind === "github") {
+        console.log(`    ${pri}${item.id} ${item.text}  ${DIM}${item.repo} ${item.url ?? ""}${item.stale ? " (STALE)" : ""}${RESET}`);
+        continue;
+      }
       const loc = item.sources.length > 1 ? item.sources.map((s) => `${s.file}:${s.line}`).join(", ") : `${item.file}:${item.line}`;
       console.log(`    ${pri}${item.text}  ${DIM}${loc}${RESET}`);
     }
@@ -4693,6 +4735,30 @@ async function monitorCmd() {
   // rather than reporting a clean backlog it never managed to read.
   let defects = [];
   let backlogErr = null;
+
+  // GITHUB TRACKERS (#104, R4). The monitor's scheduled run is the one background refresher: doctor, digest,
+  // the rollup and the dashboard only READ the cache and print its age. Bounded (a hung gh cannot hold the
+  // run), skipped on --dry-run (a dry run that spends the GitHub REST budget and writes a cache is not dry),
+  // and a failure here is a line in the log and NEVER a notification: an unreadable tracker is not a
+  // backlog defect (backlogDefects() does not look at trackers), and a flaky network must not mute this
+  // channel by firing every five minutes.
+  let trackerRefresh = null;
+  if (!dryRun) {
+    try {
+      const bl0 = await import("./lib/report/backlog.mjs");
+      const { refreshTrackers } = await import("./lib/tasks/tracker.mjs");
+      const delegated = bl0.backlog().totals.delegated ?? [];
+      if (delegated.length) {
+        const r = await refreshTrackers({ delegated, deadlineMs: 30_000 });
+        trackerRefresh = { fetched: r.fetched, failed: r.failed, skipped: r.skipped, error: r.error };
+      }
+    } catch (e) {
+      trackerRefresh = { error: String(e && e.message) };
+    }
+    if (trackerRefresh && (trackerRefresh.failed || trackerRefresh.skipped || trackerRefresh.error)) {
+      console.error(`${YELLOW}monitor: GitHub tracker refresh was incomplete${RESET} ${DIM}(${trackerRefresh.failed ?? 0} failed, ${trackerRefresh.skipped ?? 0} not attempted${trackerRefresh.error ? ", " + trackerRefresh.error : ""}) — the previous read is kept, marked stale${RESET}`);
+    }
+  }
   try {
     const bl = await import("./lib/report/backlog.mjs");
     defects = bl.backlogDefects(bl.backlog());
@@ -4720,6 +4786,7 @@ async function monitorCmd() {
     backlogDefects: defects.length,
     backlogNotified: dryRun ? 0 : defectPick.toNotify.length,
     backlogError: backlogErr,
+    ...(trackerRefresh ? { trackerRefresh } : {}),
     ms: Date.now() - started,
     runId: monitorRunId,
   };

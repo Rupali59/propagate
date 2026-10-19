@@ -3036,6 +3036,73 @@ test("Phase 4b backlog: the empty state names the files read; a failed source is
   assert.doesNotMatch(t, /0 open items/, "a failure is not reported as an empty backlog");
 });
 
+/* ---- #104: GitHub rows on the Backlog page ---- */
+
+const GHROW = (over) => BL({ id: "gh1", priority: 1, ref: "#12", text: "a moved task", file: GH + "p/TODOS.md", line: null, kind: "github", url: "https://github.com/o/r/issues/12", repo: "o/r", labels: ["task", "priority:P1"], stale: false, ...over });
+const BACKLOG_GH = {
+  ...BACKLOG_P,
+  rows: [GHROW(), GHROW({ id: "gh2", ref: "#13", text: "no link", url: null, priority: null }), ...BACKLOG_P.rows],
+  kinds: [{ kind: "github", label: "GitHub", count: 2 }, ...BACKLOG_P.kinds],
+  summary: { ...BACKLOG_P.summary, items: 7, delegatedRegisters: 2,
+    github: { trackers: 2, counted: 1, unreadable: 1, unsupported: 0, notFetched: 0, stale: 0, open: 2, ranked: 2, handoverIssues: 4, asOf: "2026-10-19T01:00:00.000Z", asOfText: "2 h ago", cacheError: null } },
+};
+
+test("#104 backlog: a GitHub row links to its issue (new tab, no opener), shows the repo, and clicking the link does not also copy the row", async () => {
+  const m = await mount4b("backlog", BACKLOG_GH);
+  const wrote = clipboard(m);
+  const row = dtRows(m.app).find((r) => /a moved task/.test(textOf(r)));
+  assert.match(textOf(row), /^P1#12a moved task\s*o\/rgithub$/, "id, item, then the REPO where a register row shows file:line");
+  const links = findAll(row, (n) => n.nodeType === 1 && n.localName === "a");
+  assert.equal(links.length, 1);
+  assert.equal(links[0].getAttribute("href"), "https://github.com/o/r/issues/12");
+  assert.equal(links[0].getAttribute("target"), "_blank");
+  assert.match(links[0].getAttribute("rel"), /noopener/);
+  click(links[0]); await m.settle();
+  assert.deepEqual(Array.from(wrote), [], "the link click is the link's, not the row's copy action");
+  click(row); await m.settle();
+  assert.deepEqual(Array.from(wrote), ["https://github.com/o/r/issues/12"], "the row copies the URL (a GitHub row has no file:line)");
+  // A row whose URL the server refused to carry is plain text, never an anchor with an empty href.
+  const nolink = dtRows(m.app).find((r) => /no link/.test(textOf(r)));
+  assert.equal(findAll(nolink, (n) => n.nodeType === 1 && n.localName === "a").length, 0);
+  const kindChip = byClass(m.app, "chip").find((c) => /^github/.test(textOf(c)));
+  assert.equal(textOf(kindChip), "github2", "GitHub is its own kind, filterable like the others");
+  click(kindChip); await m.settle();
+  assert.equal(dtRows(m.app).length, 2);
+});
+
+test("#104 backlog: the delegated note says N open on GitHub, as of when, what could not be read (not 0), and that handover issues are not ranked", async () => {
+  const m = await mount4b("backlog", BACKLOG_GH);
+  const t = textOf(detail(m.app));
+  assert.match(t, /2 registers delegate to GitHub: 2 open on GitHub, as of 2 h ago · 1 tracker\(s\) could not be read, and are not counted as 0 · 4 handover issue\(s\) on GitHub are briefings and are not ranked\./);
+  assert.doesNotMatch(t, /their open work is not counted here/, "the old sentence said the opposite of what the page now does");
+  // Nothing read yet is its own sentence, never 0.
+  const cold = await mount4b("backlog", { ...BACKLOG_GH, summary: { ...BACKLOG_GH.summary, github: { ...BACKLOG_GH.summary.github, counted: 0, unreadable: 0, notFetched: 2, open: 0, asOf: null, asOfText: null } } });
+  assert.match(textOf(detail(cold.app)), /2 registers delegate to GitHub: 2 tracker\(s\) not fetched yet · /);
+  assert.doesNotMatch(textOf(detail(cold.app)), /0 open on GitHub/);
+});
+
+test("#104 backlog: the refresh button POSTs to /api/trackers/refresh, shows the outcome, and re-reads the page; a failed refresh says so", async () => {
+  let hits = 0;
+  const routes = { "/api/trackers/refresh": () => { hits++; return { ok: true, fetched: 2, failed: 0, skipped: 0 }; } };
+  const m = await mount4b("backlog", BACKLOG_GH, routes);
+  const btn = buttons(detail(m.app)).find((b) => /refresh from GitHub/.test(textOf(b)));
+  assert.ok(btn, "a refresh control sits on the Backlog page");
+  const before = m.fetches.filter((f) => f.path === "/api/backlog").length;
+  click(btn); await m.settle();
+  assert.equal(hits, 1);
+  const post = m.fetches.find((f) => f.path === "/api/trackers/refresh");
+  assert.equal(post.opts.method, "POST", "it spends the GitHub budget and writes a cache: not a GET");
+  assert.match(textOf(detail(m.app)), /refreshed: 2 fetched/);
+  assert.equal(m.fetches.filter((f) => f.path === "/api/backlog").length, before + 1, "the page re-reads after the refresh");
+
+  const bad = await mount4b("backlog", BACKLOG_GH, { "/api/trackers/refresh": respond(401, { ok: false, error: "token" }) });
+  click(buttons(detail(bad.app)).find((b) => /refresh from GitHub/.test(textOf(b)))); await bad.settle();
+  assert.match(textOf(detail(bad.app)), /token expired, reopen from the widget/);
+  // No GitHub block in the payload (an old server): no button, and the old sentence.
+  const old = await mount4b("backlog", BACKLOG_P);
+  assert.equal(buttons(detail(old.app)).filter((b) => /refresh from GitHub/.test(textOf(b))).length, 0);
+});
+
 test("Phase 4b backlog: Registers is still there, still has no button, and its header links to Backlog", async () => {
   const reg = { error: null, issues: [], todos: [], handovers: [] };
   const m = await mount({ hash: "#/registers", routes: { "/api/registers": reg } });

@@ -1754,3 +1754,75 @@ subsequence and extra-lines checks. A check that cannot fail is worse than no ch
 **Affects:** propagate `tasks export`; every HANDOVER file
 
 **Refs:** `lib/tasks/export.mjs` `buildHandoverMarkers` / `verifyHandoverMarkers`; issue #100 (the handover model)
+
+## 2026-10-19 · `backlog` reads GitHub by default, through a cache, and the "opt-in network call" posture is superseded
+
+**Decision.** Every open task now lives in GitHub issues (2026-10-17 "Open tasks live on GitHub"), so propagate reads
+them back. `backlog` refreshes the delegated trackers before it prints (bounded to 20 s), unless `--offline`;
+`--trackers` stays as an alias for what is now the default. The read is `gh api repos/O/R/issues --paginate`
+(REST), pull requests filtered, fetched once per (repo, label filter), and the result is written atomically to
+`<stateDir>/tracker-cache.json`. `backlog()` itself stays synchronous and offline: it merges that cache, so every
+reader (doctor, digest, rollup, the dashboard) sees the GitHub work and prints the cache's age. Each open issue is
+a `ranked` row `{id: "#n", repo, url, text, priority, file: <delegating register>, line: null, kind: "github"}`;
+priority comes only from a `priority:P0..P3` label. `kind:handover` issues stay out of `ranked` (Phase 4b, decision
+3) and are counted in `handovers.github`. Refreshers: `propagate backlog`, the monitor's scheduled run (30 s,
+skipped on `--dry-run`), and a dashboard button (`POST /api/trackers/refresh`). A failed refresh keeps the previous
+rows, marked stale, and is never a notification.
+
+**Supersedes** the posture written in the `backlog --trackers` code comments and `STATE.md` (2026-10-04): *"`--trackers`
+is backlog's only network call, so it is opt-in"*. There is no DECISIONS entry for that posture to supersede; it
+lived only in those two places, which is part of why it outlived its reason. The reason was that a delegated register
+was rare. It is now the normal case for every register in the tree, and an opt-in flag made `backlog --json` return
+536 rows from STATE.md and none of the GitHub work. Tests that pinned the old posture
+(`tests/cli/backlog-trackers.test.mjs` "does not run gh without --trackers") are inverted on purpose, with a comment
+citing this entry. The guarantee survives as `--offline`, which has its own test.
+
+**Rejected.** (1) *Keep it opt-in and make people remember `--trackers`*: the dashboard, doctor and digest cannot
+pass a flag, so they would keep reporting "delegated, 0 open". (2) *Read GitHub inside `backlog()`*: it is
+synchronous and called by the monitor, doctor and the UI; one slow or hung `gh` would stall all of them. (3) *GraphQL
+(`gh issue list`)*: two read-only agents exhausted the GraphQL budget on 2026-10-18 and blocked every write; REST has
+its own 5,000/h budget. (4) *No timeout, trusting gh*: a hung `gh issue close` blocked a session for 15 minutes the
+same day; every call has a per-call timeout and the refresh has a total deadline.
+
+**Cost, stated.** `backlog` is no longer network-free by default, and its output depends on the cache, which differs
+between machines and between runs. The rollup (`ECOSYSTEM.md`) therefore carries a per-register GitHub count that
+changes when the cache does; it uses a date, not an age, so two renders of the same cache read the same. Verified
+here: unit tests with fake gh only. NOT verified here: the real `gh api` path against real GitHub (the parent's real
+run does that).
+
+**Affects:** propagate `backlog`, the dashboard Backlog page, doctor, digest, rollup, monitor
+
+**Refs:** plan `~/.claude/plans/ticklish-gathering-brook.md` (#104); `lib/tasks/tracker.mjs`,
+`lib/tasks/tracker-cache.mjs`, `lib/report/backlog.mjs` `mergeTrackerCache`, `cli.mjs` `backlogCmd` / `monitorCmd`,
+`cli/ui.mjs` `/api/trackers/refresh`; DECISIONS 2026-10-17 "Open tasks live on GitHub"
+
+## 2026-10-19 · The public repo carries only the tool (#12 option 1); the two-repo release model is retired
+
+**Decision.** Rupali chose "one public repo, cleaned in place". The release model assumed a private working copy
+plus a scrubbed public copy that `scripts/make-public.mjs` builds (docs/RELEASE.md, #25). Since 2026-08-29 there is
+one repo, Rupali59/propagate, and it is public. So release gate 3 scrubbed a copy nobody publishes, while the repo
+that is actually published went unscrubbed: #12 counts 464 name occurrences in 81 tracked files.
+
+**Plan, after R4:**
+1. Move `propagation/state/**` to the private hub repo, leaving a pointer stub. Measure first that gotcha-guard
+   still fires, that sidecar edges follow, and that tests which need the state skip with a stated reason.
+2. Replace real names and evaluative wording with identity-map aliases.
+3. Make gate 3 scan the tracked tree and the public issue text.
+4. Scrub every write to a public repo before it is sent (#103).
+
+#25 is closed as obsolete: with no second repo there is no cross-repo edge to declare.
+
+**Rejected.**
+- *Private repo plus a scrubbed public copy.* Two repos to keep in sync forever, and the existing public history
+  stays public anyway.
+- *Keep as is.* About 460 names stay public, and gate 3 keeps measuring a proxy (rule:measure-the-claim-not-a-proxy).
+
+**Cost, measured 2026-10-19.** 7 public issues carried identity-map names, 2 of them filed by this session through
+ad-hoc outbox drafts that skipped the scrub. #106 and #108 were deleted and refiled scrubbed as #113 and #114.
+#1, #2, #3, #79 and #84 were edited; their old text stays in GitHub's edit history, which Rupali accepted.
+A scan of all 98 issues now finds 0. One bug was also caught before anything was sent: `scrubEntries` was given the
+whole map instead of `map.names`, so it scrubbed nothing. The post-scrub name check is what stopped it.
+
+**Affects:** propagate (public repo), hub (receives the state)
+
+**Refs:** issues #12, #25, #103; plan `~/.claude/plans/ticklish-gathering-brook.md` "NEXT (after R4)"

@@ -7,9 +7,9 @@
  * missing the project's 45+ open issues.
  *
  * Three things are pinned here:
- *   1. the destination is NAMED without any network call, and gh is NOT run
- *      unless --trackers is passed (a fake gh writes a marker when invoked);
- *   2. --trackers counts, and "could not read the tracker" is never "0 open";
+ *   1. the destination is NAMED, and (since #104, DECISIONS 2026-10-19) `backlog` reads it by
+ *      DEFAULT, refreshing a cache first; only --offline runs no gh (a fake gh writes a marker);
+ *   2. the tracker is counted, and "could not read the tracker" is never "0 open";
  *   3. the URL parser refuses what it cannot count (a project board, one issue,
  *      another host) rather than guessing.
  *
@@ -143,44 +143,106 @@ test("hitting the --limit cap is reported as a floor (capped), not as an exact c
 
 /* -- the CLI: named without network; counted only on request --------------- */
 
-test("backlog NAMES a delegated register's tracker, and does not run gh without --trackers", () => {
+// DELIBERATELY INVERTED (#104, DECISIONS 2026-10-19, which supersedes 2026-10-04's "--trackers is backlog's
+// only network call, opt-in"). This test used to assert that gh was NOT run without --trackers. It now asserts
+// the opposite: the work of every delegated register lives in GitHub issues, so plain `backlog` reads them
+// (bounded, through a cache) -- and the old guarantee survives as `--offline`, tested right below.
+test("backlog NAMES a delegated register's tracker and READS it by default; the ranked list carries the issues", () => {
   const root = delegatingTree();
   const stateDir = mkdtempSync(path.join(tmpdir(), "pr034-state-"));
   try {
-    const gh = fakeGh(root, { stdout: "[{},{},{}]" });
+    const gh = fakeGh(root, { stdout: JSON.stringify([{ number: 4, title: "first", html_url: "https://github.com/o/r/issues/4", labels: [{ name: "priority:P1" }] }, { number: 5, title: "second", html_url: "https://github.com/o/r/issues/5", labels: [] }, { number: 6, title: "a pull request", pull_request: {}, labels: [] }]) });
     const r = runBacklog([], { root, gh: gh.bin, stateDir });
     assert.equal(r.status, 0, r.stderr);
     const out = plain(r.stdout);
-    assert.match(out, /1 register\(s\) delegate to an external tracker/);
-    assert.match(out, /NOT in the total above \(count it: --trackers\)/);
-    assert.match(out, new RegExp(`delegated .*TODOS\\.md → ${ISSUES.replace(/[.?]/g, "\\$&")}`));
-    assert.equal(existsSync(gh.marker), false, "gh must not run without --trackers: it is backlog's only network call");
+    assert.match(out, /\+ 2 open on GitHub in 1 delegated tracker\(s\) \(as of /);
+    assert.match(out, new RegExp(`delegated .*TODOS\\.md → ${ISSUES.replace(/[.?]/g, "\\$&")}  2 open`));
+    assert.match(out, /GitHub refresh: 1 fetched/);
+    assert.match(out, /ranked \(2\)/);
+    assert.match(out, /P1 #4 first {2}o\/r https:\/\/github\.com\/o\/r\/issues\/4/);
+    assert.equal(existsSync(gh.marker), true, "control: plain backlog ran gh");
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(stateDir, { recursive: true, force: true });
   }
 });
 
-test("backlog --trackers adds the tracker's count beside the total; an unreadable one is never +0", () => {
+test("backlog --offline runs NO gh at all, reads the last cache, and says how old it is -- or that there is none, which is not 0", () => {
   const root = delegatingTree();
   const stateDir = mkdtempSync(path.join(tmpdir(), "pr034-state-"));
   try {
-    const ok = fakeGh(root, { stdout: "[{},{},{}]" });
+    const gh = fakeGh(root, { stdout: JSON.stringify([{ number: 1, title: "from the last refresh", html_url: "https://github.com/o/r/issues/1", labels: [] }]) });
+
+    // No cache yet: not-fetched, never a zero.
+    const cold = runBacklog(["--offline"], { root, gh: gh.bin, stateDir });
+    assert.equal(cold.status, 0, cold.stderr);
+    const c = plain(cold.stdout);
+    assert.equal(existsSync(gh.marker), false, "--offline must not run gh");
+    assert.match(c, /not fetched/);
+    assert.match(c, /--offline: GitHub read from the cache only \(no cache yet/);
+    assert.doesNotMatch(c, /\+ 0 open/);
+    assert.doesNotMatch(c, /0 open on GitHub/);
+
+    // Warm the cache with a real (fake-gh) refresh, then go offline again: the rows come from the cache, gh stays untouched.
+    runBacklog([], { root, gh: gh.bin, stateDir });
+    assert.equal(existsSync(gh.marker), true, "control: the refresh ran gh");
+    rmSync(gh.marker);
+    const warm = runBacklog(["--offline", "--json"], { root, gh: gh.bin, stateDir });
+    assert.equal(existsSync(gh.marker), false, "--offline with a warm cache still runs no gh");
+    const j = JSON.parse(warm.stdout);
+    assert.deepEqual(j.ranked.map((x) => [x.id, x.url, x.kind]), [["#1", "https://github.com/o/r/issues/1", "github"]]);
+    assert.equal(j.refresh.offline, true);
+    assert.equal(j.totals.trackers.cache.present, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("backlog names an unreadable tracker and its cache age; one that failed AFTER a good read keeps its rows, marked STALE -- never +0", () => {
+  const root = delegatingTree();
+  const stateDir = mkdtempSync(path.join(tmpdir(), "pr034-state-"));
+  try {
+    const ok = fakeGh(root, { stdout: JSON.stringify([{ number: 3, title: "kept", html_url: "https://github.com/o/r/issues/3", labels: [] }]) });
     const r = runBacklog(["--trackers"], { root, gh: ok.bin, stateDir });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(plain(r.stdout), /\+ 3 open in 1 delegated tracker\(s\), not in the total above/);
-    assert.match(plain(r.stdout), /→ https:\/\/github\.com\/o\/r\/issues {2}3 open/);
-    assert.equal(existsSync(ok.marker), true, "control: --trackers did run gh");
+    assert.match(plain(r.stdout), /\+ 1 open on GitHub in 1 delegated tracker\(s\)/, "--trackers is kept as an alias for the default");
 
     const bad = fakeGh(root, { code: 1, stdout: "", stderr: "HTTP 401" });
     const b = plain(runBacklog(["--trackers"], { root, gh: bad.bin, stateDir }).stdout);
     assert.doesNotMatch(b, /\+ 0 open/, "an unread tracker must not render as a zero");
     assert.match(b, /1 delegated tracker\(s\) could not be read — not counted, and not 0/);
     assert.match(b, /unreadable — gh exited 1: HTTP 401/);
+    assert.match(b, /showing the previous read \(1 issue\(s\), .*STALE/);
+    assert.match(b, /1 tracker\(s\) are showing a previous read \(STALE\)/);
+    assert.match(b, /#3 kept .*\(STALE\)/, "the kept row says it is stale");
 
     const j = JSON.parse(runBacklog(["--trackers", "--json"], { root, gh: ok.bin, stateDir }).stdout);
     assert.equal(j.delegatedTrackers.length, 1);
-    assert.deepEqual([j.delegatedTrackers[0].status, j.delegatedTrackers[0].open], ["counted", 3]);
+    assert.deepEqual([j.delegatedTrackers[0].status, j.delegatedTrackers[0].open], ["counted", 1]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("a gh that hangs cannot hang `backlog`: the refresh is bounded and the command still answers (G53: a 60 s sleep is the signal)", () => {
+  const root = delegatingTree();
+  const stateDir = mkdtempSync(path.join(tmpdir(), "pr034-state-"));
+  try {
+    const n = ++fakeSeq;
+    const bin = path.join(root, `gh-${n}`);
+    writeFileSync(bin, "#!/bin/sh\nexec sleep 60\n");
+    chmodSync(bin, 0o755);
+    const t0 = Date.now();
+    const r = spawnSync(process.execPath, [CLI, "backlog"], {
+      encoding: "utf8", timeout: 55000,
+      env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, PROPAGATE_GH_BIN: bin, NO_COLOR: "1" },
+    });
+    assert.ok(Date.now() - t0 < 50000, "the 20 s budget held; a broken bound would have waited the full minute");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(plain(r.stdout), /unreadable — timed out after /);
+    assert.doesNotMatch(plain(r.stdout), /\+ 0 open/);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(stateDir, { recursive: true, force: true });

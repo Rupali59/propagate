@@ -565,7 +565,8 @@ export function page(token, build = buildId()) {
  *   key is absent, and tests/cli/ui-server.test.mjs also runs once with none, so
  *   the production construction path is exercised (rule:name-what-no-test-executes:
  *   an injection seam is exactly what lets the real arm ship unrun).
- *   Keys: deps, inboxDeps, appendEvent, evidenceFor, readSnapshot, surfacePayload, machinery ({sources, ttlMs, now}), root.
+ *   Keys: deps, inboxDeps, appendEvent, evidenceFor, readSnapshot, surfacePayload, machinery ({sources, ttlMs, now}), root,
+ *   refreshTrackers (the GitHub read behind POST /api/trackers/refresh), backlog (where that endpoint finds the delegated registers).
  */
 export async function uiCmd(argv = [], io = console, overrides = {}) {
   if (argv.includes("--rotate-token")) {
@@ -585,6 +586,9 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
   const { registerQueue } = await import("../lib/registers/queue.mjs");
   const { planEdit, applyEdit } = await import("../lib/registers/write.mjs");
   const { backlog } = await import("../lib/report/backlog.mjs");
+  const refreshTrackers = overrides.refreshTrackers ?? (await import("../lib/tasks/tracker.mjs")).refreshTrackers;
+  // One refresh at a time: a second click while gh is running joins the first rather than spawning another round of calls.
+  let refreshing = null;
   const evidenceFor = overrides.evidenceFor ?? (await import("../lib/report/evidence.mjs")).evidenceFor;
   const readSnapshot = overrides.readSnapshot ?? (await import("../lib/report/doctor/snapshot.mjs")).readSnapshot;
   const surfacePayload = overrides.surfacePayload ?? (await import("../lib/report/surface.mjs")).surfacePayload;
@@ -738,6 +742,25 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
         try {
           const r = await machinery.readDetail(viewKey[1], { fresh: url.searchParams.get("fresh") === "1" });
           return send(r.ok ? 200 : 502, r);
+        } catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+
+      // #104. Re-read the GitHub trackers behind the Backlog page. POST because it spends the GitHub REST
+      // budget and writes the tracker cache; it is behind the same guardRequest (loopback Host, same Origin,
+      // token) as every /api/ route above. ASYNC and bounded: refreshTrackers has a per-call timeout and a
+      // total deadline, so a hung gh cannot hold this request, and the page shows the result either way.
+      // It does not touch any register file. A failure is a 200 with ok:false and a reason, not a 500, so
+      // the page can show "refresh failed" beside the stale rows it kept.
+      if (url.pathname === "/api/trackers/refresh" && req.method === "POST") {
+        try {
+          refreshing ??= (async () => {
+            const delegated = (overrides.backlog ?? backlog)().totals.delegated ?? [];
+            return refreshTrackers({ delegated, deadlineMs: 20_000 });
+          })().finally(() => { refreshing = null; });
+          const r = await refreshing;
+          // Re-prime the machinery cache, or the page's next read would be the minute-old pre-refresh answer.
+          await machinery.read({ fresh: true }).catch(() => {});
+          return send(200, { ...r, ok: r.ok });
         } catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
       }
 

@@ -2701,6 +2701,8 @@ const BACKLOG_PRIORITIES = ["P0", "P1", "P2", "P3", "none"];
 const priKey = (r) => (r.priority === null || r.priority === undefined ? "none" : "P" + r.priority);
 const clipText = (t, n) => (String(t || "").length > n ? String(t).slice(0, n - 1) + "…" : String(t || ""));
 function backlogLocator(r) {
+  // A GitHub issue is located by its URL; it has no line in any register.
+  if (r && r.kind === "github") return r.url || null;
   if (!r || !r.file) return null;
   return typeof r.line === "number" ? r.file + ":" + r.line : r.file;
 }
@@ -2715,15 +2717,54 @@ function backlogEmpty(summary) {
 }
 const BACKLOG_COLUMNS = [
   { key: "priority", label: "priority", value: (r) => r.priority, cell: (r) => html`<span class=${"badge pri-" + priKey(r)}>${r.priority === null || r.priority === undefined ? "none" : "P" + r.priority}</span>` },
-  { key: "ref", label: "id", value: (r) => r.ref || "", cell: (r) => html`<span class="mono">${r.ref || ""}</span>` },
+  { key: "ref", label: "id", value: (r) => r.ref || "",
+    // A GitHub row links out. It opens in a new tab with no opener, and the click must not also fire the row's copy action.
+    cell: (r) => (r.kind === "github" && r.url
+      ? html`<a class="mono" href=${r.url} target="_blank" rel="noopener noreferrer" onClick=${(e) => e.stopPropagation()}>${r.ref || "issue"}</a>`
+      : html`<span class="mono">${r.ref || ""}</span>`) },
   { key: "text", label: "item", value: (r) => r.text, cell: (r) => html`<div>${clipText(r.text, BACKLOG_TEXT_CHARS)}</div>` },
-  { key: "where", label: "file:line", value: (r) => r.file, cell: (r) => html`<span class="mono">${short(r.file)}${typeof r.line === "number" ? ":" + r.line : ""}</span>` },
+  { key: "where", label: "file:line", value: (r) => (r.kind === "github" ? r.repo || "" : r.file),
+    cell: (r) => (r.kind === "github"
+      ? html`<span class="mono">${r.repo || "GitHub"}</span>${r.stale ? html` <span class="dmeta">stale</span>` : null}`
+      : html`<span class="mono">${short(r.file)}${typeof r.line === "number" ? ":" + r.line : ""}</span>`) },
   { key: "kind", label: "kind", value: (r) => r.kind, cell: (r) => r.kind },
 ];
+/**
+ * What the delegated registers' trackers hold, in one sentence. Unread trackers are named apart: a
+ * tracker that could not be read is not "0 open on GitHub".
+ */
+function githubNote(s) {
+  const g = s.github;
+  if (!g) return s.delegatedRegisters + " registers delegate to an external tracker; their open work is not counted here.";
+  const parts = [];
+  if (g.counted) parts.push(g.open + " open on GitHub, as of " + (g.asOfText || "an unknown time"));
+  if (g.unreadable) parts.push(g.unreadable + " tracker(s) could not be read, and are not counted as 0");
+  if (g.notFetched) parts.push(g.notFetched + " tracker(s) not fetched yet");
+  if (g.unsupported) parts.push(g.unsupported + " tracker(s) are not GitHub issue lists");
+  if (g.stale) parts.push(g.stale + " showing a previous read (stale)");
+  if (g.handoverIssues) parts.push(g.handoverIssues + " handover issue(s) on GitHub are briefings and are not ranked");
+  if (g.cacheError) parts.push("the tracker cache is unusable: " + g.cacheError);
+  return s.delegatedRegisters + " registers delegate to GitHub: " + (parts.length ? parts.join(" · ") : "nothing has been read yet") + ".";
+}
+
 function BacklogView({ st, retry }) {
   const [pri, setPri] = useState(null);
   const [kind, setKind] = useState(null);
   const [copied, copy] = useCopyFlash();
+  const [rf, setRf] = useState({ busy: false, text: null, ok: null });
+  // POST, not GET: it spends the GitHub REST budget and writes the tracker cache. The server bounds it (20 s).
+  const refreshGithub = useCallback(async () => {
+    setRf({ busy: true, text: null, ok: null });
+    const r = await api("/api/trackers/refresh", { method: "POST", headers: JSON_HEADERS, body: "{}" });
+    if (r.kind === "aborted") return;
+    if (!r.ok) { setRf({ busy: false, ok: false, text: r.kind === "token" ? TOKEN_EXPIRED : "refresh failed: " + r.error }); return; }
+    const d = r.data || {};
+    const bits = [(d.fetched || 0) + " fetched"];
+    if (d.failed) bits.push(d.failed + " failed");
+    if (d.skipped) bits.push(d.skipped + " not attempted (deadline)");
+    setRf({ busy: false, ok: d.ok !== false, text: d.error ? "refresh failed: " + d.error : "refreshed: " + bits.join(", ") });
+    retry();
+  }, [retry]);
   return html`<${MachineryPage} title="Backlog" question="What open work is recorded, and what is unprioritised?" what="backlog" st=${st} retry=${retry}>${(d) => {
     const s = d.summary || {};
     const bp = s.byPriority || {};
@@ -2733,7 +2774,8 @@ function BacklogView({ st, retry }) {
       <div class="sec">${s.items != null ? s.items : all.length} items in ${s.files || 0} files · ${BACKLOG_PRIORITIES.map((k) => k + " " + (bp[k] || 0)).join(" · ")}${s.mergedDuplicates ? " · " + s.mergedDuplicates + " duplicates merged" : ""}</div>
       ${s.caveat ? html`<div class="caveat">${s.caveat}</div>` : null}
       ${s.handovers && s.handovers.sections ? html`<div class="dmeta">${s.handovers.sections} handover sections (${s.handovers.open} open) are not ranked items and are not listed here; "propagate backlog" prints them.</div>` : null}
-      ${s.delegatedRegisters ? html`<div class="dmeta">${s.delegatedRegisters} registers delegate to an external tracker; their open work is not counted here.</div>` : null}
+      ${s.delegatedRegisters ? html`<div class="dmeta">${githubNote(s)}</div>` : null}
+      ${s.delegatedRegisters && s.github ? html`<div class="dmeta"><button class="ghost" disabled=${rf.busy} onClick=${refreshGithub}>${rf.busy ? "refreshing from GitHub…" : "refresh from GitHub"}</button>${rf.text ? html` <span role="status" class=${rf.ok === false ? "bad" : ""}>${rf.text}</span>` : null}</div>` : null}
       ${all.length === 0 ? html`<div class="reason">${backlogEmpty(s)}</div>` : html`<div>
         <div class="chips" role="group" aria-label="filter by priority">
           <button class=${"chip" + (pri === null ? " on" : "")} onClick=${() => setPri(null)}>any priority<b>${all.length}</b></button>
@@ -2747,7 +2789,9 @@ function BacklogView({ st, retry }) {
           <${DataTable} columns=${BACKLOG_COLUMNS} rows=${shown} rowKey=${(r) => r.id} initialSort=${{ key: "priority", dir: "asc" }} tie=${(r) => r.file + ":" + (r.line || 0)} label="open items" flashKey=${copied}
             act=${(r) => { const l = backlogLocator(r); return l ? () => copy(r.id, l) : null; }}
             tip=${(r) => { const l = backlogLocator(r); return { title: (r.ref ? r.ref + " · " : "") + (r.priority === null || r.priority === undefined ? "no priority" : "P" + r.priority), lines: [
-              r.text, r.alsoIn ? "also recorded in " + r.alsoIn + " other register(s)" : null, l ? "click to copy " + l : "no file recorded for this item"].filter(Boolean) }; }} />`}
+              r.text, r.alsoIn ? "also recorded in " + r.alsoIn + " other register(s)" : null,
+              r.kind === "github" ? "GitHub issue in " + (r.repo || "an unknown repo") + (arr(r.labels).length ? " · " + arr(r.labels).join(", ") : "") + (r.stale ? " · STALE: the last refresh could not read this tracker" : "") : null,
+              l ? "click to copy " + l : "no file recorded for this item"].filter(Boolean) }; }} />`}
       </div>`}
     </div>`;
   }}<//>`;

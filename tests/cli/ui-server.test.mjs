@@ -68,6 +68,7 @@ const free = () => new Promise((res) => { const s = net.createServer(); s.listen
 let ctx;       // the server with injected data
 let real;      // a server built with NO overrides: the production construction path
 let hooks = {}; // per-test behaviour for the injected dependencies
+const REFRESH_CALLS = []; // every call the tracker-refresh endpoint made to the (fake) GitHub read
 
 before(async () => {
   const quiet = { log() {} };
@@ -90,6 +91,9 @@ before(async () => {
     readSnapshot: async () => { if (hooks.snapshotThrows) throw new Error("snapshot exploded"); return { ok: false, reason: "none", ageMs: null }; },
     evidenceFor: async (b) => { if (hooks.evidenceThrows) throw new Error("diff exploded"); return (await import("../../lib/report/evidence.mjs")).evidenceFor(b); },
     surfacePayload: async () => { if (hooks.surfaceThrows) throw new Error("surface exploded"); return { fixture: "surface" }; },
+    // #104: the GitHub read behind POST /api/trackers/refresh. Recorded, never real: the test asserts on the calls.
+    refreshTrackers: async (a) => { REFRESH_CALLS.push(a); if (hooks.refreshThrows) throw new Error("refresh exploded"); return hooks.refreshResult ?? { ok: true, fetched: 2, failed: 0, skipped: 0, unsupported: 0, deadlineHit: false, wrote: true, error: null }; },
+    backlog: () => ({ totals: { delegated: [{ file: "/x/TODOS.md", delegatedTo: "https://github.com/o/r/issues" }] } }),
     // ttlMs 0: every request recomputes, so a per-test hook is seen. The cache itself is tested in machinery.test.mjs.
     // "history" (Phase 4b) is page-only: it has no count and no tile, so it returns a detail and nothing else.
     machinery: { ttlMs: 0, sources: { ...Object.fromEntries(["claims", "rules", "caps", "skills", "backlog", "goals"].map((k) => [k, async () => {
@@ -753,4 +757,45 @@ test("headers: no-store, no-referrer, frame-ancestors 'none' and X-Frame-Options
     assert.equal(res.headers["content-security-policy"], "frame-ancestors 'none'", name);
     assert.equal(res.headers["x-frame-options"], "DENY", name);
   }
+});
+
+
+// ── POST /api/trackers/refresh (#104, R4) ───────────────────────────────────
+
+test("/api/trackers/refresh: no token is 401, a foreign Origin or Host is 403, GET is not the verb -- and the GitHub read is NOT run for any of them", async () => {
+  const before = REFRESH_CALLS.length;
+  assert.equal((await call(ctx, "POST", "/api/trackers/refresh", { token: "nope", body: {} })).status, 401);
+  assert.equal((await call(ctx, "POST", "/api/trackers/refresh", { token: null, body: {} })).status, 401);
+  assert.equal((await call(ctx, "POST", "/api/trackers/refresh", { body: {}, headers: { origin: "http://evil.example" } })).status, 403);
+  assert.equal((await call(ctx, "POST", "/api/trackers/refresh", { body: {}, headers: { host: "evil.example" } })).status, 403);
+  assert.equal((await call(ctx, "GET", "/api/trackers/refresh")).status, 404, "a GET must not spend the GitHub budget");
+  // The effect, not the status: a guard that answered 401 after running the read would pass every line above.
+  assert.equal(REFRESH_CALLS.length, before, "the refusals never reached refreshTrackers");
+});
+
+test("/api/trackers/refresh with the token reads the delegated registers once, bounded, and a failed read is a 200 with ok:false and its reason", async () => {
+  const before = REFRESH_CALLS.length;
+  const ok = await call(ctx, "POST", "/api/trackers/refresh", { body: {} });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.ok, true);
+  assert.equal(ok.json.fetched, 2);
+  assert.equal(REFRESH_CALLS.length, before + 1);
+  const a = REFRESH_CALLS.at(-1);
+  assert.deepEqual(a.delegated, [{ file: "/x/TODOS.md", delegatedTo: "https://github.com/o/r/issues" }]);
+  assert.ok(a.deadlineMs > 0 && a.deadlineMs <= 30000, "the request is bounded: a hung gh cannot hold it open");
+
+  hooks.refreshResult = { ok: false, fetched: 0, failed: 1, skipped: 0, unsupported: 0, deadlineHit: false, wrote: true, error: null };
+  try {
+    const bad = await call(ctx, "POST", "/api/trackers/refresh", { body: {} });
+    assert.equal(bad.status, 200, "an unreadable tracker is a result the page shows, not a server error");
+    assert.equal(bad.json.ok, false);
+    assert.equal(bad.json.failed, 1);
+  } finally { delete hooks.refreshResult; }
+
+  hooks.refreshThrows = true;
+  try {
+    const boom = await call(ctx, "POST", "/api/trackers/refresh", { body: {} });
+    assert.equal(boom.status, 500);
+    assert.deepEqual(boom.json, { ok: false, error: "refresh exploded" });
+  } finally { delete hooks.refreshThrows; }
 });

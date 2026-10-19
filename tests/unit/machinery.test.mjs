@@ -376,6 +376,28 @@ test("phase 4b backlog: rows keep the ranked items and only those; text is one l
   assert.equal(backlogKind("/x/y/ISSUES.md"), "issue");
 });
 
+test("#104 backlog: a GitHub row carries its url, repo and labels through shapeBacklog; only an https url is carried; the summary names the trackers and their age", () => {
+  const gh = (over) => ({ id: "#12", repo: "o/r", url: "https://github.com/o/r/issues/12", text: "an issue **bold**", priority: 1, file: "/h/GitHub/E/TODOS.md", line: null, kind: "github", labels: ["task", "priority:P1"], sources: [{ file: "/h/GitHub/E/TODOS.md", line: null }], ...over });
+  const r = {
+    ranked: [gh(), gh({ id: "#13", url: "javascript:alert(1)", stale: true }), gh({ id: "#14", url: "http://github.com/o/r/issues/14" })],
+    totals: { stateFilesRead: 0, todoFilesRead: 1, issueFilesRead: 0, delegated: [{ file: "/h/GitHub/E/TODOS.md", delegatedTo: "https://github.com/o/r/issues" }],
+      trackers: { trackers: 2, counted: 1, unreadable: 1, unsupported: 0, notFetched: 0, stale: 1, openIssues: 3, rankedIssues: 3, handoverIssues: 2, asOf: "2026-10-19T01:00:00.000Z", asOfAgeMs: 2 * 3600_000, cache: { error: null } } },
+    handovers: { files: [], github: { open: 2 } },
+  };
+  const s = shapeBacklog(r, priorityCaveat);
+  const [a, b, c] = s.detail.rows;
+  assert.deepEqual([a.ref, a.url, a.repo, a.kind, a.line, a.labels, a.stale], ["#12", "https://github.com/o/r/issues/12", "o/r", "github", null, ["task", "priority:P1"], false]);
+  assert.equal(b.url, null, "a javascript: url is never carried: the page renders it as an href");
+  assert.equal(b.stale, true);
+  assert.equal(c.url, null, "only https");
+  assert.deepEqual(s.detail.kinds, [{ kind: "github", label: "GitHub", count: 3 }]);
+  assert.deepEqual(s.detail.summary.github, { trackers: 2, counted: 1, unreadable: 1, unsupported: 0, notFetched: 0, stale: 1, open: 3, ranked: 3, handoverIssues: 2, asOf: "2026-10-19T01:00:00.000Z", asOfText: "2 h ago", cacheError: null });
+  assert.equal(s.detail.summary.handovers.github, 2);
+  // A non-GitHub row has none of the GitHub keys: the shape is unchanged for the existing page.
+  const plain = shapeBacklog(BACKLOG, priorityCaveat).detail.rows[0];
+  assert.equal("url" in plain, false);
+});
+
 test("phase 4b backlog: the floor caveat is the CLI's own sentence (one function), and it is absent when everything has a priority", () => {
   const s = shapeBacklog(BACKLOG, priorityCaveat);
   assert.equal(s.detail.summary.caveat, '2 of 4 carry NO priority — so "2 prioritised" is a floor, not a ranking');

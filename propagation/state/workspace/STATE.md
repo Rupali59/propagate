@@ -1,5 +1,16 @@
 # propagate — State
 
+## R4: backlog reads the moved work back from GitHub (#104) — 2026-10-19 (0.15.40)
+
+`backlog` refreshes GitHub first (REST, not GraphQL — the GraphQL budget ran out on 2026-10-18 and blocked every write;
+per-call timeout plus total deadline) into `<stateDir>/tracker-cache.json`; `--offline` reads the cache only. `backlog()`
+itself stays synchronous and never spawns gh, so doctor, digest and the dashboard read the cache and show its age.
+Measured on the real tree: 28 trackers, 455 open issues, 450 ranked rows with links (5 handovers kept out of ranked);
+each tracker count matched an independent GraphQL count except one issue created in the same second as the fetch.
+Network off: every tracker unreadable and stale, last rows kept, and the summary reads "not read", not 0 (a 0 there was
+found by that check and fixed). The monitor refreshes on schedule. Also: `.githooks/post-merge` follows #97 (G83).
+Next: the public-repo cleanup (DECISIONS 2026-10-19), then R5 (#105).
+
 ## Implementation code leaves `commands/` for `cli/` (#97) — 2026-10-18 (0.15.39)
 
 `commands/` holds only the four slash-command `.md` files; the 18 command modules, `ui.client.js`, `ui/css/` and `vendor/`
