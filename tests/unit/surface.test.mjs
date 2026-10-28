@@ -593,6 +593,87 @@ test("toJudge is null with a reason when the fix-order join is missing", () => {
   assert.match(w.toJudgeReason, /join/);
 });
 
+test("the queue splits by action: toJudge + decide + blocked === total whenever the join is present", () => {
+  // A free DRIFTED (judge), B free DIVERGED (pick a side), C blocked DRIFTED, D blocked DIVERGED,
+  // E free REVERSED (judge), F free UNMATCHED (judge). Every item lands in exactly one part.
+  const items = [
+    blockedItem("A", "DRIFTED", []),
+    blockedItem("B", "DIVERGED", []),
+    blockedItem("C", "DRIFTED", ["A"]),
+    blockedItem("D", "DIVERGED", ["A"]),
+    blockedItem("E", "REVERSED", []),
+    blockedItem("F", "UNMATCHED", []),
+  ];
+  const w = buildWorklist(items);
+  assert.deepEqual([w.toJudge, w.decide, w.blocked], [3, 1, 2]);
+  assert.equal(w.toJudge + w.decide + w.blocked, w.total, "the three parts must partition the queue");
+  // A DIVERGED+blocked edge is counted ONCE, as blocked (never as a side to pick).
+  assert.equal(w.decide, 1);
+  // The same through buildSurface, so the wiring is covered and not just the helper.
+  const surfaced = buildSurface({ queue: queueOf(items), now: NOW }).worklist;
+  assert.equal(surfaced.toJudge + surfaced.decide + surfaced.blocked, surfaced.total);
+});
+
+test("decide and blocked are null (not 0) with toJudge when the fix-order join is missing", () => {
+  const w = buildWorklist([{ ...item(), blocked: null }, { ...item(), blocked: false }]);
+  assert.deepEqual([w.toJudge, w.decide, w.blocked], [null, null, null], "an unjoined set cannot be split by action");
+  assert.equal(w.total, 2);
+  assert.match(w.toJudgeReason, /join/);
+});
+
+test("ages bucket last.ts with ageBucket, sum to total, and keep never apart", () => {
+  const now = Date.parse("2026-10-28T12:00:00Z");
+  const ago = (days) => new Date(now - days * 86400000).toISOString();
+  const items = [
+    blockedItem("a", "DRIFTED", [], { ts: ago(0.2) }),   // today
+    blockedItem("b", "DRIFTED", [], { ts: ago(3) }),     // week
+    blockedItem("c", "DRIFTED", [], { ts: ago(10) }),    // fortnight
+    blockedItem("d", "DRIFTED", [], { ts: ago(10) }),    // fortnight
+    blockedItem("e", "DRIFTED", [], { ts: ago(40) }),    // stale
+    blockedItem("f", "DRIFTED", []),                      // never
+    blockedItem("g", "DRIFTED", [], { ts: "not a date" }), // unparseable counts as never, like the edges row
+  ];
+  const w = buildWorklist(items, { now });
+  assert.deepEqual(w.ages, { never: 2, today: 1, week: 1, fortnight: 2, stale: 1 });
+  assert.equal(Object.values(w.ages).reduce((a, b) => a + b, 0), w.total, "every item is in exactly one age bucket");
+  // buildSurface passes its own `now` through; the edges row buckets the same field the same way.
+  const surfaced = buildSurface({ queue: queueOf(items), now }).worklist.ages;
+  assert.deepEqual(surfaced, w.ages);
+  // inbox.mjs calls buildWorklist(items) with no options: still valid.
+  assert.equal(buildWorklist(items).ages.never, 2);
+  assert.deepEqual(buildWorklist([]).ages, { never: 0, today: 0, week: 0, fortnight: 0, stale: 0 });
+});
+
+test("velocity.idleDays counts the trailing run of zero-verdict days", () => {
+  const day = (n, total) => ({ day: `2026-10-${String(n).padStart(2, "0")}`, total, noChange: 0, changed: total });
+  const vel = (days) => buildVelocity({ charts: { dispositionsByDay: { error: null, windowDays: days.length, days, events: 0, noChangeEvents: 0, noChangeShareOfEvents: null } } });
+  assert.equal(vel([day(24, 11), day(25, 3), day(26, 5), day(27, 2), day(28, 4)]).idleDays, 0, "a verdict today means 0 idle days");
+  assert.equal(vel([day(24, 11), day(25, 0), day(26, 0), day(27, 0), day(28, 0)]).idleDays, 4, "the live shape: four idle days after a busy one");
+  assert.equal(vel([day(24, 0), day(25, 3), day(26, 0), day(27, 0), day(28, 0)]).idleDays, 3, "an earlier gap does not count, only the trailing run");
+  assert.equal(vel([day(24, 0), day(25, 0), day(26, 0)]).idleDays, 3, "all zeros: the whole window is idle");
+  assert.equal(vel([day(24, 0), day(25, 7), day(26, 0)]).idleDays, 1);
+  assert.equal(buildVelocity(undefined).idleDays, undefined, "an unknown velocity carries no idleDays: the widget says can't tell");
+});
+
+test("changed carries the stream window's start, or null - never an invented time", () => {
+  const c = buildChangedSummary({ since: "2026-10-21T06:16:31.556Z", sinceSource: "default-7d", summary: { total: 36, open: 1, closed: 35 } });
+  assert.equal(c.since, "2026-10-21T06:16:31.556Z");
+  assert.equal(c.sinceSource, "default-7d");
+  const none = buildChangedSummary({ summary: { total: 2, open: 0, closed: 2 } });
+  assert.equal(none.since, null, "no window in the stream payload means null, so the widget says 'in the stream'");
+  assert.equal(buildChangedSummary({ since: "", summary: { total: 1, open: 0, closed: 1 } }).since, null);
+});
+
+test("changed says 'cursor' only when a marked cursor was read; missing or corrupt is the 7-day default", () => {
+  const base = { since: "2026-10-27T09:00:00.000Z", sinceSource: "given", summary: { total: 3, open: 1, closed: 2 } };
+  assert.equal(buildChangedSummary({ ...base, cursorStatus: "ok" }).sinceSource, "cursor");
+  // streamPayload labels ANY passed since as "given"; without the cursor status that would read
+  // as a real last look. A missing cursor must say it is the default.
+  assert.equal(buildChangedSummary({ ...base, cursorStatus: "missing" }).sinceSource, "default-7d");
+  assert.equal(buildChangedSummary({ ...base, cursorStatus: "corrupt" }).sinceSource, "default-7d");
+  assert.equal(buildChangedSummary(base).sinceSource, "given", "no cursor status: the payload's own label stands");
+});
+
 test("calendar buckets last.ts by LOCAL day: 2026-10-12T20:00Z is 10-13 in Asia/Kolkata", () => {
   const items = [
     blockedItem("a", "DRIFTED", [], { ts: "2026-10-12T20:00:00Z" }),

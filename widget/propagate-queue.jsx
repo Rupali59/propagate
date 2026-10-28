@@ -1,19 +1,26 @@
 // propagate — the whole propagation picture on the desktop layer, draggable.
 //
-// WHAT THIS IS NOW (rewritten 2026-10-15 to the locked "variant A" target, the
-// large landscape card; compacted 2026-10-15, revision 3). Top to bottom: a
-// changed pill, HEALTH as one row of eight icon pills, WORKLIST as a donut of
-// edge states beside a contribution calendar sized to the card's content width,
-// LEVERAGE at full width (which edges hold the blocked ones back), VELOCITY
-// (judgements per day, split changed / no-change) beside COMMANDS (usage and the
-// top five; the 14-day chart only once three days carry data), and a footer
-// carrying the freshness clocks and, only when thin, the headroom note. The
-// previous version was nine ratio-bar rows
-// plus an edge grid plus a judge panel; none of that survives.
+// WHAT THIS IS NOW (rewritten 2026-10-28, QUEUE FIRST; the 2026-10-15 "variant A"
+// card it replaces had ~60 numbers, ~110 calendar cells and ~40 bars, and the one
+// answer a person opens it for was 12px dim subtext). The review and its findings
+// F1-F13: /Users/rupali.b/.claude/plans/crispy-imagining-lemon.md, saved in the
+// workspace as UX-REVIEW-2026-10-28-widget.md. Top to bottom:
+//   header      the title and a "N changed since <day>" pill
+//   QUEUE       "92 to judge now" as the largest element, "of 162 in queue", ONE
+//               segmented bar split by what a person can DO (judge / pick a side /
+//               blocked), the age of the queue in words, and small edge-state chips
+//   KEEPING UP  "nothing judged in N days" (amber, with an icon) or "N judged in 14
+//               days", plus a compact sparkline of verdicts per day
+//   START HERE  the top roots to settle, in plain words ("settling it frees N blocked")
+//   HEALTH      one line: failing sections named and deep-linked, "health ok" otherwise
+//   footer      refresh, headroom when thin, the two freshness clocks, the click gate
+// Deleted on purpose: Commands (propagate measuring itself; "556 failed" read as an
+// alarm about the user's work; it stays in /activity), the contribution calendar, the
+// edge-state donut and the cascade bar. Hover detail is formatting only (tipLines).
 //
 // EVERY NUMBER COMES FROM `propagate surface --json`; THE WIDGET DRAWS, IT
-// DOES NOT DERIVE (N86). The one thing it computes is GEOMETRY — donut arc
-// angles, which calendar cell a day lands in, bar heights — because the payload
+// DOES NOT DERIVE (N86). The one thing it computes is GEOMETRY — the queue
+// bar's percentages, sparkline bar heights — because the payload
 // is pure data (decision D4). That arithmetic lives in the marked pure:charts
 // block below, plain JS with no JSX and no imports, so tests/unit/widget-charts
 // .test.mjs can run it in node:vm and assert the maths.
@@ -32,8 +39,8 @@
 // that holds, so nothing is hidden behind
 // one: every colour is paired with an icon or a label (Apple HIG: convey
 // meaning without relying on colour), and the clicks are only shortcuts —
-// worklist /judge, leverage /unblock, velocity and commands /activity, health
-// /health, the pill /activity (routes renamed 2026-10-15, plan F11) — through widget/open-ui.sh.
+// queue /judge, /unblock, velocity /activity, health
+// /health, the pill /judge (routes renamed 2026-10-15, plan F11) — through widget/open-ui.sh.
 //
 // DESKTOP JUDGING WAS REMOVED (decision D15, 2026-10-15). This file used to
 // carry a judge panel and shell out to widget/judge.sh, which writes events to
@@ -323,18 +330,12 @@ export const className = `
   .chg.none { color: var(--fg); border-color: var(--hair); background: rgba(127,127,127,.22); }
   .chg.unknown { color: var(--dim); border-color: var(--hair); cursor: default; }
 
-  /* PANELS. One quiet container per section; 11px inside and between (HIG's
-     tight Mac-desktop margin; revision 3 compacted the card from 16-20px). */
+  /* PANELS. One quiet container per section; 11px inside and between. */
   .pn { border: .5px solid var(--hair); border-radius: 12px; padding: 11px; background: rgba(127,127,127,.05); }
-  /* 640px is the content width every panel is laid out against: the calendar's
-     week count is DERIVED from it (CARD_INNER in the script is this less the
-     panel padding, and widget-contract asserts they agree). The shell stays
-     width: max-content (G9); this fixes the stack so one panel's one-line
-     max-content cannot widen the card past the grid the others were drawn on. */
-  .stack { display: flex; flex-direction: column; gap: 11px; width: 640px; }
+  /* 440px is the stack's layout width: the queue bar's segments are percentages of it, so it
+     must be a definite width. The shell stays width: max-content (G9). */
+  .stack { display: flex; flex-direction: column; gap: 11px; width: 440px; }
   .act { cursor: pointer; }
-  .row2 { display: flex; gap: 11px; align-items: stretch; }
-  .row2 > .pn { flex: 1 1 0; }
   .ph { display: flex; align-items: center; flex-wrap: wrap; gap: 3px var(--s2); margin-bottom: 4px; }
   .st { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
   .sb { color: var(--dim); }
@@ -342,73 +343,61 @@ export const className = `
   .why { display: flex; align-items: center; gap: var(--s2); color: var(--dim); }
   .ic { flex: 0 0 auto; display: block; }
 
-  /* HEALTH PILLS, ONE row of eight. Each carries its section icon AND a status
-     glyph whose SHAPE differs (check, alert, minus, question), so no state is
-     colour alone. Icon and glyph share the top line and the label sits under
-     them, which is what lets eight pills fit the card's content width. accepted-
-     only is deliberately grey: a failure someone declared permanent is neither ok
-     nor a failure. */
-  .hgrid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--s2); }
-  .pill { display: flex; flex-direction: column; gap: 2px; font-size: 11px; padding: 5px 5px; border: .5px solid var(--hair); border-radius: 8px; background: rgba(127,127,127,.06); white-space: nowrap; }
-  .pill .pt { display: flex; align-items: center; justify-content: space-between; gap: var(--s1); }
-  .pill .ps { display: flex; align-items: center; gap: var(--s1); font-weight: 600; }
-  .pill.ok .ps { color: var(--st-ok); }
-  .pill.fail { border-color: var(--st-warn); }
-  .pill.fail .ps { color: var(--st-warn); }
-  .pill.accepted-only .ps { color: var(--dim); }
-  .pill.unknown .ps { color: var(--dim); }
-  .hnote { margin-top: var(--s2); color: var(--dim); display: flex; align-items: center; gap: var(--s2); }
-
-  /* WORKLIST: donut + legend on the left, calendar on the right. */
-  .wl { display: flex; gap: 11px; align-items: flex-start; }
-  .lg { display: flex; flex-direction: column; gap: var(--s2); padding-top: var(--s3); width: 128px; flex: 0 0 auto; }
-  .lgr { display: flex; align-items: center; gap: var(--s2); }
-  .lgr .n { margin-left: auto; padding-left: var(--s2); font-variant-numeric: tabular-nums; }
+  /* QUEUE. The hero number is the largest thing on the card. The bar is split by what a
+     person can DO; every segment has a text key with its count under it, so colour is
+     never alone. */
+  .hero { display: flex; align-items: baseline; gap: var(--s3); }
+  .hero .big { font-size: 28px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .hero .of { margin-left: auto; color: var(--dim); white-space: nowrap; }
+  .qbar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--track); margin-top: var(--s3); }
+  .qs { display: block; height: 100%; }
+  .qs.judge { background: var(--st-accent); }
+  .qs.decide { background: var(--edge-diverge); }
+  .qs.blocked { background: var(--dimmer); }
+  .qkeys { display: flex; flex-wrap: wrap; gap: 3px 11px; margin-top: var(--s2); }
+  .qk { display: flex; align-items: center; gap: var(--s2); white-space: nowrap; }
+  .qk b { font-variant-numeric: tabular-nums; }
   .sw { width: 10px; height: 10px; border-radius: 5px; background: var(--dim); flex: 0 0 auto; }
+  .sw.judge { background: var(--st-accent); }
+  .sw.decide { background: var(--edge-diverge); }
+  .sw.blocked { background: var(--dimmer); }
   .sw.DRIFTED { background: var(--edge-drift); }
   .sw.REVERSED { background: var(--edge-reverse); }
   .sw.DIVERGED { background: var(--edge-diverge); }
   .sw.UNMATCHED { background: var(--dim); }
   .sw.other { background: var(--dimmer); }
-  .sw.chgd { background: var(--st-ok); }
-  .sw.nochg { background: var(--st-ok); opacity: .35; }
-  .cap { margin-top: var(--s2); color: var(--dim); }
+  .ages { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 11px; margin-top: var(--s3); color: var(--dim); }
+  .ages b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ages .old { color: var(--st-caution); display: flex; align-items: center; gap: var(--s1); }
+  .ages .old b { color: var(--st-caution); }
+  .chips { display: flex; flex-wrap: wrap; gap: 3px 11px; margin-top: var(--s2); color: var(--dim); }
+  .chip { display: flex; align-items: center; gap: var(--s1); white-space: nowrap; }
+  .chip b { font-variant-numeric: tabular-nums; }
 
-  /* CHART FILLS. Classes here, tokens only. */
-  .track { fill: none; stroke: var(--track); stroke-width: 18; }
-  .arc { fill: none; stroke-width: 18; }
-  .arc.DRIFTED { stroke: var(--edge-drift); }
-  .arc.REVERSED { stroke: var(--edge-reverse); }
-  .arc.DIVERGED { stroke: var(--edge-diverge); }
-  .arc.UNMATCHED { stroke: var(--dim); }
-  .arc.other { stroke: var(--dimmer); }
-  .t { fill: var(--dim); font-size: 11px; }
-  .tn { fill: var(--fg); font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .cc { fill: var(--track); }
-  .cc.l1 { fill: var(--st-caution); fill-opacity: .30; }
-  .cc.l2 { fill: var(--st-caution); fill-opacity: .50; }
-  .cc.l3 { fill: var(--st-caution); fill-opacity: .75; }
-  .cc.l4 { fill: var(--st-caution); }
-  .cc.today { stroke: var(--fg); stroke-width: 1.5; }
+  /* KEEPING UP. One line and a sparkline: idle days are amber WITH an icon and words. */
+  .keep { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+  .keep .idle { color: var(--st-caution); display: flex; align-items: center; gap: var(--s2); font-weight: 600; }
+  .keep .spark { margin-left: auto; }
   .bc { fill: var(--st-ok); }
-  .bn { fill: var(--st-ok); fill-opacity: .35; }
-  .bu { fill: var(--st-accent); }
   .bz { fill: var(--dimmer); }
 
-  /* LEVERAGE. A root's two numbers are both labelled: "frees N now" is what
-     settling it releases on its own, "upstream of M" is how many blocked edges
-     list it at all (D14). Never "unblocks". */
+  /* START HERE. A root's number is labelled in words: "settling it frees N blocked". */
   .lv { display: flex; flex-direction: column; gap: var(--s2); }
-  .lvh { display: flex; align-items: baseline; gap: 11px; flex-wrap: wrap; }
   .rt { display: flex; align-items: center; gap: 11px; }
-  /* A root's label is never ellipsised by CSS: compactPath() elides DIRECTORIES
-     only, so a filename always survives. */
-  .rn { flex: 1 1 auto; white-space: nowrap; }
-  .mt { height: 8px; border-radius: 4px; background: var(--track); flex: 0 0 auto; }
-  .mf { height: 8px; border-radius: 4px; background: var(--st-accent); }
-  .nums { color: var(--dim); white-space: nowrap; min-width: 235px; text-align: right; }
+  /* min-width:0 lets the path column shrink; without it a long dir line pushed .nums past the card edge (seen 2026-10-28) */
+  .rn { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; white-space: nowrap; }
+  .rn > span { overflow: hidden; text-overflow: ellipsis; }
+  .rdir { color: var(--dim); font-size: 11px; }
+  .nums { flex: none; color: var(--dim); white-space: nowrap; text-align: right; }
   .nums b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .big { font-size: 14px; font-weight: 600; }
+
+  /* HEALTH, one line. Failing sections are named (icon + words + count, amber-red), accepted-only
+     reds are counted and grey, unknown ones are named as "can't tell". */
+  .hl { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 11px; color: var(--dim); }
+  .hl .bad { color: var(--st-warn); display: flex; align-items: center; gap: var(--s1); font-weight: 600; white-space: nowrap; }
+  .hl .cant { display: flex; align-items: center; gap: var(--s1); white-space: nowrap; }
+  .hl .okl { color: var(--st-ok); display: flex; align-items: center; gap: var(--s1); }
+
   /* HOVER IS AFFORDANCE, NEVER INFORMATION (2026-10-15). Every fact stays inline; hover only says
      "this is clickable". Possible since the foreground window tracks the mouse (Übersicht 1.6
      detectWidgetHover.js). widget-contract.test.mjs allows only these properties under :hover. */
@@ -416,13 +405,10 @@ export const className = `
   .hv { border-radius: 6px; }
   .pn.act:hover { box-shadow: inset 0 0 0 1px var(--track); }
   .hv:hover { background-color: var(--track); }
-  .cs.hv:hover { opacity: .75; }
-  /* SHAPES ARE TARGETS TOO (2026-10-15, "visualisations dont have hover, labels do"): every arc,
-     calendar cell and day column. Opacity says "this one"; a cell also gets an outline, because
-     a 13px square barely reads a fade. A transparent .hit rect makes an EMPTY day hoverable. */
+  .qs.hv:hover { opacity: .75; }
+  /* Shapes are targets too: opacity says "this one". A transparent .hit rect makes an EMPTY day hoverable. */
   .vz { cursor: pointer; }
   .vz:hover { opacity: .7; }
-  .cc.vz:hover { stroke: var(--fg); stroke-width: 1.5; }
   .hit { fill: none; pointer-events: all; }
   /* THE TOOLTIP. Fixed to the Übersicht window (clientX/Y are window coordinates), above the card,
      never catching the mouse itself so it cannot flicker under the pointer. */
@@ -430,32 +416,6 @@ export const className = `
          border-radius: 8px; padding: 7px 10px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); font-size: 12px; line-height: 1.45; white-space: nowrap; }
   .tip .tt { font-weight: 600; }
   .tip .tl { color: var(--dim); }
-  .cas { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--track); margin-top: 9px; }
-  .cs { display: block; height: 100%; }
-  .cs.root { background: var(--st-accent); }
-  .cs.r2 { opacity: .72; }
-  .cs.r3 { opacity: .5; }
-  .cs.several { background: var(--st-caution); }
-  .cs.rest { background: var(--track); }
-  .csl { display: flex; margin-top: 3px; font-size: 11px; color: var(--dim); white-space: nowrap; }
-  .csl span { overflow: hidden; text-overflow: clip; }
-  .rk { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 2px; }
-  .rnum { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-  .rn { display: flex; flex-direction: column; }
-  .rdir { color: var(--dim); font-size: 11px; }
-  .keys { display: flex; gap: var(--s4); margin-top: var(--s2); color: var(--dim); }
-  .keys span { display: flex; align-items: center; gap: var(--s2); }
-
-  /* COMMANDS */
-  .cmd { display: flex; flex-direction: column; gap: var(--s2); }
-  .tc { display: flex; flex-direction: column; gap: 4px; }
-  .tcr { line-height: 1.25; }
-  .tot { display: flex; align-items: center; gap: 11px; color: var(--dim); white-space: nowrap; }
-  .tot span { display: flex; align-items: center; gap: var(--s1); }
-  .tot b { color: var(--fg); }
-  .tcr { display: flex; align-items: center; gap: var(--s3); }
-  .tcr .nm { width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tcr .n { margin-left: auto; font-variant-numeric: tabular-nums; }
 
   /* HEADROOM, shown only when thin (or when it cannot be told), now INLINE in the
      footer row instead of its own boxed row. Amber text AND a gauge icon AND the
@@ -481,8 +441,6 @@ export const className = `
 // anything defined outside it is a ReferenceError in the vm and a failing test.
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const DAY_MS = 86400000;
-const WORKLIST_ORDER = ['DRIFTED', 'REVERSED', 'DIVERGED', 'UNMATCHED', 'other'];
 
 // 'YYYY-MM-DD' -> UTC midnight in ms, or null. UTC arithmetic on purpose: the
 // payload's days are already LOCAL days (surface.mjs localDay), so this only
@@ -490,10 +448,6 @@ const WORKLIST_ORDER = ['DRIFTED', 'REVERSED', 'DIVERGED', 'UNMATCHED', 'other']
 function isoToUtc(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));
   return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
-}
-
-function utcToIso(ms) {
-  return new Date(ms).toISOString().slice(0, 10);
 }
 
 // A Date's LOCAL calendar day. Not toISOString(): that is UTC, which names the
@@ -533,95 +487,6 @@ function whyNot(section) {
   return null;
 }
 
-// DONUT. Slices in the edge-family order, angles clockwise from 12 o'clock.
-// Sweeps sum to 360 exactly (the last slice takes the remainder), a single slice
-// is one full ring, and an empty population is total 0 with no arcs — the caller
-// draws the bare track, never a division by zero.
-function donutArcs(byState) {
-  const src = byState || {};
-  const slices = WORKLIST_ORDER
-    .map((key) => ({ key: key, count: Number(src[key]) > 0 ? Number(src[key]) : 0 }))
-    .filter((s) => s.count > 0);
-  const total = slices.reduce((n, s) => n + s.count, 0);
-  const arcs = [];
-  let at = 0;
-  slices.forEach((s, i) => {
-    const last = i === slices.length - 1;
-    const sweep = last ? 360 - at : (s.count / total) * 360;
-    arcs.push({ key: s.key, count: s.count, startDeg: at, sweepDeg: sweep, full: slices.length === 1 });
-    at += sweep;
-  });
-  return { total: total, arcs: arcs };
-}
-
-function polar(cx, cy, r, deg) {
-  const a = ((deg - 90) * Math.PI) / 180;
-  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-}
-
-// SVG path for one ring segment. A full ring cannot be one arc (start == end
-// draws nothing), so it is two half arcs.
-function arcPath(cx, cy, r, startDeg, sweepDeg) {
-  const f = (n) => String(Math.round(n * 100) / 100);
-  if (sweepDeg >= 359.999) {
-    const a = polar(cx, cy, r, startDeg);
-    const b = polar(cx, cy, r, startDeg + 180);
-    return 'M' + f(a[0]) + ' ' + f(a[1]) + ' A' + r + ' ' + r + ' 0 1 1 ' + f(b[0]) + ' ' + f(b[1])
-      + ' A' + r + ' ' + r + ' 0 1 1 ' + f(a[0]) + ' ' + f(a[1]);
-  }
-  const p = polar(cx, cy, r, startDeg);
-  const q = polar(cx, cy, r, startDeg + sweepDeg);
-  return 'M' + f(p[0]) + ' ' + f(p[1]) + ' A' + r + ' ' + r + ' 0 ' + (sweepDeg > 180 ? 1 : 0) + ' 1 ' + f(q[0]) + ' ' + f(q[1]);
-}
-
-// CONTRIBUTION CALENDAR. Columns are Monday-start weeks, the LAST column holds
-// `todayISO`, rows are Monday..Sunday. A day with no items is a real cell at
-// level 0 (a visible baseline), never a missing one; days after today in the
-// last week are `future` and the renderer skips them. Items outside the window
-// are COUNTED (`outside`), not dropped, so the caption can say so.
-function calendarCells(calendar, todayISO, weeks) {
-  const nWeeks = weeks > 0 ? Math.floor(weeks) : 9;
-  const today = isoToUtc(todayISO);
-  if (today == null) {
-    return { error: 'today is not a YYYY-MM-DD date: ' + todayISO, cols: [], months: [], max: 0, outside: 0, future: 0, firstISO: null, lastISO: null };
-  }
-  const todayRow = (new Date(today).getUTCDay() + 6) % 7;
-  const lastMonday = today - todayRow * DAY_MS;
-  const firstMonday = lastMonday - (nWeeks - 1) * 7 * DAY_MS;
-
-  const counts = new Map();
-  let outside = 0;
-  let future = 0;
-  for (const c of calendar || []) {
-    const ms = isoToUtc(c.day);
-    const n = Number(c.count) > 0 ? Number(c.count) : 0;
-    if (ms == null || n === 0) continue;
-    if (ms < firstMonday) outside += n;
-    else if (ms > today) future += n;
-    else counts.set(c.day, (counts.get(c.day) || 0) + n);
-  }
-  const max = Math.max(0, ...counts.values());
-
-  const cols = [];
-  const months = [];
-  let prevMonth = -1;
-  for (let w = 0; w < nWeeks; w += 1) {
-    const cells = [];
-    for (let r = 0; r < 7; r += 1) {
-      const ms = firstMonday + (w * 7 + r) * DAY_MS;
-      const iso = utcToIso(ms);
-      const count = counts.get(iso) || 0;
-      const level = count === 0 ? 0 : Math.min(4, Math.max(1, Math.ceil((4 * count) / max)));
-      cells.push({ iso: iso, row: r, col: w, count: count, level: level, future: ms > today, today: ms === today });
-    }
-    cols.push(cells);
-    const month = new Date(firstMonday + w * 7 * DAY_MS).getUTCMonth();
-    if (month !== prevMonth) months.push({ col: w, label: MONTHS[month] });
-    prevMonth = month;
-  }
-  return { error: null, cols: cols, months: months, max: max, outside: outside, future: future, firstISO: utcToIso(firstMonday), lastISO: utcToIso(lastMonday) };
-}
-
 // BAR HEIGHTS. Scaled to the largest value; 0 stays 0 (the caller draws a
 // baseline tick for it, so zero is visible rather than missing); any positive
 // value is at least 1px so a small day never vanishes.
@@ -630,35 +495,6 @@ function barHeights(values, maxPx) {
   const max = Math.max(0, ...vs);
   if (max === 0) return vs.map(() => 0);
   return vs.map((v) => (v === 0 ? 0 : Math.max(1, Math.round((v / max) * maxPx))));
-}
-
-// STACKED BARS for velocity: total height scales to the busiest day, split into
-// a changed part (solid, on top) and a no-change part (light, below). Each part
-// keeps at least 1px while it is non-zero.
-function stackBars(days, maxPx) {
-  const list = days || [];
-  const heights = barHeights(list.map((row) => row.total), maxPx);
-  return list.map((row, i) => {
-    const h = heights[i];
-    const changed = Number(row.changed) > 0 ? Number(row.changed) : 0;
-    const noChange = Number(row.noChange) > 0 ? Number(row.noChange) : 0;
-    let changedPx = 0;
-    if (h > 0 && changed > 0) {
-      changedPx = Math.round((changed / (changed + noChange)) * h);
-      changedPx = Math.max(1, Math.min(changedPx, noChange > 0 && h > 1 ? h - 1 : h));
-    }
-    return { day: row.day, h: h, changedPx: changedPx, noChangePx: h - changedPx };
-  });
-}
-
-// X-axis ticks: the day of the month, plus the month name on the first bar and
-// whenever a month starts.
-function dayTicks(days) {
-  return (days || []).map((row, i) => {
-    const iso = String(row.day);
-    const dom = Number(iso.slice(8, 10));
-    return { label: String(dom), month: i === 0 || dom === 1 ? MONTHS[Number(iso.slice(5, 7)) - 1] : null };
-  });
 }
 
 // HEALTH PILLS: eight fixed pills over the doctor sections. A pill's status is
@@ -704,68 +540,56 @@ function healthPills(sections) {
   return { pills: pills, otherFailing: otherFailing };
 }
 
-// HOW MANY CALENDAR WEEKS FIT. The card's width is derived from its content (G9),
-// so the calendar cannot ask the card how wide it is; the caller states the
-// width it was given and this returns the whole weeks that fit in it: a left
-// label gutter, then `step` per week, the last cell needing only its own width.
-function calendarWeeks(availPx, labelPx, stepPx, cellPx) {
-  const room = availPx - labelPx - cellPx;
-  return room < 0 ? 1 : Math.floor(room / stepPx) + 1;
-}
-
-// WHETHER THE 14-DAY BAR CHART IS WORTH DRAWING. A chart of thirteen empty days
-// and one bar says nothing a number does not, so it waits for `minDays` days
-// that carry data (default 3). Until then the widget says when recording began.
-function shouldDrawDays(days, minDays) {
-  const min = minDays > 0 ? minDays : 3;
-  return (days || []).filter((row) => Number(row.count) > 0).length >= min;
-}
-
-// The first day in the window that carries data, or null when none does.
-function recordingSince(days) {
-  const hit = (days || []).find((row) => Number(row.count) > 0);
-  return hit ? hit.day : null;
-}
-
-// A PATH LABEL THAT NEVER LOSES ITS FILENAME. Untouched when it fits. Otherwise
-// only DIRECTORIES are elided, most expendable first: the middle ones
-// (first/…/last/file), then all but the first (first/…/file), then all of them
-// (…/file). When even that is too long the filename still wins: truncating
-// "README.md" to "READ…" names nothing, so the result may exceed maxChars.
-function compactPath(label, maxChars) {
-  const s = String(label == null ? '' : label);
-  if (s.length <= maxChars) return s;
-  const parts = s.split('/');
-  const file = parts[parts.length - 1];
-  const dirs = parts.slice(0, -1).filter((d) => d !== '' && d !== '\u2026');
-  if (dirs.length === 0) return s;
-  const tries = [];
-  if (dirs.length > 2) tries.push(dirs[0] + '/\u2026/' + dirs[dirs.length - 1] + '/' + file);
-  if (dirs.length > 1) tries.push(dirs[0] + '/\u2026/' + file);
-  for (const t of tries) if (t.length <= maxChars) return t;
-  return '\u2026/' + file;
-}
-
-// THE LEVERAGE CASCADE (direction A, 2026-10-15). One bar of every blocked edge: a segment per
-// top root (rank 1..3), then the edges that need several roots, then the rest. Widths are
-// percentages that sum to EXACTLY 100 (largest-remainder rounding to 0.1), so the bar never
-// over- or under-fills the track. A zero part is OMITTED, never drawn as a zero-width sliver.
-// The widget derives no number here: n comes from the payload; only the geometry is computed.
-function cascadeParts(cascade) {
-  if (!cascade || !(cascade.blocked > 0)) return [];
-  const raw = [];
-  (cascade.segments || []).forEach((s, i) => raw.push({ key: s.edge_id, kind: 'root', rank: i + 1, n: s.n }));
-  raw.push({ key: 'several', kind: 'several', rank: 0, n: cascade.several });
-  raw.push({ key: 'rest', kind: 'rest', rank: 0, n: cascade.rest });
-  const parts = raw.filter((p) => Number(p.n) > 0);
-  const total = parts.reduce((t, p) => t + p.n, 0);
-  if (total === 0) return [];
-  const tenths = parts.map((p) => (p.n / total) * 1000);
+// LARGEST-REMAINDER ROUNDING to 0.1: percentages that sum to EXACTLY 100, so a bar never over- or
+// under-fills its track. All zeros in, all zeros out (no division by zero).
+function apportion(ns) {
+  const total = ns.reduce((t, n) => t + n, 0);
+  if (!(total > 0)) return ns.map(() => 0);
+  const tenths = ns.map((n) => (n / total) * 1000);
   const floors = tenths.map(Math.floor);
   let left = 1000 - floors.reduce((a, b) => a + b, 0);
   const order = tenths.map((t, i) => [t - floors[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
   for (let k = 0; left > 0; k = (k + 1) % order.length, left -= 1) floors[order[k][1]] += 1;
-  return parts.map((p, i) => ({ ...p, pct: floors[i] / 10 }));
+  return floors.map((f) => f / 10);
+}
+
+// THE QUEUE BAR (2026-10-28): the whole queue split by what a person can DO, in the payload's own
+// counts (worklist.toJudge / decide / blocked, which sum to total). A zero part is OMITTED, never a
+// zero-width sliver. Any null part means the fix-order join is missing and the split is UNKNOWN, so
+// the answer is [] and the caller says "can't tell": a partial bar would be a bar that lies.
+// The widget derives no number here; only the geometry (pct) is computed.
+function queueParts(wl) {
+  if (!wl) return [];
+  const raw = [
+    { key: 'judge', label: 'to judge', n: wl.toJudge },
+    { key: 'decide', label: 'pick a side', n: wl.decide },
+    { key: 'blocked', label: 'blocked', n: wl.blocked },
+  ];
+  if (raw.some((p) => p.n == null || !(Number(p.n) >= 0))) return [];
+  const parts = raw.filter((p) => Number(p.n) > 0);
+  const pcts = apportion(parts.map((p) => Number(p.n)));
+  return parts.map((p, i) => ({ key: p.key, label: p.label, n: Number(p.n), pct: pcts[i] }));
+}
+
+// THE HEALTH LINE (2026-10-28): the eight pills reduced to what a person needs. Failing pills are
+// NAMED; unknown ones are named as "can't tell"; accepted-only reds are only counted. A failing
+// section no pill covers rides along in otherFailing, so nothing hides behind the fixed set.
+function healthSummary(sections) {
+  const h = healthPills(sections);
+  return {
+    failing: h.pills.filter((p) => p.status === 'fail'),
+    unknown: h.pills.filter((p) => p.status === 'unknown'),
+    accepted: h.pills.filter((p) => p.status === 'accepted-only').length,
+    otherFailing: h.otherFailing,
+  };
+}
+
+// "Oct 21" for the changed pill's window start, in the reader's LOCAL day, or null when the payload
+// carries no usable timestamp. Null means "say 'in the stream'"; a time is never invented.
+function sinceText(iso) {
+  if (typeof iso !== 'string' || iso === '') return null;
+  const when = new Date(iso);
+  return isNaN(when.getTime()) ? null : shortDate(localISO(when));
 }
 
 // Where a root row's click goes. A root that is in the queue opens Judge on that edge; anything
@@ -811,30 +635,17 @@ function tipLines(kind, v) {
     const p = pctOf(v.n, v.total);
     return { title: v.label, lines: [plural(v.n, 'edge'), p ? p + ' of ' + v.total + ' queued' : null, 'click to judge these'].filter(Boolean) };
   }
-  if (kind === 'judged-day') {
-    return { title: fmtDay(v.iso), lines: [v.count > 0 ? plural(v.count, 'edge') + ' last judged this day' : 'nothing last judged this day', 'click to open Judge'] };
+  if (kind === 'queue') {
+    const p = pctOf(v.n, v.total);
+    return { title: v.label, lines: [plural(v.n, 'edge'), p ? p + ' of ' + v.total + ' in the queue' : null, v.hint].filter(Boolean) };
   }
   if (kind === 'verdicts') {
     if (!(v.total > 0)) return { title: fmtDay(v.day), lines: ['no verdicts recorded'] };
     return { title: fmtDay(v.day), lines: [plural(v.total, 'verdict'), v.changed + ' changed · ' + v.noChange + ' no change needed'] };
   }
-  if (kind === 'runs') {
-    return { title: fmtDay(v.day), lines: [v.count > 0 ? plural(v.count, 'command') + ' run' : 'no commands run'] };
-  }
-  if (kind === 'segment') {
-    const p = pctOf(v.n, v.blocked);
-    const share = p ? p + ' of ' + v.blocked + ' blocked' : null;
-    if (v.kind === 'root') return { title: v.name || 'root', lines: ['frees ' + v.n + ' now, on its own', share, 'click to judge it'].filter(Boolean) };
-    if (v.kind === 'several') return { title: 'need several roots', lines: [plural(v.n, 'edge') + ' wait on more than one root', share].filter(Boolean) };
-    return { title: 'other roots', lines: [plural(v.n, 'edge') + ' freed by roots beyond the top 3', share].filter(Boolean) };
-  }
   if (kind === 'pill') {
     const s = v.status === 'fail' ? plural(v.fail, 'failing check') : v.status === 'accepted-only' ? plural(v.accepted, 'accepted red') : v.status === 'ok' ? 'all checks pass' : "can't tell";
     return { title: v.label, lines: [s, v.count > 1 ? 'across ' + v.count + ' sections' : null, 'click to open this section'].filter(Boolean) };
-  }
-  if (kind === 'command') {
-    const p = pctOf(v.count, v.total);
-    return { title: v.command, lines: [plural(v.count, 'run'), p ? p + ' of ' + v.total + ' interactive runs' : null].filter(Boolean) };
   }
   return null;
 }
@@ -845,8 +656,8 @@ function tipLines(kind, v) {
 // package: lucide
 // version: 1.55.0
 // license: ISC
-// icons: activity, book-open, check, circle-alert, circle-question-mark, folders, gauge, git-branch, inbox, minus, search, terminal, truck
-// sha256: 70eabbc629ace96eea360634949ca38270f67a98bdc82b1c65a4f9f05be42173
+// icons: activity, book-open, check, circle-alert, circle-question-mark, folders, gauge, git-branch, hourglass, inbox, search, truck
+// sha256: 379ac49492ea92f29aaa42f2ab1cf851b47fba3725f4a76b73a121a4b0670a9e
 const LUCIDE_ICONS = {
   "activity": [["path",{"d":"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"}]],
   "book-open": [["path",{"d":"M12 5v16"}],["path",{"d":"M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"}]],
@@ -856,10 +667,9 @@ const LUCIDE_ICONS = {
   "folders": [["path",{"d":"M20 5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h2.5a1.5 1.5 0 0 1 1.2.6l.6.8a1.5 1.5 0 0 0 1.2.6z"}],["path",{"d":"M3 8.268a2 2 0 0 0-1 1.738V19a2 2 0 0 0 2 2h11a2 2 0 0 0 1.732-1"}]],
   "gauge": [["path",{"d":"m12 14 4-4"}],["path",{"d":"M3.34 19a10 10 0 1 1 17.32 0"}]],
   "git-branch": [["path",{"d":"M15 6a9 9 0 0 0-9 9V3"}],["circle",{"cx":"18","cy":"6","r":"3"}],["circle",{"cx":"6","cy":"18","r":"3"}]],
+  "hourglass": [["path",{"d":"M5 22h14"}],["path",{"d":"M5 2h14"}],["path",{"d":"M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"}],["path",{"d":"M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"}]],
   "inbox": [["polyline",{"points":"22 12 16 12 14 15 10 15 8 12 2 12"}],["path",{"d":"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"}]],
-  "minus": [["path",{"d":"M5 12h14"}]],
   "search": [["path",{"d":"m21 21-4.34-4.34"}],["circle",{"cx":"11","cy":"11","r":"8"}]],
-  "terminal": [["path",{"d":"M12 19h8"}],["path",{"d":"m4 17 6-6-6-6"}]],
   "truck": [["path",{"d":"M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"}],["path",{"d":"M15 18H9"}],["path",{"d":"M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"}],["circle",{"cx":"17","cy":"18","r":"2"}],["circle",{"cx":"7","cy":"18","r":"2"}]]
 };
 // ---- vendored:lucide end ----
@@ -942,13 +752,6 @@ function beginDrag(e, pos, dispatch) {
 // contract.test.mjs reads `<alias>.<field>` off this file and asserts the real
 // payload has it, so an alias must never name anything else.
 
-const STATUS = {
-  ok: { icon: 'check' },
-  fail: { icon: 'circle-alert' },
-  'accepted-only': { icon: 'minus' },
-  unknown: { icon: 'circle-question-mark' },
-};
-
 const STATE_LABEL = { DRIFTED: 'drifted', REVERSED: 'reversed', DIVERGED: 'both sides', UNMATCHED: 'unmatched', other: 'other' };
 
 // Icons are vendored node data (above), rendered as inline SVG. A name that is
@@ -970,186 +773,119 @@ const CantTell = ({ why }) => (
   <div className="why"><Icon icon="circle-question-mark" size={14} /><span>can&#8217;t tell &#8212; {why}</span></div>
 );
 
-const HealthPanel = ({ hl, dispatch }) => {
-  const why = hl && hl.ok === false ? (hl.reason || 'no doctor snapshot') : (hl ? null : 'missing from the payload');
-  const parts = why ? null : healthPills(hl.sections);
-  return (
-    <div className="pn act" onClick={() => openView('/health', dispatch)}>
-      {why ? <div className="ph"><span className="st">Health</span></div> : null}
-      {why ? <CantTell why={why} /> : (
-        <div className="hgrid">
-          {parts.pills.map((p) => (
-            <div key={p.label} className={`pill hv ${p.status}`} onClick={go(viewRoute('/health', { section: p.section }), dispatch)}
-              onMouseEnter={tipOn(dispatch, tipLines('pill', p))} onMouseLeave={tipOff(dispatch)}>
-              <span className="pt">
-                <Icon icon={p.icon} size={16} />
-                <span className="ps">
-                  <Icon icon={STATUS[p.status].icon} size={14} />
-                  {p.status === 'fail' ? <span>{p.fail} fail</span> : null}
-                  {p.status === 'accepted-only' ? <span>{p.accepted} ok&#8217;d</span> : null}
-                </span>
-              </span>
-              <span className="pl">{p.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      {why ? null : parts.pills.filter((p) => p.status === 'unknown').map((p) => (
-        <div key={p.label} className="hnote"><Icon icon="circle-question-mark" size={14} /><span>can&#8217;t tell &#8212; {p.label}: {p.reason}</span></div>
-      ))}
-      {why ? null : parts.otherFailing.map((k) => (
-        <div key={k} className="hnote warn"><Icon icon="circle-alert" size={14} /><span>also failing: {k}</span></div>
-      ))}
-    </div>
-  );
-};
+// Where each queue part is judged. The "pick a side" part is the DIVERGED chip of Judge.
+const QUEUE_ROUTE = { judge: '/judge', decide: viewRoute('/judge', { chip: 'both' }), blocked: '/unblock' };
+const QUEUE_HINT = { judge: 'click to judge these', decide: 'click to pick a side', blocked: 'click to see what blocks them' };
 
-const DONUT = 112;
-
-const Donut = ({ wl, dispatch }) => {
-  const dn = donutArcs(wl.byState);
-  return (
-    <svg width={DONUT} height={DONUT} viewBox={`0 0 ${DONUT} ${DONUT}`}>
-      <circle className="track" cx={DONUT / 2} cy={DONUT / 2} r={DONUT / 2 - 12} />
-      {dn.arcs.map((a) => <path key={a.key} className={`arc vz ${a.key}`} onClick={go(stateRoute(a.key), dispatch)}
-        onMouseEnter={tipOn(dispatch, tipLines('state', { label: STATE_LABEL[a.key] || a.key, n: a.count, total: dn.total }))} onMouseLeave={tipOff(dispatch)} d={arcPath(DONUT / 2, DONUT / 2, DONUT / 2 - 12, a.startDeg, a.sweepDeg)} />)}
-      <text className="tn" x={DONUT / 2} y={DONUT / 2 + 3} textAnchor="middle">{dn.total}</text>
-      <text className="t" x={DONUT / 2} y={DONUT / 2 + 19} textAnchor="middle">queued</text>
-    </svg>
-  );
-};
-
-// THE WORKLIST ROW'S WIDTH BUDGET, stated rather than measured (className is
-// static, there is no resize event, and the card is as wide as its widest child
-// so it cannot be asked). The card's content width is CARD_INNER = 618px (a 640px
-// panel less its 11px padding twice, and .stack in the stylesheet is 640px); the
-// donut takes 112, the legend 128 and two 11px gaps, which leaves CAL_W = 356px
-// for the calendar, and calendarWeeks(356, 16, 15, 13) is 22 weeks. Change one number and the others
-// follow; nothing here is a fixed card width.
-const CARD_INNER = 618;
-const CAL_W = CARD_INNER - DONUT - 128 - 22;
-const CAL_LABEL = 16;
-const CAL_STEP = 15;
-const CAL_CELL = 13;
-const CAL_WEEKS = calendarWeeks(CAL_W, CAL_LABEL, CAL_STEP, CAL_CELL);
-
-const Calendar = ({ cal, dispatch }) => {
-  const L = CAL_LABEL;
-  const T = 14;
-  const STEP = CAL_STEP;
-  const W = L + (cal.cols.length - 1) * STEP + CAL_CELL;
-  const H = T + 7 * STEP;
-  const ROWS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-      {cal.months.map((m) => <text key={m.label + m.col} className="t" x={L + m.col * STEP} y="11">{m.label}</text>)}
-      {ROWS.map((r, i) => <text key={i} className="t" x="0" y={T + i * STEP + 11}>{r}</text>)}
-      {cal.cols.map((col) => col.filter((c) => !c.future).map((c) => (
-        <rect
-          key={c.iso}
-          className={`cc vz l${c.level}${c.today ? ' today' : ''}`}
-          onClick={go('/judge', dispatch)}
-          onMouseEnter={tipOn(dispatch, tipLines('judged-day', { iso: c.iso, count: c.count }))}
-          onMouseLeave={tipOff(dispatch)}
-          x={L + c.col * STEP}
-          y={T + c.row * STEP}
-          width={CAL_CELL}
-          height={CAL_CELL}
-          rx="3"
-        />
-      )))}
-    </svg>
-  );
-};
-
-const WorklistPanel = ({ wl, today, dispatch }) => {
+// ONE PANEL ANSWERS "how much needs me, and where do I start": the hero number, the bar split by what
+// can be done, the age of the queue in words, and the edge-state chips. Counts come from the payload.
+const QueuePanel = ({ wl, dispatch }) => {
   if (!wl) {
-    return <div className="pn"><div className="ph"><Icon icon="inbox" size={16} /><span className="st">Worklist</span></div><CantTell why="missing from the payload" /></div>;
+    return <div className="pn"><div className="ph"><Icon icon="inbox" size={16} /><span className="st">Queue</span></div><CantTell why="missing from the payload" /></div>;
   }
+  const parts = queueParts(wl);
+  const ages = wl.ages;
   const keys = ['DRIFTED', 'REVERSED', 'DIVERGED', 'UNMATCHED'].concat(wl.byState.other > 0 ? ['other'] : []);
-  const cal = calendarCells(wl.calendar, today, CAL_WEEKS);
   return (
     <div className="pn act" onClick={() => openView('/judge', dispatch)}>
-      <div className="ph">
-        <Icon icon="inbox" size={16} />
-        <span className="st">Worklist</span>
+      <div className="hero">
         {wl.toJudge == null
-          ? <span className="sb">&#8212; can&#8217;t tell how many to judge: {wl.toJudgeReason}</span>
-          : <span className="sb">&#8212; {wl.toJudge} to judge</span>}
-        {cal.error ? null : (
-          <span className="sp">
-            last checked {shortDate(cal.firstISO)} &#8211; {shortDate(cal.lastISO)} &#183; {wl.never} never
-            {cal.outside > 0 ? ` · ${cal.outside} older` : ''}
-            {cal.max > 0 ? ` · busiest day ${cal.max}` : ''}
-          </span>
-        )}
+          ? <CantTell why={'how many to judge: ' + wl.toJudgeReason} />
+          : [<span key="n" className="big">{wl.toJudge}</span>, <span key="l">to judge now</span>]}
+        <span className="of">of {wl.total} in queue</span>
       </div>
-      <div className="wl">
-        <Donut wl={wl} dispatch={dispatch} />
-        <div className="lg">
-          {keys.map((k) => (
-            <div key={k} className="lgr hv" onClick={go(stateRoute(k), dispatch)}
-              onMouseEnter={tipOn(dispatch, tipLines('state', { label: STATE_LABEL[k], n: wl.byState[k], total: wl.total }))} onMouseLeave={tipOff(dispatch)}><span className={`sw ${k}`} /><span>{STATE_LABEL[k]}</span><span className="n">{wl.byState[k]}</span></div>
+      {parts.length > 0 ? (
+        <div className="qbar">
+          {parts.map((p) => <span key={p.key} className={'qs hv ' + p.key} style={{ width: p.pct + '%' }} onClick={go(QUEUE_ROUTE[p.key], dispatch)}
+            onMouseEnter={tipOn(dispatch, tipLines('queue', { label: p.label, n: p.n, total: wl.total, hint: QUEUE_HINT[p.key] }))} onMouseLeave={tipOff(dispatch)} />)}
+        </div>
+      ) : null}
+      {parts.length > 0 ? (
+        <div className="qkeys">
+          {parts.map((p) => (
+            <span key={p.key} className="qk hv" onClick={go(QUEUE_ROUTE[p.key], dispatch)}
+              onMouseEnter={tipOn(dispatch, tipLines('queue', { label: p.label, n: p.n, total: wl.total, hint: QUEUE_HINT[p.key] }))} onMouseLeave={tipOff(dispatch)}>
+              <span className={'sw ' + p.key} /><span>{p.label}</span><b>{p.n}</b>
+            </span>
           ))}
         </div>
-        {cal.error ? <CantTell why={cal.error} /> : <Calendar cal={cal} dispatch={dispatch} />}
+      ) : (wl.total === 0 ? <div className="sb">the queue is empty</div> : <CantTell why="the split by action needs the fix-order join" />)}
+      {ages ? (
+        <div className="ages">
+          <span>waiting</span>
+          {ages.today > 0 ? <span>today <b>{ages.today}</b></span> : null}
+          <span>&#8804;7d <b>{ages.week}</b></span>
+          <span>&#8804;15d <b>{ages.fortnight}</b></span>
+          {ages.stale > 0
+            ? <span className="old"><Icon icon="hourglass" size={12} />over 15d <b>{ages.stale}</b></span>
+            : <span>over 15d <b>0</b></span>}
+          <span>never <b>{ages.never}</b></span>
+        </div>
+      ) : <CantTell why="this collector sends no queue ages (older propagate)" />}
+      <div className="chips">
+        {keys.map((k) => (
+          <span key={k} className="chip hv" onClick={go(stateRoute(k), dispatch)}
+            onMouseEnter={tipOn(dispatch, tipLines('state', { label: STATE_LABEL[k], n: wl.byState[k], total: wl.total }))} onMouseLeave={tipOff(dispatch)}>
+            <span className={'sw ' + k} />{STATE_LABEL[k]} <b>{wl.byState[k]}</b>
+          </span>
+        ))}
       </div>
     </div>
   );
 };
 
-// A root label is "<file> -> <file>" with directories elided by compactPath, never
-// the filenames. 22 characters per side is what the full-width row can carry next
-// to the meter and the numbers.
-const ROOT_PATH_CHARS = 22;
-
-const LeveragePanel = ({ lev, dispatch }) => {
-  const head = (
-    <div className="ph">
-      <Icon icon="git-branch" size={16} />
-      <span className="st">Leverage</span>
-      {lev ? <span className="sp">top {lev.roots.length} of {lev.rootsTotal} roots</span> : null}
+// KEEPING UP. The most important trend on the card gets a sentence: idleDays is computed in the
+// payload, the widget only picks the wording and draws the bars.
+const KeepingUpLine = ({ vel, dispatch }) => {
+  const why = whyNot(vel);
+  if (why) return <div className="pn"><CantTell why={'verdict history: ' + why} /></div>;
+  const STEP = 12;
+  const BASE = 18;
+  const hs = barHeights(vel.days.map((row) => row.total), 16);
+  const W = vel.days.length * STEP;
+  const idle = vel.idleDays;
+  return (
+    <div className="pn act keep" onClick={() => openView('/activity', dispatch)}>
+      {idle != null && idle >= 2
+        ? <span className="idle"><Icon icon="circle-alert" size={14} />nothing judged in {idle} days</span>
+        : <span>{vel.events} judged in {vel.windowDays} days</span>}
+      <svg className="spark" width={W} height={BASE} viewBox={`0 0 ${W} ${BASE}`}>
+        {hs.map((h, i) => (
+          <g key={vel.days[i].day} className="vz" onClick={go('/activity', dispatch)}
+            onMouseEnter={tipOn(dispatch, tipLines('verdicts', vel.days[i]))} onMouseLeave={tipOff(dispatch)}>
+            <rect className="hit" x={i * STEP} y="0" width="9" height={BASE} />
+            {h === 0 ? <rect className="bz" x={i * STEP} y={BASE - 2} width="9" height="2" /> : <rect className="bc" x={i * STEP} y={BASE - h} width="9" height={h} />}
+          </g>
+        ))}
+      </svg>
     </div>
   );
+};
+
+// START HERE: the roots whose settling frees blocked edges, in plain words. The data is the old
+// leverage payload; only the copy changed (F10).
+const StartHere = ({ lev, dispatch }) => {
+  const head = <div className="ph"><Icon icon="git-branch" size={16} /><span className="st">Start here</span></div>;
   if (!lev) return <div className="pn">{head}<CantTell why="missing from the payload" /></div>;
-  // DIRECTION A, 2026-10-15: one bar answers "how much does settling these unblock". Every
-  // number appears once; the old bottleneck line repeated row 1 and "upstream of" lives in Unblock.
   const cas = lev.cascade;
   if (!cas) return <div className="pn act" onClick={() => openView('/unblock', dispatch)}>{head}<CantTell why="this collector sends no cascade (older propagate)" /></div>;
   if (cas.blocked === 0) return <div className="pn act" onClick={() => openView('/unblock', dispatch)}>{head}<div className="sb">nothing is blocked</div></div>;
-  const parts = cascadeParts(cas);
-  const RANK = ['', '\u2460', '\u2461', '\u2462'];
-  const label = (p) => (p.kind === 'root' ? RANK[p.rank] + ' ' + p.n : p.kind === 'several' ? p.n + ' several' : p.n + ' other');
+  const rows = lev.roots.filter((rt) => rt.freesNow > 0);
   return (
     <div className="pn act" onClick={() => openView('/unblock', dispatch)}>
       {head}
-      <div className="lvh">
-        <span className="big">settle {cas.segments.length} &#8594; {cas.freed} of {cas.blocked} free</span>
-        <span className="sb">{cas.several} need several roots settled together</span>
-      </div>
-      <div className="cas">
-        {parts.map((p) => <span key={p.key} className={'cs hv ' + p.kind + (p.rank ? ' r' + p.rank : '')} style={{ width: p.pct + '%' }}
-          onClick={go(p.kind === 'root' ? rootRoute(lev.roots.find((r) => r.edge_id === p.key)) : '/unblock', dispatch)}
-          onMouseEnter={tipOn(dispatch, tipLines('segment', { kind: p.kind, n: p.n, blocked: cas.blocked,
-            name: p.kind === 'root' ? ((lev.roots.find((r) => r.edge_id === p.key) || {}).sourceParts || {}).name : null }))}
-          onMouseLeave={tipOff(dispatch)} />)}
-      </div>
-      <div className="csl">
-        {parts.map((p) => <span key={p.key} style={{ width: p.pct + '%' }}>{label(p)}</span>)}
-      </div>
-      <div className="lv" style={{ marginTop: 6 }}>
-        {lev.roots.filter((rt) => rt.freesNow > 0).map((rt, i) => {
+      <div className="lv">
+        {rows.length === 0 ? <div className="sb">no single edge frees a blocked one on its own</div> : null}
+        {rows.map((rt) => {
           const sp = rt.sourceParts || { name: baseName(rt.source), dir: '' };
           const dp = rt.downstreamParts || { name: baseName(rt.downstream), dir: '' };
           return (
-            <div key={rt.edge_id} className="rt hv" onClick={(e) => { e.stopPropagation(); openView(rootRoute(rt), dispatch); }}>
-              <span className={'rk cs root r' + (i + 1)} />
-              <span className="rnum">{RANK[i + 1]}</span>
-              <span className="rn">
-                <span>{sp.name}{dp.name !== sp.name ? ' \u2192 ' + dp.name : ''}</span>
+            <div key={rt.edge_id} className="rt hv" onClick={go(rootRoute(rt), dispatch)}>
+              <span className="rn" title={`${rt.source} → ${rt.downstream}`}>
+                <span>{sp.name}{dp.name !== sp.name ? ' → ' + dp.name : ''}</span>
                 <span className="rdir">{sp.dir}/ &#8594; {dp.dir}/</span>
               </span>
-              <span className="nums">{rt.inQueue ? '' : 'never verified \u00b7 '}<b>+{rt.freesNow}</b></span>
+              <span className="nums">{rt.inQueue ? '' : 'never verified · '}settling it frees <b>{rt.freesNow}</b> blocked</span>
             </div>
           );
         })}
@@ -1158,103 +894,28 @@ const LeveragePanel = ({ lev, dispatch }) => {
   );
 };
 
-const VelocityPanel = ({ vel, dispatch }) => {
-  const why = whyNot(vel);
-  const head = (
-    <div className="ph">
-      <Icon icon="activity" size={16} />
-      <span className="st">Velocity</span>
-      {why ? <span className="sb">&#8212; judgements per day</span> : [
-        <span key="l" className="keys"><span><span className="sw chgd" />changed</span><span><span className="sw nochg" />no change needed</span></span>,
-        <span key="f" className="sp">
-          {vel.noChangeShareOfEvents == null ? 'no events in the window' : `${Math.round(vel.noChangeShareOfEvents * 100)}% no-change (${vel.events} events)`}
-        </span>,
-      ]}
-    </div>
-  );
-  if (why) return <div className="pn">{head}<CantTell why={why} /></div>;
-  const STEP = 19;
-  const BASE = 54;
-  const bars = stackBars(vel.days, 52);
-  const ticks = dayTicks(vel.days);
-  const W = vel.days.length * STEP;
+// HEALTH, one line. Only failing or can't-tell sections are named; each deep-links to its section.
+const HealthLine = ({ hl, dispatch }) => {
+  const why = hl && hl.ok === false ? (hl.reason || 'no doctor snapshot') : (hl ? null : 'missing from the payload');
+  if (why) return <div className="hl"><span className="cant"><Icon icon="circle-question-mark" size={14} />can&#8217;t tell &#8212; health: {why}</span></div>;
+  const sm = healthSummary(hl.sections);
+  const clean = sm.failing.length === 0 && sm.unknown.length === 0 && sm.otherFailing.length === 0;
   return (
-    <div className="pn act" onClick={() => openView('/activity', dispatch)}>
-      {head}
-      <svg width={W} height={BASE + 28} viewBox={`0 0 ${W} ${BASE + 28}`}>
-        {bars.map((b, i) => (
-          <g key={b.day} className="vz" onClick={go('/activity', dispatch)}
-            onMouseEnter={tipOn(dispatch, tipLines('verdicts', vel.days[i]))} onMouseLeave={tipOff(dispatch)}>
-            <rect className="hit" x={i * STEP} y="0" width="14" height={BASE} />
-            {b.h === 0 ? <rect className="bz" x={i * STEP} y={BASE - 2} width="14" height="2" /> : null}
-            {b.noChangePx > 0 ? <rect className="bn" x={i * STEP} y={BASE - b.noChangePx} width="14" height={b.noChangePx} /> : null}
-            {b.changedPx > 0 ? <rect className="bc" x={i * STEP} y={BASE - b.h} width="14" height={b.changedPx} /> : null}
-            <text className="t" x={i * STEP + 7} y={BASE + 13} textAnchor="middle">{ticks[i].label}</text>
-            {ticks[i].month ? <text className="t" x={i === 0 ? 0 : i * STEP + 7} y={BASE + 26} textAnchor={i === 0 ? "start" : "middle"}>{ticks[i].month}</text> : null}
-          </g>
-        ))}
-      </svg>
-    </div>
-  );
-};
-
-const CommandsPanel = ({ use, dispatch }) => {
-  const why = whyNot(use);
-  // Fewer than three days with data: a chart of mostly-empty bars says nothing a
-  // number does not, so say when recording began instead (shouldDrawDays).
-  const draw = !why && shouldDrawDays(use.days, 3);
-  const since = why ? null : recordingSince(use.days);
-  const head = (
-    <div className="ph">
-      <Icon icon="terminal" size={16} />
-      <span className="st">Commands</span>
-      {draw
-        ? <span className="sb">&#8212; last {use.windowDays} days</span>
-        : (since ? <span className="sb">&#8212; recording since {shortDate(since)}</span> : null)}
-    </div>
-  );
-  if (why) return <div className="pn">{head}<CantTell why={why} /></div>;
-  const STEP = 20;
-  const BASE = 52;
-  const hs = barHeights(use.days.map((day) => day.count), 48);
-  const ticks = dayTicks(use.days);
-  const W = use.days.length * STEP;
-  const widths = barHeights(use.top.map((cmd) => cmd.count), 110);
-  return (
-    <div className="pn act" onClick={() => openView('/activity', dispatch)}>
-      {head}
-      <div className="cmd">
-        {draw ? (
-          <svg width={W} height={BASE + 28} viewBox={`0 0 ${W} ${BASE + 28}`}>
-            {hs.map((h, i) => (
-              <g key={use.days[i].day} className="vz" onClick={go('/activity', dispatch)}
-                onMouseEnter={tipOn(dispatch, tipLines('runs', use.days[i]))} onMouseLeave={tipOff(dispatch)}>
-                <rect className="hit" x={i * STEP} y="0" width="14" height={BASE} />
-                {h === 0 ? <rect className="bz" x={i * STEP} y={BASE - 2} width="14" height="2" /> : <rect className="bu" x={i * STEP} y={BASE - h} width="14" height={h} />}
-                <text className="t" x={i * STEP + 7} y={BASE + 13} textAnchor="middle">{ticks[i].label}</text>
-                {ticks[i].month ? <text className="t" x={i === 0 ? 0 : i * STEP + 7} y={BASE + 26} textAnchor={i === 0 ? "start" : "middle"}>{ticks[i].month}</text> : null}
-              </g>
-            ))}
-          </svg>
-        ) : null}
-        <div className="tc">
-          <div className="tot hv" onClick={go('/activity', dispatch)}>
-            <span><b>{use.total}</b> {use.origin || 'interactive'} runs</span>
-            {use.failures > 0
-              ? <span className="warn"><Icon icon="circle-alert" size={12} />{use.failures} failed</span>
-              : <span>0 failed</span>}
-            {use.refusals > 0 ? <span>{use.refusals} refused</span> : null}
-          </div>
-          {use.top.map((cmd, i) => (
-            <div key={cmd.command} className="tcr hv" onClick={go('/activity', dispatch)}
-              onMouseEnter={tipOn(dispatch, tipLines('command', { command: cmd.command, count: cmd.count, total: use.total }))} onMouseLeave={tipOff(dispatch)}>
-              <span className="nm">{cmd.command}</span>
-              <span className="mt" style={{ width: 110 }}><span className="mf" style={{ display: 'block', width: widths[i] }} /></span>
-              <span className="n">{cmd.count}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+    <div className="hl">
+      {clean ? <span className="okl hv" onClick={go('/health', dispatch)}><Icon icon="check" size={14} />health ok</span> : <span className="st">health</span>}
+      {sm.failing.map((p) => (
+        <span key={p.label} className="bad hv" onClick={go(viewRoute('/health', { section: p.section }), dispatch)}
+          onMouseEnter={tipOn(dispatch, tipLines('pill', p))} onMouseLeave={tipOff(dispatch)}>
+          <Icon icon={p.icon} size={14} />{p.label} {p.fail} fail
+        </span>
+      ))}
+      {sm.otherFailing.map((k) => <span key={k} className="bad"><Icon icon="circle-alert" size={14} />{k} failing</span>)}
+      {sm.unknown.map((p) => (
+        <span key={p.label} className="cant hv" onClick={go(viewRoute('/health', { section: p.section }), dispatch)}>
+          <Icon icon="circle-question-mark" size={14} />can&#8217;t tell &#8212; {p.label}: {p.reason}
+        </span>
+      ))}
+      {sm.accepted > 0 ? <span>{sm.accepted} accepted</span> : null}
     </div>
   );
 };
@@ -1320,6 +981,8 @@ export const render = (state, dispatch) => {
   // every section below: an older collect.sh that predates a field must not
   // throw reading it.
   const ch = d.changed || { value: null, label: '', tone: 'unknown' };
+  // The window comes from the stream payload's own `since`; with none, say "in the stream".
+  const since = sinceText(ch.since);
 
   // DECISION 1 — GATE THE CLICKS, NOT THE CARD. An earlier draft hid the whole
   // widget behind a setup card until interaction was configured. Drawing it
@@ -1340,10 +1003,8 @@ export const render = (state, dispatch) => {
   const wl = d.worklist;
   const lev = d.leverage;
   const vel = d.velocity;
-  const use = d.usage;
   const hr = d.headroom;
   const hl = d.health;
-  const today = localISO(new Date());
 
   // FRESHNESS, TWO CLOCKS. "updated" is when THIS payload was collected: it
   // should refresh every 5 minutes, so past 15 it is amber and says why. "doctor"
@@ -1357,20 +1018,19 @@ export const render = (state, dispatch) => {
     ch.value != null
       ? [
         <span key="t" className="ttl">propagate</span>,
-        <span key="c" className={`chg hv ${ch.tone}`} onClick={go('/judge', dispatch)}>{ch.value} new</span>,
+        <span key="c" className={`chg hv ${ch.tone}`} onClick={go('/judge', dispatch)}>{!since ? `${ch.value} changed in the stream`
+          : ch.sinceSource === 'cursor' ? `${ch.value} changed since you looked (${since})`
+            : ch.sinceSource === 'default-7d' ? `${ch.value} changed in 7 days` : `${ch.value} changed since ${since}`}</span>,
       ]
       : [
         <span key="t" className="ttl">propagate</span>,
         <span key="c" className="chg unknown">changes: can&#8217;t tell</span>,
       ],
     <div className="stack">
-      <HealthPanel hl={hl} dispatch={dispatch} />
-      <WorklistPanel wl={wl} today={today} dispatch={dispatch} />
-      <LeveragePanel lev={lev} dispatch={dispatch} />
-      <div className="row2">
-        <VelocityPanel vel={vel} dispatch={dispatch} />
-        <CommandsPanel use={use} dispatch={dispatch} />
-      </div>
+      <QueuePanel wl={wl} dispatch={dispatch} />
+      <KeepingUpLine vel={vel} dispatch={dispatch} />
+      <StartHere lev={lev} dispatch={dispatch} />
+      <HealthLine hl={hl} dispatch={dispatch} />
       {note ? <div className="err"><Icon icon="circle-alert" size={14} /><span>{note}</span></div> : null}
       <div className="foot">
         <span className="rf hv" onClick={() => forceRefresh(dispatch)}>{busy ? "…" : "↻"}</span>

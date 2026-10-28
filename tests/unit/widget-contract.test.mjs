@@ -135,7 +135,8 @@ test("the nested fields the widget names are present too", () => {
   // The locked widget's pure-data sections (W4). Geometry is the widget's own (D4).
   assert.equal(d.health.ok, true);
   for (const k of ["key", "label", "status", "fail", "accepted", "pass"]) assert.ok(k in d.health.sections[0], `health sections must carry ${k}`);
-  for (const k of ["toJudge", "byState", "total", "calendar", "never"]) assert.ok(k in d.worklist, `worklist must carry ${k}`);
+  for (const k of ["toJudge", "decide", "blocked", "ages", "byState", "total", "calendar", "never"]) assert.ok(k in d.worklist, `worklist must carry ${k}`);
+  for (const k of ["never", "today", "week", "fortnight", "stale"]) assert.ok(k in d.worklist.ages, `worklist.ages must carry ${k}`);
   for (const k of ["DRIFTED", "REVERSED", "DIVERGED", "UNMATCHED"]) assert.ok(k in d.worklist.byState, `worklist.byState must carry ${k}`);
   for (const k of ["day", "count"]) assert.ok(k in d.worklist.calendar[0], `calendar days must carry ${k}`);
   for (const k of ["blocked", "needAllRoots", "roots", "bottleneck"]) assert.ok(k in d.leverage, `leverage must carry ${k}`);
@@ -143,6 +144,8 @@ test("the nested fields the widget names are present too", () => {
   assert.equal(d.velocity.status, "ok");
   for (const k of ["day", "total", "noChange", "changed"]) assert.ok(k in d.velocity.days[0], `velocity days must carry ${k}`);
   assert.ok("noChangeShareOfEvents" in d.velocity);
+  assert.ok("idleDays" in d.velocity, "velocity must carry idleDays: the widget draws it and does not derive it (N86)");
+  assert.ok("since" in d.changed, "changed must carry the stream window's start, or null, so the pill never invents a time");
   assert.equal(d.usage.status, "ok");
   for (const k of ["days", "top", "total", "failures", "refusals", "origins"]) assert.ok(k in d.usage, `usage must carry ${k}`);
   for (const k of ["directory", "headroom", "thin"]) assert.ok(k in d.headroom, `headroom must carry ${k}`);
@@ -531,13 +534,11 @@ test("the widget cannot write a verdict: no judge script, no CLI call, no ledger
   assert.deepEqual([...new Set(scripts)].sort(), ["collect.sh", "open-ui.sh"], "the widget may only run its two read/open scripts");
 });
 
-// RETIRED 2026-10-15: "every tone toneFor can emit has a fill rule" and "a neutral
-// fill is NOT the same colour as the empty track" guarded the nine ratio-bar
-// rows (`.fil.<tone>`), which the locked variant-A redesign removed. The same
-// failure class — a value the code can emit that the stylesheet has no rule for —
-// now lives in the health pills, so the replacement derives its population from
-// the payload builder instead of a list (G67, rule:derive-dont-curate).
-test("every health status buildHealthSections can emit has a pill rule and a glyph", () => {
+// RETIRED 2026-10-28: the eight-pill grid (`.pill.<status> .ps` rules) went with the queue-first
+// redesign. The same failure class (a status the payload can emit that the card has no way to say)
+// now lives in the one-line health summary, so the population is still derived from the payload
+// builder rather than a list (G67, rule:derive-dont-curate).
+test("every health status buildHealthSections can emit has a way to be said on the health line", () => {
   const surface = readFileSync(
     path.join(import.meta.dirname, "../../lib/report/surface.mjs"), "utf8");
   const fn = surface.slice(surface.indexOf("export function buildHealthSections"));
@@ -546,14 +547,16 @@ test("every health status buildHealthSections can emit has a pill rule and a gly
   const statuses = new Set([...line[0].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]));
   assert.ok(statuses.size >= 4, `buildHealthSections emits four statuses; found ${statuses.size} (${[...statuses].join(", ")}) - gone blind`);
 
-  const unstyled = [...statuses].filter((st) => !new RegExp(`\\.pill\\.${st}\\s+\\.ps\\s*\\{`).test(src));
-  assert.deepEqual(unstyled, [], `the payload can emit these and the pill gives them no status colour: ${unstyled.join(", ")}`);
-  // Colour is never alone: every status also has a differently-SHAPED glyph.
-  const glyphs = [...src.matchAll(/(?:^|\n)\s*(?:'([a-z-]+)'|([a-z]+)):\s*\{\s*icon:\s*'([a-z-]+)'\s*\}/g)];
-  const byStatus = new Map(glyphs.map((m) => [m[1] || m[2], m[3]]));
-  const unglyphed = [...statuses].filter((st) => !byStatus.has(st));
-  assert.deepEqual(unglyphed, [], `these statuses have no glyph, so they would be colour alone: ${unglyphed.join(", ")}`);
-  assert.equal(new Set([...statuses].map((st) => byStatus.get(st))).size, statuses.size, "two statuses share one glyph, so they differ by colour alone");
+  // fail is NAMED in the warn colour with the word "fail"; unknown is NAMED as can't tell; accepted-only
+  // is COUNTED in words; ok reads "health ok" with a check. Colour is never alone.
+  const SAYS = {
+    fail: [/\.hl \.bad\s*\{/, /\{p\.fail\} fail/],
+    unknown: [/\.hl \.cant\s*\{/, /can&#8217;t tell &#8212; \{p\.label\}/],
+    "accepted-only": [/\{sm\.accepted\} accepted/],
+    ok: [/\.hl \.okl\s*\{/, /health ok/],
+  };
+  const unsaid = [...statuses].filter((st) => !(SAYS[st] && SAYS[st].every((re) => re.test(src))));
+  assert.deepEqual(unsaid, [], `the payload can emit these and the health line cannot say them: ${unsaid.join(", ")}`);
 });
 
 // ── the locked widget: sections, aliases, and Übersicht's own compiler ──────
@@ -571,13 +574,11 @@ test("every <alias>.<field> the widget reads off a payload SECTION exists on the
     wl: d.worklist,
     lev: d.leverage,
     vel: d.velocity,
-    use: d.usage,
     hr: d.headroom,
     hl: d.health,
     rt: d.leverage.roots[0],
-    cmd: d.usage.top[0],
   };
-  const FLOOR = { wl: 4, lev: 4, vel: 3, use: 5, hr: 2, hl: 2, rt: 4, cmd: 1 };
+  const FLOOR = { wl: 4, lev: 2, vel: 3, hr: 2, hl: 2, rt: 4 };
   for (const [alias, obj] of Object.entries(ALIASES)) {
     assert.ok(obj && typeof obj === "object", `fixture has no object for ${alias} - this check has gone blind`);
     const fields = new Set([...code.matchAll(new RegExp(`(?<![\\w.$])${alias}\\.([A-Za-z_$][\\w$]*)(?:\\.([A-Za-z_$][\\w$]*))?`, "g"))].map((m) => m[1] + (m[2] ? `.${m[2]}` : "")));
@@ -622,31 +623,29 @@ test("a :hover rule is affordance only (cursor, ground, outline, opacity), and n
   // every onMouseEnter goes through tipOn, and every tipOn is fed by tipLines, the pure, tested
   // formatter over values the card already holds. So no fact can exist only in a hover.
   const enters = [...code.matchAll(/onMouseEnter=\{([^\n]*)/g)].map((m) => m[1]);
-  assert.ok(enters.length >= 8, `only ${enters.length} hover tooltips - every chart shape and label is meant to have one`);
+  assert.ok(enters.length >= 5, `only ${enters.length} hover tooltips - every chart shape and label is meant to have one`);
   for (const e of enters) assert.match(e, /^tipOn\(dispatch, tipLines\('/, `a hover handler not built from tipLines: ${e.slice(0, 60)}`);
   assert.equal([...code.matchAll(/onMouseLeave=\{tipOff\(dispatch\)\}/g)].length, enters.length, "every tooltip that opens must close on leave");
 });
 
 // "give me cta for everything" (2026-10-15): every item in the click map is a target.
-test("every mapped item has its own click and a hover class: pills, legend rows, segments, root rows, footer", () => {
+test("every mapped item has its own click and a hover class: queue segments, keys, chips, roots, health, footer", () => {
   const need = [
-    [/className=\{`pill hv /, "health chip"],
-    [/className="lgr hv" onClick=/, "worklist legend row"],
-    [/className=\{'cs hv ' \+/, "leverage segment"],
-    [/className="rt hv" onClick=/, "leverage root row"],
-    [/className=\{`chg hv /, "the N new pill"],
+    [/className=\{'qs hv ' \+ p\.key\}/, "queue bar segment"],
+    [/className="qk hv" onClick=/, "queue key"],
+    [/className="chip hv" onClick=/, "edge-state chip"],
+    [/className="rt hv" onClick=/, "start-here root row"],
+    [/className=\{`chg hv /, "the changed pill"],
     [/className="rf hv" onClick=/, "refresh"],
     [/className="hr hv" onClick=/, "budget warning"],
-    // The visualisations, not only their labels ("visualisations dont have hover, labels do").
-    [/className=\{`arc vz \$\{a\.key\}`\} onClick=/, "donut arc"],
-    [/className=\{`cc vz l/, "calendar cell"],
-    [/<g key=\{b\.day\} className="vz" onClick=/, "velocity day column"],
-    [/<g key=\{use\.days\[i\]\.day\} className="vz" onClick=/, "commands day column"],
-    [/className="tcr hv" onClick=/, "command row"],
+    [/<g key=\{vel\.days\[i\]\.day\} className="vz" onClick=/, "sparkline day column"],
+    [/className="bad hv" onClick=/, "a failing health section"],
   ];
   for (const [re, what] of need) assert.match(code, re, `${what} has no click target`);
-  assert.match(code, /viewRoute\('\/health', \{ section: p\.section \}\)/, "a health chip deep-links to its own section");
-  assert.match(code, /viewRoute\('\/judge', \{ state: k \}\)/, "a legend row deep-links to its state");
+  assert.match(code, /viewRoute\('\/health', \{ section: p\.section \}\)/, "a health item deep-links to its own section");
+  assert.match(code, /viewRoute\('\/judge', \{ state: k \}\)/, "a state chip deep-links to its state");
+  assert.match(code, /decide: viewRoute\('\/judge', \{ chip: 'both' \}\)/, "pick-a-side opens Judge on the both-sides chip");
+  assert.match(code, /blocked: '\/unblock'/, "the blocked part opens Unblock");
 });
 
 test("every font-size in the stylesheet is at least 11px (Apple HIG widgets)", () => {
@@ -667,7 +666,7 @@ test("chart fills are classes over tokens: no hex literal in an SVG attribute or
   const open = src.indexOf("export const className = `") + "export const className = `".length;
   const css = src.slice(open, src.indexOf("`", open));
   const rules = [...css.matchAll(/(?:^|[\s;{])(?:fill|stroke):\s*([^;}]+)/g)].map((m) => m[1].trim());
-  assert.ok(rules.length >= 10, `only ${rules.length} fill/stroke declarations found - the extraction has gone blind`);
+  assert.ok(rules.length >= 3, `only ${rules.length} fill/stroke declarations found - the extraction has gone blind`);
   const bad = rules.filter((v) => !/^(none|var\(--[a-z-]+\))$/.test(v));
   assert.deepEqual(bad, [], `a chart fill that is not a token: ${bad.join(" | ")}`);
 });
@@ -685,25 +684,28 @@ test("every run() has a .catch that dispatches an attributable error", () => {
 
 test("every section's unknown / none-recorded / missing state renders as can't tell, never as 0", () => {
   // Each panel branches on whyNot() (or the health reason) before it draws.
-  for (const panel of ["VelocityPanel", "CommandsPanel", "HeadroomLine"]) {
+  for (const panel of ["KeepingUpLine", "HeadroomLine"]) {
     const body = code.slice(code.indexOf(`const ${panel}`));
     assert.match(body.slice(0, body.indexOf("\n};") + 3), /whyNot\(/, `${panel} must ask why it cannot be drawn before drawing`);
   }
   assert.match(code, /can&#8217;t tell/, "the can't-tell wording is the attributable absence");
-  for (const panel of ["WorklistPanel", "LeveragePanel"]) {
+  for (const [panel, re] of [["QueuePanel", /if \(!wl\)/], ["StartHere", /if \(!lev\)/], ["HealthLine", /\(hl \? null : 'missing from the payload'\)/]]) {
     const body = code.slice(code.indexOf(`const ${panel}`));
-    assert.match(body.slice(0, body.indexOf("\n};") + 3), /if \(!(wl|lev)\)/, `${panel} must handle a missing section`);
+    assert.match(body.slice(0, body.indexOf("\n};") + 3), re, `${panel} must handle a missing section`);
   }
+  // The hero number must never print a null as 0.
+  const q = code.slice(code.indexOf("const QueuePanel"));
+  assert.match(q.slice(0, q.indexOf("\n};") + 3), /wl\.toJudge == null\s*\?\s*<CantTell/, "an unknown toJudge must render can't tell, not the number");
 });
 
 test("each section's click opens its route through open-ui.sh (CTA per metric)", () => {
   // ROUTE RENAME 2026-10-15 (plan F11): ready->judge, blocked->unblock,
   // analytics->activity, reference->health, stream->activity. These literals were
   // rewritten DELIBERATELY with the table in surface.mjs, not drifted into.
-  const routes = { WorklistPanel: "/judge", LeveragePanel: "/unblock", VelocityPanel: "/activity", CommandsPanel: "/activity", HealthPanel: "/health" };
+  const routes = { QueuePanel: "/judge", StartHere: "/unblock", KeepingUpLine: "/activity", HealthLine: "/health" };
   for (const [panel, route] of Object.entries(routes)) {
     const body = code.slice(code.indexOf(`const ${panel}`));
-    assert.match(body.slice(0, body.indexOf("\n};") + 3), new RegExp(`openView\\('${route}'`), `${panel} must open ${route}`);
+    assert.match(body.slice(0, body.indexOf("\n};") + 3), new RegExp(`(openView|go)\\('${route}'`), `${panel} must open ${route}`);
   }
   // 2026-10-15: the pill opens /judge. D5 moved "new" from an Activity feed to dots on Judge
   // rows, so /activity no longer shows what the pill counts.
@@ -738,14 +740,38 @@ test("the widget compiles with Übersicht's OWN babel (preset-react, pragma 'htm
   assert.ok(!out.code.includes("React.Fragment"), "a fragment slipped through");
 });
 
-test("the calendar's width budget agrees with the stylesheet's .stack width", () => {
-  // CARD_INNER (script) is the panel's content width: .stack (640px) less the
-  // panel's 11px padding twice. If one moves without the other the calendar
-  // draws a grid for a width the card does not have.
+test("the stack has a definite width, and the queue bar is drawn in percentages of it", () => {
+  // The bar's segments are percentages, so the container needs a width that does not depend on them.
+  // (The old test tied a calendar's CARD_INNER to this width; the calendar is gone.)
   const stack = src.match(/\.stack\s*\{[^}]*?width:\s*(\d+)px/);
-  const inner = src.match(/const CARD_INNER = (\d+);/);
-  assert.ok(stack && inner, "the .stack width or CARD_INNER was not found - this check has gone blind");
-  assert.equal(Number(stack[1]) - 22, Number(inner[1]), "CARD_INNER must be the .stack width less 2 x 11px of panel padding");
+  assert.ok(stack, "the .stack width was not found - this check has gone blind");
+  assert.match(code, /style=\{\{ width: p\.pct \+ '%' \}\}/, "queue segments take their width from queueParts' percentages");
+  assert.doesNotMatch(code, /CARD_INNER|CAL_WEEKS|calendarCells|donutArcs/, "the deleted calendar/donut helpers crept back");
+});
+
+test("queue first: the layout order, the hero as the largest type, the new sections and no deleted ones (review F1, F2, F4)", () => {
+  const render = code.slice(code.indexOf("export const render"));
+  const at = ["<QueuePanel", "<KeepingUpLine", "<StartHere", "<HealthLine", 'className="foot"'].map((m) => render.indexOf(m));
+  assert.ok(at.every((i) => i > -1), `a section is missing from render(): ${at.join(",")}`);
+  assert.deepEqual([...at].sort((a, b) => a - b), at, "the order is queue, keeping up, start here, health, footer");
+  assert.doesNotMatch(code, /CommandsPanel|VelocityPanel|WorklistPanel|LeveragePanel|HealthPanel|<Donut|<Calendar/, "a deleted section is back");
+  assert.doesNotMatch(code, /\d+ failed|use\.failures/, "propagate's own run failures do not belong on the card (F5)");
+
+  const open = src.indexOf("export const className = `") + "export const className = `".length;
+  const css = src.slice(open, src.indexOf("`", open)).replace(/\/\*[\s\S]*?\*\//g, "");
+  const hero = /\.hero \.big\s*\{[^}]*font-size:\s*(\d+)px/.exec(css);
+  assert.ok(hero, "the hero number rule was not found - this check has gone blind");
+  const others = [...css.matchAll(/font(?:-size)?:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1])).filter((n) => n !== Number(hero[1]));
+  assert.ok(others.length >= 4, "too few other font sizes found - gone blind");
+  assert.ok(Number(hero[1]) > Math.max(...others), `the hero (${hero[1]}px) must be the largest type on the card; the largest other is ${Math.max(...others)}px`);
+});
+
+test("the changed pill states its window, or says 'in the stream' - it never invents a time", () => {
+  assert.match(code, /changed since \$\{since\}/, "the pill names the window when the stream carries one");
+  assert.match(code, /changed since you looked/, "a marked cursor reads as 'since you looked'");
+  assert.match(code, /changed in 7 days/, "the seven-day default says it is a default, not a last look");
+  assert.match(code, /changed in the stream/, "and says so plainly when it does not");
+  assert.match(code, /const since = sinceText\(ch\.since\)/, "the time comes only from the payload, through the pure sinceText");
 });
 
 // Rewritten 2026-10-15 (Leverage cascade, direction A): names now arrive whole as
