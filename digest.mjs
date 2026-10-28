@@ -765,6 +765,73 @@ async function eventsBackupSnapshot(dryRun) {
   return { dryRun, dest, rel, results, protection };
 }
 
+/**
+ * ACCESS — runs the hub's `scripts/access-check.sh --json` and reports findings.
+ *
+ * READ-ONLY, so `dryRun` is accepted for symmetry with the other snapshots and
+ * changes nothing: a preview that skipped the check would preview a different
+ * digest from the one that runs. The script path is overridable with
+ * PROPAGATE_ACCESS_CHECK and the timeout with PROPAGATE_ACCESS_TIMEOUT_MS (or
+ * the second parameter) so tests never wait 60s.
+ *
+ * Outcomes are all attributable (rule:discernment-checks §2): never-ran is
+ * `{reason}` / `{error}`, ran-clean is `{findings: []}`, ran-dirty is
+ * `{findings: [...]}`. A could-not-run state must never read as healthy.
+ */
+async function accessSnapshot(dryRun, timeoutMs) { // eslint-disable-line no-unused-vars
+  const script =
+    process.env.PROPAGATE_ACCESS_CHECK ||
+    (HUB_ROOT ? path.join(HUB_ROOT, "scripts", "access-check.sh") : null);
+  if (!script) return { reason: "hub-root-unconfigured, so access-check.sh cannot be located" };
+  if (!existsSync(script)) return { reason: `access-check.sh not found at ${script}` };
+
+  const envMs = Number(process.env.PROPAGATE_ACCESS_TIMEOUT_MS);
+  const ms = timeoutMs ?? (envMs > 0 ? envMs : 120_000);
+  /* --no-html: the live-HTML visibility step is info only and costs ~30s on slow sites (measured 65s
+     total with it, 2026-10-28), which alone pushed the check past the old 60s limit */
+  const r = spawnSync("bash", [script, "--json", "--no-html"], { encoding: "utf8", timeout: ms });
+  if (r.error?.code === "ETIMEDOUT" || r.signal) {
+    return { error: `timed out after ${Math.round((ms / 1000) * 10) / 10}s` };
+  }
+  if (r.error) return { error: String(r.error.message ?? r.error).slice(0, 200) };
+
+  if (r.status !== 0 && r.status !== 1) {
+    const first = `${r.stderr || ""}\n${r.stdout || ""}`.split("\n").map((l) => l.trim()).find(Boolean);
+    return { error: (first || `exit ${r.status} with no output`).slice(0, 200) };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch {
+    return { error: "unreadable output" };
+  }
+  const findings = Array.isArray(parsed) ? parsed : parsed?.findings;
+  if (!Array.isArray(findings)) return { error: "unreadable output" };
+  // Exit code and payload must agree; a disagreement is a broken check, not a result.
+  if (r.status === 1 && findings.length === 0) return { error: "exit 1 but no findings in output" };
+  if (r.status === 0 && findings.length > 0) return { error: "exit 0 but findings in output" };
+  const out = { findings };
+  if (parsed && typeof parsed.checked === "number") out.checked = parsed.checked;
+  return out;
+}
+
+/** Pure: render an accessSnapshot() result to digest lines. Healthy => []. */
+function accessLines(acc) {
+  if (!acc) return [];
+  if (acc.error) return [`could not run — ${acc.error}`];
+  if (acc.reason) return [`could not run — ${acc.reason}`];
+  return (acc.findings || []).map((f) => {
+    if (f === null || typeof f !== "object") return String(f).slice(0, 140);
+    const { check, ...rest } = f;
+    const kv = Object.entries(rest).map(
+      ([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`,
+    );
+    return [check ?? "finding", ...kv].join("  ").slice(0, 140);
+  });
+}
+
+
 async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
   const watcher = await watcherSnapshot();
   const workspaces = [];
@@ -828,6 +895,14 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     // note the asymmetry that makes this worth stating: a crash here loses the
     // REPORT, while a silent skip would lose the BACKUP and say nothing.
     eventsBackup = { dryRun, dest: null, results: [], error: String(err?.message ?? err) };
+  }
+
+  let access;
+  try {
+    access = await accessSnapshot(dryRun);
+  } catch (err) {
+    // Same belt-and-suspenders as eventsBackup: a bug here loses one section, not the digest.
+    access = { error: String(err?.message ?? err) };
   }
 
   const metrics = await metricsSnapshot();
@@ -910,6 +985,7 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     lifecycle,
     refs,
     eventsBackup,
+    access,
     metrics,
     inbound,
     drift,
@@ -1539,6 +1615,10 @@ export function computeDiff(snapshot, prior) {
     }
   }
 
+  // ── Access ────────────────────────────────────────────────────────────
+  // Empty on a healthy day (hub DECISIONS 2026-08-10); could-not-run is a line.
+  const accessLinesOut = accessLines(snapshot.access);
+
   // ── Skills ────────────────────────────────────────────────────────────
   // Diff-only, for the same reason disk is threshold-only: a block that
   // restates "92 skills, 36 never invoked" every morning is wallpaper within a
@@ -1803,6 +1883,7 @@ export function computeDiff(snapshot, prior) {
     skillLines,
     refsLines,
     backupLines,
+    accessLines: accessLinesOut,
     metricLines,
     inboundLines,
     driftLines,
@@ -1909,6 +1990,13 @@ export function formatDigest(diff) {
   if (backupLines.length > 0) {
     lines.push(`EVENT-STORE BACKUP:`);
     for (const l of backupLines) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  const accessOut = diff.accessLines || [];
+  if (accessOut.length > 0) {
+    lines.push(`ACCESS:`);
+    for (const l of accessOut) lines.push(`  ${l}`);
     lines.push("");
   }
 
@@ -2142,4 +2230,6 @@ export {
   // for not running it (rule:name-what-no-test-executes).
   eventsBackupSnapshot as eventsBackupSnapshotForTest,
   mirrorProtection as mirrorProtectionForTest,
+  accessSnapshot as accessSnapshotForTest,
+  accessLines as accessLinesForTest,
 };
