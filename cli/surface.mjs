@@ -55,9 +55,15 @@ function age(ms) {
  */
 export function changedLine(changed) {
   if (!changed) return null;
-  return changed.value == null
-    ? `${TONE_MARK[changed.tone] ?? "?"} ${changed.label} — could not derive what changed since last look`
-    : `${TONE_MARK[changed.tone] ?? "·"} ${changed.value} ${changed.label} since last look`;
+  if (changed.value == null) return `${TONE_MARK[changed.tone] ?? "?"} ${changed.label} — could not derive what changed`;
+  // Same wording as the widget's pill: "since you looked" only when a marked
+  // cursor was read. With no cursor the window is a fixed seven days, and
+  // calling that a last look is the claim v0.15.42 removed from the widget.
+  const day = changed.since ? changed.since.slice(0, 10) : null;
+  const window = !day ? "in the stream"
+    : changed.sinceSource === "cursor" ? `since you looked (${day})`
+      : changed.sinceSource === "default-7d" ? "in 7 days" : `since ${day}`;
+  return `${TONE_MARK[changed.tone] ?? "·"} ${changed.value} ${changed.label} ${window}`;
 }
 
 /**

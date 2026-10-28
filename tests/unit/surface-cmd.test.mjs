@@ -43,6 +43,18 @@ test("changedLine: a null value (no stream) never prints as 0 or blank — it sa
   assert.match(line, /no stream/);
 });
 
+test("changedLine: 'since you looked' only for a marked cursor; the 7-day default says so", () => {
+  // Literals, not buildChangedSummary output, so a cursor status the builder
+  // would never emit still reaches the renderer's fallthrough.
+  const since = "2026-10-21T00:00:00.000Z";
+  assert.match(changedLine({ value: 3, label: "changed", tone: "none", since, sinceSource: "cursor" }), /3 changed since you looked \(2026-10-21\)/);
+  const week = changedLine({ value: 3, label: "changed", tone: "none", since, sinceSource: "default-7d" });
+  assert.match(week, /3 changed in 7 days/);
+  assert.doesNotMatch(week, /look/, "a fixed week must not read as a last look");
+  assert.match(changedLine({ value: 3, label: "changed", tone: "none" }), /3 changed in the stream/);
+  assert.match(changedLine({ value: 3, label: "changed", tone: "none", since, sinceSource: "given" }), /3 changed since 2026-10-21/);
+});
+
 test("changedLine: a null value (stream error) is distinguishable from the 'no stream' case", () => {
   const noStream = changedLine({ value: null, label: "no stream", tone: "unknown" });
   const streamError = changedLine({ value: null, label: "stream error", tone: "unknown" });
