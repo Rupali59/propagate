@@ -162,7 +162,7 @@ import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatt
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
 import { reconcile, STATES, groupRows, inboundRows, edgeIdFor, isGlobPattern, expandDownstream } from "./lib/edges/reconcile.mjs";
-import { appendEvent, readEvents, DISPOSITIONS, edgeId, dryValidateEvent } from "./lib/edges/events.mjs";
+import { appendEvent, readEvents, VERIFY_DISPOSITIONS, edgeId, dryValidateEvent } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
 import { resolveProvenance, resolveObservedRef, resolveExecution } from "./lib/edges/provenance.mjs";
 import {
@@ -3023,7 +3023,8 @@ async function whyCmd() {
     const where = e.position.recorded
       ? `branch=${e.position.branch ?? "(detached)"} commit=${e.position.commit ? e.position.commit.slice(0, 8) : "?"}${e.position.dirty ? " [dirty]" : ""}`
       : `${DIM}${e.position.note}${RESET}`;
-    console.log(`  ${e.ts}  ${BOLD}${e.disposition}${RESET}  ${where}`);
+    console.log(`  ${e.ts}  ${BOLD}${e.disposition}${RESET}  ${where}${e.previous_edge_id ? `  ${DIM}under previous id ${e.previous_edge_id}${RESET}` : ""}`);
+    if (e.from_edge_id) console.log(`    ${DIM}continues ${e.from_edge_id}${RESET}`);
     console.log(
       `    ${DIM}by=${e.by ?? "?"} by_kind=${e.by_kind ?? "(not recorded)"} ` +
         `src-ref=${e.observed_on_ref ?? "?"} ds-ref=${e.downstream_on_ref ?? "(not recorded)"}${RESET}`,
@@ -3031,7 +3032,109 @@ async function whyCmd() {
     if (e.reason) console.log(`    ${e.reason}`);
     console.log();
   }
+  if (result.chainStopped) console.log(`  ${YELLOW}history chain stopped: ${result.chainStopped}${RESET}\n`);
   process.exit(0);
+}
+
+/**
+ * `rekey --to <new_edge_id> [--from <old_edge_id>] [--reason "<text>"] [--apply] [--json]`
+ * — thin dispatch arm (D7). All the logic lives in lib/edges/rekey.mjs; this
+ * parses argv, prints, and sets the exit code.
+ *
+ * Without --from it only LISTS candidates. With --from it is a dry run unless
+ * --apply is given (same posture as `verify`, GOTCHAS G44: --apply must mean the
+ * same thing everywhere). Every refusal prints its reason and exits with that
+ * reason's own code (REKEY_EXIT); usage errors exit 2.
+ */
+async function rekeyCmd() {
+  const args = process.argv.slice(3);
+  const get = (flag) => {
+    const i = args.indexOf(flag);
+    return i !== -1 ? args[i + 1] : undefined;
+  };
+  const to = get("--to");
+  const from = get("--from");
+  const reason = get("--reason");
+  const apply = args.includes("--apply");
+  const json = args.includes("--json");
+
+  if (!to) {
+    console.error(`${RED}error:${RESET} usage: node cli.mjs rekey --to <new_edge_id> [--from <old_edge_id>] [--reason "<text>"] [--apply] [--json]`);
+    process.exit(2);
+  }
+  if (apply && !from) {
+    console.error(`${RED}error:${RESET} --apply needs --from <old_edge_id>. Without --from this command only lists candidates and writes nothing.`);
+    process.exit(2);
+  }
+
+  const { listRekeyCandidates, planRekey, applyRekey } = await import("./lib/edges/rekey.mjs");
+
+  const refuse = (r) => {
+    if (json) {
+      console.log(JSON.stringify({ generatedAt: new Date().toISOString(), apply, refused: r.refusal, message: r.message, exitCode: r.exitCode, from: r.from ?? null, to: r.to ?? null }));
+    } else {
+      console.error(`${RED}refused (${r.refusal}):${RESET} ${r.message}`);
+    }
+    process.exit(r.exitCode);
+  };
+
+  if (!from) {
+    const r = await listRekeyCandidates(to);
+    if (!r.ok) refuse(r);
+    if (json) {
+      console.log(JSON.stringify({ generatedAt: new Date().toISOString(), apply: false, to: r.to, candidates: r.candidates }));
+      process.exit(0);
+    }
+    console.log(`${BOLD}# rekey candidates for ${to}${RESET}  ${DIM}(nothing written)${RESET}\n`);
+    console.log(`  new edge: ${shortPath(r.to.node_id)} -> ${shortPath(r.to.downstream)}`);
+    console.log(`  why:      ${DIM}${String(r.to.why ?? "").replace(/\s+/g, " ").trim()}${RESET}\n`);
+    for (const c of r.candidates) {
+      console.log(
+        `  ${BOLD}${c.edge_id}${RESET}  last ${c.lastDisposition ?? "?"} ${c.lastTs ?? "?"}  ${c.verdicts} verdict${c.verdicts === 1 ? "" : "s"}  ${DIM}${shortPath(c.node_id)}${RESET}`,
+      );
+      console.log(`    ${DIM}matched: ${c.matchedBy.join("; ")}${RESET}`);
+      if (c.rekeyedTo) console.log(`    ${YELLOW}already continued by ${c.rekeyedTo}; a second rekey would be refused${RESET}`);
+    }
+    console.log(`\n  ${DIM}next: propagate rekey --to ${to} --from <old_edge_id>   (dry run; add --apply to write)${RESET}`);
+    process.exit(0);
+  }
+
+  const plan = await planRekey(from, to, { reason });
+  if (!plan.ok) refuse(plan);
+
+  if (!apply) {
+    if (json) {
+      console.log(JSON.stringify({ generatedAt: new Date().toISOString(), apply: false, wouldWrite: plan.event, from: plan.from, to: plan.to, predictedState: plan.predictedState, mismatch: plan.mismatch }));
+      process.exit(0);
+    }
+    console.log(`${BOLD}would write 1 event${RESET} ${DIM}— nothing has been written${RESET}\n`);
+    console.log(`  from  ${BOLD}${plan.from.edge_id}${RESET}  ${DIM}${shortPath(plan.from.node_id)}  (last ${plan.from.lastDisposition} ${plan.from.lastTs ?? "?"})${RESET}`);
+    console.log(`  to    ${BOLD}${plan.to.edge_id}${RESET}  ${DIM}${shortPath(plan.to.node_id)} -> ${shortPath(plan.to.downstream)}${RESET}`);
+    for (const m of plan.mismatch) console.log(`  ${YELLOW}!${RESET} ${m}`);
+    console.log(`  carries: ${plan.event.carried_disposition} pin, source ${String(plan.event.source_content).slice(0, 8)}, downstream ${String(plan.event.downstream_content).slice(0, 8)}, at commit ${String(plan.event.observed_at_commit ?? "(not recorded)").slice(0, 8)}`);
+    console.log(`  reason: ${plan.event.reason}`);
+    console.log(`  predicted state of ${plan.to.edge_id} afterwards: ${BOLD}${plan.predictedState}${RESET}`);
+    console.log(`\n  ${DIM}pass ${RESET}${BOLD}--apply${RESET}${DIM} to write it${RESET}`);
+    process.exit(0);
+  }
+
+  let stamped;
+  try {
+    stamped = await applyRekey(plan);
+  } catch (err) {
+    console.error(`${RED}error:${RESET} ${err.message}`);
+    process.exit(1);
+  }
+  // Verify after write (the same non-negotiable as verify): a write that returned is not a write that landed.
+  const { rows: after } = await reconcile(WORKSPACES);
+  const row = after.find((r) => r.edge_id === to);
+  const ok = row?.state === plan.predictedState;
+  if (json) {
+    console.log(JSON.stringify({ generatedAt: new Date().toISOString(), apply: true, event_id: stamped.event_id, predictedState: plan.predictedState, state: row?.state ?? null, confirmed: ok }));
+  } else {
+    console.log(`${ok ? GREEN + "✓" : RED + "✗"}${RESET} wrote ${stamped.event_id}: ${from} -> ${to}, state now ${BOLD}${row?.state ?? "(edge not found)"}${RESET}${ok ? "" : `  ${RED}expected ${plan.predictedState}${RESET}`}`);
+  }
+  process.exit(ok ? 0 : 1);
 }
 
 async function drain() {
@@ -3635,12 +3738,18 @@ async function verifyCmd() {
     process.exit(2);
   }
   if (!opts.disposition) {
-    console.error(`${RED}error:${RESET} --disposition <${DISPOSITIONS.join("|")}> is required`);
+    console.error(`${RED}error:${RESET} --disposition <${VERIFY_DISPOSITIONS.join("|")}> is required`);
     process.exit(2);
   }
-  if (!DISPOSITIONS.includes(opts.disposition)) {
+  if (!VERIFY_DISPOSITIONS.includes(opts.disposition)) {
+    // `rekeyed` is a real disposition (appendEvent accepts it) that is not a verdict, so the refusal
+    // for it names the command that writes it instead of calling it unknown.
+    const hint = opts.disposition === "rekeyed"
+      ? `\n  "rekeyed" records that an edge continues another after a rename or a reworded \`why\`; ` +
+        `use \`propagate rekey --to <new_edge_id> [--from <old_edge_id>]\` (docs/REFERENCE.md)`
+      : "";
     console.error(
-      `${RED}error:${RESET} unknown disposition ${JSON.stringify(opts.disposition)}; must be one of ${DISPOSITIONS.join(" | ")}`,
+      `${RED}error:${RESET} ${opts.disposition === "rekeyed" ? "disposition \"rekeyed\" is not a verdict" : `unknown disposition ${JSON.stringify(opts.disposition)}`}; must be one of ${VERIFY_DISPOSITIONS.join(" | ")}${hint}`,
     );
     process.exit(2);
   }
@@ -5455,6 +5564,8 @@ if (_invokedDirectly) {
     await reconcileCmd();
   } else if (mode === "why") {
     await whyCmd();
+  } else if (mode === "rekey") {
+    await rekeyCmd();
   } else if (mode === "verify") {
     await verifyCmd();
   } else if (mode === "bootstrap") {

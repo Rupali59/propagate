@@ -376,7 +376,8 @@ test("deferred with no content pinned is accepted", async () => {
 test("every disposition round-trips except deferred requiring the inverse content rule", async () => {
   // Sanity sweep: every disposition other than deferred/wontfix/baselined
   // (already covered above) accepts a fully-pinned event.
-  const plain = DISPOSITIONS.filter((d) => !["deferred", "wontfix", "baselined"].includes(d));
+  // `rekeyed` also needs from_edge_id and reason; tests/unit/rekey.test.mjs covers it.
+  const plain = DISPOSITIONS.filter((d) => !["deferred", "wontfix", "baselined", "rekeyed"].includes(d));
   for (const disposition of plain) {
     await withScopedStore(async (stateDir) => {
       const event = baseEvent({ disposition, reason: "reason for " + disposition });

@@ -20,7 +20,7 @@ import {
   allowedDispositions, orderingBlocks, divergedGuard, divergedRefusal,
   GUARD_EXEMPT, shellQuote, verifyCommand,
 } from "../../lib/edges/disposition.mjs";
-import { DISPOSITIONS } from "../../lib/edges/events.mjs";
+import { DISPOSITIONS, VERIFY_DISPOSITIONS } from "../../lib/edges/events.mjs";
 import { buildQueue } from "../../lib/report/queue.mjs";
 import { validateWrite, orderingRefusal } from "../../cli/ui.mjs";
 
@@ -82,7 +82,7 @@ test("PARITY: states x blocked x dispositions — pure fn, queue, and both UI ga
       assert.deepEqual(item.allowed, expected.allowed, `queue allowed, ${state} blocked=${blocked}`);
       assert.deepEqual(item.viaOutOfOrder, expected.viaOutOfOrder, `queue viaOutOfOrder, ${state} blocked=${blocked}`);
 
-      for (const d of DISPOSITIONS) {
+      for (const d of VERIFY_DISPOSITIONS) {
         cells += 1;
         const accepted = expected.allowed.includes(d);
 
@@ -101,7 +101,7 @@ test("PARITY: states x blocked x dispositions — pure fn, queue, and both UI ga
       }
     }
   }
-  assert.equal(cells, STATES.length * 2 * DISPOSITIONS.length, "every cell was visited");
+  assert.equal(cells, STATES.length * 2 * VERIFY_DISPOSITIONS.length, "every cell was visited");
 });
 
 test("a queue row with no worklist entry is not silently treated as blocked or unblocked-and-verified", () => {

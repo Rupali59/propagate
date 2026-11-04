@@ -22,7 +22,7 @@ import path from "node:path";
 
 import { makeChain, runCli, storeSnapshot, cleanup } from "../helpers/verify-fixture.mjs";
 import { allowedDispositions } from "../../lib/edges/disposition.mjs";
-import { DISPOSITIONS } from "../../lib/edges/events.mjs";
+import { VERIFY_DISPOSITIONS } from "../../lib/edges/events.mjs";
 
 function probe(env, row, disposition) {
   const r = runCli(
@@ -43,7 +43,7 @@ function probe(env, row, disposition) {
 function assertParity(env, row, blocked, label) {
   const expected = allowedDispositions({ state: row.state }, blocked ? [{ edge_id: "x" }] : []);
   let probed = 0;
-  for (const d of DISPOSITIONS) {
+  for (const d of VERIFY_DISPOSITIONS) {
     const got = probe(env, row, d);
     probed += 1;
     if (expected.allowed.includes(d)) {
@@ -55,7 +55,7 @@ function assertParity(env, row, blocked, label) {
       assert.ok(got.status === 3 || got.refusal, `${label}: ${d} is not allowed but verify let it through`);
     }
   }
-  assert.equal(probed, DISPOSITIONS.length);
+  assert.equal(probed, VERIFY_DISPOSITIONS.length);
 }
 
 test("verify agrees with allowedDispositions: DRIFTED unblocked and CLEAN blocked", async () => {
