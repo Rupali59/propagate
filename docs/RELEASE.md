@@ -117,7 +117,8 @@ So step 5 stays a person, reviewing the tree `make-public.mjs` (without
 node cli.mjs release --check [--json]
 ```
 
-Runs gates 1-4 above and exits:
+Runs gates 1-4 above, plus `plugin-validate` (Claude's own `claude plugin validate --json` on this plugin,
+read by `lib/core/plugin-validate.mjs`; the one pinned warning is the `skills/propagate/SKILL.md` symlink, #98), and exits:
 
 | Exit | Meaning |
 |---|---|
@@ -125,8 +126,10 @@ Runs gates 1-4 above and exits:
 | `1` | **blocked** — at least one gate failed. |
 | `2` | **incomplete** — no gate failed, but at least one could not run (e.g. no identity map on this machine). Never conflated with "ready." |
 
-Each gate reports one of `passed` / `failed` / `could-not-run`, always with a
-reason or detail line — never a bare status. `--json` emits the full
+Each gate reports one of `passed` / `failed` / `could-not-run` (or `skipped`, only for `plugin-validate` when
+the `claude` CLI is not installed: stated, and it does not block), always with a
+reason or detail line — never a bare status. The `suite` gate reads node:test's junit reporter for both suites
+(`npm test` runs `test:propagate` then `test:curate-docs`), sums them, and names failing tests. `--json` emits the full
 structured result (`lib/core/release.mjs`'s `runReleaseCheck`).
 
 **It records each run.** After the gates finish, `release --check` (and only that

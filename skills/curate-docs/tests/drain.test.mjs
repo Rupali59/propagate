@@ -10,11 +10,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setStatus } from "../lib/state.mjs";
+import { privateRoot } from "./_tmp.mjs";
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "cli.mjs");
 const git = (d, ...a) => execFileSync("git", ["-C", d, ...a], { stdio: ["ignore", "pipe", "ignore"] });
@@ -34,7 +34,7 @@ function snapshot(dir) {
 
 /** hub -> A ; A -> B ; plus a standalone C that nothing depends on. */
 function repo() {
-  const d = mkdtempSync(path.join(tmpdir(), "cd-drain-"));
+  const d = privateRoot("cd-drain-"); // scanned: the CLI builds the link graph over this root
   git(d, "init", "-q"); git(d, "config", "user.email", "t@t"); git(d, "config", "user.name", "t");
   mkdirSync(path.join(d, "docs"));
   writeFileSync(path.join(d, "STATE.md"), "# hub\n- [A](./docs/a.md)\n- [C](./docs/c.md)\n");

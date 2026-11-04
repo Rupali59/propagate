@@ -18,7 +18,7 @@ const git = (d, ...a) => execFileSync("git", ["-C", d, ...a], { stdio: ["ignore"
 
 /** main has a doc citing two absent files; one exists on a feature branch, one nowhere. */
 function repo() {
-  const d = mkdtempSync(path.join(tmpdir(), "cd-br-"));
+  const d = mkdtempSync(path.join(tmpdir(), "cd-br-")); // not scanned: classifyDangling reads only below this root and its git refs; no link graph
   git(d, "init", "-q", "-b", "main");
   git(d, "config", "user.email", "t@t"); git(d, "config", "user.name", "t");
   mkdirSync(path.join(d, "docs"));
@@ -66,7 +66,7 @@ test("how many refs were actually searched is REPORTED, never assumed", () => {
 });
 
 test("in a non-git directory the status says so and nothing is silently excused", () => {
-  const d = mkdtempSync(path.join(tmpdir(), "cd-nogit-"));
+  const d = mkdtempSync(path.join(tmpdir(), "cd-nogit-")); // not scanned: classifyDangling on a non-git dir, no link graph
   writeFileSync(path.join(d, "STATE.md"), "# x\n");
   const r = classifyDangling(d, [{ from: path.join(d, "STATE.md"), cites: "./docs/x.md" }]);
   assert.equal(r.status, "no-git");

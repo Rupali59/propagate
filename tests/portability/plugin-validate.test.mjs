@@ -19,63 +19,26 @@
  * own instruction ("If it prints nothing, the file is not committed and so is not submitted"). A committed .DS_Store
  * is red.
  *
+ * `classify`, `KNOWN_WARNINGS` and `KNOWN_DIRECTORY` live in lib/core/plugin-validate.mjs, shared with the release gate
+ * (`release --check`'s `plugin-validate`, #115); this file tests them.
+ *
  * The `claude` CLI is not on CI runners, so the live check SKIPS there with a stated reason, never passes
  * silently (rule:discernment-checks §2). `classify` is tested without it, so the logic is always exercised.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { classify, claudeVersion, validatePlugin, isTrackedIn } from "../../lib/core/plugin-validate.mjs";
+
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-/** The validator warnings propagate knowingly carries, matched against `<path>: <message>`. */
-export const KNOWN_WARNINGS = [
-  { re: /^directory: 1 component here was not read/, why: "skills/propagate/SKILL.md is a symlink to the root SKILL.md (#98)" },
-];
-
-/** Plugin-directory finding codes propagate knowingly carries. */
-export const KNOWN_DIRECTORY = [
-  { code: "ICON_MISSING", why: "propagate ships from its own marketplace, not the plugin directory; no listing icon exists yet" },
-];
-
-/**
- * `{passed, unexpected, directoryUnexpected}` from the validator's `--json` report.
- * `isTracked(file)` answers whether a repo-relative path is committed; untracked OS metadata is not submitted.
- * A report whose shape is not recognised is a failure that says so, never an empty result (rule:discernment-checks §6).
- */
-export function classify(report, { isTracked = () => true } = {}) {
-  if (!report || typeof report !== "object" || !Array.isArray(report.contents) || !report.manifest) {
-    return { passed: false, unexpected: ["unrecognised validator report shape — the reader cannot say what it found"], directoryUnexpected: [] };
-  }
-  const parts = [report.manifest, ...report.contents];
-  const errors = parts.flatMap((p) => p.errors ?? []);
-  const warnings = parts.flatMap((p) => p.warnings ?? []).map((w) => `${w.path}: ${w.message}`);
-  const unexpected = [...errors.map((e) => `error ${e.path}: ${e.message}`), ...warnings.filter((l) => !KNOWN_WARNINGS.some((k) => k.re.test(l)))];
-  const directoryUnexpected = (report.directory?.findings ?? [])
-    .filter((f) => {
-      if (f.blocking) return true;
-      if (f.code === "ARCHIVE_OS_METADATA_FILE") return isTracked(f.file);
-      return !KNOWN_DIRECTORY.some((k) => k.code === f.code);
-    })
-    .map((f) => `${f.code} ${f.file}${f.blocking ? " (blocking)" : ""}`);
-  return { passed: report.success === true && errors.length === 0, unexpected, directoryUnexpected };
-}
-
-const claude = spawnSync("claude", ["--version"], { encoding: "utf8" });
-const noClaude = claude.error || claude.status !== 0 ? "the claude CLI is not installed here (CI) — classify() is still tested below" : false;
-const validate = (dir) => {
-  const r = spawnSync("claude", ["plugin", "validate", dir, "--json"], { encoding: "utf8", timeout: 60000 });
-  try {
-    return JSON.parse(r.stdout);
-  } catch {
-    return { unparsed: `${r.stdout ?? ""}${r.stderr ?? ""}` };
-  }
-};
-const tracked = (file) => spawnSync("git", ["-C", REPO, "ls-files", "--error-unmatch", "--", file], { stdio: "ignore" }).status === 0;
+const noClaude = claudeVersion() === null ? "the claude CLI is not installed here (CI) — classify() is still tested below" : false;
+const validate = (dir) => validatePlugin(dir);
+const tracked = isTrackedIn(REPO);
 
 // Literal reports, not live output, so every branch is reachable without the CLI (rule:mutate-behind-the-fixture-builder).
 const report = (over = {}) => ({
@@ -87,7 +50,9 @@ const report = (over = {}) => ({
 });
 
 test("classify: the pinned symlink warning is accepted, anything else is reported", () => {
-  assert.deepEqual(classify(report()), { passed: true, unexpected: [], directoryUnexpected: [] });
+  const ok = classify(report());
+  assert.deepEqual({ passed: ok.passed, unexpected: ok.unexpected, directoryUnexpected: ok.directoryUnexpected }, { passed: true, unexpected: [], directoryUnexpected: [] });
+  assert.deepEqual(ok.pinnedWarnings, ["skills/propagate/SKILL.md symlink, #98"], "the pinned warning is counted, so the gate can say it was pinned");
   const extra = report({ contents: [{ errors: [], warnings: [
     { path: "directory", message: "1 component here was not read — x" },
     { path: "root", message: "CLAUDE.md at the plugin root is not loaded as project context." },

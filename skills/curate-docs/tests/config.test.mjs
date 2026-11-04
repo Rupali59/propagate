@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { loadConfig, DEFAULTS } from "../lib/config.mjs";
 
+// not scanned: only loadConfig reads these (a repo config file and a fake home); no link graph is built over them
 const tmp = () => mkdtempSync(path.join(tmpdir(), "cd-cfg-"));
 
 test("with no config anywhere, the shipped defaults are in force and say so", () => {

@@ -5,14 +5,15 @@ import { fileURLToPath } from "node:url";
 import { buildLinkGraph } from "../lib/link-graph.mjs";
 import { discover } from "../lib/discovery.mjs";
 import { loadConfig } from "../lib/config.mjs";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { privateRoot } from "./_tmp.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(HERE, "fixtures", "sample-repo");
 
 const rel = (abs) => path.relative(REPO, abs).split(path.sep).join("/");
-const HOME = mkdtempSync(path.join(tmpdir(), "cd-h-"));
+const HOME = mkdtempSync(path.join(tmpdir(), "cd-h-")); // not scanned: a fake HOME handed to loadConfig
 const cfgFor = (r) => loadConfig(r, { home: HOME });
 const discoverDocs = (r, o = {}) => {
   const c = cfgFor(r);
@@ -173,4 +174,19 @@ test("a docs index that seeds reachability but nothing links is UNLINKED-INDEX, 
   assert.equal(n.inDegree, 1, "the sample repo does link it");
   assert.ok(g.unlinkedSeeds !== undefined, "the finding must exist as a reported list");
   assert.deepEqual(g.unlinkedSeeds.map(rel), [], "and be empty when every seed is linked");
+});
+
+test("a ./-prefixed citation means the citing file's own directory: a same-named file in the tree's parent does NOT make it external (#115)", () => {
+  // The tree's parent holds stray.md and PARENT.md. `./stray.md` is the author naming a sibling that is not there, so it is
+  // broken; before this, the resolver retried it against the parent and reported a false external hit (a stub in another
+  // repo once answered for a broken link this way). `../PARENT.md` and the bare `PARENT.md` keep the external fallback.
+  const root = privateRoot("cd-dot-");
+  const parent = path.dirname(root);
+  writeFileSync(path.join(parent, "stray.md"), "# stray\n");
+  writeFileSync(path.join(parent, "PARENT.md"), "# parent\n");
+  writeFileSync(path.join(root, "STATE.md"), "# hub\n- [a](./stray.md)\n- [b](../PARENT.md)\n- [c](PARENT.md)\n");
+  const cfg = loadConfig(root, { home: HOME });
+  const g = buildLinkGraph(root, { docs: discover(root, cfg).docs, cfg });
+  assert.deepEqual(g.dangling.map((d) => d.cites), ["./stray.md"], "./stray.md must be dangling, not external");
+  assert.deepEqual(g.external.map((e) => e.cites).sort(), ["../PARENT.md", "PARENT.md"], "../ and bare cites keep the external fallback");
 });

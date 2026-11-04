@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import {
   gateVersionManifests,
   gateSuite,
+  gatePluginValidate,
   gateMakePublicCheck,
   gateStrangerInstall,
   runReleaseCheck,
@@ -337,6 +338,194 @@ test("gate 2: output with no parseable node:test summary is could-not-run, not a
 });
 
 // ---------------------------------------------------------------------------
+// Gate 2 reads EVERY suite (#115). `npm test` runs test:propagate and then test:curate-docs; the gate used to take the
+// first summary only, so a curate-docs failure blocked the release while the detail line said "0 fail".
+// ---------------------------------------------------------------------------
+
+// A fixture whose `npm test` runs two scripts, each printing `body` through node -e (npm's own `> pkg test:<name>` headers
+// are real here, because the scripts are real npm scripts).
+function twoSuiteFixture(a, b) {
+  const dir = tmp("propagate-release-two-");
+  const js = (lines) => `node -e "${lines.join("; ")}"`;
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      test: "npm run test:propagate; A=$?; npm run test:curate-docs; B=$?; [ $A -eq 0 ] && [ $B -eq 0 ]",
+      "test:propagate": js(a.lines),
+      "test:curate-docs": js(b.lines),
+    },
+  }));
+  return dir;
+}
+const summary = (tests, pass, fail) => [`console.log('ℹ tests ${tests}')`, `console.log('ℹ pass ${pass}')`, `console.log('ℹ fail ${fail}')`];
+
+test("gate 2: both suites are summed, and the failing curate-docs test is NAMED (text summaries)", () => {
+  const dir = twoSuiteFixture(
+    { lines: summary(3, 3, 0) },
+    { lines: [...summary(3, 2, 1), "console.log('✖ failing tests:')", "console.log('probe')", "console.log('✖ probe curate-docs test (1.2ms)')", "process.exit(1)"] },
+  );
+  try {
+    const g = gateSuite({ skillDir: dir, env: noRecordEnv() });
+    assert.equal(g.status, "failed", g.detail);
+    assert.equal(g.failed, 1, "the second suite's failure must be counted");
+    assert.equal(g.passed, 5);
+    assert.equal(g.total, 6);
+    assert.match(g.detail, /across 2 suites \(propagate 3\/0 · curate-docs 2\/1\)/);
+    assert.match(g.detail, /failing: curate-docs › probe curate-docs test/);
+    assert.deepEqual(g.suites.map((s) => s.name), ["propagate", "curate-docs"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 2: a suite npm announced and that printed no summary FAILS the gate, never summed as complete", () => {
+  const dir = twoSuiteFixture({ lines: summary(3, 3, 0) }, { lines: ["console.log('crashed before reporting')", "process.exit(1)"] });
+  try {
+    const g = gateSuite({ skillDir: dir, env: noRecordEnv() });
+    assert.equal(g.status, "failed", g.detail);
+    assert.match(g.detail, /read 1 of 2 suite summaries — curate-docs printed none/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+// The route proven by the #115 probe: node:test's own junit reporter, switched on through NODE_OPTIONS, reaching BOTH
+// `node --test` runs without editing either npm script. These are real node:test files, not printed summaries.
+function realNodeTestFixture() {
+  const dir = tmp("propagate-release-junit-");
+  mkdirSync(path.join(dir, "a"), { recursive: true });
+  mkdirSync(path.join(dir, "b"), { recursive: true });
+  writeFileSync(path.join(dir, "a", "a.test.mjs"), `import { test } from "node:test";\ntest("a one", () => {});\ntest("a two", () => {});\n`);
+  writeFileSync(path.join(dir, "b", "b.test.mjs"),
+    `import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("b ok", () => {});\n` +
+    `test("b fails <&> probe", () => { assert.equal(1, 2); });\n`);
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      test: "npm run test:propagate; A=$?; npm run test:curate-docs; B=$?; [ $A -eq 0 ] && [ $B -eq 0 ]",
+      "test:propagate": "node --test a/a.test.mjs",
+      "test:curate-docs": "node --test b/b.test.mjs",
+    },
+  }));
+  return dir;
+}
+
+test("gate 2: real node --test in two npm scripts is read through the junit reporter, per suite, naming the failing test", () => {
+  const dir = realNodeTestFixture();
+  try {
+    const g = gateSuite({ skillDir: dir, env: { ...noRecordEnv(), NODE_TEST_CONTEXT: undefined } });
+    assert.equal(g.source, "junit", `the gate fell back to the text summary: ${g.detail}`);
+    assert.equal(g.status, "failed", g.detail);
+    assert.deepEqual(g.suites, [{ name: "propagate", pass: 2, fail: 0, total: 2 }, { name: "curate-docs", pass: 1, fail: 1, total: 2 }]);
+    assert.deepEqual(g.failing, ["curate-docs › b fails <&> probe"], "XML entities in the test name must be decoded");
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 2: run inside a suite that is already on the junit reporter (release --check runs this file), it does not double the reporter", () => {
+  // Found by running the real release --check: the outer gate had put --test-reporter=junit in NODE_OPTIONS, the inner
+  // gate appended a second one, every document printed twice and the counts doubled.
+  const dir = realNodeTestFixture();
+  try {
+    const g = gateSuite({ skillDir: dir, env: { ...noRecordEnv(), NODE_TEST_CONTEXT: undefined, NODE_OPTIONS: "--test-reporter=junit" } });
+    assert.equal(g.source, "junit");
+    assert.deepEqual(g.suites, [{ name: "propagate", pass: 2, fail: 0, total: 2 }, { name: "curate-docs", pass: 1, fail: 1, total: 2 }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 2: more than 5 failing tests lists the first 5 and counts the rest", () => {
+  const dir = tmp("propagate-release-many-");
+  try {
+    writeFileSync(path.join(dir, "many.test.mjs"),
+      `import { test } from "node:test";\nfor (let i = 1; i <= 7; i++) test("bad " + i, () => { throw new Error("x" + i); });\n`);
+    writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture", scripts: { test: "node --test many.test.mjs" } }));
+    const g = gateSuite({ skillDir: dir, env: { ...noRecordEnv(), NODE_TEST_CONTEXT: undefined } });
+    assert.equal(g.failed, 7);
+    assert.match(g.detail, /failing: bad 1; bad 2; bad 3; bad 4; bad 5 … and 2 more \(npm test for the full list\)/);
+    assert.doesNotMatch(g.detail, /bad 6/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Gate — plugin-validate (#115): Claude's own `claude plugin validate --json`, read by lib/core/plugin-validate.mjs.
+// A stub `claude` script stands in for the CLI so every branch is reachable without it.
+// ---------------------------------------------------------------------------
+
+function fakeClaude(reportJson, { version = "9.9.9 (Claude Code)" } = {}) {
+  const dir = tmp("propagate-release-fakeclaude-");
+  const bin = path.join(dir, "claude");
+  writeFileSync(path.join(dir, "report.json"), JSON.stringify(reportJson));
+  writeFileSync(bin, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "${version}"; exit 0; fi\ncat "${path.join(dir, "report.json")}"\n`, { mode: 0o755 });
+  return { dir, bin };
+}
+const pinnedReport = (extraWarnings = []) => ({
+  success: true,
+  manifest: { errors: [], warnings: [] },
+  contents: [{ errors: [], warnings: [{ path: "directory", message: "1 component here was not read — x" }, ...extraWarnings] }],
+  directory: { findings: [{ code: "ICON_MISSING", file: ".claude-plugin/plugin.json", blocking: false }] },
+});
+
+test("plugin-validate gate: the pinned report passes, and the detail says what was pinned", () => {
+  const f = fakeClaude(pinnedReport());
+  try {
+    const g = gatePluginValidate({ skillDir: SKILL_DIR, claudeBin: f.bin });
+    assert.equal(g.status, "passed", g.detail);
+    assert.match(g.detail, /^claude plugin validate \(9\.9\.9\): passed · 1 pinned warning \(skills\/propagate\/SKILL\.md symlink, #98\) · directory: ICON_MISSING pinned, 0 tracked OS files$/);
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("plugin-validate gate: a NEW validator warning turns it red and quotes the warning", () => {
+  const f = fakeClaude(pinnedReport([{ path: "root", message: "CLAUDE.md at the plugin root is not loaded as project context" }]));
+  try {
+    const g = gatePluginValidate({ skillDir: SKILL_DIR, claudeBin: f.bin });
+    assert.equal(g.status, "failed", g.detail);
+    assert.match(g.detail, /new validator warning: root: CLAUDE\.md at the plugin root is not loaded as project context — fix it or pin it in KNOWN_WARNINGS/);
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("plugin-validate gate: a NEW plugin-directory finding is red too, and a report it cannot read is a failure, not a pass", () => {
+  const withNew = pinnedReport();
+  withNew.directory.findings.push({ code: "LICENSE_MISSING", file: "LICENSE", blocking: false });
+  const f = fakeClaude(withNew);
+  const bad = fakeClaude({ unexpected: "shape" });
+  try {
+    const g = gatePluginValidate({ skillDir: SKILL_DIR, claudeBin: f.bin });
+    assert.equal(g.status, "failed", g.detail);
+    assert.match(g.detail, /new plugin-directory finding: LICENSE_MISSING LICENSE — fix it or pin its code in KNOWN_DIRECTORY/);
+    const u = gatePluginValidate({ skillDir: SKILL_DIR, claudeBin: bad.bin });
+    assert.equal(u.status, "failed", u.detail);
+    assert.match(u.detail, /unrecognised validator report shape/);
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true });
+    rmSync(bad.dir, { recursive: true, force: true });
+  }
+});
+
+test("plugin-validate gate: no claude CLI is SKIPPED, stated, and does not block the release", () => {
+  const g = gatePluginValidate({ skillDir: SKILL_DIR, claudeBin: path.join(tmpdir(), "no-such-claude-binary") });
+  assert.equal(g.status, "skipped");
+  assert.equal(g.reason, "skipped — the claude CLI is not installed here");
+  const result = runReleaseCheck({
+    manifestsDir: SKILL_DIR, suiteDir: suiteFixture(`node -e "console.log('# tests 1'); console.log('# pass 1'); console.log('# fail 0')"`),
+    skillDir: SKILL_DIR, claudeBin: path.join(tmpdir(), "no-such-claude-binary"),
+    makePublicEnv: { ...process.env, HOME: tmp("propagate-release-skip-"), PROPAGATE_STATE_DIR: path.join(tmp("propagate-release-skip2-"), "s") },
+  });
+  const pv = result.gates.find((x) => x.name === "plugin-validate");
+  assert.equal(pv.status, "skipped");
+  const others = result.gates.filter((x) => x.name !== "plugin-validate");
+  assert.equal(result.overall, others.some((x) => x.status === "failed") ? "blocked" : others.some((x) => x.status === "could-not-run") ? "incomplete" : "ready", "a skipped gate must not change the verdict");
+});
+
+// ---------------------------------------------------------------------------
 // Gate 3 — make-public --check (the REAL scripts/make-public.mjs, isolated HOME)
 // ---------------------------------------------------------------------------
 
@@ -372,6 +561,29 @@ test("gate 3: an empty identity map is its own distinct could-not-run reason", (
     // fixture is exercising the real refusal path rather than a fluke.
     assert.equal(g.status, "could-not-run", g.detail || g.reason);
     assert.match(g.reason, /empty/i);
+  } finally {
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 3: an unmapped watchlist directory is NAMED in the reason, not just counted", () => {
+  // Found 2026-11-04: the refusal's first line is "1 WATCHLIST DIRECTORY IS UNMAPPED:" and the name is on the next
+  // line, so a first-line reason named nothing. The reason is the first paragraph.
+  const home = tmp("propagate-release-unmapped-");
+  try {
+    const stateDir = path.join(home, ".propagate");
+    mkdirSync(stateDir, { recursive: true });
+    const root = path.join(home, "Documents", "GitHub");
+    mkdirSync(path.join(root, "zz-unmapped-probe"), { recursive: true });
+    writeFileSync(path.join(stateDir, "identity-map.json"), JSON.stringify({ names: { "Some Client": "client-a" }, allow: [] }));
+    // The watchlist is depth-1 under SEARCH_ROOTS, and the env var outranks config.yml (lib/core/config.mjs).
+    const g = gateMakePublicCheck({
+      skillDir: SKILL_DIR,
+      env: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: stateDir, PROPAGATE_SEARCH_ROOTS: root },
+    });
+    assert.equal(g.status, "could-not-run", g.detail || g.reason);
+    assert.match(g.reason, /UNMAPPED/, `premise: the fixture must hit the unmapped refusal, got: ${g.reason}`);
+    assert.match(g.reason, /zz-unmapped-probe/, "the reason must name the directory");
   } finally {
     rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
@@ -424,7 +636,7 @@ test("runReleaseCheck: a could-not-run gate makes the run 'incomplete', never 'r
       skillDir: SKILL_DIR,
       makePublicEnv: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") },
     });
-    assert.equal(result.gates.length, 4);
+    assert.equal(result.gates.length, 5);
     const g3 = result.gates.find((g) => g.name === "make-public-check");
     assert.equal(g3.status, "could-not-run");
     assert.notEqual(result.overall, "ready", "could-not-run must never be summarized as ready");
@@ -458,7 +670,7 @@ test("runReleaseCheck alone writes no state: the state dir is byte-identical bef
   try {
     const result = runReleaseCheck({ manifestsDir: manifests, hubMarketplacePath: hubPath(manifests), suiteDir: suite, skillDir: SKILL_DIR,
       makePublicEnv: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") } });
-    assert.equal(result.gates.length, 4, "the aggregate really ran");
+    assert.equal(result.gates.length, 5, "the aggregate really ran");
     assert.equal(treeSnapshot(stateDir), before, "runReleaseCheck must not write into the state dir");
     assert.equal(existsSync(path.join(stateDir, "release-checks.jsonl")), false);
   } finally {

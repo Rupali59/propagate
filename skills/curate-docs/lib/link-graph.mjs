@@ -81,7 +81,13 @@ function resolveCitation(cite, fromDir, root, index, byBasename, externalBases) 
   if (hits.length === 1) return { status: "resolved", abs: hits[0] };
   if (hits.length > 1) return { status: "ambiguous", candidates: hits, reason: "resolves from two bases" };
 
-  for (const base of [fromDir, root, ...externalBases]) {
+  // `./x.md` means the citing file's own directory (CommonMark's relative-link meaning, and the author's explicit
+  // intent), so it is looked for there and nowhere else. Retrying it against the root and the tree's parent let a stub
+  // in another repo answer for a link that is broken: `./DECISIONS.md` in a workspace doc resolved to the hub's
+  // pointer stub two directories up, and a stray $TMPDIR/c.md did the same to a fixture (#115). Bare cites
+  // (`STATE.md`) and `../` cites keep the fallback: it exists for workspace-relative references such as `../STATE.md`.
+  const externalTry = target.startsWith("./") ? [fromDir] : [fromDir, root, ...externalBases];
+  for (const base of externalTry) {
     const abs = path.resolve(base, target);
     if (!abs.startsWith(root + path.sep) && existsSync(abs)) return { status: "external", abs };
   }

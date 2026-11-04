@@ -2893,7 +2893,7 @@ const RELEASE_COLUMNS = [
   { key: "ms", label: "took", num: true, value: (r) => r.ms, cell: (r) => secs(r.ms) },
   { key: "origin", label: "origin", value: (r) => r.origin || "", cell: (r) => (r.recorded ? (r.version ? "v" + r.version : "") : (r.origin || "not recorded")) },
 ];
-const GATE_MARK = { passed: "h-recorded", failed: "h-failed", "could-not-run": "h-none" };
+const GATE_MARK = { passed: "h-recorded", failed: "h-failed", "could-not-run": "h-none", skipped: "h-none" };
 
 function HistoryPart({ part, retry, nav }) {
   const [copied, copy] = useCopyFlash();

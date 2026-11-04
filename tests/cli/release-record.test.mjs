@@ -42,7 +42,7 @@ function sandbox() {
 
 const lines = (f) => readFileSync(f, "utf8").split("\n").filter(Boolean);
 
-test("release --check appends exactly one line with the four gates, matching what it printed (--json), and a second run appends a second", () => {
+test("release --check appends exactly one line with every gate, matching what it printed (--json), and a second run appends a second", () => {
   const sb = sandbox();
   try {
     assert.equal(existsSync(sb.file), false, "nothing recorded before the run");
@@ -56,7 +56,7 @@ test("release --check appends exactly one line with the four gates, matching wha
     assert.equal(rec.exitCode, printed.exitCode);
     assert.equal(r.status, printed.exitCode, "the exit code is the verdict's, record or no record");
     assert.equal(rec.version, JSON.parse(readFileSync(path.join(SKILL_DIR, "package.json"), "utf8")).version);
-    assert.deepEqual(rec.gates.map((g) => g.name), ["version-manifests", "suite", "make-public-check", "stranger-install"]);
+    assert.deepEqual(rec.gates.map((g) => g.name), ["version-manifests", "suite", "plugin-validate", "make-public-check", "stranger-install"]);
     assert.deepEqual(rec.gates.map((g) => g.status), printed.gates.map((g) => g.status));
     for (const g of rec.gates) assert.ok(typeof (g.detail ?? g.reason) === "string" && (g.detail ?? g.reason).length > 0, `${g.name} carries its detail or reason`);
     assert.equal("raw" in rec.gates[0], false, "gate output is not stored");

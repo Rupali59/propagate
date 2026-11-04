@@ -7,11 +7,11 @@ import path from "node:path";
 import { discover } from "../lib/discovery.mjs";
 import { loadConfig } from "../lib/config.mjs";
 
-const cfg = (root) => loadConfig(root, { home: mkdtempSync(path.join(tmpdir(), "cd-h-")) });
+const cfg = (root) => loadConfig(root, { home: mkdtempSync(path.join(tmpdir(), "cd-h-")) }); // not scanned: a fake HOME
 const git = (d, ...a) => execFileSync("git", ["-C", d, ...a], { stdio: ["ignore", "pipe", "ignore"] });
 
 function repo() {
-  const d = mkdtempSync(path.join(tmpdir(), "cd-git-"));
+  const d = mkdtempSync(path.join(tmpdir(), "cd-git-")); // not scanned: discover() lists files; it never resolves a citation, so the tree's parent is not consulted
   git(d, "init", "-q");
   git(d, "config", "user.email", "t@t"); git(d, "config", "user.name", "t");
   return d;
@@ -50,7 +50,7 @@ test("untracked-but-real docs are included and counted separately", () => {
 });
 
 test("a non-git directory falls back to the filesystem walk and SAYS which instrument ran", () => {
-  const d = mkdtempSync(path.join(tmpdir(), "cd-nogit-"));
+  const d = mkdtempSync(path.join(tmpdir(), "cd-nogit-")); // not scanned: discover() lists files; it never resolves a citation, so the tree's parent is not consulted
   writeFileSync(path.join(d, "README.md"), "# r");
   const r = discover(d, cfg(d));
   assert.equal(r.instrument, "filesystem");
@@ -82,9 +82,9 @@ test("skipDirs apply under git too — git does not know .worktrees is not docum
 });
 
 test("symlinked doc trees are followed, and the count is reported (F5)", () => {
-  const outside = mkdtempSync(path.join(tmpdir(), "cd-out-"));
+  const outside = mkdtempSync(path.join(tmpdir(), "cd-out-")); // not scanned: the symlink target, only listed through the link
   writeFileSync(path.join(outside, "linked.md"), "# linked");
-  const d = mkdtempSync(path.join(tmpdir(), "cd-sym-"));
+  const d = mkdtempSync(path.join(tmpdir(), "cd-sym-")); // not scanned: discover() lists files; it never resolves a citation, so the tree's parent is not consulted
   writeFileSync(path.join(d, "README.md"), "# r");
   symlinkSync(outside, path.join(d, "ext"));
   const r = discover(d, cfg(d));
@@ -94,7 +94,7 @@ test("symlinked doc trees are followed, and the count is reported (F5)", () => {
 });
 
 test("a symlink cycle terminates and is reported, not hung or silently pruned", () => {
-  const d = mkdtempSync(path.join(tmpdir(), "cd-cyc-"));
+  const d = mkdtempSync(path.join(tmpdir(), "cd-cyc-")); // not scanned: discover() lists files; it never resolves a citation, so the tree's parent is not consulted
   writeFileSync(path.join(d, "README.md"), "# r");
   mkdirSync(path.join(d, "sub"));
   writeFileSync(path.join(d, "sub/b.md"), "# b");

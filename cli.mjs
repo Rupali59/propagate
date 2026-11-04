@@ -1694,7 +1694,7 @@ async function releaseCmd(argv = []) {
     process.exit(result.exitCode);
   }
 
-  const MARK = { passed: `${GREEN}✓${RESET}`, failed: `${RED}✗${RESET}`, "could-not-run": `${DIM}·${RESET}` };
+  const MARK = { passed: `${GREEN}✓${RESET}`, failed: `${RED}✗${RESET}`, "could-not-run": `${DIM}·${RESET}`, skipped: `${DIM}-${RESET}` };
   console.log(`${BOLD}# release --check${RESET}  ${DIM}(docs/RELEASE.md — publishes nothing)${RESET}\n`);
   for (const g of result.gates) {
     const line = g.detail || g.reason || g.status;
@@ -1703,9 +1703,16 @@ async function releaseCmd(argv = []) {
 
   const failed = result.gates.filter((g) => g.status === "failed");
   const couldNotRun = result.gates.filter((g) => g.status === "could-not-run");
+  const skipped = result.gates.filter((g) => g.status === "skipped");
   console.log();
   if (result.overall === "ready") {
-    console.log(`${GREEN}${BOLD}release: READY${RESET} — all ${result.gates.length} gates passed. Step 5 (publish) is yours to do by hand.`);
+    // A skipped gate (plugin-validate with no claude CLI) does not block, but "all gates passed" would be false.
+    const ran = result.gates.length - skipped.length;
+    console.log(
+      `${GREEN}${BOLD}release: READY${RESET} — ` +
+        (skipped.length ? `${ran} of ${result.gates.length} gates passed, ${skipped.length} skipped (${skipped.map((g) => g.name).join(", ")}).` : `all ${result.gates.length} gates passed.`) +
+        ` Step 5 (publish) is yours to do by hand.`,
+    );
   } else if (result.overall === "blocked") {
     console.log(
       `${RED}${BOLD}release: BLOCKED${RESET} — ${failed.length} gate(s) failed` +

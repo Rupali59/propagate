@@ -7,8 +7,8 @@ import { readStatus, setStatus, STATUSES, backfillFromRenames } from "../lib/sta
 import { loadConfig } from "../lib/config.mjs";
 
 const cfg = () =>
-  loadConfig(mkdtempSync(path.join(tmpdir(), "cd-r-")), { home: mkdtempSync(path.join(tmpdir(), "cd-h-")) });
-const tmp = () => mkdtempSync(path.join(tmpdir(), "cd-st-"));
+  loadConfig(mkdtempSync(path.join(tmpdir(), "cd-r-")), { home: mkdtempSync(path.join(tmpdir(), "cd-h-")) }); // not scanned: loadConfig only (a root with no config file, a fake home); no link graph is built over them
+const tmp = () => mkdtempSync(path.join(tmpdir(), "cd-st-")); // not scanned: readStatus/setStatus act on single files in this directory; no link graph
 
 /** Every byte of every file — the artifact a write gate must leave untouched. */
 function snapshot(dir) {

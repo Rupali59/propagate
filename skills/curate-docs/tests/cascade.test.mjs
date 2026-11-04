@@ -18,15 +18,14 @@ import { buildLinkGraph } from "../lib/link-graph.mjs";
 import { setStatus } from "../lib/state.mjs";
 import { loadConfig } from "../lib/config.mjs";
 import { discover } from "../lib/discovery.mjs";
+import { privateRoot } from "./_tmp.mjs";
 
-const HOME = mkdtempSync(path.join(tmpdir(), "cd-h-"));
+const HOME = mkdtempSync(path.join(tmpdir(), "cd-h-")); // not scanned: a fake HOME handed to loadConfig
 
 /** hub -> A ; A -> {B, C} */
 function tree() {
-  // One level below a PRIVATE temp dir: the resolver also tries the tree's parent (externalBases), so a fixture
-  // made directly in the shared $TMPDIR resolved `./c.md` to a stray $TMPDIR/c.md another process left there
-  // (2026-10-19: this test went red with no code change). The parent must be empty and ours.
-  const d = path.join(mkdtempSync(path.join(tmpdir(), "cd-casc-")), "root");
+  // Scanned, so a private parent (see _tmp.mjs): a stray $TMPDIR/c.md once answered `./c.md` here (2026-10-19).
+  const d = privateRoot("cd-casc-");
   mkdirSync(path.join(d, "docs/archive"), { recursive: true });
   writeFileSync(path.join(d, "STATE.md"), "# hub\n- [plan A](./docs/a.md)\n");
   writeFileSync(path.join(d, "docs/a.md"), "# A\nDepends on [B](./b.md) and [C](./c.md).\n");
