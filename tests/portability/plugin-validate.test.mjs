@@ -8,6 +8,17 @@
  * skills/propagate/. So `--strict` (warnings are failures) is not the gate — this is: any warning OTHER than the
  * pinned one, or a failure, is red. An allowlist of one fails loudly on anything new (rule:derive-dont-curate).
  *
+ * READ `--json`, NEVER THE PROSE. Until 2026-11-04 this parsed `❯ ` lines out of the human report. Claude Code
+ * 2.1.311 appended a plugin-directory section (12 `❯ ` findings) and an "About these checks" block (2 more `❯ `
+ * notes) to that report, and both live tests went red with the validator's own verdict unchanged. The JSON keeps
+ * the three apart: the validator's warnings (`manifest`, `contents[]`), the plugin directory's findings
+ * (`directory.findings[]`, each with a stable `code`), and advice/notes, which never gate anything.
+ *
+ * The directory findings are gated too, separately: a blocking one is red, ICON_MISSING is pinned with its reason,
+ * and ARCHIVE_OS_METADATA_FILE (.DS_Store) is accepted only for a file git does not track, which is the validator's
+ * own instruction ("If it prints nothing, the file is not committed and so is not submitted"). A committed .DS_Store
+ * is red.
+ *
  * The `claude` CLI is not on CI runners, so the live check SKIPS there with a stated reason, never passes
  * silently (rule:discernment-checks §2). `classify` is tested without it, so the logic is always exercised.
  */
@@ -21,38 +32,100 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-/** The warnings propagate knowingly carries, each with the reason it is accepted. */
+/** The validator warnings propagate knowingly carries, matched against `<path>: <message>`. */
 export const KNOWN_WARNINGS = [
   { re: /^directory: 1 component here was not read/, why: "skills/propagate/SKILL.md is a symlink to the root SKILL.md (#98)" },
 ];
 
-/** `{passed, unexpected}` from the validator's output: `❯ ` lines are warnings or errors. */
-export function classify(output) {
-  const lines = output.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("❯ ")).map((l) => l.slice(2));
-  const unexpected = lines.filter((l) => !KNOWN_WARNINGS.some((k) => k.re.test(l)));
-  return { passed: /Validation passed/.test(output) && !/Validation failed/.test(output), unexpected };
+/** Plugin-directory finding codes propagate knowingly carries. */
+export const KNOWN_DIRECTORY = [
+  { code: "ICON_MISSING", why: "propagate ships from its own marketplace, not the plugin directory; no listing icon exists yet" },
+];
+
+/**
+ * `{passed, unexpected, directoryUnexpected}` from the validator's `--json` report.
+ * `isTracked(file)` answers whether a repo-relative path is committed; untracked OS metadata is not submitted.
+ * A report whose shape is not recognised is a failure that says so, never an empty result (rule:discernment-checks §6).
+ */
+export function classify(report, { isTracked = () => true } = {}) {
+  if (!report || typeof report !== "object" || !Array.isArray(report.contents) || !report.manifest) {
+    return { passed: false, unexpected: ["unrecognised validator report shape — the reader cannot say what it found"], directoryUnexpected: [] };
+  }
+  const parts = [report.manifest, ...report.contents];
+  const errors = parts.flatMap((p) => p.errors ?? []);
+  const warnings = parts.flatMap((p) => p.warnings ?? []).map((w) => `${w.path}: ${w.message}`);
+  const unexpected = [...errors.map((e) => `error ${e.path}: ${e.message}`), ...warnings.filter((l) => !KNOWN_WARNINGS.some((k) => k.re.test(l)))];
+  const directoryUnexpected = (report.directory?.findings ?? [])
+    .filter((f) => {
+      if (f.blocking) return true;
+      if (f.code === "ARCHIVE_OS_METADATA_FILE") return isTracked(f.file);
+      return !KNOWN_DIRECTORY.some((k) => k.code === f.code);
+    })
+    .map((f) => `${f.code} ${f.file}${f.blocking ? " (blocking)" : ""}`);
+  return { passed: report.success === true && errors.length === 0, unexpected, directoryUnexpected };
 }
 
 const claude = spawnSync("claude", ["--version"], { encoding: "utf8" });
 const noClaude = claude.error || claude.status !== 0 ? "the claude CLI is not installed here (CI) — classify() is still tested below" : false;
 const validate = (dir) => {
-  const r = spawnSync("claude", ["plugin", "validate", dir], { encoding: "utf8", timeout: 60000 });
-  return `${r.stdout ?? ""}${r.stderr ?? ""}`;
+  const r = spawnSync("claude", ["plugin", "validate", dir, "--json"], { encoding: "utf8", timeout: 60000 });
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    return { unparsed: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+  }
 };
+const tracked = (file) => spawnSync("git", ["-C", REPO, "ls-files", "--error-unmatch", "--", file], { stdio: "ignore" }).status === 0;
+
+// Literal reports, not live output, so every branch is reachable without the CLI (rule:mutate-behind-the-fixture-builder).
+const report = (over = {}) => ({
+  success: true,
+  manifest: { errors: [], warnings: [] },
+  contents: [{ errors: [], warnings: [{ path: "directory", message: "1 component here was not read — the path is not a regular file" }] }],
+  directory: { findings: [] },
+  ...over,
+});
 
 test("classify: the pinned symlink warning is accepted, anything else is reported", () => {
-  const known = "⚠ Found 1 warning:\n  ❯ directory: 1 component here was not read — the path is not a regular file\n✔ Validation passed with warnings";
-  assert.deepEqual(classify(known), { passed: true, unexpected: [] });
-  const extra = known.replace("✔", "  ❯ root: CLAUDE.md at the plugin root is not loaded as project context.\n✔");
+  assert.deepEqual(classify(report()), { passed: true, unexpected: [], directoryUnexpected: [] });
+  const extra = report({ contents: [{ errors: [], warnings: [
+    { path: "directory", message: "1 component here was not read — x" },
+    { path: "root", message: "CLAUDE.md at the plugin root is not loaded as project context." },
+  ] }] });
   assert.deepEqual(classify(extra).unexpected, ["root: CLAUDE.md at the plugin root is not loaded as project context."]);
-  assert.equal(classify("✘ Validation failed").passed, false);
+  assert.equal(classify(report({ success: false })).passed, false);
+  const errored = classify(report({ manifest: { errors: [{ path: "name", message: "missing" }], warnings: [] } }));
+  assert.equal(errored.passed, false);
+  assert.deepEqual(errored.unexpected, ["error name: missing"]);
+});
+
+test("classify: directory findings — icon pinned, untracked .DS_Store accepted, tracked or blocking or new is red", () => {
+  const findings = [
+    { code: "ICON_MISSING", file: ".claude-plugin/plugin.json", blocking: false },
+    { code: "ARCHIVE_OS_METADATA_FILE", file: "lib/.DS_Store", blocking: false },
+    { code: "ARCHIVE_OS_METADATA_FILE", file: "docs/.DS_Store", blocking: false },
+    { code: "LICENSE_MISSING", file: "LICENSE", blocking: false },
+    { code: "ICON_MISSING", file: "x", blocking: true },
+  ];
+  const r = classify(report({ directory: { findings } }), { isTracked: (f) => f === "docs/.DS_Store" });
+  assert.deepEqual(r.directoryUnexpected, ["ARCHIVE_OS_METADATA_FILE docs/.DS_Store", "LICENSE_MISSING LICENSE", "ICON_MISSING x (blocking)"]);
+});
+
+test("classify: a report it does not recognise is a failure, never an empty pass", () => {
+  for (const bad of [null, {}, { unparsed: "⚠ Found 1 warning" }, { success: true, contents: "x", manifest: {} }]) {
+    const r = classify(bad);
+    assert.equal(r.passed, false);
+    assert.match(r.unexpected[0], /unrecognised validator report shape/);
+  }
 });
 
 test("claude plugin validate passes on propagate with only the pinned warning", { skip: noClaude }, () => {
   const out = validate(REPO);
-  const r = classify(out);
-  assert.equal(r.passed, true, `validation did not pass:\n${out}`);
-  assert.deepEqual(r.unexpected, [], `a NEW validator warning — fix it, or pin it in KNOWN_WARNINGS with its reason:\n${out}`);
+  const r = classify(out, { isTracked: tracked });
+  const show = JSON.stringify(out, null, 1).slice(0, 4000);
+  assert.equal(r.passed, true, `validation did not pass:\n${show}`);
+  assert.deepEqual(r.unexpected, [], `a NEW validator warning — fix it, or pin it in KNOWN_WARNINGS with its reason:\n${show}`);
+  assert.deepEqual(r.directoryUnexpected, [], `a NEW plugin-directory finding — fix it, or pin its code in KNOWN_DIRECTORY with its reason:\n${show}`);
 });
 
 test("the live check can fail: a probe plugin with a root CLAUDE.md raises an unpinned warning", { skip: noClaude }, () => {
@@ -63,7 +136,9 @@ test("the live check can fail: a probe plugin with a root CLAUDE.md raises an un
     writeFileSync(path.join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "probe-plugin", version: "0.0.1", description: "d", author: { name: "a" } }));
     writeFileSync(path.join(dir, "skills", "x", "SKILL.md"), "---\nname: x\ndescription: Use when probing.\n---\nbody\n");
     writeFileSync(path.join(dir, "CLAUDE.md"), "hi\n");
-    assert.equal(classify(validate(dir)).unexpected.length, 1);
+    const r = classify(validate(dir));
+    assert.equal(r.unexpected.length, 1, JSON.stringify(r));
+    assert.match(r.unexpected[0], /^root: CLAUDE\.md at the plugin root/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
