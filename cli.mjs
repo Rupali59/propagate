@@ -146,7 +146,6 @@ import { shortPath, currentWorkspace } from "./lib/core/config.mjs";
 export { parsePlistWatchPaths, expectedWatchPaths, findDuplicateOpenAcrossLedgers };
 
 import {
-  readLedger,
   readLedgerWithStats,
   lastActivityAt,
   markStatus,
@@ -162,8 +161,8 @@ import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatt
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
 import { reconcile, STATES, groupRows, inboundRows, edgeIdFor, isGlobPattern, expandDownstream } from "./lib/edges/reconcile.mjs";
-import { ACTIONABLE, ACTIONS, actionOf } from "./lib/edges/states.mjs";
-import { appendEvent, readEvents, VERIFY_DISPOSITIONS, edgeId, dryValidateEvent } from "./lib/edges/events.mjs";
+import { ACTIONABLE, ACTIONS, DISPLAY_ORDER, actionOf } from "./lib/edges/states.mjs";
+import { appendEvent, edgeEventIndex, VERIFY_DISPOSITIONS, edgeId, dryValidateEvent } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
 import { resolveProvenance, resolveObservedRef, resolveExecution } from "./lib/edges/provenance.mjs";
 import {
@@ -1429,7 +1428,7 @@ async function doctor({ exitProcess = true } = {}) {
     // reading, and asserting a threshold on it would be the invention G16 forbids.
     try {
       const { sessionGapMedian, describeCadence } = await import("./lib/report/verify-cadence.mjs");
-      const { events: cadenceEvents } = await readEvents({});
+      const { events: cadenceEvents } = await edgeEventIndex();
       info("verify cadence (uncalibrated, not asserted)", describeCadence(sessionGapMedian(cadenceEvents)));
     } catch (err) {
       // A gauge that cannot be read says so; it must not read as "no data yet".
@@ -2521,11 +2520,76 @@ export function resolveChangedFile(absPath, workspaces = WORKSPACES) {
 }
 
 /**
+ * Reconcile once for `check` and say so when it could not. The ONE place a reconcile failure is
+ * caught: it comes back as `error`, never as an empty `rows`, because "reconcile failed" and
+ * "nothing drifted" are different facts (rule:discernment-checks §2) and the old advisory
+ * swallowed one into the other (`catch { return [] }`).
+ *
+ * @param {Array} workspaces
+ * @param {Function} [reconcileFn] injectable so a test can make reconcile throw
+ * @returns {Promise<{rows: Array|null, error: string|null}>}
+ */
+export async function loadEdgeStates(workspaces = WORKSPACES, reconcileFn = reconcile) {
+  try {
+    const { rows } = await reconcileFn(workspaces);
+    return { rows, error: null };
+  } catch (err) {
+    return { rows: null, error: String(err?.message ?? err) };
+  }
+}
+
+/** Resolve a path through symlinks when it exists, else as written: row paths and workspace roots may differ only by a link (N32). */
+function realOrAbs(p) {
+  const abs = path.resolve(p);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * The worse of two states by `DISPLAY_ORDER` (worst first). A state nobody mapped has index -1 and
+ * so wins: it stays visible (`actionOf` says "unknown") rather than losing to a mapped one.
+ */
+function worseState(a, b) {
+  return DISPLAY_ORDER.indexOf(b) < DISPLAY_ORDER.indexOf(a) ? b : a;
+}
+
+/**
+ * Index reconcile rows by the (source, downstream) pair a coupling names, so each coupled path
+ * can be annotated with its edge's state. A glob downstream is keyed by its pattern (that is how
+ * `buildEdgeMap` keeps it) and takes the WORST state among the files it expanded to, by
+ * `DISPLAY_ORDER`. Two edges between the same pair (different `why`) also take the worst.
+ *
+ * @param {Array|null} rows reconcile rows, or null when reconcile did not run
+ * @returns {Map<string, string>} `source\0downstream` or `source\0glob:<pattern>` -> state
+ */
+function indexEdgeStates(rows) {
+  const byPair = new Map();
+  const put = (key, state) => {
+    const cur = byPair.get(key);
+    byPair.set(key, cur === undefined ? state : worseState(cur, state));
+  };
+  for (const r of rows ?? []) {
+    if (!r?.source?.path) continue;
+    const src = realOrAbs(r.source.path);
+    if (r.downstream?.path) put(`${src}\0${realOrAbs(r.downstream.path)}`, r.state);
+    if (r.glob) put(`${src}\0glob:${r.glob}`, r.state);
+  }
+  return byPair;
+}
+
+/**
  * Core of `check`: given changed files (paths relative to `repoRoot`, as
  * `git diff --name-only` reports them) resolve each to its workspace's
  * declared edges (F4 — repo-relative -> absolute -> nearest-ancestor
- * workspace -> workspace-relative, on both sides before lookup) and cross-ref
- * the workspace ledger for already-open drift on that file.
+ * workspace -> workspace-relative, on both sides before lookup), and, when
+ * reconcile's rows are supplied, name the state of each coupled edge.
+ *
+ * The frozen v1 ledger is no longer read: its only use here was an "open
+ * drift #id" column, and every v1 ledger has zero open rows, so that column
+ * could never fire (a check that cannot fail, rule:discernment-checks §1).
  *
  * Exported (not just used internally by `check()`) so tests can drive it
  * directly against a temp workspace, without shelling out to git or reading
@@ -2534,12 +2598,15 @@ export function resolveChangedFile(absPath, workspaces = WORKSPACES) {
  * @param {string[]} changedRepoRelPaths
  * @param {string} repoRoot absolute path to the git repo root the paths are relative to
  * @param {Array} workspaces defaults to the real discovered WORKSPACES; override in tests
- * @returns {Promise<{file: string, workspace: string, coupled: string[], openLedgerIds: string[]}[]>}
+ * @param {{rows?: Array|null}} [opts] reconcile's rows. Absent or null -> no `states` on the results
+ * @returns {Promise<{file: string, workspace: string, coupled: string[], states: Record<string, {state: string, action: string}>}[]>}
+ *   `states` holds only the coupled paths whose edge was found in `rows`; a path with no entry has
+ *   no known state, which is not the same as done.
  */
-export async function computeCouplings(changedRepoRelPaths, repoRoot, workspaces = WORKSPACES) {
+export async function computeCouplings(changedRepoRelPaths, repoRoot, workspaces = WORKSPACES, opts = {}) {
   const edgeMapCache = new Map(); // workspace.root -> {forward, reverse}
-  const ledgerCache = new Map(); // workspace.ledgerJsonl -> open rows
   const results = [];
+  const stateIndex = opts.rows ? indexEdgeStates(opts.rows) : null;
 
   for (const relPath of changedRepoRelPaths) {
     const abs = path.resolve(repoRoot, relPath);
@@ -2552,21 +2619,38 @@ export async function computeCouplings(changedRepoRelPaths, repoRoot, workspaces
     }
     const { forward, reverse } = edgeMapCache.get(workspace.root);
 
-    const coupled = new Set();
-    if (forward.has(rel)) for (const p of forward.get(rel)) coupled.add(p);
-    if (reverse.has(rel)) for (const u of reverse.get(rel)) coupled.add(u.upstreamDoc);
-
-    if (!ledgerCache.has(workspace.ledgerJsonl)) {
-      const rows = existsSync(workspace.ledgerJsonl) ? await readLedger(workspace.ledgerJsonl) : [];
-      ledgerCache.set(workspace.ledgerJsonl, rows.filter((r) => r.status === "open"));
+    // coupled path -> the (source, downstream) pair of the edge that couples it
+    const coupled = new Map();
+    if (forward.has(rel)) {
+      for (const p of forward.get(rel)) {
+        const downstreamKey = isGlobPattern(p) ? `glob:${p}` : realOrAbs(path.resolve(workspace.root, p));
+        if (!coupled.has(p)) coupled.set(p, []);
+        coupled.get(p).push(`${realOrAbs(path.resolve(workspace.root, rel))}\0${downstreamKey}`);
+      }
     }
-    const openIds = ledgerCache
-      .get(workspace.ledgerJsonl)
-      .filter((r) => r.source === rel)
-      .map((r) => r.id);
+    if (reverse.has(rel)) {
+      for (const u of reverse.get(rel)) {
+        if (!coupled.has(u.upstreamDoc)) coupled.set(u.upstreamDoc, []);
+        coupled.get(u.upstreamDoc).push(
+          `${realOrAbs(path.resolve(workspace.root, u.upstreamDoc))}\0${realOrAbs(path.resolve(workspace.root, rel))}`,
+        );
+      }
+    }
+    if (coupled.size === 0) continue;
 
-    if (coupled.size === 0 && openIds.length === 0) continue;
-    results.push({ file: rel, workspace: workspace.name, coupled: [...coupled], openLedgerIds: openIds });
+    const states = {};
+    if (stateIndex) {
+      for (const [p, keys] of coupled) {
+        let worst = null;
+        for (const k of keys) {
+          const st = stateIndex.get(k);
+          if (st === undefined) continue;
+          worst = worst === null ? st : worseState(worst, st);
+        }
+        if (worst !== null) states[p] = { state: worst, action: actionOf(worst) };
+      }
+    }
+    results.push({ file: rel, workspace: workspace.name, coupled: [...coupled.keys()], states });
   }
   return results;
 }
@@ -2575,33 +2659,47 @@ export async function computeCouplings(changedRepoRelPaths, repoRoot, workspaces
  * Print the grouped warning and return the exit code — separated from
  * `check()`'s arg-parsing/git-shelling so tests can call this directly with
  * a synthetic changed-file list (no git, no real WORKSPACES needed).
- * @returns {Promise<{exitCode: number, couplings: Array}>}
+ *
+ * Edge states come from reconcile. `check()` computes them once and passes
+ * `edgeStates` so the coupling lines and the inbound advisory share one run;
+ * called without it (tests), this reconciles `workspaces` itself. A coupled
+ * path whose edge is not done is annotated with its action word
+ * (`judge`, `pick-a-side`, `parked`, ...); a done one prints bare. When
+ * reconcile cannot run, the coupling lines print unannotated and a
+ * `edge states unknown` line says why, never a silent empty result.
+ * The exit code never depends on any of this.
+ *
+ * @returns {Promise<{exitCode: number, couplings: Array, statesUnknown: string|null}>}
  */
 export async function runCheck(
-  { changedFiles, repoRoot, strict = false, json = false },
+  { changedFiles, repoRoot, strict = false, json = false, edgeStates, reconcileFn },
   workspaces = WORKSPACES,
 ) {
-  const couplings = await computeCouplings(changedFiles, repoRoot, workspaces);
+  const loaded = edgeStates ?? (await loadEdgeStates(workspaces, reconcileFn));
+  const statesUnknown = loaded.error;
+  const couplings = await computeCouplings(changedFiles, repoRoot, workspaces, { rows: loaded.rows });
   const exitCode = couplings.length === 0 ? 0 : strict ? 1 : 0;
   if (json) {
     // Printing is check()'s job when --json is set (it wraps couplings in an
     // envelope with generatedAt/repoRoot/etc, matching statusJson's shape).
-    return { exitCode, couplings };
+    return { exitCode, couplings, statesUnknown };
   }
-  if (couplings.length === 0) {
-    return { exitCode, couplings };
-  }
-  console.log(
-    `${YELLOW}⚠ ${couplings.length} coupled file${couplings.length === 1 ? "" : "s"} in this change:${RESET}`,
-  );
-  for (const c of couplings) {
-    const parts = [...c.coupled];
-    if (c.openLedgerIds.length) {
-      parts.push(`open drift ${c.openLedgerIds.map((id) => `#${id}`).join(", ")}`);
+  if (couplings.length > 0) {
+    console.log(
+      `${YELLOW}⚠ ${couplings.length} coupled file${couplings.length === 1 ? "" : "s"} in this change:${RESET}`,
+    );
+    for (const c of couplings) {
+      const parts = c.coupled.map((p) => {
+        const s = c.states[p];
+        return s && s.action !== ACTIONS.DONE ? `${p} (${s.action})` : p;
+      });
+      console.log(`  ${c.file} → verify: ${parts.join(", ")}`);
     }
-    console.log(`  ${c.file} → verify: ${parts.join(", ")}`);
   }
-  return { exitCode, couplings };
+  if (statesUnknown) {
+    console.log(`${YELLOW}  edge states unknown — reconcile failed: ${statesUnknown}${RESET}`);
+  }
+  return { exitCode, couplings, statesUnknown };
 }
 
 /**
@@ -2625,20 +2723,18 @@ export function gitDiffNames(gitArgs, repoRoot) {
 
 /**
  * Inbound drift, advisory-only (2026-08 plan Part 2: "the pre-push moment is
- * when the answer matters"). Reconciles every workspace and filters to the
- * edges pointing into `repoRoot` that have actually drifted or diverged —
- * `check`'s existing coupling gate stays exactly as it was; this is a
- * second, independent read layered alongside it, never feeding `exitCode`.
- * Errors are swallowed to `[]`: a reconcile bug must never turn an advisory
- * warning into a broken commit gate.
+ * when the answer matters"). Filters reconcile's rows to the edges pointing
+ * into `repoRoot` that have actually drifted or diverged — `check`'s existing
+ * coupling gate stays exactly as it was; this is a second, independent read
+ * layered alongside it, never feeding `exitCode`.
+ *
+ * Takes the rows `check()` already computed. It used to run its own reconcile
+ * and swallow any error to `[]`, so a reconcile bug read as "nothing drifted";
+ * the failure is now carried by `loadEdgeStates` and printed by `runCheck`.
  */
-async function inboundAdvisory(repoRoot) {
-  try {
-    const { rows: allRows } = await reconcile(WORKSPACES);
-    return inboundRows(allRows, repoRoot).filter((r) => ACTIONABLE.has(r.state));
-  } catch {
-    return [];
-  }
+function inboundAdvisory(rows, repoRoot) {
+  if (!rows) return [];
+  return inboundRows(rows, repoRoot).filter((r) => ACTIONABLE.has(r.state));
 }
 
 function printInboundAdvisory(inbound, repoRoot) {
@@ -2649,7 +2745,7 @@ function printInboundAdvisory(inbound, repoRoot) {
   for (const r of inbound) {
     const relSource = path.relative(repoRoot, r.source.path);
     const relDownstream = r.downstream.path ? path.relative(repoRoot, r.downstream.path) : "(unmatched)";
-    console.log(`  ${relSource} → ${relDownstream}   ${r.state}`);
+    console.log(`  ${relSource} → ${relDownstream}   ${actionOf(r.state)}`);
   }
 }
 
@@ -2694,8 +2790,10 @@ async function check() {
   // out loud, not to quietly enlarge the set.
   const untracked = range || staged ? [] : gitDiffNames(["ls-files", "--others", "--exclude-standard"], repoRoot);
 
-  const { exitCode, couplings } = await runCheck({ changedFiles, repoRoot, strict, json });
-  const inbound = await inboundAdvisory(repoRoot);
+  // ONE reconcile per run, shared by the coupling annotations and the inbound advisory.
+  const edgeStates = await loadEdgeStates(WORKSPACES);
+  const { exitCode, couplings, statesUnknown } = await runCheck({ changedFiles, repoRoot, strict, json, edgeStates });
+  const inbound = inboundAdvisory(edgeStates.rows, repoRoot);
   if (json) {
     console.log(
       JSON.stringify({
@@ -2706,6 +2804,7 @@ async function check() {
         strict,
         exitCode,
         couplings,
+        statesUnknown, // null when reconcile ran; the reason when it did not
         inbound, // advisory only — never affects exitCode, see inboundAdvisory()
       }),
     );

@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 import { computeCouplings, runCheck, resolveChangedFile } from "../../cli.mjs";
 import { appendRow } from "../../lib/edges/ledger.mjs";
@@ -145,43 +146,169 @@ sources:
   assert.equal(result.couplings.length, 1);
 });
 
-test("check: open ledger row for a changed file is surfaced even without a declared edge", async () => {
-  const ws = await makeWorkspace("chk-ledger-");
-  await writeFile(path.join(ws.root, "orphan.md"), "no sidecar for this one");
-  // No .propagates.yml at all — this file isn't declared anywhere — but it
-  // already has an open drift row in the ledger (e.g. filed by hand, or by
-  // an earlier watcher fire whose sidecar was later removed).
-  await appendRow(ws.ledgerJsonl, {
-    type: "drift",
-    id: "001",
-    source: "orphan.md",
-    change: "manually filed",
-    downstream: [{ path: "somewhere.md", why: "manual", kind: "prose" }],
-    status: "open",
-  });
+// ── edge states on `check` (#127 phase 0) ────────────────────────────────────
 
-  const couplings = await computeCouplings(["orphan.md"], ws.root, [ws]);
-  assert.equal(couplings.length, 1);
-  assert.equal(couplings[0].file, "orphan.md");
-  assert.deepEqual(couplings[0].openLedgerIds, ["001"]);
-  assert.deepEqual(couplings[0].coupled, []);
+const SPEC_SIDECAR = `
+sources:
+  SPEC.md:
+    propagates_to:
+      - path: lib/engine.ts
+        why: engine implementation must match spec
+        kind: prose
+`;
+
+async function specWorkspace(prefix, sidecar = SPEC_SIDECAR) {
+  const ws = await makeWorkspace(prefix);
+  await mkdir(path.join(ws.root, "lib"), { recursive: true });
+  await writeFile(path.join(ws.root, "SPEC.md"), "spec v1");
+  await writeFile(path.join(ws.root, "lib", "engine.ts"), "export function run() {}");
+  await writeFile(path.join(ws.root, ".propagates.yml"), sidecar);
+  return ws;
+}
+
+/** A reconcile row, as literal as the test needs: source, downstream, state. */
+function row(ws, source, downstream, state, extra = {}) {
+  return {
+    source: { path: path.join(ws.root, source) },
+    downstream: { path: downstream ? path.join(ws.root, downstream) : null },
+    state,
+    glob: null,
+    ...extra,
+  };
+}
+
+/** Run `fn` with console.log captured; returns what it printed. */
+async function captureLog(fn) {
+  const lines = [];
+  const orig = console.log;
+  console.log = (...a) => lines.push(a.join(" "));
+  try {
+    const result = await fn();
+    return { result, out: lines.join("\n") };
+  } finally {
+    console.log = orig;
+  }
+}
+
+test("check: a DRIFTED coupled edge is annotated (judge), a CLEAN one is not", async () => {
+  const ws = await specWorkspace("chk-state-");
+  for (const [state, annotation] of [["DRIFTED", "lib/engine.ts (judge)"], ["CLEAN", "lib/engine.ts"]]) {
+    const { out, result } = await captureLog(() =>
+      runCheck(
+        { changedFiles: ["SPEC.md"], repoRoot: ws.root, edgeStates: { rows: [row(ws, "SPEC.md", "lib/engine.ts", state)], error: null } },
+        [ws],
+      ),
+    );
+    assert.ok(out.includes(`SPEC.md → verify: ${annotation}`), `${state}: ${out}`);
+    if (state === "CLEAN") assert.ok(!out.includes("("), `a done edge prints bare: ${out}`);
+    assert.equal(result.couplings[0].states["lib/engine.ts"].state, state);
+  }
 });
 
-test("check: a closed (done) ledger row is NOT surfaced", async () => {
-  const ws = await makeWorkspace("chk-closed-");
-  await writeFile(path.join(ws.root, "orphan.md"), "closed drift");
+test("check: every state reads in the action vocabulary, and a path with no row stays unannotated", async () => {
+  const ws = await specWorkspace("chk-vocab-");
+  const cases = [
+    ["DIVERGED", "(pick-a-side)"],
+    ["REVERSED", "(judge)"],
+    ["DEFERRED", "(parked)"],
+    ["NEVER_VERIFIED", "(never-judged)"],
+    ["UNMATCHED", "(broken)"],
+    ["DECOUPLED", null],
+  ];
+  for (const [state, word] of cases) {
+    const { out } = await captureLog(() =>
+      runCheck({ changedFiles: ["SPEC.md"], repoRoot: ws.root, edgeStates: { rows: [row(ws, "SPEC.md", "lib/engine.ts", state)], error: null } }, [ws]),
+    );
+    if (word) assert.ok(out.includes(`lib/engine.ts ${word}`), `${state}: ${out}`);
+    else assert.ok(!out.includes("("), `${state} is done: ${out}`);
+  }
+  const { out, result } = await captureLog(() =>
+    runCheck({ changedFiles: ["SPEC.md"], repoRoot: ws.root, edgeStates: { rows: [], error: null } }, [ws]),
+  );
+  assert.deepEqual(result.couplings[0].states, {}, "no row means no known state, which is not 'done'");
+  assert.ok(out.includes("SPEC.md → verify: lib/engine.ts"), out);
+});
+
+test("check: a glob downstream takes the worst state among the files it expanded to", async () => {
+  const ws = await specWorkspace(
+    "chk-glob-",
+    `
+sources:
+  SPEC.md:
+    propagates_to:
+      - path: lib/*.ts
+        why: every module follows the spec
+        kind: prose
+`,
+  );
+  const rows = [
+    row(ws, "SPEC.md", "lib/engine.ts", "CLEAN", { glob: "lib/*.ts" }),
+    row(ws, "SPEC.md", "lib/other.ts", "DIVERGED", { glob: "lib/*.ts" }),
+  ];
+  const { out } = await captureLog(() =>
+    runCheck({ changedFiles: ["SPEC.md"], repoRoot: ws.root, edgeStates: { rows, error: null } }, [ws]),
+  );
+  assert.ok(out.includes("lib/*.ts (pick-a-side)"), out);
+});
+
+test("check: the real reconcile path annotates an edge nobody has verified", async () => {
+  const ws = await specWorkspace("chk-real-");
+  // reconcile resolves content through git; outside a repo both sides read UNRESOLVABLE.
+  execFileSync("git", ["init", "-q"], { cwd: ws.root });
+  const { out, result } = await captureLog(() => runCheck({ changedFiles: ["SPEC.md"], repoRoot: ws.root }, [ws]));
+  assert.equal(result.statesUnknown, null);
+  assert.ok(out.includes("lib/engine.ts (never-judged)"), out);
+});
+
+test("check: when reconcile cannot run, it says so — never an empty advisory — and the exit code is unchanged", async () => {
+  const ws = await specWorkspace("chk-unknown-");
+  const boom = async () => {
+    throw new Error("sidecar exploded");
+  };
+  for (const strict of [false, true]) {
+    const { out, result } = await captureLog(() =>
+      runCheck({ changedFiles: ["SPEC.md"], repoRoot: ws.root, strict, reconcileFn: boom }, [ws]),
+    );
+    assert.ok(out.includes("SPEC.md → verify: lib/engine.ts"), `couplings still print unannotated: ${out}`);
+    assert.ok(out.includes("edge states unknown — reconcile failed: sidecar exploded"), out);
+    assert.equal(result.statesUnknown, "sidecar exploded");
+    assert.equal(result.exitCode, strict ? 1 : 0, "reconcile failing never changes the gate");
+  }
+  // With nothing coupled the failure is still reported: the inbound advisory depends on it too.
+  const { out } = await captureLog(() =>
+    runCheck({ changedFiles: ["README.md"], repoRoot: ws.root, reconcileFn: boom }, [ws]),
+  );
+  assert.ok(out.includes("edge states unknown — reconcile failed: sidecar exploded"), out);
+});
+
+test("check: an open row in the frozen v1 ledger no longer changes the output", async () => {
+  const ws = await specWorkspace("chk-v1-");
+  const states = { rows: [row(ws, "SPEC.md", "lib/engine.ts", "CLEAN")], error: null };
+  const before = await captureLog(() => runCheck({ changedFiles: ["SPEC.md"], repoRoot: ws.root, edgeStates: states }, [ws]));
   await appendRow(ws.ledgerJsonl, {
     type: "drift",
     id: "001",
+    source: "SPEC.md",
+    change: "manually filed",
+    downstream: [{ path: "lib/engine.ts", why: "manual", kind: "prose" }],
+    status: "open",
+  });
+  const after = await captureLog(() => runCheck({ changedFiles: ["SPEC.md"], repoRoot: ws.root, edgeStates: states }, [ws]));
+  assert.equal(after.out, before.out);
+  assert.ok(!after.out.includes("open drift"), after.out);
+  assert.equal("openLedgerIds" in after.result.couplings[0], false);
+
+  // And an open v1 row on an undeclared file, which used to be surfaced by itself, is not.
+  await writeFile(path.join(ws.root, "orphan.md"), "no sidecar for this one");
+  await appendRow(ws.ledgerJsonl, {
+    type: "drift",
+    id: "002",
     source: "orphan.md",
     change: "manually filed",
     downstream: [{ path: "somewhere.md", why: "manual", kind: "prose" }],
     status: "open",
   });
-  await appendRow(ws.ledgerJsonl, { type: "status_change", id: "001", status: "done" });
-
-  const couplings = await computeCouplings(["orphan.md"], ws.root, [ws]);
-  assert.equal(couplings.length, 0);
+  assert.deepEqual(await computeCouplings(["orphan.md"], ws.root, [ws]), []);
 });
 
 test("resolveChangedFile: nearest-ancestor wins for nested workspaces (F4)", async () => {

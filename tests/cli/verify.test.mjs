@@ -815,10 +815,11 @@ test("readEvents: an old 11-key event (verbatim from the live store, less the re
     await writeFile(path.join(eventsDir, "2026-08.jsonl"), legacyLine + "\n");
 
     const script = `
-      import { readEvents, knownGoodPairs } from ${JSON.stringify(fileURLToPath(new URL("../../lib/edges/events.mjs", import.meta.url)))};
+      import { readEvents } from ${JSON.stringify(fileURLToPath(new URL("../../lib/edges/events.mjs", import.meta.url)))};
+      import { reduceLastPinning } from ${JSON.stringify(fileURLToPath(new URL("../../lib/edges/reconcile.mjs", import.meta.url)))};
       const { events, malformed } = await readEvents({ edgeId: "d3f4ce26" });
-      const pairs = await knownGoodPairs();
-      console.log(JSON.stringify({ events, malformed, hasPair: pairs.has("d3f4ce26|d39f2b5d9f16a61a55621fc46a19831e1b496f7e4501f752cc27c528e4344418|bce18f16d6b9ff3e40758f1d2098006575d1ff68d6ab679cb5d7402b8a55a792") }));
+      const pin = reduceLastPinning(events).get("d3f4ce26");
+      console.log(JSON.stringify({ events, malformed, hasPair: !!pin && pin.source_content === "d39f2b5d9f16a61a55621fc46a19831e1b496f7e4501f752cc27c528e4344418" && pin.downstream_content === "bce18f16d6b9ff3e40758f1d2098006575d1ff68d6ab679cb5d7402b8a55a792" }));
     `;
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
       encoding: "utf8",
@@ -849,6 +850,6 @@ test("readEvents: an old 11-key event (verbatim from the live store, less the re
     assert.equal("downstream_dirty" in event, false);
     // Still folds: the pinning lookup reconcile() relies on (edge_id +
     // both content ids) still resolves correctly off this event.
-    assert.equal(out.hasPair, true, "the legacy event must still participate in knownGoodPairs' fold");
+    assert.equal(out.hasPair, true, "the legacy event must still win reduceLastPinning with both content ids");
   });
 });

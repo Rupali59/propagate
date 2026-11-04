@@ -24,7 +24,6 @@ import {
   edgeId,
   appendEvent,
   readEvents,
-  knownGoodPairs,
   shardPathForTs,
   DISPOSITIONS,
   dryValidateEvent,
@@ -457,33 +456,6 @@ test("readEvents filters by since", async () => {
     const out = runInSubprocess(script, { ...process.env, PROPAGATE_STATE_DIR: stateDir });
     assert.equal(out.events.length, 1);
     assert.equal(out.events[0].event_id, out.late.event_id);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// knownGoodPairs
-// ---------------------------------------------------------------------------
-
-test("knownGoodPairs returns the exact triples appended", async () => {
-  await withScopedStore(async (stateDir) => {
-    const eventA = baseEvent({ edge_id: "aaaaaaaa", source_content: "srcA", downstream_content: "dstA" });
-    const eventB = baseEvent({ edge_id: "bbbbbbbb", source_content: "srcB", downstream_content: "dstB" });
-    const eventDeferred = baseEvent({ disposition: "deferred", reason: "looked" });
-    delete eventDeferred.source_content;
-    delete eventDeferred.downstream_content;
-
-    const script = `
-      import { appendEvent, knownGoodPairs } from ${JSON.stringify(EVENTS_LIB_PATH)};
-      await appendEvent(${JSON.stringify(eventA)});
-      await appendEvent(${JSON.stringify(eventB)});
-      await appendEvent(${JSON.stringify(eventDeferred)});
-      const pairs = await knownGoodPairs();
-      console.log(JSON.stringify([...pairs]));
-    `;
-    const pairs = runInSubprocess(script, { ...process.env, PROPAGATE_STATE_DIR: stateDir });
-    assert.equal(pairs.length, 2, "deferred (unpinned) does not contribute a triple");
-    assert.ok(pairs.includes("aaaaaaaa|srcA|dstA"));
-    assert.ok(pairs.includes("bbbbbbbb|srcB|dstB"));
   });
 });
 

@@ -436,14 +436,20 @@ them stays in `cli.mjs`.
   downstreams to re-verify.
 - **reverse** — is it a `kind: code` downstream? → list the upstream doc(s)
   to re-verify (the case that let #43 slip).
-- **ledger cross-ref** — does it already have an open drift row in its
-  workspace's ledger?
+
+Each coupled path is annotated with its edge's state, in the action words
+(`judge`, `pick-a-side`, `parked`, `never-judged`, `broken`), from the one
+reconcile run `check` makes (the same run feeds the inbound advisory). A done
+(CLEAN or DECOUPLED) edge prints bare. The frozen v1 ledger is no longer read.
+If reconcile cannot run, the coupling lines print unannotated and
+`edge states unknown — reconcile failed: <reason>` follows them; the exit code
+never depends on any of it.
 
 Output is grouped and human-readable:
 
 ```
 ⚠ 1 coupled file in this change:
-  lib/engine.ts → verify: SPEC.md
+  lib/engine.ts → verify: SPEC.md (judge)
 ```
 
 **Default = warn, exit 0.** `--strict` makes couplings a hard failure
