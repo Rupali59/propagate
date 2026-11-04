@@ -103,6 +103,13 @@ test("surfaceCmd: --json mode is untouched by this change — one JSON line, cha
 
 import { widgetLines } from "../../cli/surface.mjs";
 
+test("widgetLines: parked and broken counts are rendered when the payload carries them", () => {
+  const text = widgetLines({
+    worklist: { toJudge: 1, total: 4, parked: 10, broken: 2, byState: { DRIFTED: 2, REVERSED: 0, DIVERGED: 2, UNMATCHED: 0 }, calendar: [], never: 0 },
+  }).join("\n");
+  assert.match(text, /parked 10 · broken 2/);
+});
+
 test("widgetLines: every absent section says WHY, and none prints a bare zero for 'not measured'", () => {
   const lines = widgetLines({
     worklist: { toJudge: 1, total: 4, byState: { DRIFTED: 2, REVERSED: 0, DIVERGED: 2, UNMATCHED: 0 }, calendar: [], never: 0 },
@@ -114,6 +121,8 @@ test("widgetLines: every absent section says WHY, and none prints a bare zero fo
   });
   const text = lines.join("\n");
   assert.match(text, /to judge 1 of 4/);
+  // parked/broken absent from the payload: said as "not measured", never as 0
+  assert.match(text, /parked \? \(not measured\) · broken \? \(not measured\)/);
   assert.match(text, /bottleneck: nothing is blocked/);
   assert.match(text, /velocity: unknown — disk gone/);
   assert.match(text, /usage: none-recorded — no command records/);

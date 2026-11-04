@@ -10,8 +10,9 @@ This document names the states, says how a thing *leaves* each one, and derives
 the work lanes from that. It is a map, not a mechanism — there is no
 `propagate hazard` command, deliberately (see the end).
 
-**It restates nothing.** The edge states are defined in `lib/reconcile.mjs`'s
-module docstring, the dispositions in `lib/events.mjs`'s. Two copies of one
+**It restates nothing.** The edge states are defined in `lib/edges/states.mjs`
+(`EDGE_STATES`, and `actionOf` for what a person does with each), the dispositions
+in `lib/edges/events.mjs`'s. Two copies of one
 state list is [G20](../propagation/state/workspace/GOTCHAS.md); `DATA_MODEL.md` §7 is this project's own
 cautionary tale of a doc that drifted from the code it described.
 
@@ -21,9 +22,9 @@ cautionary tale of a doc that drifted from the code it described.
 
 | Machine | Defined in | Subject |
 |---|---|---|
-| **Edge** | `lib/reconcile.mjs` `STATES` | one declared coupling between two files |
-| **Disposition** | `lib/events.mjs` `DISPOSITIONS` | the verbs that move an edge. `VERIFY_DISPOSITIONS` is the subset a person can apply with `verify`; `rekeyed` is the one bookkeeping disposition, written by `propagate rekey` and never offered as a verdict |
-| **Skill** | `lib/skills-lifecycle.mjs` | quarantine → 3 uses → promoted → demoted → reaped@14d |
+| **Edge** | `lib/edges/states.mjs` `EDGE_STATES` (derived once in `lib/edges/reconcile.mjs` `deriveEdgeState`) | one declared coupling between two files |
+| **Disposition** | `lib/edges/events.mjs` `DISPOSITIONS` | the verbs that move an edge. `VERIFY_DISPOSITIONS` is the subset a person can apply with `verify`; `rekeyed` is the one bookkeeping disposition, written by `propagate rekey` and never offered as a verdict |
+| **Skill** | `lib/skills/skills-lifecycle.mjs` | quarantine → 3 uses → promoted → demoted → reaped@14d |
 | **Hazard** | *this document* | one thing that has cost someone time |
 
 ---
@@ -49,27 +50,36 @@ cautionary tale of a doc that drifted from the code it described.
         ▼                           │ a mechanism is an artifact,
      (terminal)                     │ and artifacts have couplings
                                     ▼
-                        ┌─── EDGE MACHINE ─── lib/reconcile.mjs ───┐
-                        │  NEVER_VERIFIED                          │
+                        ┌─ EDGE MACHINE ─ lib/edges/states.mjs ────┐
+                        │  NEVER_VERIFIED   no pin, no deferral    │
                         │        │ baselined                       │
                         │        ▼                                 │
                         │      CLEAN ⇄ DRIFTED    source moved     │
                         │            ⇄ REVERSED   downstream moved │
                         │            ⇄ DIVERGED   both moved       │
-                        │        │ decoupled                       │
-                        │        ▼                                 │
-                        │    (edge removed)                        │
                         │                                          │
-                        │  ── not-a-verdict, by design ──          │
+                        │  DEFERRED    no pin, only a deferral:    │
+                        │              examined, parked, NEVER     │
+                        │              blocks. A deferral AFTER a  │
+                        │              real pin keeps the pinned   │
+                        │              state (shown, not a state)  │
+                        │  DECOUPLED   `decoupled` pin: terminal,  │
+                        │              content-less, not a pin,    │
+                        │              never blocks                │
+                        │                                          │
+                        │  ── broken, never block, by design ──    │
                         │  UNMATCHED           glob matches 0      │
                         │                      (after exclude:)    │
                         │  NOT_PRESENT_ON_REF  absent at this ref  │
                         │  UNRESOLVABLE        no-repo / lfs /     │
                         │                      is-dir / read-error │
-                        │  ── and UNRESOLVABLE WINS ──             │
+                        │                      (still UNSETTLED:   │
+                        │                      it does block)      │
+                        │  ── and the environment WINS ──          │
                         │  a serious reason on EITHER side beats a │
-                        │  not-found on the other; the benign      │
-                        │  state is the one a reader acts on       │
+                        │  not-found on the other, and any broken  │
+                        │  state beats a deferral: a broken edge   │
+                        │  stays visible, never parked             │
                         └──────────────────────────────────────────┘
                                     │
                      repeated DIVERGED on one coupling
@@ -150,7 +160,7 @@ cannot recur; the entry is history.
 **For:** a hazard with a mechanical signature but no design fix.
 
 **Exit:** a `doctor` expectation following the `graph.cycles` shape in
-`lib/metrics.mjs`, carrying a dated `basis`, plus its failing fixture. Absence
+`lib/report/metrics.mjs`, carrying a dated `basis`, plus its failing fixture. Absence
 must be attributable — a metric that cannot distinguish "clean" from "did not
 run" is not a check (see `graph.cycles` returning **null**, never 0, when
 reconcile fails).

@@ -56,7 +56,12 @@ nothing on screen reveals how a tie was broken: a mis-ranked row is
 indistinguishable from a correctly-ranked one (N89). `NEVER_VERIFIED` edges are excluded from the worklist by
 default (`--include-unverified` to show them) — they're a baseline gap, not
 movement — but they still count as unsettled when deciding what blocks what,
-and the excluded count is always printed. `graph` also names structural
+and the excluded count is always printed. `DEFERRED` edges (examined and parked; counted as
+`excludedParked`) are excluded the same way and **never block**: they are not in `UNSETTLED`.
+Broken edges (`UNMATCHED`, `NOT_PRESENT_ON_REF`, `UNRESOLVABLE`) are shown under "broken", not in
+the judge/pick-a-side/blocked split. `UNMATCHED` and `NOT_PRESENT_ON_REF` never block; `UNRESOLVABLE`
+still blocks, because its content exists but cannot be read safely. The state definitions are
+`lib/edges/states.mjs`; `graph` imports them. `graph` also names structural
 defects a per-edge view can't see: cycles (condensed, not dropped), the same
 pair declared twice, globs matching nothing.
 

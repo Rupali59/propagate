@@ -64,7 +64,7 @@ the system you're reading from. None of them share a schema definition.
    as a delta.
 
 3. **`index.db` `ledger_row`** — a SQLite table, rebuilt from scratch on every
-   `index.db` rebuild (`lib/index-db.mjs`, `dropAndCreateTables` at `:337-343`).
+   `index.db` rebuild (`lib/skills/index-db.mjs`, `dropAndCreateTables` at `:337-343`).
    Its `INSERT` is fixed at 11 columns (`lib/index-db.mjs:390`):
    ```
    id, ledger_path, workspace, type, source, change, status,
@@ -562,8 +562,12 @@ new event, never by editing an old one.
 (`CARRIED_FIELDS` in `lib/edges/rekey.mjs`) verbatim from the old edge's latest pin, so the new edge reconciles to the
 state the old one had. It is in `DISPOSITIONS` (so `appendEvent` validates it) and not in `VERIFY_DISPOSITIONS`, so
 `verify` cannot assert it. `deferred`
-records that someone **looked** and must not re-pin. `decoupled` removes the edge
-from its sidecar, so nothing ever reads its pin: content is recorded when
+records that someone **looked** and must not re-pin: an edge whose only verdict is a deferral
+derives **DEFERRED** (parked, never blocks), and a deferral recorded after a real pin leaves the
+pinned state in place with the deferral visible on the row (`lib/edges/reconcile.mjs`
+`deriveEdgeState`). `decoupled` derives **DECOUPLED**, not a pin: it removes the edge
+from its sidecar, so nothing ever reads its pin (before v0.15.47 it was compared against
+undefined content and read DIVERGED): content is recorded when
 resolvable and **not required**. A glob that matches nothing has no downstream to
 hash, and requiring one made that removal unrecordable (N119, v0.15.18). Note both
 still carry both refs: where you looked is a fact even when you pinned nothing.

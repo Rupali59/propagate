@@ -80,6 +80,12 @@ export function widgetLines(s) {
       `to judge ${w.toJudge ?? "?"} of ${w.total}  ·  ${st.DRIFTED} drifted · ${st.REVERSED} reversed · ${st.DIVERGED} diverged · ${st.UNMATCHED} unmatched`
         + `  ·  ${w.calendar.length} day(s) with a last check, ${w.never} never`,
     );
+    // The two action buckets the queue does not list (the widget shows them beside the split).
+    // null means "not measured" and is said as such, never printed as 0.
+    out.push(
+      `parked ${w.parked ?? "? (not measured)"} · broken ${w.broken ?? "? (not measured)"}`
+        + `  (parked = examined, never blocks; broken = unmatched/unresolvable, never blocks)`,
+    );
   }
   const l = s.leverage;
   if (l) {
