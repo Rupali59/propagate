@@ -494,7 +494,7 @@ function parkedAllowed(inbox) {
   const w = (inbox && inbox.divisions && inbox.divisions.worklist) || {};
   let best = [];
   for (const r of (w.ready || []).concat(w.blocked || [])) {
-    if (r.state !== "DIVERGED" && Array.isArray(r.allowed) && r.allowed.length > best.length) best = r.allowed;
+    if (r.action !== ACTION_PICK && Array.isArray(r.allowed) && r.allowed.length > best.length) best = r.allowed;
   }
   return best;
 }
@@ -515,8 +515,15 @@ function judgeModel(inbox, held) {
   if (!d) return null;
   const w = d.worklist || {};
   const ready = (w.ready || []).filter((r) => !hide.has(r.edge_id));
-  const toJudge = ready.filter((r) => r.state !== "DIVERGED");
-  const diverged = ready.filter((r) => r.state === "DIVERGED");
+  // Only the judge action, never "everything that is not pick-a-side": that also swept in a broken
+  // (UNMATCHED) item, so this list read 4 where the worklist said 3 (2026-11-04). Broken has its own chip.
+  const toJudge = ready.filter((r) => r.action === ACTION_JUDGE);
+  const diverged = ready.filter((r) => r.action === ACTION_PICK);
+  // BLOCKED and BROKEN are listed read-only: no verdict is offered for either (allowed is emptied,
+  // so the key handler and the verdict bar refuse them), but the count has rows behind it.
+  const readOnly = (r) => Object.assign({}, r, { readonly: true, allowed: [] });
+  const blocked = (w.blocked || []).filter((r) => !hide.has(r.edge_id)).map(readOnly);
+  const broken = ((d.broken && d.broken.items) || []).filter((r) => !hide.has(r.edge_id)).map(readOnly);
   const allowed = parkedAllowed(inbox);
   const parked = ((d.parked && d.parked.items) || [])
     .filter((r) => !hide.has(r.edge_id))
@@ -525,20 +532,22 @@ function judgeModel(inbox, held) {
   return {
     toJudge: toJudge,
     diverged: diverged,
+    blocked: blocked,
+    broken: broken,
     parked: parked,
     badge: wl && typeof wl.toJudge === "number" ? wl.toJudge : null,
     includesUnplaced: wl && wl.toJudgeIncludesUnplaced ? wl.toJudgeIncludesUnplaced : 0,
     // A division that failed arrives with `ready: null` and an `error`. Reading null
     // as an empty list would say "nothing to judge" about a queue that could not be
     // computed -- the one confusion every empty state here exists to prevent.
-    errors: { worklist: w.error || null, parked: (d.parked && d.parked.error) || null },
+    errors: { worklist: w.error || null, parked: (d.parked && d.parked.error) || null, broken: (d.broken && d.broken.error) || null },
     blockedN: (w.blocked || []).length,
     gapTotal: d.gap && typeof d.gap.total === "number" ? d.gap.total : null,
     checked: wl && typeof wl.total === "number" ? wl.total : null,
     rootsTotal: inbox.leverage && typeof inbox.leverage.rootsTotal === "number" ? inbox.leverage.rootsTotal : null,
     // Every edge id anywhere in the payload, held or not: selection pruning asks
     // "is this still in the payload", and a held row still is.
-    allIds: new Set((w.ready || []).concat(w.blocked || [], (d.parked && d.parked.items) || []).map((r) => r.edge_id)),
+    allIds: new Set((w.ready || []).concat(w.blocked || [], (d.parked && d.parked.items) || [], (d.broken && d.broken.items) || []).map((r) => r.edge_id)),
   };
 }
 
@@ -1322,12 +1331,21 @@ function EvidencePane({ entry, row }) {
 /* -- the Judge view ------------------------------------------------------- */
 
 const JUDGE_STATES = ["DRIFTED", "REVERSED", "UNMATCHED"];
+// The chips ARE the actions, in the widget's words (graph-model plan, "State -> action"): judge, pick a
+// side, blocked, parked, broken, and the baseline gap. `chip=both` (the widget's old word) still opens
+// "pick a side"; keys stay stable so saved hashes keep working.
 const CHIPS = [
   { key: "judge", label: "To judge" },
-  { key: "diverged", label: "Both sides moved" },
+  { key: "diverged", label: "Pick a side" },
+  { key: "blocked", label: "Blocked" },
   { key: "parked", label: "Parked" },
-  { key: "never", label: "Never verified" },
+  { key: "broken", label: "Broken" },
+  { key: "never", label: "Never judged" },
 ];
+// The server stamps each queue item with its action (lib/edges/states.mjs actionOf). The client compares
+// that word and never a state string for this decision.
+const ACTION_PICK = "pick-a-side";
+const ACTION_JUDGE = "judge";
 
 function ReasonBox({ id, label, value, onInput, placeholder }) {
   return html`<div class="reasonbox">
@@ -1369,7 +1387,7 @@ function JudgeView({ app, route }) {
     setStateFilter(st);
     const f = { ws: route.ws || null, age: AGE_KEYS.indexOf(route.age) >= 0 ? route.age : null, source: route.source || null };
     setFilters(f);
-    const ck = route.chip === "both" ? "diverged" : route.chip;
+    const ck = route.chip === "both" || route.chip === "decide" ? "diverged" : route.chip;
     if (ck && CHIPS.some((c) => c.key === ck)) { setChip(ck); setIdx(0); }
     else if (st || f.ws || f.age || f.source) { setChip("judge"); setIdx(0); }
   }, [route.state, route.chip, route.ws, route.age, route.source]);
@@ -1391,7 +1409,8 @@ function JudgeView({ app, route }) {
   const bulkRef = useRef(null);
 
   const rowsFor = (k) => (!model ? [] : k === "judge" ? scoped(stateFilter ? model.toJudge.filter((r) => r.state === stateFilter) : model.toJudge)
-    : k === "diverged" ? scoped(model.diverged) : k === "parked" ? scoped(model.parked) : []);
+    : k === "diverged" ? scoped(model.diverged) : k === "parked" ? scoped(model.parked)
+    : k === "blocked" ? scoped(model.blocked) : k === "broken" ? scoped(model.broken) : []);
   const rows = rowsFor(chip);
   const shaped = useMemo(() => groupRows(rows), [rows]);
   const flat = shaped.flat;
@@ -1433,7 +1452,7 @@ function JudgeView({ app, route }) {
   // controller cancels the one a newer selection overtook. The next row is
   // prefetched once the current one has landed -- one row, never the queue.
   useEffect(() => {
-    if (!curId || chip === "never") return;
+    if (!curId || chip === "never" || chip === "broken") return;
     const ctl = typeof AbortController === "function" ? new AbortController() : null;
     let alive = true;
     const t = setTimeout(async () => {
@@ -1560,7 +1579,8 @@ function JudgeView({ app, route }) {
   const seenOk = seen.status === "ok";
   const isNew = (r) => seenOk && r.contentKey && !seen.set.has(r.contentKey);
   const unseenCount = flat.filter((r) => r.contentKey && !(seen.set && seen.set.has(r.contentKey))).length;
-  const counts4 = { judge: scoped(model.toJudge).length, diverged: scoped(model.diverged).length, parked: scoped(model.parked).length, never: model.gapTotal };
+  const counts4 = { judge: scoped(model.toJudge).length, diverged: scoped(model.diverged).length, blocked: scoped(model.blocked).length,
+    parked: scoped(model.parked).length, broken: scoped(model.broken).length, never: model.gapTotal };
   // One clearable control per active filter, like the state one beside it. The source's tooltip
   // carries the full path: the chip shows the file name only.
   // The filters ride in the hash (a reload restores them), so a clear that only touched local state
@@ -1603,10 +1623,10 @@ function JudgeView({ app, route }) {
     : tickNote.missing.length ? html`<div class="note">${plural(tickNote.count, "root")} ticked. ${plural(tickNote.missing.length, "root")} not in the queue (never verified, or already settled), so not ticked: ${tickNote.missing.join(", ")}.</div>` : null;
   const unplacedNote = model.includesUnplaced > 0 ? html`<div class="note">${plural(model.includesUnplaced, "edge")} in the count ${model.includesUnplaced === 1 ? "has" : "have"} no place in the fix order and cannot be listed here.</div>` : null;
 
-  const divErr = chip === "parked" ? model.errors.parked : chip === "never" ? null : model.errors.worklist;
+  const divErr = chip === "parked" ? model.errors.parked : chip === "broken" ? model.errors.broken : chip === "never" ? null : model.errors.worklist;
   let listBody;
   if (divErr) {
-    listBody = html`<${ErrorBanner} what=${(chip === "parked" ? "parked" : "the worklist") + " could not be computed —"} st=${{ error: divErr }} retry=${retryInbox} />`;
+    listBody = html`<${ErrorBanner} what=${(chip === "parked" ? "parked" : chip === "broken" ? "broken" : "the worklist") + " could not be computed —"} st=${{ error: divErr }} retry=${retryInbox} />`;
   } else if (chip === "never") {
     listBody = html`<div class="empty"><b>${model.gapTotal == null ? "unknown" : model.gapTotal} never verified.</b><br />
       They are read-only here: a baseline pins the current bytes of both files as correct without a verdict, which is a different operation from judging. The detail pane has the command.</div>`;
@@ -1649,11 +1669,13 @@ function JudgeView({ app, route }) {
 function emptyJudge(chip, model, toUnblock, toChip) {
   if (chip === "parked") return html`<b>Nothing parked.</b><br />A deferred edge lands here with its reason.`;
   if (chip === "diverged") return html`<b>No edge has both sides moved.</b>`;
+  if (chip === "blocked") return html`<b>Nothing is blocked.</b>`;
+  if (chip === "broken") return html`<b>No edge is broken.</b><br />An edge lands here when a file it names is missing or unreadable.`;
   const lines = [];
   if (model.blockedN > 0) lines.push(html`<div key="b">${plural(model.blockedN, "edge")} ${model.blockedN === 1 ? "is" : "are"} blocked${model.rootsTotal ? " on " + plural(model.rootsTotal, "root") : ""} <button class="ghost" onClick=${toUnblock}>Unblock</button></div>`);
-  if (model.diverged.length > 0) lines.push(html`<div key="d">${plural(model.diverged.length, "edge")} need both sides edited <button class="ghost" onClick=${() => toChip("diverged")}>Both sides moved</button></div>`);
+  if (model.diverged.length > 0) lines.push(html`<div key="d">${plural(model.diverged.length, "edge")} need both sides edited <button class="ghost" onClick=${() => toChip("diverged")}>Pick a side</button></div>`);
   if (model.parked.length > 0) lines.push(html`<div key="p">${model.parked.length} parked <button class="ghost" onClick=${() => toChip("parked")}>Parked</button></div>`);
-  if (model.gapTotal) lines.push(html`<div key="n">${model.gapTotal} never verified <button class="ghost" onClick=${() => toChip("never")}>Never verified</button></div>`);
+  if (model.gapTotal) lines.push(html`<div key="n">${model.gapTotal} never verified <button class="ghost" onClick=${() => toChip("never")}>Never judged</button></div>`);
   return html`<b>Nothing to judge (${model.checked == null ? "sources checked" : plural(model.checked, "edge") + " checked"}).</b>${lines}`;
 }
 
@@ -1677,10 +1699,13 @@ function JudgeDetail({ chip, cur, model, entry, evSettled, reasons, judgeOne, ba
     <h2 class="dtitle">${r.sourceShort} → ${r.downstreamShort}</h2>
     <div class="dmeta">${dot(r.edge_id, r.state, r.layer != null ? "layer " + r.layer : null, boundaryLabel(r.boundary))}</div>
     ${r.why ? html`<div class="dmeta why">${r.why}</div>` : null}
-    ${r.state === "DIVERGED" ? html`<div class="note">Both sides moved. Edit both files first, then give your verdict: only <b>both-reconciled</b> is offered.</div>` : null}
+    ${r.action === ACTION_PICK ? html`<div class="note">Both sides moved. Edit both files first, then give your verdict: only <b>both-reconciled</b> is offered.</div>` : null}
     ${r.parked ? html`<div class="note">Parked ${r.ageDays == null ? "at an unknown time" : r.ageDays + " days ago"}${r.by ? " by " + r.by : ""}${r.reason ? ": " + r.reason : " with no reason recorded — that is a finding, not an absence"}.${r.allowedDerived && !allowed.length ? " No dispositions could be derived for parked edges, so this one is read-only." : ""}</div>` : null}
-    <${EvidencePane} entry=${entry} row=${r} />
-    <div class="sec">Verdict</div>
+    ${r.readonly ? html`<div class="note">${r.action === "broken"
+      ? "Broken: a file this edge names is missing or unreadable" + (r.reason ? " (" + r.reason + ")" : "") + ", so there is nothing to judge. Fix the declaration or restore the file."
+      : "Blocked: an unsettled edge upstream holds this one back, so a verdict now would pin against a source that is not settled. Settle the root first (Unblock lists them)."}</div>` : null}
+    ${chip === "broken" ? null : html`<${EvidencePane} entry=${entry} row=${r} />`}
+    ${r.readonly ? null : html`<div class="sec">Verdict</div>
     <${VerdictBar} allowed=${allowed} disabled=${!evSettled} onPick=${(a) => judgeOne(r, a)}
       note=${!evSettled ? html`<span class="meta">waiting for the evidence…</span>` : null} />
     <${ReasonBox} id=${id} key=${id} label=${"Reason for " + r.edge_id} value=${reasons.get(r.edge_id) || ""} onInput=${(v) => reasons.set(r.edge_id, v)}
@@ -1689,7 +1714,7 @@ function JudgeDetail({ chip, cur, model, entry, evSettled, reasons, judgeOne, ba
     ${msg ? html`<div class=${"msg " + (msg.ok ? "ok" : "err")}>${msg.text}</div>` : null}
     <div class="hint">
       <kbd>j</kbd><kbd>k</kbd> move · <kbd>x</kbd> tick · <kbd>⇧J</kbd> verdict for ticked · <kbd>n</kbd><kbd>p</kbd><kbd>d</kbd><kbd>r</kbd> judge · <kbd>u</kbd> undo · <kbd>Esc</kbd> clear
-    </div>
+    </div>`}
   </div>`;
 }
 

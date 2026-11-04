@@ -332,7 +332,9 @@ test("planBaseline — --baseline-all baselines every NEVER_VERIFIED row without
 
 function deferredRow(overrides = {}) {
   return {
-    state: "NEVER_VERIFIED",
+    // #118: a row whose only verdict is a deferral is state DEFERRED (it used to read
+    // NEVER_VERIFIED with a `deferred` flag beside it).
+    state: "DEFERRED",
     sameRepo: true,
     edge_id: "deferred-edge",
     node_id: "n-deferred",

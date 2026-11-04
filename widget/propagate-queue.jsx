@@ -810,6 +810,12 @@ const QueuePanel = ({ wl, dispatch }) => {
           ))}
         </div>
       ) : (wl.total === 0 ? <div className="sb">the queue is empty</div> : <CantTell why="the split by action needs the fix-order join" />)}
+      {wl.parked != null || wl.broken != null ? (
+        <div className="ages offq">
+          {wl.parked != null ? <span className="hv" onClick={go(viewRoute('/judge', { chip: 'parked' }), dispatch)}>parked <b>{wl.parked}</b></span> : null}
+          {wl.broken != null ? <span className="hv" onClick={go(viewRoute('/judge', { chip: 'broken' }), dispatch)}>broken <b>{wl.broken}</b></span> : null}
+        </div>
+      ) : null}
       {ages ? (
         <div className="ages">
           <span>waiting</span>

@@ -36,6 +36,8 @@
 .badge.fail { background: var(--st-warn); }
 .badge.accepted { background: var(--dim); }
 .badge.NEVER_VERIFIED { background: var(--dim); }
+.badge.DEFERRED { background: var(--dim); }
+.badge.DECOUPLED { background: var(--dim); }
 /* Phase 4a (2026-10-17): the Claims, Rules, Caps and Skills pages. Their badge values come from the data (a claim kind,
    a rule or skill status), so a value the stylesheet has not met must still have a background (the UNMATCHED lesson
    above): the attribute selector gives any k-/r-/c-/s- badge the quiet default, and every value the client is known to

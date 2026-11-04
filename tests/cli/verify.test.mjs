@@ -127,7 +127,8 @@ test("verify --edge — each disposition writes one correctly-shaped event", asy
       assert.equal(parsed.refused.length, 0);
       assert.equal(parsed.failed.length, 0);
 
-      const expected = d === "deferred" ? "NEVER_VERIFIED" : "CLEAN";
+      // #118: deferring an edge that was never pinned parks it (DEFERRED); every other disposition pins.
+      const expected = d === "deferred" ? "DEFERRED" : "CLEAN";
       assert.equal(parsed.confirmed[0].state, expected, `${d} must land on ${expected}`);
     }
   });
@@ -420,12 +421,15 @@ test("computeVerifyAfterWrite — an edge missing from the re-reconcile is a fai
   assert.match(failed[0].error, /vanished/);
 });
 
-test("expectedStateAfter — every disposition re-pins to CLEAN except deferred, which keeps the prior state", () => {
+test("expectedStateAfter — every disposition re-pins to CLEAN except deferred, which keeps a pinned state and parks an unpinned one", () => {
   assert.equal(expectedStateAfter("propagated", "DRIFTED"), "CLEAN");
   assert.equal(expectedStateAfter("no-change-needed", "REVERSED"), "CLEAN");
   assert.equal(expectedStateAfter("both-reconciled", "DIVERGED"), "CLEAN");
   assert.equal(expectedStateAfter("deferred", "DRIFTED"), "DRIFTED");
-  assert.equal(expectedStateAfter("deferred", "NEVER_VERIFIED"), "NEVER_VERIFIED");
+  // An edge with no pin of its own reads DEFERRED afterwards (#118); a broken one stays broken.
+  assert.equal(expectedStateAfter("deferred", "NEVER_VERIFIED"), "DEFERRED");
+  assert.equal(expectedStateAfter("deferred", "UNMATCHED"), "UNMATCHED");
+  assert.equal(expectedStateAfter("deferred", "DEFERRED"), "DEFERRED");
 });
 
 test("selectVerifyRows / divergedGuard — pure selection and guard logic", () => {

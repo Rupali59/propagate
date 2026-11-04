@@ -7,7 +7,7 @@
  *
  * Its siblings are not like that, and the difference is worth recording rather
  * than discovering twice:
- *   `status`      pulls statusJson, relToWs, coverageFrom and ACTIONABLE_STATES,
+ *   `status`      pulls statusJson, relToWs, coverageFrom and isMoved,
  *                 which are its own, PLUS currentWorkspace, which three other
  *                 commands also call. It is a command family, not a function.
  *   `drainClose`  shares drainScope and openRowsForWorkspace with drainList.

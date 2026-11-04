@@ -327,7 +327,7 @@ test("if the client draws chart series, it MUST measure and set --len", () => {
   assert.match(client, /--len/, "and hand that length to the CSS");
 });
 
-test("ui.css styles every edge state the graph can emit", () => {
+test("ui.css styles every edge state the graph can emit", async () => {
   // THE THIRD INSTANCE OF ONE SHAPE, all found on 2026-09-21: a value the code
   // can produce that the stylesheet has no rule for. The widget's toneFor
   // emitted five tones and it styled four; the chart CSS read a --len nothing
@@ -336,11 +336,13 @@ test("ui.css styles every edge state the graph can emit", () => {
   // None of them errors. The element renders with no background, or the
   // animation silently does not run. That is what makes this class worth a
   // test rather than a careful eye.
-  const graph = read("lib/graph/graph.mjs");
-  const m = /const ACTIONABLE = new Set\(\[([^\]]*)\]\)/.exec(graph);
-  assert.ok(m, "could not find ACTIONABLE in graph.mjs — this check has gone blind");
-  const states = [...m[1].matchAll(/"([A-Z_]+)"/g)].map((x) => x[1]);
-  assert.ok(states.length >= 4, `expected the actionable states, found ${states.length}`);
+  // The vocabulary lives in lib/edges/states.mjs (#127 phase 1). A row can be rendered for every
+  // ACTIONABLE state and for a PARKED one (DEFERRED lists in the Parked chip), so those are the
+  // states whose badge needs a rule. Derived from the module, with a floor: a scan that finds
+  // nothing is a blind scan, not a pass.
+  const { EDGE_STATES, ACTIONABLE, ACTIONS, actionOf } = await import("../../lib/edges/states.mjs");
+  const states = EDGE_STATES.filter((st) => ACTIONABLE.has(st) || actionOf(st) === ACTIONS.PARKED);
+  assert.ok(states.length >= 5, `expected the actionable states plus the parked one, found ${states.length}: this check has gone blind`);
 
   const css = stylesheet();
   const unstyled = states.filter((st) => !new RegExp(`\\.badge\\.${st}\\s*\\{`).test(css));

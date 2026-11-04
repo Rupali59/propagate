@@ -32,6 +32,7 @@ import assert from "node:assert/strict";
 import { byClass, byTag, textOf, findAll } from "../helpers/minidom.mjs";
 import { mountClient, respond, rawText, rejectWith } from "../helpers/mount-client.mjs";
 import { worklistWithUnplaced } from "../../lib/report/inbox.mjs";
+import { actionOf } from "../../lib/edges/states.mjs";
 import { buildLeverage } from "../../lib/report/surface.mjs";
 import { fromRealm } from "../helpers/plain.mjs";
 
@@ -55,6 +56,10 @@ const edge = (id, state, over = {}) => ({
   noiseRatio: null,
   lastVerified: null,
   allowed: state === "DIVERGED" ? ["both-reconciled"] : ALLOWED,
+  // The server stamps the action (lib/edges/states.mjs actionOf); the client reads this word.
+  // Stamped with the server's own actionOf, not a hand copy of it: the copy said "judge" for an
+  // UNMATCHED edge after the server learned to call it "broken", and the UI tests drifted (2026-11-04).
+  action: actionOf(state, !!over.blocked),
   orderIndex: over.orderIndex ?? 0,
   layer: 0,
   blockedBy: [],
@@ -225,8 +230,8 @@ test("the Judge badge EQUALS the rendered To-judge rows, by the widget's own cou
   assert.equal(badge, INBOX.worklist.toJudge, "the rail did not read worklist.toJudge");
   assert.equal(rows(app).length, badge, "the badge says one number and the list draws another");
   // DIVERGED rows are NOT in To judge: they sit under their own chip with their own count.
-  const chip = btnText(app, /Both sides moved/);
-  assert.match(textOf(chip), /Both sides moved\s*1/);
+  const chip = btnText(app, /Pick a side/);
+  assert.match(textOf(chip), /Pick a side\s*1/);
   assert.equal(ui.judgeModel(fromRealm(INBOX), new Set()).diverged.length, 1);
 });
 
@@ -263,7 +268,7 @@ test("the top row is fixOrder's first, not a re-sorted one", async () => {
 
 test("a DIVERGED edge offers only both-reconciled, and says to edit both files first (D2)", async () => {
   const m = await mount();
-  click(btnText(m.app, /Both sides moved/));
+  click(btnText(m.app, /Pick a side/));
   await m.settle();
   const t = textOf(detail(m.app));
   assert.match(t, /Edit both files first/);
@@ -455,7 +460,7 @@ test("nothing is ticked or preselected when the page opens (plan test 3a)", asyn
 test("x ticks across groups, and the bulk verdict offers only the dispositions EVERY row allows (plan test 3b)", async () => {
   const m = await mount();
   m.press("x");                       // b
-  click(btnText(m.app, /Both sides moved/));
+  click(btnText(m.app, /Pick a side/));
   await m.settle();
   m.press("x");                       // a -- DIVERGED, allowed only both-reconciled
   await m.settle();
@@ -610,7 +615,7 @@ test("Never verified is read-only: counts and the buckets, the reason there is n
   const m = await mount({ routes: { "/api/baseline": { buckets: { baselineable: 6, noCoCommit: 253, boundReached: 1, ineligibleCrossRepo: 64, examinedAndDeferred: 33 },
     total: 357, accountedFor: true, unaccounted: 0, error: null } } });
   const log = withPlot(m);
-  click(btnText(m.app, /Never verified/));
+  click(btnText(m.app, /Never judged/));
   await m.settle();
   const t = textOf(byClass(m.app, "detail")[0]);
   assert.match(t, /357 never verified/);
@@ -631,7 +636,7 @@ test("a never-verified bucket leads somewhere only when something is there: Park
   const m = await mount({ routes: { "/api/baseline": { buckets: k, total: 357, accountedFor: true, unaccounted: 0, error: null } } });
   const wrote = clipboard(m);
   const log = withPlot(m);
-  click(btnText(m.app, /Never verified/));
+  click(btnText(m.app, /Never judged/));
   await m.settle();
   const bars = fromRealm(m.ui.bucketBars(k, 357));
   const at = (id) => log.shapes[bars.findIndex((b) => b.id === id)];
@@ -661,7 +666,7 @@ test("a never-verified bucket leads somewhere only when something is there: Park
 test("a baseline split that does not add up SAYS so", async () => {
   const m = await mount({ routes: { "/api/baseline": { buckets: { baselineable: 1, noCoCommit: 1, boundReached: 0, ineligibleCrossRepo: 0, examinedAndDeferred: 0 },
     total: 99, accountedFor: false, unaccounted: 97, error: null } } });
-  click(btnText(m.app, /Never verified/));
+  click(btnText(m.app, /Never judged/));
   await m.settle();
   assert.match(textOf(byClass(m.app, "detail")[0]), /do not sum to the total/);
 });
@@ -742,9 +747,9 @@ test("?state= filters To judge to that state and SAYS so with a clearable contro
   assert.ok(byClass(m.app, "item").every((r) => !/DRI/.test(textOf(r))), "no DRIFTED row survives a REVERSED filter");
 });
 
-test("?chip=both opens Both sides moved; an unknown chip or state is ignored, never a blank list", async () => {
+test("?chip=both opens Pick a side; an unknown chip or state is ignored, never a blank list", async () => {
   const m = await mount({ hash: "#/judge?chip=both" });
-  assert.match(textOf(byClass(m.app, "chip").find((c) => /\bon\b/.test(c.getAttribute("class")))), /Both sides moved/);
+  assert.match(textOf(byClass(m.app, "chip").find((c) => /\bon\b/.test(c.getAttribute("class")))), /Pick a side/);
   const u = await mount({ hash: "#/judge?chip=nope&state=EVERYTHING" });
   assert.equal(byClass(u.app, "filt").length, 0, "an unknown state must not filter");
   assert.match(textOf(byClass(u.app, "chip").find((c) => /\bon\b/.test(c.getAttribute("class")))), /To judge/);
@@ -755,7 +760,7 @@ test("?edge= selects that edge, switching to the chip it lives in", async () => 
   const m = await mount({ hash: "#/judge?edge=a" });
   const sel = byClass(m.app, "sel");
   assert.ok(sel.length && /lib\/a\.mjs/.test(textOf(sel[0])), "the DIVERGED root should be selected under its own chip");
-  assert.match(textOf(byClass(m.app, "chip").find((c) => /on/.test(c.getAttribute("class")))), /Both sides moved/);
+  assert.match(textOf(byClass(m.app, "chip").find((c) => /on/.test(c.getAttribute("class")))), /Pick a side/);
 });
 
 /* -- Unblock -------------------------------------------------------------- */
@@ -1082,7 +1087,7 @@ test("every badge class a rendered view emits has a stylesheet rule", async () =
   const un = await mount({ hash: "#/unblock", inbox: inboxOf({ ready: [], blocked: unblockItems, parked: [] }) });
   for (const b of byClass(un.app, "badge")) for (const c of b.getAttribute("class").split(/\s+/)) if (c !== "badge") seen.add(c);
   const dv = await mount({ hash: "#/judge" });
-  click(btnText(dv.app, /Both sides moved/));
+  click(btnText(dv.app, /Pick a side/));
   await dv.settle();
   for (const b of byClass(dv.app, "badge")) for (const c of b.getAttribute("class").split(/\s+/)) if (c !== "badge") seen.add(c);
 
@@ -2171,7 +2176,7 @@ test("Phase 1b/5: the header refresh re-reads /api/baseline when the Never-verif
   const baseline = { buckets: { baselineable: 6, noCoCommit: 253, boundReached: 1, ineligibleCrossRepo: 64, examinedAndDeferred: 33 }, total: 357, accountedFor: true, unaccounted: 0, error: null };
   const count = (m, p) => m.calls.filter((c) => c === p).length;
   const m = await mount({ routes: { "/api/baseline": baseline } });
-  click(btnText(m.app, /Never verified/)); await m.settle();
+  click(btnText(m.app, /Never judged/)); await m.settle();
   assert.equal(count(m, "/api/baseline"), 1);
   click(btnText(m.app, /^refresh$/)); await m.settle();
   assert.equal(count(m, "/api/baseline"), 2, "an open Never chip's split is re-read by refresh");

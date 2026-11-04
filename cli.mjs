@@ -162,6 +162,7 @@ import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatt
 import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
 import { reconcile, STATES, groupRows, inboundRows, edgeIdFor, isGlobPattern, expandDownstream } from "./lib/edges/reconcile.mjs";
+import { ACTIONABLE, ACTIONS, actionOf } from "./lib/edges/states.mjs";
 import { appendEvent, readEvents, VERIFY_DISPOSITIONS, edgeId, dryValidateEvent } from "./lib/edges/events.mjs";
 import { gitStage, planBaseline, applyBaseline, BASELINE_POLICIES, DEFAULT_WALK_COMMITS } from "./lib/edges/bootstrap.mjs";
 import { resolveProvenance, resolveObservedRef, resolveExecution } from "./lib/edges/provenance.mjs";
@@ -2634,7 +2635,7 @@ export function gitDiffNames(gitArgs, repoRoot) {
 async function inboundAdvisory(repoRoot) {
   try {
     const { rows: allRows } = await reconcile(WORKSPACES);
-    return inboundRows(allRows, repoRoot).filter((r) => r.state === "DRIFTED" || r.state === "DIVERGED");
+    return inboundRows(allRows, repoRoot).filter((r) => ACTIONABLE.has(r.state));
   } catch {
     return [];
   }
@@ -3245,7 +3246,10 @@ export { divergedGuard };
  * @param {string} priorState - the row's state at selection time
  */
 export function expectedStateAfter(disposition, priorState) {
-  return disposition === "deferred" ? priorState : "CLEAN";
+  if (disposition !== "deferred") return "CLEAN";
+  // A deferral never pins, but it is a verdict: an edge with no pin of its own now reads
+  // DEFERRED (#118); a pinned or broken one keeps its state (a broken edge stays visible).
+  return actionOf(priorState) === ACTIONS.NEVER_JUDGED ? "DEFERRED" : priorState;
 }
 
 /**
@@ -5072,6 +5076,7 @@ async function graphCmd() {
           topoOrder: graph.topoOrder,
           fixOrder: order.items,
           excludedUnverified: order.excludedUnverified,
+          excludedParked: order.excludedParked,
         },
         null,
         2,
@@ -5119,9 +5124,12 @@ async function graphCmd() {
     const blocked = it.blockedBy.length
       ? `  ${RED}BLOCKED by ${it.blockedBy.length}${RESET}`
       : "";
+    // A parked edge says why it never blocks (#118): `graph` used to list it as NEVER_VERIFIED.
+    const parkedNote = actionOf(it.state) === ACTIONS.PARKED
+      ? `  ${DIM}(examined, not resolved — never blocks)${RESET}` : "";
     console.log(
       `    ${String(i + 1).padStart(2)}. ${DIM}L${it.layer}${RESET} ${it.state.padEnd(10)} ` +
-        `${shortPath(it.from)} -> ${target}${blocked}`,
+        `${shortPath(it.from)} -> ${target}${blocked}${parkedNote}`,
     );
     for (const b of it.blockedBy) {
       console.log(`        ${DIM}^ ${shortPath(b.from)} -> ${shortPath(b.to)} is ${b.state}${RESET}`);
@@ -5131,6 +5139,12 @@ async function graphCmd() {
     console.log(
       `\n  ${DIM}${order.excludedUnverified} NEVER_VERIFIED edge(s) excluded from the worklist ` +
         `(--include-unverified to show). They still count as unsettled when deciding what blocks what.${RESET}`,
+    );
+  }
+  if (order.excludedParked) {
+    console.log(
+      `\n  ${DIM}${order.excludedParked} DEFERRED edge(s) excluded from the worklist ` +
+        `(--include-unverified to show). Parked edges never block anything.${RESET}`,
     );
   }
 }

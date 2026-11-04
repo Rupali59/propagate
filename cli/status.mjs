@@ -3,7 +3,7 @@
  *
  * Last of the T5 extractions, and a family for the same reason drain was: the
  * dispatcher calls `status`, which itself calls `statusJson` for --json, and
- * both rest on `coverageFrom`, `relToWs` and `ACTIONABLE_STATES`. None of those
+ * both rest on `coverageFrom`, `relToWs` and `isMoved`. None of those
  * four has another caller, so all five moved together and none became a lib
  * export for the sake of it.
  *
@@ -52,6 +52,8 @@ import {
   openCount,
 } from "../lib/edges/ledger.mjs";
 import { reconcile } from "../lib/edges/reconcile.mjs";
+import { ACTIONS, actionOf } from "../lib/edges/states.mjs";
+import { buildGraph, blockedBy } from "../lib/graph/graph.mjs";
 
 
 /**
@@ -84,7 +86,6 @@ import { reconcile } from "../lib/edges/reconcile.mjs";
  * (PanditPawanKaushik drove CLEAN 380 -> 516 in one pass), and a missing tick
  * costs nothing: `status` has no red state and exits 0 either way.
  */
-const UNEVALUABLE_STATES = ["NOT_PRESENT_ON_REF", "UNRESOLVABLE", "UNMATCHED"];
 
 
 
@@ -181,7 +182,12 @@ export function nestedUnderOf(ws, workspaces) {
   return nearest.root;
 }
 
-const ACTIONABLE_STATES = ["DRIFTED", "REVERSED", "DIVERGED"];
+// DRIFTED / REVERSED / DIVERGED, whether or not an ancestor blocks them. Derived from the
+// shared state -> action table (states.mjs), not re-spelled here.
+const isMoved = (state) => {
+  const a = actionOf(state);
+  return a === ACTIONS.JUDGE || a === ACTIONS.PICK_A_SIDE;
+};
 
 /**
  * Exported for direct testing (ISSUES N70's `forced` count). The CLI fixture
@@ -194,6 +200,8 @@ const ACTIONABLE_STATES = ["DRIFTED", "REVERSED", "DIVERGED"];
 export function coverageFrom(rows) {
   const byState = {};
   let verified = 0, actionable = 0, never_verified = 0, cannot_evaluate = 0, deferred = 0;
+  // The action buckets (graph-model plan, "State -> action"): every edge lands in exactly one.
+  const by = { done: 0, judge: 0, pickASide: 0, blocked: 0, parked: 0, neverJudged: 0, broken: 0, unknown: 0 };
   // ISSUES N70. A CLEAN edge whose last verification was FORCED past an
   // unsettled source is a weaker claim than an ordinary CLEAN, and until the
   // event carried `out_of_order` the two rendered identically -- so the ledger
@@ -203,33 +211,46 @@ export function coverageFrom(rows) {
   // just on a weaker footing, and splitting it out would overstate the problem.
   let forced = 0;
   const unknown_states = {};
+
+  // Blocked is a graph query (an unsettled ancestor), so it needs the graph over
+  // these rows. Built once; blockedBy walks it per moved edge.
+  const graph = buildGraph(rows);
+  const isBlocked = (r) => blockedBy(graph, r.edge_id).length > 0;
+
   for (const r of rows) {
     const s = r.state;
     byState[s] = (byState[s] || 0) + 1;
+    const moved = isMoved(s);
+    const action = actionOf(s, moved && isBlocked(r));
     if (s === "CLEAN") {
       verified++;
       // `last` is the whole event (lib/edges/reconcile.mjs's reduceLastPinning
       // stores it verbatim), so the field is here with no fold change.
       if (r.last?.out_of_order) forced++;
     }
-    // A deferred row is split OUT of never_verified here (N71): it has an
-    // event — someone examined it and parked it with a reason — so "no event
-    // of any kind" is false for it, even though reconcile's `state` still
-    // reads NEVER_VERIFIED (deferred never pins). Checked before the plain
-    // NEVER_VERIFIED branch so it wins the bucket.
-    else if (s === "NEVER_VERIFIED" && r.deferred) deferred++;
-    else if (s === "NEVER_VERIFIED") never_verified++;
-    else if (ACTIONABLE_STATES.includes(s)) actionable++;
-    else if (UNEVALUABLE_STATES.includes(s)) cannot_evaluate++;
-    else {
-      // Not silently dropped. Counted where it cannot be mistaken for clean.
-      cannot_evaluate++;
-      unknown_states[s] = (unknown_states[s] || 0) + 1;
+    // `deferred` is its own bucket (N71, #118): reconcile now says DEFERRED for an
+    // edge whose only verdict is a deferral, so no `row.deferred` re-derivation here.
+    switch (action) {
+      case ACTIONS.DONE: by.done++; break;
+      case ACTIONS.JUDGE: by.judge++; actionable++; break;
+      case ACTIONS.PICK_A_SIDE: by.pickASide++; actionable++; break;
+      case ACTIONS.BLOCKED: by.blocked++; actionable++; break;
+      case ACTIONS.PARKED: by.parked++; deferred++; break;
+      case ACTIONS.NEVER_JUDGED: by.neverJudged++; never_verified++; break;
+      case ACTIONS.BROKEN: by.broken++; cannot_evaluate++; break;
+      default:
+        // Not silently dropped. Counted where it cannot be mistaken for clean.
+        by.unknown++;
+        cannot_evaluate++;
+        unknown_states[s] = (unknown_states[s] || 0) + 1;
     }
   }
   const edges = rows.length;
   return {
     edges, verified, actionable, never_verified, cannot_evaluate, deferred, forced,
+    // The action vocabulary, one word per bucket; sums with `unknown` to `edges`.
+    done: by.done, judge: by.judge, pick_a_side: by.pickASide, blocked: by.blocked,
+    parked: by.parked, never_judged: by.neverJudged, broken: by.broken, unknown: by.unknown,
     byState, unknown_states,
     // deferred keeps `ok` false too — "examined, not resolved" is still
     // outstanding, just not a baseline gap and not what `bootstrap` fixes.
@@ -325,17 +346,18 @@ export async function status() {
     const { rows: recRows } = await reconcile([ws]);
     const cov = coverageFrom(recRows);
     console.log(
-      `  ${cov.edges} edges · ${cov.verified} verified` +
+      `  ${cov.edges} edges · ${cov.done} done` +
         // N70: only when there ARE forced ones. A `0 forced` on every clean
         // tree is noise that teaches people to skip the line.
         (cov.forced ? ` ${DIM}(${cov.forced} forced)${RESET}` : "") +
-        ` · ${cov.never_verified} never verified · ${cov.deferred} deferred · ` +
-        `${cov.actionable} need attention` +
+        ` · ${cov.judge} judge · ${cov.pick_a_side} pick a side · ${cov.blocked} blocked · ` +
+        `${cov.parked} parked · ${cov.never_judged} never judged · ${cov.broken} broken` +
+        (cov.unknown ? ` · ${YELLOW}${cov.unknown} unrecognised${RESET}` : "") +
         (cov.ok ? `  ${GREEN}✓${RESET}` : ""),
     );
 
     if (cov.actionable > 0) {
-      const act = recRows.filter((r) => ACTIONABLE_STATES.includes(r.state));
+      const act = recRows.filter((r) => isMoved(r.state));
       console.log(`\n  ${YELLOW}needs attention (${act.length})${RESET}`);
       for (const r of act.slice(0, 10)) {
         const src = relToWs(ws, r.source?.path);
@@ -348,8 +370,10 @@ export async function status() {
     }
     if (cov.cannot_evaluate > 0) {
       // Never folded into clean: this is a question we failed to answer.
-      const un = recRows.filter((r) => !ACTIONABLE_STATES.includes(r.state)
-        && r.state !== "CLEAN" && r.state !== "NEVER_VERIFIED");
+      const un = recRows.filter((r) => {
+        const a = actionOf(r.state);
+        return a === ACTIONS.BROKEN || a === ACTIONS.UNKNOWN;
+      });
       console.log(`\n  ${YELLOW}cannot evaluate (${un.length})${RESET} ${DIM}— not a pass${RESET}`);
       for (const r of un.slice(0, 5)) {
         console.log(`    ${r.state.padEnd(19)} ${relToWs(ws, r.source?.path)}`);
@@ -360,7 +384,7 @@ export async function status() {
     }
     if (cov.never_verified > 0) {
       console.log(
-        `\n  ${DIM}never verified (${cov.never_verified}) — a baseline gap, not drift. ` +
+        `\n  ${DIM}never judged (${cov.never_judged}) — a baseline gap, not drift. ` +
           `\`bootstrap\` to triage.${RESET}`,
       );
     }
@@ -369,7 +393,7 @@ export async function status() {
       // someone already looked and parked them with a reason. Never offered
       // `bootstrap` — that remediation is for edges nobody has examined.
       console.log(
-        `\n  ${DIM}deferred (${cov.deferred}) — examined, not resolved. ` +
+        `\n  ${DIM}parked (${cov.parked}) — examined, not resolved. ` +
           `\`why <edge>\` for the reason.${RESET}`,
       );
     }

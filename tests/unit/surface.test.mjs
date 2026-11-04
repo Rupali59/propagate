@@ -595,7 +595,9 @@ test("toJudge is null with a reason when the fix-order join is missing", () => {
 
 test("the queue splits by action: toJudge + decide + blocked === total whenever the join is present", () => {
   // A free DRIFTED (judge), B free DIVERGED (pick a side), C blocked DRIFTED, D blocked DIVERGED,
-  // E free REVERSED (judge), F free UNMATCHED (judge). Every item lands in exactly one part.
+  // E free REVERSED (judge), F free UNMATCHED (BROKEN: it leaves the split, as status files it —
+  // counting it as judge made the widget say 102 where status said 101, 2026-11-04).
+  // Every other item lands in exactly one part.
   const items = [
     blockedItem("A", "DRIFTED", []),
     blockedItem("B", "DIVERGED", []),
@@ -605,7 +607,8 @@ test("the queue splits by action: toJudge + decide + blocked === total whenever 
     blockedItem("F", "UNMATCHED", []),
   ];
   const w = buildWorklist(items);
-  assert.deepEqual([w.toJudge, w.decide, w.blocked], [3, 1, 2]);
+  assert.deepEqual([w.toJudge, w.decide, w.blocked], [2, 1, 2]);
+  assert.equal(w.total, 5, "the broken UNMATCHED item is not part of the queue split");
   assert.equal(w.toJudge + w.decide + w.blocked, w.total, "the three parts must partition the queue");
   // A DIVERGED+blocked edge is counted ONCE, as blocked (never as a side to pick).
   assert.equal(w.decide, 1);
@@ -929,4 +932,14 @@ test("buildSurface carries every widget section alongside the existing fields", 
   }
   assert.equal(s.usage.status, "unknown", "no runs supplied is unknown, not zeros");
   assert.equal(s.velocity.status, "unknown");
+});
+
+test("#127 phase 1: the worklist carries parked and broken from the queue, null (never 0) when it does not", () => {
+  const items = [blockedItem("A", "DRIFTED", [])];
+  const withCounts = buildSurface({ queue: queueOf(items, { declared: 4, expanded: 4, parked: 10, broken: 2 }), now: NOW }).worklist;
+  assert.equal(withCounts.parked, 10);
+  assert.equal(withCounts.broken, 2);
+  const without = buildSurface({ queue: queueOf(items), now: NOW }).worklist;
+  assert.equal(without.parked, null, "no count in the queue is 'not measured', which must not read as none");
+  assert.equal(without.broken, null);
 });

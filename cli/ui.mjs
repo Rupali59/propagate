@@ -54,6 +54,7 @@ import { readFileSync, readdirSync, statSync, chmodSync, mkdirSync, openSync, wr
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { queuePayload, buildQueue, orderFor, historyByEdge } from "../lib/report/queue.mjs";
+import { ACTIONS, actionOf } from "../lib/edges/states.mjs";
 import { streamPayload, readCursor, writeCursor } from "../lib/report/stream.mjs";
 import { readSeen, addSeen, validateTriples } from "../lib/report/seen-edges.mjs";
 import { buildId } from "../lib/report/ui-build.mjs";
@@ -629,8 +630,8 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
    * milliseconds. The real staleness (the human's) is handled by `state` moved
    * checks and by `observed` (F1), which compare against these rows.
    *
-   * THE PARKED SET (D11) is NEVER_VERIFIED rows carrying a `deferred` flag. They
-   * read as NEVER_VERIFIED, which `isActionable` drops, so they are in no queue;
+   * THE PARKED SET (D11) is the DEFERRED rows (#118: they used to read NEVER_VERIFIED
+   * with a `deferred` flag beside it). `isActionable` drops them, so they are in no queue;
    * someone examined each and parked it, and judging one is legitimate. They go
    * through the SAME divergedGuard / ordering / allowedDispositions as queue
    * items (`allowedFor`). A NEVER_VERIFIED edge that is NOT parked is deliberately
@@ -644,7 +645,7 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
     const items = buildQueue(rows, history, { root, order });
     const allowedFor = allowedForRows(rows);
     const parked = rows
-      .filter((r) => r.deferred && r.state === "NEVER_VERIFIED")
+      .filter((r) => actionOf(r.state) === ACTIONS.PARKED)
       .map((r) => {
         const a = allowedFor(r);
         return {

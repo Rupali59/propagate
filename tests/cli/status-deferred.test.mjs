@@ -169,7 +169,7 @@ test("status does not offer bootstrap for a workspace where every edge is deferr
     `a deferred edge must not be described as a baseline gap:\n${plain.stdout}`,
   );
   assert.ok(
-    plain.stdout.includes("deferred (2)") && plain.stdout.includes("examined, not resolved"),
+    plain.stdout.includes("parked (2)") && plain.stdout.includes("examined, not resolved"),
     `deferred edges must get their own line naming the count:\n${plain.stdout}`,
   );
 });
@@ -190,11 +190,11 @@ test("a mixed workspace still recommends bootstrap only for the genuinely unveri
   const plain = runCli(["status"], env);
   assert.equal(plain.status, 0, `plain status exited ${plain.status}: ${plain.stderr}`);
   assert.ok(
-    plain.stdout.includes("bootstrap") && plain.stdout.includes("never verified (1)"),
+    plain.stdout.includes("bootstrap") && plain.stdout.includes("never judged (1)"),
     `the one genuinely-unverified edge should still get the bootstrap remediation:\n${plain.stdout}`,
   );
   assert.ok(
-    plain.stdout.includes("deferred (1)"),
+    plain.stdout.includes("parked (1)"),
     `the deferred edge should be named separately:\n${plain.stdout}`,
   );
 });

@@ -314,14 +314,14 @@ test("F1: an unchanged observed pair writes; a malformed one is 400 and writes n
 
 // ── D11: parked edges ───────────────────────────────────────────────────────
 
-const parkedRow = (id, extra = {}) => mkRow(id, "NEVER_VERIFIED", { deferred: { ts: "2026-09-01T00:00:00Z", reason: "waiting", by: "t" }, ...extra });
+const parkedRow = (id, extra = {}) => mkRow(id, "DEFERRED", { deferred: { ts: "2026-09-01T00:00:00Z", reason: "waiting", by: "t" }, ...extra });
 
-test("D11: a parked (deferred NEVER_VERIFIED) edge is accepted, single and in an edges batch", async () => {
+test("D11: a parked (DEFERRED) edge is accepted, single and in an edges batch", async () => {
   ROWS = [parkedRow("pk1"), parkedRow("pk2"), mkRow("pk3", "DRIFTED")];
   const before = storeLines().length;
   const one = await dispose({ edge_id: "pk1", disposition: "no-change-needed", reason: REASON });
   assert.equal(one.status, 200, one.raw);
-  const many = await dispose({ edges: edges(["pk2", "NEVER_VERIFIED"], ["pk3", "DRIFTED"]), disposition: "no-change-needed", reason: REASON });
+  const many = await dispose({ edges: edges(["pk2", "DEFERRED"], ["pk3", "DRIFTED"]), disposition: "no-change-needed", reason: REASON });
   assert.equal(many.status, 200, many.raw);
   assert.deepEqual(storeLines().slice(before).map((e) => e.edge_id), ["pk1", "pk2", "pk3"]);
 });

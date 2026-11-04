@@ -646,6 +646,11 @@ test("every mapped item has its own click and a hover class: queue segments, key
   assert.match(code, /viewRoute\('\/judge', \{ state: k \}\)/, "a state chip deep-links to its state");
   assert.match(code, /decide: viewRoute\('\/judge', \{ chip: 'both' \}\)/, "pick-a-side opens Judge on the both-sides chip");
   assert.match(code, /blocked: '\/unblock'/, "the blocked part opens Unblock");
+  // #127 phase 1: the parked / broken line, each opening its own Judge chip, read from the payload.
+  assert.match(code, /wl\.parked/, "the widget reads worklist.parked");
+  assert.match(code, /wl\.broken/, "the widget reads worklist.broken");
+  assert.match(code, /viewRoute\('\/judge', \{ chip: 'parked' \}\)/, "parked opens the Parked chip");
+  assert.match(code, /viewRoute\('\/judge', \{ chip: 'broken' \}\)/, "broken opens the Broken chip");
 });
 
 test("every font-size in the stylesheet is at least 11px (Apple HIG widgets)", () => {

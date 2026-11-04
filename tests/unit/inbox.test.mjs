@@ -31,7 +31,7 @@ const ROWS = [
   edge("e-ab", "rules/a.md", "Tathya/b.md", "DRIFTED"),        // root, crosses
   edge("e-bc", "Tathya/b.md", "Tathya/c.md", "REVERSED"),      // blocked by e-ab
   edge("e-hub", "rules/x.md", "scripts/y.md", "DIVERGED"),     // hub-internal
-  edge("e-park", "Keerti/p.md", "Keerti/q.md", "NEVER_VERIFIED", {
+  edge("e-park", "Keerti/p.md", "Keerti/q.md", "DEFERRED", {
     deferred: { ts: "2026-09-01T00:00:00Z", reason: "waiting on the upstream rename", by: "rupali" },
   }),
   edge("e-nv", "Keerti/r.md", "Keerti/s.md", "NEVER_VERIFIED"),
@@ -43,10 +43,10 @@ const okDeps = (over = {}) => ({
   reconcile: async () => ({ rows: ROWS, stats: { edges: 4, expanded: 6 } }),
   historyByEdge: async () => new Map(),
   planBaseline: (rows) => {
-    const nv = rows.filter((r) => r.state === "NEVER_VERIFIED");
+    const nv = rows.filter((r) => r.state === "NEVER_VERIFIED" || r.state === "DEFERRED");
     return {
       neverVerifiedCount: nv.length,
-      outcomes: { examinedAndDeferred: nv.filter((r) => r.deferred), baselined: [], noCoCommit: [], boundReached: [], ineligibleCrossRepo: [] },
+      outcomes: { examinedAndDeferred: nv.filter((r) => r.state === "DEFERRED"), baselined: [], noCoCommit: [], boundReached: [], ineligibleCrossRepo: [] },
     };
   },
   registerQueue: () => ({ error: null, issues: [{ id: "N1" }], todos: [] }),
@@ -65,9 +65,8 @@ test("READY + BLOCKED == the actionable set, nothing unplaced", async () => {
 });
 
 test("a deferred row is in PARKED and in NO other division", async () => {
-  // It still reads NEVER_VERIFIED, which is why isActionable drops it and why
-  // it has been on no surface. The flag is the only thing distinguishing
-  // "examined and parked" from "never looked at".
+  // It reads DEFERRED (#118; it used to read NEVER_VERIFIED with a flag beside it),
+  // which isActionable drops, so it is on no queue and only PARKED lists it.
   const p = await inboxPayload({ root: ROOT, deps: okDeps(), now: Date.parse("2026-09-21T00:00:00Z") });
   const d = p.divisions;
   assert.deepEqual(d.parked.items.map((i) => i.edge_id), ["e-park"]);
@@ -153,14 +152,14 @@ test("boundaryOf: a contract that has not reached its instances is the interesti
 // ── helpers, directly ──────────────────────────────────────────────────────
 
 test("parkedFrom reports a missing reason as null, never as empty prose", () => {
-  const out = parkedFrom([edge("e", "a/x.md", "a/y.md", "NEVER_VERIFIED", { deferred: { ts: "2026-09-11T00:00:00Z" } })],
+  const out = parkedFrom([edge("e", "a/x.md", "a/y.md", "DEFERRED", { deferred: { ts: "2026-09-11T00:00:00Z" } })],
     ROOT, Date.parse("2026-09-21T00:00:00Z"));
   assert.equal(out[0].reason, null, "deferred with no reason given is a finding, not an empty string");
   assert.equal(out[0].ageDays, 10);
 });
 
 test("parkedFrom survives an unparseable timestamp without inventing an age", () => {
-  const out = parkedFrom([edge("e", "a/x.md", "a/y.md", "NEVER_VERIFIED", { deferred: { ts: "not-a-date" } })], ROOT);
+  const out = parkedFrom([edge("e", "a/x.md", "a/y.md", "DEFERRED", { deferred: { ts: "not-a-date" } })], ROOT);
   assert.equal(out[0].ageDays, null, "null, not 0 — 0 would read as deferred today");
 });
 
