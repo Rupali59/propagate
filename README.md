@@ -12,6 +12,14 @@ call. The ledger is a record of that decision, not an automation that makes it.
 
 ## Install
 
+As a Claude Code plugin (Claude Code 2.1.275+):
+
+```
+/plugin install propagate --marketplace Rupali59/propagate
+```
+
+From a clone, for use outside Claude Code too:
+
 ```bash
 git clone https://github.com/Rupali59/propagate-skill
 cd propagate-skill && npm install

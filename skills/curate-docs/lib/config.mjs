@@ -26,6 +26,9 @@ import { parse as parseYaml } from "yaml";
  *   .claude 183 · .gemini 140 · .github 160 · .disabled 169 · .cursor 9 — agent/CI config
  *   .obsidian    a vault is a [[wikilink]] corpus this extractor cannot read (refused, not guessed)
  *   fixtures     found by running this tool on ITSELF: 11 of 16 "docs" were its own fixtures
+ *   evals        `claude plugin eval`'s default suite dir: prompt.md + graders/*.md are test
+ *                input, not docs. Adding propagate's 12 took it from 17 to 29 orphans of 54
+ *                and failed the "not mostly orphans" repo check (2026-11-04)
  *   .gstack      session scratch, "never authoritative" per rule:state-and-decisions
  *
  * NOT here, deliberately:
@@ -37,7 +40,7 @@ import { parse as parseYaml } from "yaml";
  */
 const SKIP_DIRS = [
   "node_modules", ".git", ".next", "dist", "build", "coverage", "vendor",
-  ".agent", ".agents", "_archive", "fixtures", "__fixtures__", "testdata", "__snapshots__",
+  ".agent", ".agents", "_archive", "fixtures", "__fixtures__", "testdata", "__snapshots__", "evals",
   ".gstack", ".worktrees", ".claude", ".gemini", ".github", ".cursor", ".disabled",
   ".obsidian", ".turbo", ".vercel", ".docusaurus", "_site",
 ];

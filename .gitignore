@@ -60,3 +60,6 @@ docs/archive/*watcher*.log*
 # not named here is still missing).
 propagation/refs/snapshot.json
 propagation/refs/lifecycle.jsonl
+
+# claude plugin eval run reports (local, regenerated per run)
+evals/results/

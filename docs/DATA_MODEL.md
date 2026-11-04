@@ -541,10 +541,12 @@ new event, never by editing an old one.
 |---|---|---|
 | `event_id` | stamped | ULID, minted by `appendEvent` |
 | `ts` | stamped | ISO-8601, minted by `appendEvent` |
-| `edge_id` | **yes** | `sha8(node_id, toNodeId(downstream), why)` |
+| `edge_id` | **yes** | `sha8(node_id, toNodeId(downstream), why)`. A reworded `why` or a renamed file mints a **new** id; `propagate rekey` links the old id forward with a `rekeyed` event (`from_edge_id`) so the history is not orphaned |
 | `node_id` | **yes** | `basename(repoRoot):relPath` of the source |
 | `disposition` | **yes** | one of `DISPOSITIONS` |
-| `reason` | `wontfix`, `baselined` | free text; `baselined` must name its evidence |
+| `reason` | `wontfix`, `baselined`, `rekeyed` | free text; `baselined` must name its evidence, and `rekeyed` must say why two ids are one coupling |
+| `from_edge_id` | `rekeyed` | the edge this one continues. Required, and must differ from the event's own `edge_id` (`appendEvent` throws otherwise) |
+| `from_node_id` / `carried_disposition` / `carried_event_id` / `carried_ts` | `rekeyed` (audit) | the old edge's latest pinning event, recorded by `lib/edges/rekey.mjs`: its `node_id`, `disposition`, `event_id` and `ts`, each `null` when that pin lacks it. Read for audit, never for state |
 | `by` / `by_kind` | `by_kind` on new events | actor, and which of `BY_KINDS` it was |
 | `executed_by` | new events (2026-10-02) | `agent` when `CLAUDECODE=1` was in the environment of the process that wrote the event, else `human`. **Who pressed the key** — `by_kind` stays **who decided** (a `settle` walkthrough has an agent run `verify` on a human's answer: `by_kind: human`, `executed_by: agent`) |
 | `session_id` | new events, only inside Claude Code | `CLAUDE_CODE_SESSION_ID` when present, **absent otherwise**. Groups a session's verifies, which is what the `doctor` "verify cadence" gauge derives from |
@@ -555,7 +557,11 @@ new event, never by editing an old one.
 | `downstream_on_ref` | **yes** | the ref the **downstream** was read at |
 | `downstream_at_commit` / `downstream_on_branch` / `downstream_dirty` | new events | the downstream's git position |
 
-"Pinning" means every disposition except `deferred` and `decoupled`. `deferred`
+"Pinning" means every disposition except `deferred` and `decoupled`. `rekeyed` pins, but it pins
+**carried** content, not a new judgement: `rekey` copies `source_content`, `downstream_content` and the position fields
+(`CARRIED_FIELDS` in `lib/edges/rekey.mjs`) verbatim from the old edge's latest pin, so the new edge reconciles to the
+state the old one had. It is in `DISPOSITIONS` (so `appendEvent` validates it) and not in `VERIFY_DISPOSITIONS`, so
+`verify` cannot assert it. `deferred`
 records that someone **looked** and must not re-pin. `decoupled` removes the edge
 from its sidecar, so nothing ever reads its pin: content is recorded when
 resolvable and **not required**. A glob that matches nothing has no downstream to
