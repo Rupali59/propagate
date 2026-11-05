@@ -343,6 +343,13 @@ Per unit, `manifest` now also reports:
 - **`analytics`** — joined from `scripts/execution/access.yml` (`PROPAGATE_ACCESS_FILE`).
   Its rows sit under `properties:` (siblings `conventions:` and `robots:` are not
   rows), keyed `<Workspace>/<unit-path>` like the other registries.
+- **`svc`** — the external services the unit uses, from `scripts/execution/services.yml`
+  (`PROPAGATE_SERVICES_FILE`; pages in `rules/conventions/services/`, `PROPAGATE_SERVICES_DIR`). Shown only when
+  that file is configured. A unit using a service that needs credentials, with no `credentials:` entry in its
+  project's sidecar, adds the gap `service-no-credential-location`. `propagate services` gives the full matrix and
+  findings (UNPAGED, STUB-IN-USE, STALE-LIMIT, HAZARD-UNTRIGGERED, NO-CREDENTIAL-LOCATION, ENV-UNKNOWN,
+  SCAN-SKIPPED, UNIT-NOT-ON-DISK; exit 0 clean · 1 findings · 2 could not run). A registry row keyed by a project
+  root matches a unit below it only when that project has one unit.
 
 **`credentials:` in `.sidecar.yml`** records where a project's credentials live.
 Locations only, never values; read leniently (no schema):
