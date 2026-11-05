@@ -950,6 +950,19 @@ async function doctor({ exitProcess = true } = {}) {
     problems += reporter.problems;
   }
 
+  // # Services — offline only (no network call). One line when clean; findings warn, never fail.
+  {
+    try {
+      const { checkServices } = await import("./lib/report/doctor/services.mjs");
+      const reporter = new Reporter();
+      await checkServices({ reporter });
+      renderDoctorEntries(reporter.drain());
+      problems += reporter.problems;
+    } catch (err) {
+      console.log(`  ${YELLOW}!${RESET} services  ${DIM}could not be derived: ${err.message}${RESET}`);
+    }
+  }
+
   // # Goals — arrival conditions. Surfaced HERE rather than left to whoever
   // remembers to type `propagate goals`, because a capability nobody invokes is
   // indistinguishable from one that was never built
@@ -5711,6 +5724,9 @@ if (_invokedDirectly) {
   } else if (mode === "goals") {
     const { goalsCmd } = await import("./cli/goals.mjs");
     process.exitCode = await goalsCmd(process.argv.slice(3));
+  } else if (mode === "services") {
+    const { servicesCmd } = await import("./cli/services.mjs");
+    process.exitCode = await servicesCmd(process.argv.slice(3));
   } else if (mode === "instructions") {
     const { instructionsCmd } = await import("./cli/instructions.mjs");
     process.exitCode = await instructionsCmd(process.argv.slice(3));

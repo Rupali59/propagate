@@ -33,6 +33,7 @@ const GAP_LABEL = {
   "credential-undeclared": `${RED}credential undeclared${RESET}`,
   "store-missing": `${RED}store missing${RESET}`,
   "store-loose": `${RED}store loose${RESET}`,
+  "service-no-credential-location": `${RED}service, no credential location${RESET}`,
 };
 
 export async function manifestCmd() {
@@ -61,6 +62,10 @@ export async function manifestCmd() {
 
   const { workspaceManifest } = await import("../lib/report/manifest.mjs");
   const result = workspaceManifest(ws.root);
+  // Services column and its gap kind. A no-op (and no output change) when services.yml is not
+  // configured; a could-not-run is printed at the end rather than read as "no services".
+  const { annotateManifest } = await import("../lib/report/services.mjs");
+  const svc = annotateManifest(result);
 
   // Blind is a distinct exit (3), never 0: a scan of zero units is not clean.
   if (result.blind) process.exitCode = 3;
@@ -135,7 +140,8 @@ export async function manifestCmd() {
       const port = u.port ? portTxt : `${DIM}${portTxt}${RESET}`;
       const env =
         u.env.source === "doppler" ? envTxt : u.env.source === "env-example" ? `${DIM}${envTxt}${RESET}` : `${YELLOW}${envTxt}${RESET}`;
-      console.log(`  ${u.rel.padEnd(w)}  ${tool} ${DIM}${fw}${RESET} ${port} ${env}${an}${u.compose ? `  ${DIM}compose${RESET}` : ""}`);
+      const sv = u.services?.length ? `  ${DIM}svc ${u.services.join(",")}${RESET}` : "";
+      console.log(`  ${u.rel.padEnd(w)}  ${tool} ${DIM}${fw}${RESET} ${port} ${env}${an}${sv}${u.compose ? `  ${DIM}compose${RESET}` : ""}`);
     }
   }
   if (result.workspaceCompose) {
@@ -180,6 +186,9 @@ export async function manifestCmd() {
   // Registry health last, so a malformed registry is visible without burying
   // the runbook. "ok" is printed too — silence about a source you read is how a
   // stale registry passes for a healthy one.
+  if (svc.state === "could-not-run") {
+    console.log(`\n${YELLOW}services${RESET} ${DIM}could-not-run: ${svc.reason} — the services column is absent, which is not "no services"${RESET}`);
+  }
   console.log(`\n${DIM}registries: ports ${result.sources.ports} · deploy ${result.sources.deploy} · mongo ${result.sources.mongo} · access ${result.sources.access}${RESET}`);
   console.log(
     `${DIM}This gets you cloned, on the right branches, with toolchains and ports known.` +
