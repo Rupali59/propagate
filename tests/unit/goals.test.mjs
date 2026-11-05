@@ -236,3 +236,53 @@ Just prose.
   );
   assert.equal(c.total, 3);
 });
+
+// ---------------------------------------------------------------------------
+// Letter goal ids (astro-darpan: E, V0, S, B, W, R), 2026-11-05.
+// Renumbering was refused because the letters are cited across DECISIONS,
+// STATE and issue bodies. The section COUNT is asserted, so a parser that
+// matches nothing cannot pass by finding zero "violations".
+// ---------------------------------------------------------------------------
+
+test("letter goal ids parse beside digit ids, and prose headings never do", () => {
+  const p = goalsFile(`# astro-darpan — goal states
+
+## E · Engine parity
+**Done when:** the engine matches the reference.
+**Derived by:** \`node check-engine.mjs\`
+
+## Notes
+This prose heading must not become a goal.
+
+## V0 · First playable build
+**Done when:** Pandit signs off.
+**Judgement, not derivable:** a person's sign-off.
+
+## TODO: tidy
+Also prose, not a goal.
+
+## API docs
+Also prose.
+
+## 3 · Store listing
+**Done when:** listed.
+**Derived by:** \`node check-store.mjs\`
+`);
+  const r = parseGoalsFile(p);
+  assert.equal(r.unread, false, "a file with letter-id goals is readable");
+  assert.equal(r.entries.length, 3, `exactly 3 goal sections (E, V0, 3), found ${r.entries.length}`);
+  assert.deepEqual(r.entries.map((e) => e.n), ["E", "V0", 3], "each entry carries its own id, not its list index");
+  assert.deepEqual(r.entries.map((e) => e.title), ["Engine parity", "First playable build", "Store listing"]);
+  // Bodies pair with the right heading: if the body splitter used a different
+  // regex, V0's waiver would land on E or the derivations would shift by one.
+  assert.deepEqual(r.entries.map((e) => e.derivation), ["claimed", "waived", "claimed"]);
+  assert.equal(r.entries[0].command, "node check-engine.mjs");
+  assert.equal(r.entries[2].command, "node check-store.mjs");
+});
+
+test("a file of only prose headings stays UNREAD, never read as zero goals", () => {
+  const p = goalsFile(`# notes\n\n## Notes\ntext\n\n## Background\ntext\n`);
+  const r = parseGoalsFile(p);
+  assert.equal(r.unread, true);
+  assert.equal(r.entries.length, 0);
+});
