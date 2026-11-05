@@ -309,3 +309,174 @@ test("a genuinely standalone dir with no remote is STILL cannot-clone", () => {
     cleanup(root);
   }
 });
+
+// ── credentials: where each project's credential stores live (#132) ──────────
+// SAFETY: nothing here may read a store's contents. The fixtures plant a
+// sentinel string inside the `.env*` files and the tests assert it never
+// reaches the output.
+
+import { chmodSync, mkdirSync as mkdirSyncC, writeFileSync as writeFileSyncC } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const SENTINEL = "SENTINEL_SECRET_DO_NOT_READ_7f3a";
+
+/** A one-project workspace with extra sidecar YAML lines and planted files. */
+function credFixture({ credentialsYaml = "", files = {}, pkg = null, registries = {} } = {}) {
+  const root = fixture({ sidecars: { app: { remote: "https://x/app.git" } }, dirs: { app: ["pnpm-lock.yaml"] } });
+  const side = path.join(root, "propagation", "state", "app", ".sidecar.yml");
+  if (credentialsYaml) writeFileSync(side, readFileSync(side, "utf8") + credentialsYaml + "\n");
+  for (const [f, body] of Object.entries(files)) writeFileSync(path.join(root, "app", f), body);
+  if (pkg) writeFileSync(path.join(root, "app", "package.json"), JSON.stringify(pkg));
+  return root;
+}
+import { readFileSync } from "node:fs";
+
+test("framework is derived from package.json and go.mod, and unknown stays empty", () => {
+  const root = credFixture({
+    pkg: { dependencies: { next: "15", react: "19", "@clerk/nextjs": "1", mongoose: "8" }, devDependencies: { prisma: "5" } },
+  });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    assert.deepEqual(m.projects[0].units[0].framework, ["next", "react", "@clerk/*", "mongoose", "prisma"]);
+    writeFileSync(path.join(root, "app", "package.json"), JSON.stringify({ dependencies: { lodash: "4" } }));
+    writeFileSync(path.join(root, "app", "go.mod"), "module x\nrequire github.com/gin-gonic/gin v1.9.0\n");
+    const m2 = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    assert.deepEqual(m2.projects[0].units[0].framework, ["gin"]);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("credential-undeclared: a planted .env.local with no entry fires; naming it clears it; .env.example never fires", () => {
+  const root = credFixture({ files: { ".env.local": `KEY=${SENTINEL}\n`, ".env.example": "KEY=\n" } });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    const g = m.gaps.filter((x) => x.kind === "credential-undeclared");
+    assert.equal(g.length, 1, "exactly the .env.local, not .env.example");
+    assert.match(g[0].detail, /app\/\.env\.local/);
+    assert.ok(!JSON.stringify(m).includes(SENTINEL), "contents must never be read");
+  } finally {
+    cleanup(root);
+  }
+  const declared = credFixture({
+    files: { ".env.local": `KEY=${SENTINEL}\n`, ".env.example": "KEY=\n" },
+    credentialsYaml: "credentials:\n  local:\n    - {store: .env.local, authoritative: false}",
+  });
+  try {
+    const m = workspaceManifest(declared, { integrations: NO_REGISTRIES });
+    assert.deepEqual(m.gaps.filter((x) => x.kind === "credential-undeclared"), []);
+  } finally {
+    cleanup(declared);
+  }
+});
+
+test("credential-undeclared is satisfied by a deploy.yml Doppler binding", () => {
+  const root = credFixture({ files: { ".env.local": `KEY=${SENTINEL}\n` } });
+  const deployFile = path.join(root, "deploy.yml");
+  writeFileSync(deployFile, `deployments:\n  "${path.basename(root)}/app":\n    doppler: proj\n    binding: x\n`);
+  try {
+    const m = workspaceManifest(root, { integrations: { ...NO_REGISTRIES, deployFile } });
+    assert.deepEqual(m.gaps.filter((x) => x.kind === "credential-undeclared"), []);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("store-missing for a declared path that does not exist; store-loose for a 0644 out_of_tree store", () => {
+  const home = mkdtempSync(path.join(tmpdir(), "home-"));
+  writeFileSync(path.join(home, ".pgpass"), `h:5432:db:u:${SENTINEL}\n`);
+  chmodSync(path.join(home, ".pgpass"), 0o644);
+  writeFileSync(path.join(home, "tight"), "x");
+  chmodSync(path.join(home, "tight"), 0o600);
+  const root = credFixture({
+    credentialsYaml:
+      'credentials:\n  local:\n    - {store: .env.gone}\n  out_of_tree:\n    - {store: "~/.pgpass", host: "localhost:5436"}\n    - {store: "~/tight"}\n    - {store: "~/absent"}',
+  });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES, home });
+    const kinds = gapKinds(m);
+    assert.deepEqual(kinds, ["store-loose", "store-missing", "store-missing"]);
+    assert.match(m.gaps.find((g) => g.kind === "store-loose").detail, /0644/);
+    assert.ok(!JSON.stringify(m).includes(SENTINEL));
+  } finally {
+    cleanup(root);
+    cleanup(home);
+  }
+});
+
+test("access.yml joins on its `properties:` key", () => {
+  const root = credFixture({});
+  const accessFile = path.join(root, "access.yml");
+  writeFileSync(accessFile, `properties:\n  "${path.basename(root)}/app":\n    property: 123\n    robot: bot\n    role: editor\n`);
+  try {
+    const m = workspaceManifest(root, { integrations: { ...NO_REGISTRIES, accessFile } });
+    assert.deepEqual(m.projects[0].units[0].analytics, { property: 123, robot: "bot", role: "editor" });
+    assert.equal(m.sources.access, "ok");
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("FLOOR: an empty workspace is blind, not clean", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "manifest-"));
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    assert.equal(m.blind, true);
+    assert.equal(m.unitsScanned, 0);
+    assert.equal(workspaceManifest(credFixture({}), { integrations: NO_REGISTRIES }).blind, false);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("SENTINEL: .env content never appears in the manifest object (the whole output surface) and the source never reads an env path", () => {
+  const root = credFixture({ files: { ".env.local": `KEY=${SENTINEL}\n`, ".env": `K=${SENTINEL}\n` } });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    assert.ok(!JSON.stringify(m).includes(SENTINEL));
+    // The implementation must not even open the file: it only readdirs.
+    const src = readFileSync(fileURLToPath(new URL("../../lib/report/manifest.mjs", import.meta.url)), "utf8");
+    assert.ok(!/readFileSync\([^)]*env/i.test(src), "manifest.mjs must never readFileSync an env path");
+    // --json prints this object verbatim and the text renderer only formats it, so the object is the whole output surface.
+    assert.ok(!JSON.stringify(m, null, 2).includes(SENTINEL));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("credential-undeclared is DERIVED by walking the project, not limited to known units", () => {
+  // An .env two levels below the project root, in a directory that is no unit
+  // (no lockfile, in no registry). A unit-only scan never looks there.
+  const root = credFixture({ files: {} });
+  mkdirSync(path.join(root, "app", "services", "billing"), { recursive: true });
+  writeFileSync(path.join(root, "app", "services", "billing", ".env"), `K=${SENTINEL}\n`);
+  mkdirSync(path.join(root, "app", "node_modules", "x"), { recursive: true });
+  writeFileSync(path.join(root, "app", "node_modules", "x", ".env"), "skipped");
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    const g = m.gaps.filter((x) => x.kind === "credential-undeclared");
+    assert.equal(g.length, 1, "the nested non-unit .env, and not the node_modules one");
+    assert.match(g[0].detail, /app\/services\/billing\/\.env/);
+    assert.ok(!JSON.stringify(m).includes(SENTINEL));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("the workspace repo's own walk finds nested .env files and does not double-count another project's", () => {
+  const root = fixture({
+    sidecars: { workspace: { project: "workspace", repo_root: ".", remote: "https://x/w.git" }, app: { remote: "https://x/app.git" } },
+    dirs: { app: ["pnpm-lock.yaml"] },
+  });
+  mkdirSync(path.join(root, "services", "auth"), { recursive: true });
+  writeFileSync(path.join(root, "services", "auth", ".env"), `K=${SENTINEL}\n`);
+  writeFileSync(path.join(root, "app", ".env.local"), `K=${SENTINEL}\n`);
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    const g = m.gaps.filter((x) => x.kind === "credential-undeclared");
+    assert.equal(g.length, 2);
+    assert.deepEqual(g.map((x) => x.project).sort(), ["app", "workspace"]);
+  } finally {
+    cleanup(root);
+  }
+});

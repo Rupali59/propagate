@@ -331,6 +331,47 @@ is the same identity, so they join without new storage.
 | `would-be-missed` | a repo on disk no sidecar declares; a new machine silently would not get it |
 | `not-cloned-here` | declared, absent locally. **Informational** — a fresh machine is entirely this |
 
+### Frameworks, analytics and credential stores
+
+Per unit, `manifest` now also reports:
+
+- **`framework`** — derived from the unit's `package.json` (`dependencies` plus
+  `devDependencies`) and `go.mod`: `next`, `react`, `next-auth`, `@clerk/*`,
+  `@auth0/*`, `mongoose`, `pg`, `prisma`, `express`, `gin`. The population is the
+  units discovery already found; only the recognised names are a list. `-` means
+  none of those, not "no framework".
+- **`analytics`** — joined from `scripts/execution/access.yml` (`PROPAGATE_ACCESS_FILE`).
+  Its rows sit under `properties:` (siblings `conventions:` and `robots:` are not
+  rows), keyed `<Workspace>/<unit-path>` like the other registries.
+
+**`credentials:` in `.sidecar.yml`** records where a project's credentials live.
+Locations only, never values; read leniently (no schema):
+
+```yaml
+credentials:
+  deployed: {see: deploy.yml#"Vipin Kaushik/VipinKaushik"}
+  database: {see: mongo.yml#"Vipin Kaushik/VipinKaushik"}
+  analytics: {see: access.yml#properties.vipinkaushik}
+  local: [{store: .env.local, authoritative: false}]   # relative to the project root
+  out_of_tree: [{store: "~/.pgpass", host: "localhost:5436"}]
+```
+
+`see:` pointers are carried as written, not resolved. Stores are **detected by
+name and `stat`ed, never opened**: `.env*` files are found with a directory
+listing, and a test plants a sentinel string in them and asserts it never reaches
+the output.
+
+New gap kinds (all blocking):
+
+| kind | meaning |
+|---|---|
+| `credential-undeclared` | a `.env*` file (not `.env.example`/`.sample`/`.template`; `.env.bak*` counts) found by walking each project root, names only, never opened (skips `node_modules`, `.git`, `.next`, `dist`, `vendor`, `.worktrees`; depth 6; the workspace repo itself is walked too, stepping over other declared projects). Attributed to its nearest unit, else the project, and exempt only if that has a `deploy.yml` Doppler binding or a `credentials.local` entry naming the path relative to the project root. One row per file |
+| `store-missing` | a declared `local` store (judged only when the project is on disk) or `out_of_tree` store (`~` expanded) fails `stat` |
+| `store-loose` | an `out_of_tree` store's mode has bits beyond 0600 |
+
+**Floor.** If 0 units were scanned the command prints `scan has gone blind` and
+exits 3 (`--json` carries `blind: true`, `unitsScanned`); it never reports clean.
+
 ### `external:` — the one thing that cannot be derived
 
 Nothing on disk distinguishes a required gitignored directory from scratch. It has

@@ -30,6 +30,9 @@ const GAP_LABEL = {
   "not-cloned-here": `${DIM}not cloned here${RESET}`,
   "sidecar-unreadable": `${RED}sidecar unreadable${RESET}`,
   "state-dir-undeclared": `${RED}state dir undeclared${RESET}`,
+  "credential-undeclared": `${RED}credential undeclared${RESET}`,
+  "store-missing": `${RED}store missing${RESET}`,
+  "store-loose": `${RED}store loose${RESET}`,
 };
 
 export async function manifestCmd() {
@@ -59,8 +62,19 @@ export async function manifestCmd() {
   const { workspaceManifest } = await import("../lib/report/manifest.mjs");
   const result = workspaceManifest(ws.root);
 
+  // Blind is a distinct exit (3), never 0: a scan of zero units is not clean.
+  if (result.blind) process.exitCode = 3;
+
   if (json) {
     console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (result.blind) {
+    console.log(
+      `${RED}scan has gone blind${RESET} ${DIM}— 0 units scanned in ${result.workspace}; this is not a clean result, it is no result. ` +
+        `Check propagation/state/*/.sidecar.yml exists.${RESET}`,
+    );
     return;
   }
 
@@ -113,13 +127,15 @@ export async function manifestCmd() {
       // exactly the rows that are coloured — i.e. the ones worth reading.
       const dim = u.toolchain === "none" || u.toolchain === "unknown";
       const toolPad = u.toolchain.padEnd(8);
+      const fw = (u.framework.length ? u.framework.join(",") : "-").padEnd(22);
+      const an = u.analytics ? `  ${DIM}ga ${u.analytics.property}${RESET}` : "";
       const portTxt = (u.port ? `port ${u.port}` : `port ${u.portStatus}`).padEnd(18);
       const envTxt = u.env.source === "doppler" ? `doppler ${u.env.project}` : u.env.source === "env-example" ? ".env.example" : "env: NO SOURCE";
       const tool = dim ? `${DIM}${toolPad}${RESET}` : toolPad;
       const port = u.port ? portTxt : `${DIM}${portTxt}${RESET}`;
       const env =
         u.env.source === "doppler" ? envTxt : u.env.source === "env-example" ? `${DIM}${envTxt}${RESET}` : `${YELLOW}${envTxt}${RESET}`;
-      console.log(`  ${u.rel.padEnd(w)}  ${tool} ${port} ${env}${u.compose ? `  ${DIM}compose${RESET}` : ""}`);
+      console.log(`  ${u.rel.padEnd(w)}  ${tool} ${DIM}${fw}${RESET} ${port} ${env}${an}${u.compose ? `  ${DIM}compose${RESET}` : ""}`);
     }
   }
   if (result.workspaceCompose) {
@@ -138,6 +154,18 @@ export async function manifestCmd() {
     }
   }
 
+  // ── credential stores: locations only, never values ─────────────────────────
+  const stores = result.projects.flatMap((p) => [
+    ...p.credentials.local.map((s) => ({ ...s, kind: "local", project: p.project })),
+    ...p.credentials.out_of_tree.map((s) => ({ ...s, kind: "out of tree", project: p.project })),
+  ]);
+  if (stores.length) {
+    console.log(`\n${BOLD}# 4 · Credential stores${RESET} ${DIM}(locations only — never read)${RESET}`);
+    for (const s of stores) {
+      console.log(`  ${s.store}  ${DIM}${s.kind}${s.host ? ` · ${s.host}` : ""} · ${s.project}${RESET}`);
+    }
+  }
+
   // ── gaps ───────────────────────────────────────────────────────────────────
   console.log(`\n${BOLD}# Gaps${RESET}`);
   if (result.gaps.length === 0) {
@@ -152,7 +180,7 @@ export async function manifestCmd() {
   // Registry health last, so a malformed registry is visible without burying
   // the runbook. "ok" is printed too — silence about a source you read is how a
   // stale registry passes for a healthy one.
-  console.log(`\n${DIM}registries: ports ${result.sources.ports} · deploy ${result.sources.deploy} · mongo ${result.sources.mongo}${RESET}`);
+  console.log(`\n${DIM}registries: ports ${result.sources.ports} · deploy ${result.sources.deploy} · mongo ${result.sources.mongo} · access ${result.sources.access}${RESET}`);
   console.log(
     `${DIM}This gets you cloned, on the right branches, with toolchains and ports known.` +
       ` Env VALUES come from Doppler; out-of-band payloads move by hand.${RESET}`,

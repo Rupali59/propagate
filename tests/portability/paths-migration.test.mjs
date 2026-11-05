@@ -129,6 +129,7 @@ test("migration equality — all 36 pre-existing config.mjs exports are byte-ide
       portsFile: null,
       deployFile: null,
       mongoFile: null,
+      accessFile: null,
       instructionBudgetFile: null,
       healthExceptionsFile: null,
       telegramDir: null,
