@@ -10,11 +10,17 @@
  * can match while the files do not. A mismatch is a finding about the MODEL; it is reported,
  * never tuned toward.
  *
- * Exit: 0 report printed (and, for --calibrate, every session matched); 1 calibration mismatch;
- * 2 could not run (blind scan, no log) — "looked at nothing" is never exit 0.
+ * `--gate` is the pre-commit ratchet (#218): it inspects only what is STAGED, blocks a commit that
+ * GROWS a directory past the gate (or past its excepted ceiling), and writes nothing. It is a
+ * different code path from the report on purpose, as `caps --gate` is.
+ *
+ * Exit: 0 report printed (and, for --calibrate, every session matched; for --gate, pass or
+ * bypassed); 1 calibration mismatch / gate blocked; 2 could not run (blind scan, no log, gate unable
+ * to judge) — "looked at nothing" is never exit 0.
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -25,6 +31,8 @@ import {
   HARNESS_OBSERVED,
   instructionBudget,
   createBudgetModel,
+  instructionsGate,
+  GATE_BYPASS_ENV,
   parseBudgetRegistry,
   evaluateBudget,
   calibrate,
@@ -54,6 +62,8 @@ export async function instructionsCmd(args, inject = {}) {
   const roots = inject.roots ?? SEARCH_ROOTS;
   const registryFile = inject.registryFile === undefined ? INTEGRATIONS.instructionBudgetFile : inject.registryFile;
   const home = inject.home ?? os.homedir();
+
+  if (args.includes("--gate")) return gateCmd({ out, err: inject.err ?? ((s) => console.error(s)), roots, registryFile, home, inject });
 
   if (args.includes("--calibrate")) {
     const logPath = value(args, "--log") ?? defaultLogPath();
@@ -144,6 +154,64 @@ export async function instructionsCmd(args, inject = {}) {
     out(`${BOLD}${budget.over}${RESET} of ${budget.dirs.length} directories over ${n(limit)}`);
   }
   return 0;
+}
+
+/**
+ * `--gate`. Output goes to stderr (a hook's stdout is not shown by git). Never writes.
+ * @returns {number} 0 pass/bypassed, 1 blocked, 2 could not run
+ */
+function gateCmd({ err, roots, registryFile, home, inject }) {
+  let repoRoot = inject.repoRoot;
+  if (!repoRoot) {
+    try {
+      repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    } catch (e) {
+      err(`${YELLOW}instructions --gate: not a git repository — nothing inspected, which is not a pass${RESET}`);
+      return 2;
+    }
+  }
+  // stdio piped: git's stderr must not leak into the hook output on an ordinary absence probe.
+  const runGit = inject.runGit ?? ((a) => execFileSync("git", ["-C", repoRoot, ...a], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }));
+  const bypass = (inject.env ?? process.env)[GATE_BYPASS_ENV] === "1";
+
+  let registry = null;
+  let hubRoot = null;
+  if (registryFile && existsSync(registryFile)) {
+    const parsed = parseBudgetRegistry(readFileSync(registryFile, "utf8"));
+    if (parsed.problems.length) {
+      err(`${YELLOW}instructions --gate: ${tilde(registryFile)} is malformed (${parsed.problems.join("; ")}) — exceptions NOT applied${RESET}`);
+    } else {
+      registry = { ...parsed, file: registryFile };
+      hubRoot = path.resolve(path.dirname(registryFile), "..", "..");
+    }
+  }
+
+  const g = instructionsGate({ repoRoot, runGit, home, roots, registry, hubRoot, bypass, minDirs: inject.minDirs });
+
+  if (g.status === "bypassed") {
+    err(`${YELLOW}instructions --gate: ${GATE_BYPASS_ENV}=1 — allowing without inspection (bypassed)${RESET}`);
+    return 0;
+  }
+  if (g.status === "skipped") {
+    err(`${RED}instructions --gate: could not judge — ${g.reason}. This is not a pass.${RESET}`);
+    return 2;
+  }
+  if (g.status === "pass") {
+    err(`${DIM}instructions --gate: ${g.measured ? `budget measured, no directory grew past its limit (${g.staged} staged path(s))` : `${g.reason} (${g.staged} staged path(s)) — budget not computed`}${RESET}`);
+    return 0;
+  }
+  const rel = (d) => (hubRoot ? path.relative(hubRoot, d) || "." : tilde(d));
+  err(`${RED}instructions --gate: refusing commit — ${g.blocked.length} director${g.blocked.length === 1 ? "y" : "ies"} would load more instruction text and sit over the limit.${RESET}`);
+  for (const b of g.blocked) {
+    err(`  ${rel(b.dir)}  ${n(b.before)} -> ${n(b.now)} chars (+${n(b.added)}), limit ${n(b.threshold)}${b.ceiling ? " (excepted ceiling)" : ""}`);
+    for (const f of b.files.slice(0, 5)) err(`      grew by ${n(f.added)}: ${tilde(f.file)}`);
+  }
+  err("");
+  err(`  ${DIM}The rule is a RATCHET: a directory over the limit may be committed, it may not GROW.`);
+  err(`  Move evidence to a companion file, scope the rule with \`paths:\`, or name an exception in`);
+  err(`  scripts/execution/instruction-budget.yml. Shrinking the same directory in this commit also passes.`);
+  err(`  Bypass (logged, and it disables every other hook too): ${GATE_BYPASS_ENV}=1${RESET}`);
+  return 1;
 }
 
 function renderCalibration(r) {

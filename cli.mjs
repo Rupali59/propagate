@@ -743,7 +743,8 @@ async function doctor({ exitProcess = true } = {}) {
   {
     const { checkHooks } = await import("./lib/report/doctor/hooks.mjs");
     const reporter = new Reporter();
-    await checkHooks({ reporter, roots: SEARCH_ROOTS });
+    const { HUB_ROOT: hookHubRoot } = await import("./lib/core/config.mjs");
+    await checkHooks({ reporter, roots: SEARCH_ROOTS, hubRoot: hookHubRoot });
     renderDoctorEntries(reporter.drain());
     problems += reporter.problems;
   }

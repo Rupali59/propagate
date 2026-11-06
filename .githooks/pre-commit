@@ -37,4 +37,16 @@ fi
 #   GSTACK_HYGIENE_BYPASS=1 git commit ...
 PROPAGATE_ORIGIN=hook node "$(git rev-parse --show-toplevel)/cli.mjs" caps --gate || exit 1
 
+# --- instruction-budget ratchet (added 2026-11-06, #218) ---------------------
+# BLOCKING, same posture as the caps ratchet: a directory over the always-loaded
+# instruction limit may be committed, it may not GROW. A commit that stages no
+# instruction file (CLAUDE.md, AGENTS.md, GEMINI.md, a rules/*.md, or a file they
+# import) computes no budget and pays for one `git diff`. Exit 1 = blocked,
+# 2 = the gate could not judge (never a pass). Bypass: GSTACK_HYGIENE_BYPASS=1.
+# Only 1 (blocked) blocks. 2 (could not judge) is printed and the commit goes on, the same posture caps --gate
+# takes for its skipped cases: a gate that blocks on its own failure to measure gets bypassed and then disabled.
+PROPAGATE_ORIGIN=hook node "$(git rev-parse --show-toplevel)/cli.mjs" instructions --gate; rc=$?
+[ "$rc" -eq 1 ] && exit 1
+[ "$rc" -eq 2 ] && echo "instructions --gate could not judge (reason above): commit allowed, not passed" >&2
+
 exit 0

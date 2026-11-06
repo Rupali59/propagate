@@ -1,15 +1,15 @@
 {
  "header": {
-  "recordedAt": "2026-11-06T08:46:05.886Z",
-  "commit": "0db99b2b6cab19237d4d45c46cca18c54def7582",
+  "recordedAt": "2026-11-06T11:55:22.866Z",
+  "commit": "13c3a5d39422986f2fb134c5e9e1436908adbe46",
   "node": "v25.9.0",
-  "tests": 272,
-  "withStaticDeps": 209,
+  "tests": 273,
+  "withStaticDeps": 210,
   "withRecordedSpawnDeps": 94,
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 1647,
+  "recordedProcesses": 1648,
   "unresolvedStaticSpecifiers": 34
  },
  "tests": {
@@ -1588,6 +1588,7 @@
     "tests/unit/inbox.test.mjs",
     "tests/unit/index-view.test.mjs",
     "tests/unit/index.test.mjs",
+    "tests/unit/instructions-gate.test.mjs",
     "tests/unit/instructions.test.mjs",
     "tests/unit/journal.test.mjs",
     "tests/unit/ledger-activity.test.mjs",
@@ -9448,6 +9449,7 @@
     "tests/unit/inbox.test.mjs",
     "tests/unit/index-view.test.mjs",
     "tests/unit/index.test.mjs",
+    "tests/unit/instructions-gate.test.mjs",
     "tests/unit/instructions.test.mjs",
     "tests/unit/journal.test.mjs",
     "tests/unit/ledger-activity.test.mjs",
@@ -10035,6 +10037,7 @@
     "tests/unit/inbox.test.mjs",
     "tests/unit/index-view.test.mjs",
     "tests/unit/index.test.mjs",
+    "tests/unit/instructions-gate.test.mjs",
     "tests/unit/instructions.test.mjs",
     "tests/unit/journal.test.mjs",
     "tests/unit/ledger-activity.test.mjs",
@@ -10700,6 +10703,7 @@
     "tests/unit/inbox.test.mjs",
     "tests/unit/index-view.test.mjs",
     "tests/unit/index.test.mjs",
+    "tests/unit/instructions-gate.test.mjs",
     "tests/unit/instructions.test.mjs",
     "tests/unit/journal.test.mjs",
     "tests/unit/ledger-activity.test.mjs",
@@ -13298,6 +13302,25 @@
     "lib/skills/skills-scan.mjs",
     "package.json",
     "tests/unit/index.test.mjs"
+   ],
+   "size": "small"
+  },
+  "tests/unit/instructions-gate.test.mjs": {
+   "deps": [
+    "SKILL.md",
+    "cli/ansi.mjs",
+    "cli/instructions.mjs",
+    "lib/core/config.mjs",
+    "lib/core/discovery.mjs",
+    "lib/core/package.json",
+    "lib/core/paths.mjs",
+    "lib/package.json",
+    "lib/report/doctor/hooks.mjs",
+    "lib/report/instructions.mjs",
+    "lib/rules/paths-guard.mjs",
+    "lib/rules/rules-check.mjs",
+    "package.json",
+    "tests/unit/instructions-gate.test.mjs"
    ],
    "size": "small"
   },
@@ -16579,6 +16602,7 @@
     "tests/unit/inbox.test.mjs",
     "tests/unit/index-view.test.mjs",
     "tests/unit/index.test.mjs",
+    "tests/unit/instructions-gate.test.mjs",
     "tests/unit/instructions.test.mjs",
     "tests/unit/journal.test.mjs",
     "tests/unit/ledger-activity.test.mjs",
