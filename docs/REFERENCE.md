@@ -633,6 +633,29 @@ The header reads "N links between files · M file pairs checked": the first is t
 the second those expanded to concrete file pairs. A row that crosses the hub/workspace line says
 "crosses workspaces".
 
+## Verification is per content, not per branch (propagate#122)
+
+`verify` pins the content of both files, and `reconcile` compares whatever is checked out against that pin. It does not
+know about branches. After a checkout of a sibling branch whose files differ, edges settled on the other branch read
+DRIFTED, REVERSED or DIVERGED, and they are: the content really does differ. Their states are unchanged.
+
+`status` adds attribution only. For each edge that needs attention it compares the branch the last pinning event
+recorded (`observed_on_branch` for the source, `downstream_on_branch` for the downstream) with the branch checked out
+now in that file's repo, and prints one line per repo and branch pair under "needs attention". The line names the repo
+whose branch moved, never the reader: run from the hub, the edges are often in another repo on another branch.
+
+```
+10 of 104 in Keerti/retail-restock-fiori were last verified on issue-57-verification-gate; that repo is now on issue-61-shared-standards. Settling them there now would pin issue-61-shared-standards's content (GOTCHAS G87).
+```
+
+The edges the line does not cover are ordinary drift. `status --json` carries the same data as an additive top-level
+`branch_attribution` object: `otherBranch` (`edge_id`, `repo`, `verifiedOn`, `currentBranch`, `side`) and `unknown`, the count of
+moved edges that could not be attributed (an event with no branch field, verified on a detached HEAD, or an unreadable
+repo). Unknown is never read as "same branch". A detached HEAD now reads `detached`.
+
+**Remedy:** do not settle on the sibling branch, because that pins the other branch's content and the edges drift again
+on merge. Settle on the branch that merges, or after the merge. See GOTCHAS G87 for the measured cost.
+
 ## git pre-push hook
 
 The injection this hook used to be blocked on (`docs/ISSUES.md` G1 — `range`

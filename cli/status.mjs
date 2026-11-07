@@ -23,7 +23,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 
 import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./ansi.mjs";
 import {
@@ -264,6 +264,112 @@ function relToWs(ws, abs) {
   return abs.startsWith(ws.root) ? abs.slice(ws.root.length).replace(/^\//, "") : abs;
 }
 
+/**
+ * propagate#122. Verification pins CONTENT, not a branch, so after a checkout of a sibling branch a
+ * settled edge reads DRIFTED / REVERSED / DIVERGED with nothing saying it is a branch effect. The
+ * pinning event already records the branch each side was observed on (`observed_on_branch`,
+ * `downstream_on_branch`), and reconcile puts that whole event on `row.last`. This compares those with
+ * the branch checked out NOW. Attribution only: no edge state, fold or event field changes.
+ *
+ * `currentBranchOf(absPath)` returns the branch name, "" for a detached HEAD, or null when it cannot be
+ * read. Absence is attributable (rule:discernment-checks section 2): an event without a branch field
+ * (older events, or verified on a detached HEAD) or an unreadable repo counts as `unknown`, never as a
+ * match. A detached HEAD now is reported as currentBranch "detached", never as a match either.
+ *
+ * @returns {{otherBranch: {edge_id: string, verifiedOn: string, currentBranch: string, side: "source"|"downstream"|"both"}[], unknown: number, moved: number}}
+ */
+// `repoOf(absPath)` names the repo an edge lives in, so the text can say WHOSE branch moved. The hub reports edges
+// from every workspace, and "you are on X" printed to someone on the hub's `main` named another repo's branch
+// (measured 2026-11-07: Keerti/retail-restock-fiori on issue-61-shared-standards). Optional: it defaults to the
+// production branch function's own `repoOf`, else null.
+export function branchAttribution(rows, currentBranchOf, repoOf = currentBranchOf?.repoOf) {
+  const otherBranch = [];
+  let unknown = 0, moved = 0;
+  for (const r of rows) {
+    if (!isMoved(r.state) || !r.last) continue;
+    moved++;
+    const sides = [
+      ["source", r.last.observed_on_branch, r.source?.path],
+      ["downstream", r.last.downstream_on_branch, r.downstream?.path],
+    ];
+    const differing = [];
+    let resolvedAll = true;
+    for (const [side, verifiedOn, absPath] of sides) {
+      if (typeof verifiedOn !== "string" || !verifiedOn || !absPath) { resolvedAll = false; continue; }
+      let cur = null;
+      try { cur = currentBranchOf(absPath); } catch { cur = null; }
+      if (cur === null || cur === undefined) { resolvedAll = false; continue; }
+      const currentBranch = cur === "" ? "detached" : cur;
+      if (currentBranch !== verifiedOn) differing.push({ side, verifiedOn, currentBranch });
+    }
+    if (differing.length === 0) {
+      // Not attributed: "same branch" and "could not tell" are different facts, only the latter is counted.
+      if (!resolvedAll) unknown++;
+      continue;
+    }
+    const first = differing[0];
+    let repo = null;
+    try { repo = repoOf ? (repoOf(first.side === "source" ? r.source?.path : r.downstream?.path) ?? null) : null; } catch { repo = null; }
+    otherBranch.push({
+      edge_id: r.edge_id,
+      repo,
+      verifiedOn: first.verifiedOn,
+      currentBranch: first.currentBranch,
+      side: differing.length === 2 ? "both" : first.side,
+    });
+  }
+  return { otherBranch, unknown, moved };
+}
+
+/** Production `currentBranchOf`: one `git rev-parse --show-toplevel` per directory, one `branch --show-current` per repo. Never throws. */
+export function makeCurrentBranchOf() {
+  const rootOf = new Map();
+  const branchOf = new Map();
+  const git = (cwd, args) =>
+    execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  const rootFor = (absPath) => {
+    const dir = path.dirname(absPath);
+    if (!rootOf.has(dir)) rootOf.set(dir, git(dir, ["rev-parse", "--show-toplevel"]));
+    return rootOf.get(dir);
+  };
+  const fn = (absPath) => {
+    try {
+      const root = rootFor(absPath);
+      if (!branchOf.has(root)) branchOf.set(root, git(root, ["branch", "--show-current"]));
+      return branchOf.get(root);
+    } catch {
+      return null;
+    }
+  };
+  // The same cached root lookup, so naming the repo costs no extra git call.
+  fn.repoOf = (absPath) => {
+    try { return rootFor(absPath); } catch { return null; }
+  };
+  return fn;
+}
+
+/**
+ * The status text lines for branchAttribution, grouped by repo, then verifiedOn -> currentBranch. Empty when nothing
+ * is attributed. Names the REPO whose branch moved, never "you": the reader may be on another repo entirely.
+ */
+export function branchAttributionLines(attr, cwd = process.cwd()) {
+  const groups = new Map();
+  for (const o of attr.otherBranch) {
+    const k = `${o.repo ?? ""}\u0000${o.verifiedOn}\u0000${o.currentBranch}`;
+    groups.set(k, (groups.get(k) || 0) + 1);
+  }
+  const label = (repo) => {
+    if (!repo) return "their repo";
+    const rel = path.relative(cwd, repo);
+    return rel === "" ? "this repo" : rel.startsWith("..") ? repo : rel;
+  };
+  return [...groups].map(([k, n]) => {
+    const [repo, from, to] = k.split("\u0000");
+    return `${n} of ${attr.moved} in ${label(repo)} were last verified on ${from}; that repo is now on ${to}. ` +
+      `Settling them there now would pin ${to}'s content (GOTCHAS G87).`;
+  });
+}
+
 async function statusJson() {
   const watcher = await watcherJsonBlock();
   const workspaces = [];
@@ -289,6 +395,7 @@ async function statusJson() {
   // question "is anything wrong" is answered by reconcile against content.
   const { rows: reconcileRows } = await reconcile(WORKSPACES);
   const cov = coverageFrom(reconcileRows);
+  const { moved: _moved, ...branch_attribution } = branchAttribution(reconcileRows, makeCurrentBranchOf());
 
   return {
     generatedAt: new Date().toISOString(),
@@ -298,6 +405,8 @@ async function statusJson() {
     workspaces,
     cross,
     ...cov,
+    // Additive (propagate#122): which moved edges were last verified on another branch than the one checked out.
+    branch_attribution,
   };
 }
 
@@ -366,6 +475,9 @@ export async function status() {
       }
       if (act.length > 10) {
         console.log(`    ${DIM}… and ${act.length - 10} more — \`graph\` prints the fix order${RESET}`);
+      }
+      for (const line of branchAttributionLines(branchAttribution(recRows, makeCurrentBranchOf()))) {
+        console.log(`  ${YELLOW}${line}${RESET}`);
       }
     }
     if (cov.cannot_evaluate > 0) {
