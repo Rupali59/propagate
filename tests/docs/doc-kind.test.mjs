@@ -415,3 +415,42 @@ test("registering gotchas did not steal any other filename", () => {
     assert.equal(kindOf(p, () => "no frontmatter\n").kind, want, p);
   }
 });
+
+test("#212: a passive notice naming its superseder, and a doc naming ITSELF, are not undeclared claims", async () => {
+  // Measured 2026-11-06/07 on the real tree: 9 of 36 flagged docs were these two shapes, and none could be cleared
+  // by a `supersedes:` key on that file. JYOTISH-CONVENTIONS.md ("Superseded for Engine A … by ENGINE-2013.md") and
+  // a sanskrit-texts plan whose only .md on the line was its own path. Each boundary below was found by measuring,
+  // and BLUEPRINT.md/BUILD.md (naming the PREDECESSOR) are why "a doc after the by" is part of the rule.
+  const dir = await mkdtemp(path.join(tmpdir(), "dockind-212-"));
+  const sub = path.join(dir, "docs", "plans");
+  await mkdir(sub, { recursive: true });
+  const self = path.join(sub, "self-ref.md");
+
+  const cases = [
+    ["passive, superseder named", "**Superseded 2026-09-26 by [`SETUP.md`](./SETUP.md).**", false],
+    ["passive with words between, superseder named", "- **Superseded for Engine A, 2026-10-24** by ENGINE-2013.md §5g.9", false],
+    // The predecessor is named, this doc did the overruling, and it CAN declare it. Must still fire.
+    ["passive naming the PREDECESSOR", "*Predecessor: `archive/BUILD_2026-03-19.md` — superseded by the Python stack.*", true],
+    ["passive naming no document", "[`old-plan.md`](old-plan.md) — superseded by the Clients Hub.", true],
+    // Mixed: an active claim on the same line keeps the line counted.
+    ["active and passive on one line", "This supersedes `../old.md`, which was superseded by `newer.md` too.", true],
+    ["active claim still fires", "This supersedes `../DECISIONS.md#2026-06-14`.", true],
+  ];
+  for (const [label, line, shouldFire] of cases) {
+    const f = path.join(sub, `${label.replace(/\W+/g, "-")}.md`);
+    await writeFile(f, `# probe\n\n${line}\n`);
+    const got = proseOnlySupersession(f) !== null;
+    assert.equal(got, shouldFire, `${label}: expected fires=${shouldFire}, got ${got} — line: ${line}`);
+  }
+
+  // Self-reference: the workspace-relative path this file's absolute path ends with is not a target…
+  await writeFile(self, "# probe\n\n- REALITY: user instructions superseded D3 and R9; recorded docs/plans/self-ref.md\n");
+  assert.equal(proseOnlySupersession(self), null, "a doc naming only itself names no target");
+  // …but the same line with a real second target still fires (self-exclusion must not become amnesty).
+  await writeFile(self, "# probe\n\nThis supersedes `../other.md` (recorded in docs/plans/self-ref.md).\n");
+  assert.ok(proseOnlySupersession(self), "self plus a real target is still a claim");
+  // A README naming a DIFFERENT folder's README.md is a target, not itself.
+  const readme = path.join(sub, "README.md");
+  await writeFile(readme, "# probe\n\nThis supersedes `../README.md`.\n");
+  assert.ok(proseOnlySupersession(readme), "../README.md from another folder's README is a real target");
+});

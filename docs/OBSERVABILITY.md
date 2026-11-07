@@ -72,7 +72,7 @@ column; without it the metric is decoration.
 | `graph.cycles` | gauge | **== 0** | a mutually-declared pair has no fix order — verify either side and the other re-arms |
 | `graph.duplicate_pairs` | gauge | **== 0** | one coupling declared twice gets two edge_ids; close one and the other stays open forever |
 | `docs.supersedes_unresolvable` | gauge | **== 0** | a `supersedes:` naming a path that does not exist looks machine-checked and is not |
-| `docs.supersession_prose_only` | gauge | **≤ 34**, ratchet — must not grow | a claim made only in prose is one-way: the overruled doc never learns it was replaced |
+| `docs.supersession_prose_only` | gauge | **≤ 27**, ratchet (lowered from 34, 2026-11-07, #212) — must not grow | a claim made only in prose is one-way: the overruled doc never learns it was replaced |
 | `ledger.unknown_types` | gauge | **0** | N1 · a `manual` row invisible since 2026-06-20 |
 | `ledger.duplicate_ids` | gauge | **0** | N2/N3 · id 256 existed twice |
 | `ledger.rows_open_multi_ledger` | gauge | **0** | A2 · 28 live instances |

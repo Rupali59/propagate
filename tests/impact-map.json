@@ -1,7 +1,7 @@
 {
  "header": {
-  "recordedAt": "2026-11-06T11:55:22.866Z",
-  "commit": "13c3a5d39422986f2fb134c5e9e1436908adbe46",
+  "recordedAt": "2026-11-07T03:07:27.308Z",
+  "commit": "c238d1aea97d4aa5b628311990a6d49ec777e842",
   "node": "v25.9.0",
   "tests": 273,
   "withStaticDeps": 210,

@@ -32,18 +32,19 @@ test("prose-only supersession ratchet holds at baseline, and FAILS when it grows
   // Lowered 101 -> 34 on 2026-09-10 when the detector began requiring the line to
   // name a `.md` target. 77 of the 111 then-flagged docs named no target and could
   // never gain a `supersedes:` key, so they were debt the stated remedy could not pay.
-  assert.equal(e.assert({ "docs.supersession_prose_only": 34 }), true, "baseline must hold");
+  assert.equal(e.assert({ "docs.supersession_prose_only": 27 }), true, "baseline must hold (lowered 34 -> 27 on 2026-11-07, #212)");
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 35 }),
+    e.assert({ "docs.supersession_prose_only": 28 }),
     false,
     "one more prose-only supersession must fail the run — this is the whole point of a ratchet",
   );
   assert.equal(
-    e.assert({ "docs.supersession_prose_only": 101 }),
+    e.assert({ "docs.supersession_prose_only": 34 }),
     false,
-    "the OLD baseline must now fail — otherwise lowering the ratchet did nothing",
+    "the OLD baseline (34, before #212) must now fail — otherwise lowering the ratchet did nothing",
   );
-  assert.equal(e.assert({ "docs.supersession_prose_only": 30 }), true, "shrinking must hold");
+  assert.equal(e.assert({ "docs.supersession_prose_only": 101 }), false, "the 2026-09-10 baseline must fail too");
+  assert.equal(e.assert({ "docs.supersession_prose_only": 20 }), true, "shrinking must hold");
   assert.match(e.detail({ "docs.supersession_prose_only": 35 }), /GREW/);
 });
 

@@ -37,7 +37,7 @@ const CLEAN = Object.freeze({
   "decisions.entries": 28,
   "decisions.with_tokens": 28,   // cross-key: must EQUAL decisions.entries
   "docs.supersedes_unresolvable": 0,
-  "docs.supersession_prose_only": 34,
+  "docs.supersession_prose_only": 27,
   "workspaces.discovered": 21,
   "ledger.malformed": 0,
   "doctor.duration_ms": 100_000,
