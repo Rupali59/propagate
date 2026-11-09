@@ -1,0 +1,13 @@
+#!/bin/sh
+# propagate's release-kind gate (#234). BLOCKING, and only when VERSION is staged.
+#
+# Why a commit-msg hook: `release --check` runs before the release commit exists, so the commit's own type
+# (feat / fix) is unknown to it. The type and the staged VERSION change meet only when the message is written, so
+# this is where a patch bump over a `feat:` is refused. See docs/RELEASE.md "Which bump" and lib/core/release-kind.mjs.
+#
+# A commit that does not stage VERSION pays for one `git diff` and exits 0 without reading anything else.
+# Bypass, knowingly (said in the refusal): PROPAGATE_SKIP_RELEASE_KIND=1 git commit ...
+git diff --cached --quiet -- VERSION && exit 0
+# The repo that owns this hook, not the repo being committed to: $0 is this file.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec node "$ROOT/cli/release-kind.mjs" hook "$1"

@@ -8,18 +8,81 @@ gives it a machine-checkable preview (`release --check`). **It does not
 publish anything, and it is not meant to yet** — see "Why step 5 has no
 flag" below.
 
-## The five steps
+## Which bump (#234)
+
+A version number says what KIND of release it is, and the kind is derived from the commits, not curated. Three
+published standards are followed; propagate builds them in-repo (`lib/core/release-kind.mjs`) rather than adopting
+release-please, and the choice is recorded so a later move is a configuration change:
+
+- **[Semantic Versioning 2.0.0](https://semver.org/)**, item 4: *"Major version zero (0.y.z) is for initial
+  development. Anything MAY change at any time."* So before 1.0 the second number carries the weight.
+- **[Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)**: `fix` is PATCH, `feat` is MINOR,
+  and `!` after the type or a `BREAKING CHANGE:` footer is MAJOR whatever the type. Other types do not change the
+  version on their own.
+- **[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)**: *"Changelogs are for humans, not machines,"*
+  with an `Unreleased` section at the top. `CHANGELOG.md` follows it.
+
+**The rule, pre-1.0** (release-please's `bump-minor-pre-major`):
+
+| The commits since the last `v*` tag hold | The release is | Example from 0.15.59 |
+|---|---|---|
+| any `feat`, or any breaking change (`!` / `BREAKING CHANGE:`) | **minor** (patch resets to 0); a breaking one is also listed under Breaking | `0.16.0` |
+| only `fix`, `docs`, `chore`, `test`, `refactor`, `perf`, `build`, `ci`, `style`, `revert` | **patch** | `0.15.60` |
+| nothing | no release | |
+
+From 1.0, a breaking change is **major**. A bump ABOVE the requirement is allowed; below it is refused. A subject with
+no recognised prefix is **listed by name and never counted as a fix**.
+
+**Where it is enforced.** At `release --check` time the release commit does not exist yet, so its type cannot be read
+from git; the type and the staged `VERSION` change meet only when the commit is written. So:
+
+- **`.githooks/commit-msg` (blocking)**, only when `VERSION` is staged: it classifies the commits since the last
+  `v*` tag AND this commit's own message (a `BREAKING CHANGE:` footer in the body counts), and refuses a bump below
+  the requirement, naming the version needed. Bypass, knowingly: `PROPAGATE_SKIP_RELEASE_KIND=1 git commit ...`
+  (the refusal says so). The repo's `core.hooksPath` already points at `.githooks`.
+- **The `release-kind` gate in `release --check`** reports what it can see: the committed range and `VERSION` against
+  the last tag. It fails on a `VERSION` equal to the tag while commits exist since it, and on a bump below what the
+  committed subjects need. It states in its detail that the pending commit's own type is checked by the hook.
+
+## The steps
 
 ```
+0. notes written            → release notes --write --version X, inside the release commit
 1. VERSION bumped           → check names the four in-repo manifests (a hub manifest is optional, see below)
 2. suite green on the floor → CI matrix; node 20 is the below-floor probe, expected to fail
 3. make-public --check      → scrub complete, watchlist satisfied, else refuse
 4. stranger install         → HOME=$(mktemp -d): setup → bootstrap → doctor clean
 5. human publishes          → never the tool
+6. GitHub Release           → gh release create vX --notes-file <section>, by the person publishing
 ```
 
-Steps 1-4 are `node cli.mjs release --check` — see below. Step 5 is a person,
-on purpose.
+Steps 1-4 are `node cli.mjs release --check` — see below. Steps 5 and 6 are a person, on purpose.
+
+### 0 · Notes
+
+`node cli.mjs release notes` prints a Keep a Changelog draft of the commits since the last tag (`--since <tag>` to
+choose another). `--write` fills or refreshes `## [Unreleased]` at the top of `CHANGELOG.md`, grouped Breaking /
+Added (`feat`) / Fixed (`fix`) / Changed (everything else), as raw material a person edits.
+`--write --version X` releases it: `[Unreleased]` becomes `## [X] — YYYY-MM-DD` (the text already there is kept; an
+empty one is filled from the commits), a fresh empty `[Unreleased]` opens above it, and it refuses if `[X]` exists.
+It covers COMMITTED work, which is why a release is **two commits**, the same shape release-please produces:
+
+1. **The work**: one or more `feat:` / `fix:` / … commits, with `VERSION` left alone. The commit-msg hook does not
+   fire, because `VERSION` is not staged.
+2. **The release**: `chore(release): vX.Y.Z`, holding `VERSION` and its manifests, the impact-map refresh, and the
+   `CHANGELOG.md` section that `release notes --write --version X.Y.Z` builds from step 1's commits. The hook checks
+   this commit's bump against those commits, so a `feat:` among them requires the minor bump. **This is the commit the
+   tag goes on.**
+
+One commit carrying both the work and the bump would leave the work out of its own notes. Avoid it.
+
+### The tag sits on the release commit
+
+The tag goes on the commit that bumps `VERSION`, never on a follow-up. The impact-map refresh that `release --check`
+writes is staged INTO the release commit; v0.15.53's tag landed on a separate `chore(test-impact)` commit instead.
+Check it after tagging with `git describe --tags --exact-match HEAD`, which must print the new tag. **`--tags` is
+required: propagate's tags are lightweight, and plain `git describe --exact-match` only matches annotated ones**
+(it failed on v0.15.59).
 
 ### 1 · VERSION bumped
 
@@ -111,13 +174,24 @@ here would be exactly the failure `rule:discernment-checks` exists to catch.
 So step 5 stays a person, reviewing the tree `make-public.mjs` (without
 `--check`) writes, and pushing it by hand.
 
+### 6 · A GitHub Release
+
+After the person has pushed and tagged, they publish the same text as a GitHub Release:
+
+```
+awk '/^## \[X\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > /tmp/notes-X.md   # the [X] section
+gh release create vX --notes-file /tmp/notes-X.md --title vX
+```
+
+Like step 5 it is not automated: it is outward-facing.
+
 ## `release --check`
 
 ```
 node cli.mjs release --check [--json]
 ```
 
-Runs gates 1-4 above, plus `plugin-validate` (Claude's own `claude plugin validate --json` on this plugin,
+Runs gates 1-4 above, plus `release-kind` (see "Which bump") and `plugin-validate` (Claude's own `claude plugin validate --json` on this plugin,
 read by `lib/core/plugin-validate.mjs`; the one pinned warning is the `skills/propagate/SKILL.md` symlink, #98), and exits:
 
 | Exit | Meaning |

@@ -17,6 +17,7 @@
  *                                              and REFUSE to report success unless discovery then
  *                                              finds >=1 workspace. Distinct from `init` (one
  *                                              sidecar) and `bootstrap` (baseline edges).
+ *   node cli.mjs release notes [--since <tag>] [--write] [--version X]  — Keep a Changelog draft (#234)
  *   node cli.mjs release --check [--json]
  *                                            — runs the four release gates (docs/RELEASE.md):
  *                                              VERSION/manifests agree, suite green, `make-public
@@ -1709,6 +1710,13 @@ async function rulesCmd() {
  * and this skill's whole premise is that it reports while a human acts.
  */
 async function releaseCmd(argv = []) {
+  if (argv[0] === "notes") {
+    // `release notes` (#234) is a sibling command with its own flags (lib/core/commands.mjs "release notes"); it never
+    // reaches the gates below. Lazy, like the other cli/*.mjs arms.
+    const { releaseNotesCmd } = await import("./cli/release-kind.mjs");
+    process.exitCode = releaseNotesCmd(argv.slice(1));
+    return;
+  }
   const asJson = argv.includes("--json");
   if (!argv.includes("--check")) {
     console.error(`${RED}error:${RESET} usage: node cli.mjs release --check [--json]`);

@@ -636,7 +636,7 @@ test("runReleaseCheck: a could-not-run gate makes the run 'incomplete', never 'r
       skillDir: SKILL_DIR,
       makePublicEnv: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") },
     });
-    assert.equal(result.gates.length, 5);
+    assert.equal(result.gates.length, 6);
     const g3 = result.gates.find((g) => g.name === "make-public-check");
     assert.equal(g3.status, "could-not-run");
     assert.notEqual(result.overall, "ready", "could-not-run must never be summarized as ready");
@@ -670,7 +670,7 @@ test("runReleaseCheck alone writes no state: the state dir is byte-identical bef
   try {
     const result = runReleaseCheck({ manifestsDir: manifests, hubMarketplacePath: hubPath(manifests), suiteDir: suite, skillDir: SKILL_DIR,
       makePublicEnv: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") } });
-    assert.equal(result.gates.length, 5, "the aggregate really ran");
+    assert.equal(result.gates.length, 6, "the aggregate really ran");
     assert.equal(treeSnapshot(stateDir), before, "runReleaseCheck must not write into the state dir");
     assert.equal(existsSync(path.join(stateDir, "release-checks.jsonl")), false);
   } finally {
