@@ -6,6 +6,12 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-11-09
+
+### Fixed
+
+- rules: rules check and the session banner honour the accepted-findings registry, so an accepted permanent finding stops reading as red (#219)
+
 ## [0.16.0] — 2026-11-09
 
 ### Added
