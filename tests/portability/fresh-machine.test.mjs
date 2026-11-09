@@ -25,19 +25,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
 import { renderConfig } from "../../lib/core/setup.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "cli.mjs");
-
-// The operator's real hub, for the one test that must READ it. Named and
-// derived once, via os.homedir() rather than process.env.HOME, so it can never
-// be confused with the isolated HOME a child is given. It is only ever passed
-// to read-only verbs — see the N46 note at its use site.
-const REAL_HUB = path.join(homedir(), "Documents", "GitHub");
 
 /** Run the CLI with a throwaway HOME. Returns {stdout, stderr, code} and never throws. */
 function runIsolated(args, { searchRoots } = {}) {
@@ -241,11 +234,20 @@ test("an UNCONFIGURED cross-repo allowlist is not a doctor failure", () => {
     // THE CONFIG IS WRITTEN, NOT `setup`-ed. This is N46, and the distinction is
     // the whole fix.
     //
-    // The assertion below needs the real tree — an unconfigured allowlist can
-    // only be shown not to fail if there are actual repos carrying cross edges
-    // to be outside it. Reading the real tree is fine and is what `doctor` does.
+    // The assertion below needs repos carrying cross edges, so that an edge can
+    // lie outside the (empty) allowlist. It used to get them from the operator's
+    // REAL hub, and a full `doctor` over that tree took 230.8 s (propagate#227),
+    // pushing release --check's suite gate past its fixed 10-minute cap.
     //
-    // But this used to reach it by running `setup --roots <real hub>`, and
+    // It now builds the minimum that carries the property, under the same mkdtemp:
+    // a hub with two git repos, one holding a `.propagates-cross.yml` whose push
+    // edge `affects` a file in the other. The target exists, so it is not
+    // "missing"; the allowlist is empty, so it resolves "outside-partner" and
+    // counts as outside-allowlist. That is exactly the state under test. The
+    // fixture cannot be blind: the doctor output is asserted to count that edge
+    // below, so a fixture that stopped producing it would fail rather than pass.
+    //
+    // This used to reach the tree by running `setup --roots <real hub>`, and
     // `setup` is one of LEDGER_SCAFFOLDING_VERBS: it walked the operator's tree
     // and created a ledger pair in every workspace that lacked one. Isolating
     // HOME and PROPAGATE_STATE_DIR protected the config and the event store; it
@@ -255,13 +257,42 @@ test("an UNCONFIGURED cross-repo allowlist is not a doctor failure", () => {
     // NEITHER file exists — and it surfaced on 2026-08-24 the moment six newly
     // declared workspaces gave it somewhere to act.
     //
-    // Writing the config file directly reaches the same state with a read-only
-    // verb. `renderConfig` is imported rather than hand-rolled so the format
-    // cannot drift from what `setup` actually writes.
+    // N46 still holds with a fixture: the config is WRITTEN, not `setup`-ed, so
+    // no scaffolding verb runs against any tree. `renderConfig` is imported
+    // rather than hand-rolled so the format cannot drift from what `setup`
+    // actually writes.
+    const hub = path.join(home, "hub");
+    const git = (cwd, ...args) =>
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
+        cwd,
+        stdio: "ignore",
+      });
+    for (const name of ["repo-a", "repo-b"]) {
+      const dir = path.join(hub, name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "README.md"), `# ${name}\n`);
+      git(dir, "init", "-q");
+      git(dir, "add", ".");
+      git(dir, "commit", "-q", "-m", "init");
+    }
+    writeFileSync(path.join(hub, "repo-b", "contract.md"), "contract\n");
+    writeFileSync(
+      path.join(hub, "repo-a", ".propagates-cross.yml"),
+      [
+        "platform_contracts:",
+        "  - source: README.md",
+        "    kind: contract",
+        "    why: fixture cross-repo edge outside an empty allowlist",
+        "    affects:",
+        "      - path: ../repo-b/contract.md",
+        "        why: fixture partner file in a sibling repo",
+        "",
+      ].join("\n"),
+    );
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(
       path.join(stateDir, "config.yml"),
-      renderConfig({ roots: [REAL_HUB], scheduler: "none", hub: REAL_HUB }),
+      renderConfig({ roots: [hub], scheduler: "none", hub }),
     );
     const out = run(["doctor"]);
     assert.doesNotMatch(
@@ -270,6 +301,11 @@ test("an UNCONFIGURED cross-repo allowlist is not a doctor failure", () => {
       "an unconfigured allowlist must not FAIL a fresh install",
     );
     assert.match(out, /allowlist/i, "but it must still say the allowlist is unconfigured");
+    assert.match(
+      out,
+      /1 outside-allowlist/,
+      "the fixture must carry a cross edge outside the allowlist, or this test proves nothing",
+    );
   } finally {
     // maxRetries, because `force` does NOT cover ENOTEMPTY. The CLI under test
     // can still be flushing to this tree when the child exits, so a bare rmSync

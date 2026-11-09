@@ -316,3 +316,64 @@ test("back-fill --apply writes the rows once; a second --apply skips them", asyn
     assert.equal(storeSnapshot(dir), snap, "a repeated --apply must not change the store");
   });
 });
+
+// --- propagate#223: internal agents are not lanes ---------------------------------------
+
+test("hook #223: empty agent_type + missing transcript writes no lane row and leaves an attributable trace", async () => {
+  await withTmp(async (dir) => {
+    const p = path.join(dir, "proj", "sess1", "subagents", "agent-internal1.jsonl");
+    const r = runHook(dir, payloadFor(p, { agent_type: "" }));
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, "");
+    assert.equal(readRows(dir).length, 0, "no lane row for an internal agent");
+    const log = await readFile(path.join(costsDirOf(dir), "errors.log"), "utf8");
+    assert.match(log, /internal agent internal1 skipped: no agent_type, no transcript/);
+  });
+});
+
+test("hook #223: a real lane with a missing transcript still writes usage:null", async () => {
+  await withTmp(async (dir) => {
+    const p = path.join(dir, "proj", "sess1", "subagents", "agent-real1.jsonl");
+    runHook(dir, payloadFor(p, { agent_type: "Plan" }));
+    const rows = readRows(dir);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].agent_type, "Plan");
+    assert.equal(rows[0].usage, null);
+    assert.equal(rows[0].summary_status, "unreadable: ENOENT");
+  });
+});
+
+test("hook #223: empty agent_type with a readable transcript still writes a row (records agent_type as sent: \"\")", async () => {
+  await withTmp(async (dir) => {
+    const p = await writeTranscript(dir, "eee", LINES);
+    runHook(dir, payloadFor(p, { agent_type: "" }));
+    const rows = readRows(dir);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].agent_type, "");
+    assert.deepEqual(rows[0].usage, { input: 5, output: 150, cache_create: 1200, cache_read: 2010 });
+  });
+});
+
+test("readCosts #223: lanesOnly ignores legacy empty-agent_type ENOENT rows, counts them, keeps backfill rows", async () => {
+  await withTmp(async (dir) => {
+    const cdir = costsDirOf(dir);
+    await mkdir(cdir, { recursive: true });
+    const noise = { ts: "2026-11-06T09:00:00Z", kind: "lane", agent_type: "", usage: null, summary_status: "unreadable: ENOENT", source: "subagent-stop" };
+    const real = { ts: "2026-11-06T10:00:00Z", kind: "lane", agent_type: "Plan", usage: null, summary_status: "unreadable: ENOENT", source: "subagent-stop" };
+    const backfill = { ts: "2026-11-06T11:00:00Z", kind: "lane", agent_type: "", usage: { input: 1 }, source: "backfill" };
+    await writeFile(path.join(cdir, "2026-11.jsonl"), [noise, noise, real, backfill].map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const prev = process.env.PROPAGATE_STATE_DIR;
+    process.env.PROPAGATE_STATE_DIR = path.join(dir, "state");
+    try {
+      const { readCosts } = await import("../../lib/core/costs.mjs");
+      const all = readCosts();
+      assert.equal(all.rows.length, 4);
+      const lanes = readCosts({ lanesOnly: true });
+      assert.equal(lanes.ignored, 2);
+      assert.deepEqual(lanes.rows.map((r) => r.source), ["subagent-stop", "backfill"]);
+    } finally {
+      if (prev === undefined) delete process.env.PROPAGATE_STATE_DIR;
+      else process.env.PROPAGATE_STATE_DIR = prev;
+    }
+  });
+});

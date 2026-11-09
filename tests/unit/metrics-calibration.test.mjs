@@ -38,6 +38,7 @@ const CLEAN = Object.freeze({
   "decisions.with_tokens": 28,   // cross-key: must EQUAL decisions.entries
   "docs.supersedes_unresolvable": 0,
   "docs.supersession_prose_only": 27,
+  "gotchas.untriaged": 692,       // #216: present and a number, or the ratchet reads could-not-run
   "workspaces.discovered": 21,
   "ledger.malformed": 0,
   "doctor.duration_ms": 100_000,

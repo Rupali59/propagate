@@ -58,6 +58,8 @@ function cleanMetrics(overrides = {}) {
     "plist.watchpaths": 1,
     "state.tracked_files": 10,
     "doctor.duration_ms": 450,
+    // #216: the untriaged-gotcha ratchet. A NUMBER at its baseline is clean; absent or null is could-not-run.
+    "gotchas.untriaged": 692,
     // plan budget-2: null = registry not resolved (stated on an info line); 0 = measured clean.
     "instructions.unexcepted_over": 0,
     "instructions.stale_exceptions": 0,
@@ -311,6 +313,7 @@ test("EXPECTATIONS table holds only sole-source assertions (no invented extras, 
     "docs.supersedes_unresolvable",
     "docs.supersession_prose_only",
     "doctor.duration_ms",
+    "gotchas.untriaged",
     "graph.cycles",
     "graph.duplicate_pairs",
     "instructions.over_ceiling",

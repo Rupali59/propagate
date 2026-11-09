@@ -415,3 +415,54 @@ test("compact form: both channels carry the same text", async (t) => {
   assert.match(payload.hookSpecificOutput.additionalContext, /full entry:/);
   assert.equal(payload.hookSpecificOutput.additionalContext, payload.systemMessage);
 });
+
+// ---------------------------------------------------------------------------
+// Triage (propagate #216): a superseded or retired entry delivers nothing
+// ---------------------------------------------------------------------------
+
+const withStatus = (id, status) =>
+  `### ${id} · a hazard marked ${id}\n**Trigger:** \`statuscmd\`\n**Fires on:** \`statuscmd\`\n` +
+  (status === null ? "" : `**Status:** ${status}\n`) +
+  `the hazard.\n**Instead:** do the other thing.\n`;
+
+test("an entry whose Status is retired or superseded delivers NOTHING, even though its trigger matches", async (t) => {
+  // FAILING INPUT: make the guard ignore Status. Both entries then match `statuscmd` and the text is non-empty.
+  const f = await fixture(
+    withStatus("S1", "retired 2026-11-09 — superseded by S9: no longer true") + "\n" + withStatus("S2", "superseded by S9"),
+  );
+  t.after(() => rm(f.dir, { recursive: true, force: true }));
+  const r = fire("statuscmd", f);
+  assert.equal(r.status, 0);
+  assert.equal(r.text, "", `a retired/superseded entry must deliver nothing, got:\n${r.text}`);
+  assert.equal(r.payload, null, "no output at all, not an empty message");
+});
+
+test("resolved, live, absent and unknown Status still deliver", async (t) => {
+  // Two fixtures: the guard shows at most 3 entries at once, so four would hide the fourth.
+  for (const ids of [["R1", "L1"], ["A1", "U1"]]) {
+    const bodies = { R1: withStatus("R1", "resolved — fixed in abc123"), L1: withStatus("L1", "live"), A1: withStatus("A1", null), U1: withStatus("U1", "bogus") };
+    const f = await fixture(ids.map((i) => bodies[i]).join("\n"));
+    t.after(() => rm(f.dir, { recursive: true, force: true }));
+    const { text } = fire("statuscmd", f);
+    for (const id of ids) assert.match(text, new RegExp(`gotcha · ${id} `), `${id} must still deliver`);
+  }
+});
+
+test("a retired entry does not use up a MAX_SHOWN slot: the live ones behind it are shown", async (t) => {
+  const f = await fixture(
+    [withStatus("T1", "retired 2026-11-09 — gone"), withStatus("T2", "retired 2026-11-09 — gone"), withStatus("T3", "retired 2026-11-09 — gone"), withStatus("T4", "live")].join("\n"),
+  );
+  t.after(() => rm(f.dir, { recursive: true, force: true }));
+  const { text } = fire("statuscmd", f);
+  assert.match(text, /gotcha · T4 /);
+  assert.doesNotMatch(text, /gotcha · T[123] /);
+  assert.doesNotMatch(text, /more matched/);
+});
+
+test("triage: both channels carry the same text", async (t) => {
+  const f = await fixture(withStatus("B1", "retired 2026-11-09 — gone") + "\n" + withStatus("B2", "resolved — done"));
+  t.after(() => rm(f.dir, { recursive: true, force: true }));
+  const { payload } = fire("statuscmd", f);
+  assert.match(payload.systemMessage, /gotcha · B2 /);
+  assert.equal(payload.hookSpecificOutput.additionalContext, payload.systemMessage);
+});

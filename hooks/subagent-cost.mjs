@@ -12,6 +12,7 @@
  *            session ends, and a hook that wedges the session gets disabled wholesale.
  *   Failures are not invisible: each is one line in $PROPAGATE_STATE_DIR/costs/errors.log
  *   (default ~/.propagate/costs/errors.log), so "no row" is attributable.
+ *   An internal agent (empty agent_type AND transcript ENOENT) writes no row, only that log line (#223).
  *   `stop_hook_active: true` writes nothing (the hook is already re-entering).
  *
  * Root is derived from this file's location, as doc-authority.mjs does; costs.mjs is
@@ -72,6 +73,11 @@ async function main() {
   }
 
   const summary = costs.summarizeTranscript(transcript);
+  if (costs.isInternalAgentWithoutTranscript(payload, meta, summary)) {
+    // #223: not a lane. The errors.log line is the attributable trace (no new file format).
+    logError(`internal agent ${payload.agent_id ?? "?"} skipped: no agent_type, no transcript; no row written`);
+    return;
+  }
   if (summary.unreadable || summary.empty) {
     logError(`agent ${payload.agent_id ?? "?"}: transcript ${summary.unreadable ? "unreadable (" + summary.reason + ")" : "has no assistant usage"}; row written with usage:null`);
   }

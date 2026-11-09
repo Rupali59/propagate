@@ -1209,6 +1209,14 @@ async function doctor({ exitProcess = true } = {}) {
     let gotchasScanned = null;
     let gotchasFiles = 0;
     const gotchasInert = [];
+    // gotchas.untriaged (propagate#216): entries with no `**Status:**` line, over the registers this
+    // census already finds PLUS the guard's global index (added inside untriagedGauge, not by widening the census). Worktree and archive copies (path has a .worktrees, archive or _archive
+    // segment) are excluded, and what is left is deduped TWICE by sha1 — a register by file content,
+    // then an entry by its text — because the same register is reachable from several workspaces.
+    // The census itself dedupes only by resolved path, so this dedupe is this gauge's own.
+    // null, never 0, when any register could not be read or the walk did not run. No fixed floor on
+    // the number of registers: a fresh install has none and 0 is the true count there.
+    const untriagedFiles = []; // census registers; untriagedGauge() adds the guard's global index
     try {
       const { proseOnlySupersession, kindOf } = await import("./lib/report/doc-kind.mjs");
       const { selftestProblems } = await import("./lib/gotchas/parse.mjs");
@@ -1262,6 +1270,7 @@ async function doctor({ exitProcess = true } = {}) {
           const kind = kindOf(abs);
           if (kind.kind === "gotchas") {
             gotchasFiles++;
+            if (!/[\\/](\.worktrees|archive|_archive)[\\/]/.test(abs)) untriagedFiles.push(abs);
             const problems = selftestProblems([abs]);
             if (problems.length) gotchasInert.push({ file: abs, problems });
           }
@@ -1358,8 +1367,20 @@ async function doctor({ exitProcess = true } = {}) {
       }
     }
 
+    let gotchasUntriaged = null;
+    let gotchasUntriagedReason = null;
+    if (gotchasScanned === null) {
+      gotchasUntriagedReason = "the doc walk did not run";
+    } else {
+      const { untriagedGauge } = await import("./lib/gotchas/parse.mjs");
+      const g = untriagedGauge(untriagedFiles);
+      gotchasUntriaged = g.count;
+      gotchasUntriagedReason = g.reason;
+    }
+
     const metrics = {
       "workspaces.discovered": WORKSPACES.length,
+      "gotchas.untriaged": gotchasUntriaged,
       "graph.cycles": graphCycles,
       "graph.duplicate_pairs": graphDuplicatePairs,
       "docs.supersession_prose_only": docsProseOnly,
@@ -1424,6 +1445,7 @@ async function doctor({ exitProcess = true } = {}) {
       graphCycleMembers,
       graphDuplicateDetails,
       instructionsContext,
+      gotchasUntriagedReason,
     });
     for (const v of violations) {
       const detailPrefix = v.detail ? `${v.detail} — ` : "";

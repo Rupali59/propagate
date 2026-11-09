@@ -56,6 +56,8 @@ import {
   selftestProblems,
   selftestWarnings,
   remedyOf,
+  statusOf,
+  SILENT_STATES,
   partitionStubs,
   sourcesFor,
 } from "../lib/gotchas/parse.mjs";
@@ -187,7 +189,9 @@ function main() {
   // A bad trigger at RUNTIME is logged (below) but never blocks the call; the
   // selftest is where it becomes a visible problem.
   const badCount = parsedAll.reduce((n, r) => n + r.bad.length, 0);
-  const hits = entries.filter((e) => e.trigger.test(subject));
+  // A superseded or retired entry delivers nothing (propagate#216): triage removes context. A resolved
+  // one still delivers, because a resolved hazard can regress; an absent or unknown Status delivers too.
+  const hits = entries.filter((e) => e.trigger.test(subject) && !SILENT_STATES.includes(statusOf(e)?.state));
 
   logLine(`tool=${payload?.tool_name || "?"} sources=${sources.length} entries=${entries.length} bad=${badCount} hits=${hits.length}`);
 
