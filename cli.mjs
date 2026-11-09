@@ -5756,6 +5756,9 @@ if (_invokedDirectly) {
   } else if (mode === "context") {
     const { contextCmd } = await import("./cli/context.mjs");
     process.exitCode = await contextCmd(process.argv.slice(3));
+  } else if (mode === "costs") {
+    const { costsCmd } = await import("./cli/costs.mjs");
+    process.exitCode = await costsCmd(process.argv.slice(3));
   } else if (mode === "queue") {
     const { queueCmd } = await import("./cli/queue.mjs");
     process.exitCode = await queueCmd(process.argv.slice(3));
