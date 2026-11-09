@@ -6,6 +6,12 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-09
+
+### Added
+
+- release: a release's kind derives from its commits; a commit-msg hook refuses a bump that does not match; Keep a Changelog notes
+
 ## [0.15.59] — 2026-11-09
 
 ### Added
