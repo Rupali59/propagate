@@ -1314,7 +1314,7 @@ async function doctor({ exitProcess = true } = {}) {
       if (gotchasInert.length) {
         // The failure the file exists to prevent, reported as green. Name the file
         // AND the entry: "2 inert" without the offender is not actionable.
-        info(
+        warn(
           "gotchas inert",
           // TWO DIFFERENT FACTS, and collapsing them hid the worse one. A file
           // whose entries parse but cannot fire is one problem; a file the
@@ -1510,7 +1510,7 @@ async function rulesCmd() {
   const sub = process.argv[3] || "check";
   const args = process.argv.slice(4);
   const asJson = args.includes("--json");
-  const { checkRules, selftest, loadRules } = await import("./lib/rules/rules-check.mjs");
+  const { checkRulesAdjudicated, selftest, loadRules } = await import("./lib/rules/rules-check.mjs");
 
   if (sub === "list") {
     const rules = loadRules(RULES_DIR);
@@ -1631,14 +1631,30 @@ async function rulesCmd() {
   // fingerprint. Scanned for overrides, excluded from findings — same carve-out the
   // original made, kept because removing it would report 16 false restatements.
   const globalMd = CLAUDE_GLOBAL_CLAUDE_MD;
-  const res = checkRules({
+  // The accepted-findings registry (#219): the same one doctor and the session banner read, so a
+  // finding the owner accepted as permanent is shown with its reason instead of failing the run.
+  const { INTEGRATIONS } = await import("./lib/core/config.mjs");
+  const res = checkRulesAdjudicated({
     rulesDir: RULES_DIR,
     roots: SEARCH_ROOTS,
     extra: [globalMd],
     exclude: [globalMd],
+    registryFile: INTEGRATIONS.healthExceptionsFile,
   });
   if (asJson) {
-    console.log(JSON.stringify({ ...res, findings: res.findings.map(({ lines, ...f }) => f) }, null, 2));
+    const strip = ({ lines, ...f }) => f;
+    console.log(
+      JSON.stringify(
+        {
+          ...res,
+          findings: res.findings.map(strip),
+          failing: res.failing.map(strip),
+          accepted: res.accepted.map((a) => ({ ...a, finding: strip(a.finding) })),
+        },
+        null,
+        2,
+      ),
+    );
     process.exit(res.exitCode);
   }
 
@@ -1648,14 +1664,20 @@ async function rulesCmd() {
       "no-rules": `no rules found in ${RULES_DIR.replace(HOME_DIR, "~")}`,
       "roots-missing": `configured root(s) do not exist: ${res.missing.join(", ")}`,
       "no-files-scanned": `roots exist but contain no CLAUDE.md — nothing was checked`,
+      "registry-missing": `the accepted-findings registry is unavailable: ${res.registry.problems.join("; ")}`,
+      "registry-broken": `the accepted-findings registry cannot be used: ${res.registry.problems.join("; ")}`,
     }[res.diagnostic];
     console.log(`\n  ${RED}rules check did not run:${RESET} ${why}`);
-    console.log(`  ${DIM}This is NOT a clean result. Run \`propagate setup\` if the roots are wrong.${RESET}\n`);
+    console.log(
+      res.diagnostic.startsWith("registry-")
+        ? `  ${DIM}No exception was consulted, so no finding could be accepted or judged stale. This is NOT a clean result. Registry: set PROPAGATE_HEALTH_EXCEPTIONS_FILE or integrations.healthExceptionsFile.${RESET}\n`
+        : `  ${DIM}This is NOT a clean result. Run \`propagate setup\` if the roots are wrong.${RESET}\n`,
+    );
     process.exit(res.exitCode);
   }
 
   const byRule = {};
-  for (const f of res.findings) (byRule[f.rule] ??= []).push(f);
+  for (const f of res.failing) (byRule[f.rule] ??= []).push(f);
   console.log(
     `\n  ${res.rules.length} active rules · ${res.filesScanned} CLAUDE.md scanned` +
       (res.excludedWorktrees
@@ -1672,12 +1694,27 @@ async function rulesCmd() {
       console.log(`     ${f.file.replace(HOME_DIR, "~")}${where}`);
     }
   }
+  if (res.accepted.length) {
+    console.log(`\n  ${DIM}accepted (not drift — ${res.accepted.length}):${RESET}`);
+    for (const a of res.accepted) {
+      console.log(`     ${a.finding.rule} @ ${a.finding.file.replace(HOME_DIR, "~")}  — ${a.reason} (since ${a.since})`);
+    }
+  }
+  if (res.stale.length) {
+    console.log(`\n  ${RED}stale exceptions (${res.stale.length}) — the finding no longer fails:${RESET}`);
+    for (const k of res.stale) console.log(`     ${k}`);
+    console.log(`  ${DIM}Remove the entr${res.stale.length === 1 ? "y" : "ies"} from ${res.registry.file} (the list may not outlive its reason).${RESET}`);
+  }
   if (res.overrides.length) {
     console.log(`\n  ${DIM}declared deviations (not drift — ${res.overrides.length}):${RESET}`);
     for (const o of res.overrides) console.log(`     ${o.file.replace(HOME_DIR, "~")}:${o.line}  overrides: ${o.rule}`);
   }
+  // The coverage line is the verdict, and it states what was NOT read: a green result must not
+  // read as "all clean" while the excused bucket (#81) is unchecked (rule:discernment-checks §2).
   console.log(
-    `\n  ${res.findings.length} restatement(s) across ${new Set(res.findings.map((f) => f.file)).size} file(s)\n`,
+    `\n  ${res.failing.length} failing · ${res.accepted.length} accepted · ${res.excusedCount} excused (not checked, #81)` +
+      (res.stale.length ? ` · ${res.stale.length} stale` : "") +
+      `\n`,
   );
   // NOT a failure, and NOT silence either. A file that references a rule AND
   // restates it was excused entirely until 2026-08-24 — measured then at 19

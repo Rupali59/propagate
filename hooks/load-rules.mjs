@@ -202,9 +202,20 @@ const warn = problems.length
  */
 let drift = "";
 try {
-  const { checkRules } = await import("../lib/rules/rules-check.mjs");
-  const { SEARCH_ROOTS } = await import("../lib/core/config.mjs");
-  const r = checkRules({ rulesDir: RULES_DIR, roots: SEARCH_ROOTS });
+  const { checkRulesAdjudicated } = await import("../lib/rules/rules-check.mjs");
+  const { SEARCH_ROOTS, INTEGRATIONS } = await import("../lib/core/config.mjs");
+  // The same accepted-findings registry doctor and `rules check` read (#219): an accepted finding
+  // is not a warning, so it must not be counted in the banner.
+  const r = checkRulesAdjudicated({
+    rulesDir: RULES_DIR,
+    roots: SEARCH_ROOTS,
+    registryFile: INTEGRATIONS.healthExceptionsFile,
+  });
+  // A registry that is missing or broken is NOT a reason to go quiet or to fail the scan: every
+  // finding then stays a failure (nothing could be accepted), which is the pre-#219 behaviour, and
+  // a clean tree stays silent so a fresh machine is not warned about a file it never had.
+  const registryUnusable = r.diagnostic === "registry-missing" || r.diagnostic === "registry-broken";
+  if (registryUnusable) r.diagnostic = "ok";
   // `no-files-scanned` means the roots hold no CLAUDE.md. That is "nothing to
   // check", not "the check broke" — and staying silent for it is required, not
   // merely nice: this hook runs at EVERY session start, including sessions
@@ -216,17 +227,26 @@ try {
       `\n\n⚠️  RULES CHECK could not run: ${r.diagnostic}` +
       (r.missing?.length ? ` (missing roots: ${r.missing.join(", ")})` : "") +
       `. The scan was INCOMPLETE — this is not "no drift".`;
-  } else if (r.diagnostic !== "no-files-scanned" && r.findings.length > 0) {
-    const lines = r.findings
+  } else if (r.diagnostic !== "no-files-scanned" && r.failing.length > 0) {
+    const lines = r.failing
       .slice(0, 10)
       .map((f) => `  - ${f.file}${f.lines?.length ? `:${f.lines[0]}` : ""} restates rule:${f.rule}`);
     drift =
-      `\n\n⚠️  ${r.findings.length} RESTATEMENT(S) of a canonical rule, across ` +
+      `\n\n⚠️  ${r.failing.length} RESTATEMENT(S) of a canonical rule, across ` +
       `${r.filesScanned} file(s) scanned:\n${lines.join("\n")}` +
-      (r.findings.length > 10 ? `\n  (+${r.findings.length - 10} more)` : "") +
+      (r.failing.length > 10 ? `\n  (+${r.failing.length - 10} more)` : "") +
       `\nReference the rule as \`rule:<id>\` instead, or declare a deviation in that ` +
       `file's own CLAUDE.md. Copying is what produced 9 divergent copies of ` +
       `tool-priority making 4 mutually exclusive claims.`;
+  }
+  // Accepted findings are not warnings: one dim line, so they stay visible without being counted.
+  if (r.accepted?.length) {
+    drift += `\n\n_${r.accepted.length} accepted restatement(s), see health-exceptions.yml (${INTEGRATIONS.healthExceptionsFile})._`;
+  }
+  // A stale entry means the list outlived its reason: advisory here (this hook exits 0), a failure in
+  // `rules check`.
+  if (r.stale?.length) {
+    drift += `\n\n⚠️  STALE accepted-restatement entr${r.stale.length === 1 ? "y" : "ies"} in health-exceptions.yml: ${r.stale.join(", ")}. The finding no longer fails; remove the entry.`;
   }
 } catch (err) {
   drift = `\n\n⚠️  RULES CHECK did not run: ${err?.message ?? err}. Nothing was checked.`;
