@@ -131,21 +131,38 @@ test("a multi-line remedy is not reordered above its own heading", async (t) => 
   assert.ok(headingAt < continuationAt, "the remedy heading must precede its continuation");
 });
 
-test("truncation is announced, never silent", async (t) => {
-  const f = await fixture(ENTRY_WITH_LONG_REMEDY);
+const ENTRY_LONG_NO_REMEDY = `# fixture
+
+### F6 · long body, no remedy
+**Trigger:** \`noremedycmd\`
+**Fires on:** \`noremedycmd --now\`
+line one of the explanation
+line two of the explanation
+line three of the explanation
+line four of the explanation
+line five of the explanation
+line six of the explanation
+line seven of the explanation
+line eight of the explanation
+line nine of the explanation
+line ten of the explanation
+`;
+
+test("truncation is announced, never silent (full form, an entry with no remedy)", async (t) => {
+  const f = await fixture(ENTRY_LONG_NO_REMEDY);
   t.after(() => rm(f.dir, { recursive: true, force: true }));
-  const { text } = fire("dangercmd --now", f);
+  const { text } = fire("noremedycmd --now", f);
   assert.match(text, /more line\(s\)/, "a dropped line must say it was dropped (G2)");
 });
 
-test("a short entry is delivered whole, with no truncation notice", async (t) => {
+test("a short entry with no remedy is delivered whole, with no truncation notice", async (t) => {
   const f = await fixture(
-    "### F2 · short\n**Trigger:** `shortcmd`\n**Fires on:** `shortcmd`\nonly one line.\n**Do:** the thing.\n",
+    "### F2 · short\n**Trigger:** `shortcmd`\n**Fires on:** `shortcmd`\nonly one line.\n**Cost:** one afternoon.\n",
   );
   t.after(() => rm(f.dir, { recursive: true, force: true }));
   const { text } = fire("shortcmd", f);
   assert.match(text, /only one line/);
-  assert.match(text, /\*\*Do:\*\* the thing/);
+  assert.match(text, /\*\*Cost:\*\* one afternoon/);
   assert.doesNotMatch(text, /more line\(s\)/, "nothing was dropped, so say nothing");
 });
 
@@ -341,4 +358,60 @@ test("a trigger in the hub copy FIRES for a cwd inside the repo", async (t) => {
     },
   });
   assert.match(r.stdout, /L1/, `the hazard in propagation/state/propagate/GOTCHAS.md was not delivered: ${r.stdout}`);
+});
+
+
+// ---------------------------------------------------------------------------
+// Compact form (propagate #225): every hit still reminds, but the body stops repeating
+// ---------------------------------------------------------------------------
+
+test("a hit on an entry WITH a remedy is compact: title, remedy and pointer, not the body", async (t) => {
+  const f = await fixture(ENTRY_WITH_LONG_REMEDY);
+  t.after(() => rm(f.dir, { recursive: true, force: true }));
+  const { text } = fire("dangercmd --now", f);
+
+  // FAILING INPUT: render the full body unconditionally. The nine explanation lines come back,
+  // the text passes 400 chars, and the pointer is replaced by the source path.
+  assert.ok(text.length < 400, `compact hit must be under 400 chars, got ${text.length}:\n${text}`);
+  assert.match(text, /^gotcha · F1 · a hazard with a long body/, "the title");
+  assert.match(text, /\*\*Instead:\*\* do the safe thing, which takes two lines to describe/, "the remedy");
+  assert.match(text, /and this is the second line of that remedy\./, "the remedy's continuation line");
+  assert.match(text, /full entry: .*index\.md#F1/, "the pointer to the full entry");
+  assert.doesNotMatch(text, /line one of the explanation/, "the body must not repeat on every hit");
+  assert.doesNotMatch(text, /more line\(s\)/, "nothing was truncated, so there is no truncation notice");
+});
+
+test("an entry with NO remedy keeps the full form, source line included", async (t) => {
+  const f = await fixture(ENTRY_LONG_NO_REMEDY);
+  t.after(() => rm(f.dir, { recursive: true, force: true }));
+  const { text } = fire("noremedycmd --now", f);
+
+  // FAILING INPUT: drop the remedy-less fallback so every entry renders compact. With no remedy
+  // there is nothing to show but a title and a pointer, and the hazard body is withheld entirely.
+  assert.match(text, /line one of the explanation/, "the body is all there is to deliver");
+  assert.match(text, /line eight of the explanation/);
+  assert.doesNotMatch(text, /full entry:/, "the compact pointer belongs to the compact form");
+  assert.match(text, /— .*index\.md/, "the full form ends in its source path");
+});
+
+test("a remedy over the cap is cut on a whole line and ends in an ellipsis", async (t) => {
+  const long = (n) => `remedy line ${n} ` + "x".repeat(100);
+  const f = await fixture(
+    `### F7 · very long remedy\n**Trigger:** \`longremedy\`\n**Fires on:** \`longremedy\`\nhazard.\n` +
+      `**Instead:** ${long(1)}\n${long(2)}\n${long(3)}\n${long(4)}\n`,
+  );
+  t.after(() => rm(f.dir, { recursive: true, force: true }));
+  const { text } = fire("longremedy", f);
+  assert.match(text, /remedy line 1 /, "the first lines survive");
+  assert.doesNotMatch(text, /remedy line 4 /, "a line past the cap is dropped whole, not split");
+  assert.match(text, /x…\n/, "the cut is announced with an ellipsis directly after a complete line");
+  assert.ok(text.length < 600, `compact hit stays small, got ${text.length}`);
+});
+
+test("compact form: both channels carry the same text", async (t) => {
+  const f = await fixture(ENTRY_WITH_LONG_REMEDY);
+  t.after(() => rm(f.dir, { recursive: true, force: true }));
+  const { payload } = fire("dangercmd --now", f);
+  assert.match(payload.hookSpecificOutput.additionalContext, /full entry:/);
+  assert.equal(payload.hookSpecificOutput.additionalContext, payload.systemMessage);
 });

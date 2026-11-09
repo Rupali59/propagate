@@ -5731,6 +5731,9 @@ if (_invokedDirectly) {
   } else if (mode === "instructions") {
     const { instructionsCmd } = await import("./cli/instructions.mjs");
     process.exitCode = await instructionsCmd(process.argv.slice(3));
+  } else if (mode === "context") {
+    const { contextCmd } = await import("./cli/context.mjs");
+    process.exitCode = await contextCmd(process.argv.slice(3));
   } else if (mode === "queue") {
     const { queueCmd } = await import("./cli/queue.mjs");
     process.exitCode = await queueCmd(process.argv.slice(3));

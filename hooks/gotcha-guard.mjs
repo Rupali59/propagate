@@ -54,6 +54,8 @@ import {
   logLine,
   parseEntries,
   selftestProblems,
+  selftestWarnings,
+  remedyOf,
   partitionStubs,
   sourcesFor,
 } from "../lib/gotchas/parse.mjs";
@@ -74,15 +76,36 @@ function subjectOf(payload) {
   return "";
 }
 
+/**
+ * COMPACT BY DEFAULT (propagate #225). Measured on one session: the full body was re-sent on every
+ * hit, 830k chars of model context in one transcript. Every hit still gets a reminder, because
+ * delivery at the moment of risk is the point; only the repeated body goes. An entry with a remedy
+ * renders as title + remedy + a pointer to the full entry. An entry with no remedy has nothing short
+ * to show, so it keeps the full form.
+ */
+export function renderFull(h) {
+  const where = h.source.replace(HOME, "~");
+  const lines = [`gotcha · ${h.title}`];
+  for (const l of h.body.split("\n")) lines.push(`  ${l.trim()}`);
+  lines.push(`  — ${where}`);
+  lines.push("");
+  return lines;
+}
+
+export function renderOne(h) {
+  const remedy = remedyOf(h);
+  if (remedy === null) return renderFull(h);
+  const where = h.source.replace(HOME, "~");
+  const lines = [`gotcha · ${h.title}`];
+  for (const l of remedy.split("\n")) lines.push(`  ${l}`);
+  lines.push(`  full entry: ${where}#${h.id}`);
+  lines.push("");
+  return lines;
+}
+
 function render(hits) {
   const lines = [];
-  for (const h of hits.slice(0, MAX_SHOWN)) {
-    const where = h.source.replace(HOME, "~");
-    lines.push(`gotcha · ${h.title}`);
-    for (const l of h.body.split("\n")) lines.push(`  ${l.trim()}`);
-    lines.push(`  — ${where}`);
-    lines.push("");
-  }
+  for (const h of hits.slice(0, MAX_SHOWN)) lines.push(...renderOne(h));
   if (hits.length > MAX_SHOWN) {
     lines.push(`  (+${hits.length - MAX_SHOWN} more matched; showing the ${MAX_SHOWN} nearest)`);
   }
@@ -121,6 +144,11 @@ function selftest() {
   for (const p of parsed) console.log(`            ${p.source.replace(HOME, "~")} (${p.count} triggered)`);
   console.log(`  entries : ${entryCount} with a **Trigger:** line`);
   console.log(`  log     : ${existsSync(LOG) ? `${readFileSync(LOG, "utf8").split("\n").filter(Boolean).length} invocations recorded` : "never run"}`);
+  const warnings = selftestWarnings(sources);
+  if (warnings.length) {
+    console.log(`\n${warnings.length} warning(s), not failures:`);
+    for (const w of warnings) console.log(`  ! ${w}`);
+  }
   if (problems.length) {
     console.log(`\n${problems.length} problem(s):`);
     for (const p of problems) console.log(`  ✗ ${p}`);
@@ -196,12 +224,10 @@ function main() {
 /**
  * Run ONLY when executed directly.
  *
- * Without this, `import`ing the module to reuse `parseEntries` /
- * `selftestProblems` would run the guard: it reads stdin (blocking, since an
- * importer has no hook payload to send) and calls `process.exit`, which would
- * take the importing process down. The census imports this file precisely so
- * there is ONE parser rather than two that disagree about the entry count —
- * which is the number the census exists to report.
+ * Without this, `import`ing the module would run the guard: it reads stdin (blocking, since an
+ * importer has no hook payload to send) and calls `process.exit`, which would take the importing
+ * process down. Nothing imports this file today (the census and doctor import lib/gotchas/parse.mjs,
+ * which is why the parser lives there), but the gate is pinned by a test so an importer stays possible.
  */
 /**
  * realpathSync on BOTH sides, and that is the whole fix. Node's ESM loader

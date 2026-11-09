@@ -58,7 +58,7 @@ process.env.GOTCHA_GUARD_GLOBAL = path.join(ROOT, "no-such-global.md");
 process.env.GOTCHA_GUARD_CEILING = ROOT;
 process.env.GOTCHA_GUARD_LOG = path.join(ROOT, "log");
 
-const { parseEntries, selftestProblems, sourcesFor } = await import("../../lib/gotchas/parse.mjs");
+const { parseEntries, selftestProblems, selftestWarnings, remedyOf, sourcesFor } = await import("../../lib/gotchas/parse.mjs");
 
 process.on("exit", () => {
   try {
@@ -374,4 +374,64 @@ test("a sidecar with no repo_root matches nothing by itself", async () => {
   await writeFile(path.join(bare, "GOTCHAS.md"), "# bare\n\n### B1 · x\n**Trigger:** `bare`\n**Fires on:** `bare go`\nbody.\n");
   await writeFile(path.join(bare, ".sidecar.yml"), "project: Bare\nowns: []\n");
   assert.ok(!sourcesFor(NPROJ).includes(path.join(bare, "GOTCHAS.md")));
+});
+
+
+// ---------------------------------------------------------------------------
+// remedyOf and selftestWarnings (propagate #225)
+// ---------------------------------------------------------------------------
+
+test("remedyOf: the first remedy paragraph, ending at a blank line or the next **Label:**", async () => {
+  const f = path.join(ROOT, "remedy.md");
+  await writeFile(
+    f,
+    "# x\n\n### M1 · has a remedy\n**Trigger:** `remcmd`\n**Fires on:** `remcmd`\nbody line.\n" +
+      "**Cost:** an hour.\n**Instead:** do it this way,\nover two lines.\n**Related:** not part of the remedy.\n\n" +
+      "**Use:** a second remedy paragraph that must not be picked.\n",
+  );
+  const [e] = parseEntries(f).entries;
+  assert.equal(remedyOf(e), "**Instead:** do it this way,\nover two lines.");
+});
+
+test("remedyOf: null when there is no remedy, and an over-cap remedy is cut on a whole line with an ellipsis", async () => {
+  const f = path.join(ROOT, "remedy2.md");
+  const line = (n) => `line ${n} ` + "y".repeat(120);
+  await writeFile(
+    f,
+    "# x\n\n### N1 · none\n**Trigger:** `nocmd`\n**Fires on:** `nocmd`\nonly a body.\n\n" +
+      `### N2 · long\n**Trigger:** \`lngcmd\`\n**Fires on:** \`lngcmd\`\n**Fix:** ${line(1)}\n${line(2)}\n${line(3)}\n`,
+  );
+  const [none, long] = parseEntries(f).entries;
+  assert.equal(remedyOf(none), null);
+  const r = remedyOf(long);
+  assert.ok(r.endsWith("…"), r);
+  assert.ok(r.length <= 250, `cap is ~250, got ${r.length}`);
+  assert.match(r, /line 1 /);
+  assert.doesNotMatch(r, /line 3 /, "cut on whole lines");
+  assert.equal(r.split("\n").every((l) => l.startsWith("**Fix:**") || l.startsWith("line ") || l === "…" || l.endsWith("…")), true);
+});
+
+test("selftestWarnings: a duplicate id within one source warns, and is not a failing problem", async () => {
+  const f = path.join(ROOT, "dup.md");
+  await writeFile(
+    f,
+    "# x\n\n### D1 · first\n**Trigger:** `dupone`\n**Fires on:** `dupone --go`\nb.\n**Instead:** x.\n\n" +
+      "### D1 · second, same id\n**Trigger:** `duptwo`\n**Fires on:** `duptwo --go`\nb.\n**Instead:** y.\n",
+  );
+  const w = selftestWarnings([f]);
+  assert.match(w.join("\n"), /D1 appears 2 times/, `expected a duplicate-id warning, got ${JSON.stringify(w)}`);
+  assert.deepEqual(selftestProblems([f]), [], "a duplicate id is a warning, not a failing probe");
+});
+
+test("selftestWarnings: a triggered entry with no remedy warns; one with a remedy does not", async () => {
+  const f = path.join(ROOT, "noremedy.md");
+  await writeFile(
+    f,
+    "# x\n\n### R1 · no remedy\n**Trigger:** `rmone`\n**Fires on:** `rmone`\nbody.\n\n" +
+      "### R2 · has one\n**Trigger:** `rmtwo`\n**Fires on:** `rmtwo`\nbody.\n**Do:** the thing.\n",
+  );
+  const w = selftestWarnings([f]);
+  assert.equal(w.length, 1, JSON.stringify(w));
+  assert.match(w[0], /R1 is triggered but has no/);
+  assert.deepEqual(selftestWarnings([PROJ_FILE]), [], "a clean source warns about nothing");
 });
