@@ -142,15 +142,12 @@ test("not macOS prints one skipped line", () => {
   assert.match(body[0].detail, /skipped: not macOS/);
 });
 
-test("an interval job uses max(3 x interval, 2 h), not the 26 h daily limit", { skip }, () => {
-  const sched = every(1800); // 3 x 30 min = 1.5 h, so the 2 h floor applies
-  const stale = run(fixture([{ label: "t.int", schedule: sched, logAgeH: 3 }]));
-  assert.equal(stale.warns.length, 1);
-  assert.match(stale.warns[0].detail, /interval job last ran 3\.0 h ago, over 2\.0 h/);
-  const fine = run(fixture([{ label: "t.int", schedule: sched, logAgeH: 1.5 }]));
-  assert.deepEqual(fine.warns, []);
-  const hourly = run(fixture([{ label: "t.int", schedule: every(3 * 3600), logAgeH: 8 }])); // limit 9 h
-  assert.deepEqual(hourly.warns, []);
+test("an interval job gets no age verdict (a quiet log is not a stopped job), but a bad exit still warns", { skip }, () => {
+  // The first real run read the 15-min usage sampler as 547 h stale: it writes samples.jsonl, not its launchd log.
+  const quiet = run(fixture([{ label: "t.int", schedule: every(1800), logAgeH: 500 }]));
+  assert.deepEqual(quiet.warns, [], "a quiet interval job must not warn on log age");
+  const daily = run(fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 27 }]));
+  assert.equal(daily.warns.length, 1, "the 26 h rule still applies to daily jobs");
 });
 
 test("an unparseable launchctl reply is stated, and a failed print on a scheduled job warns", { skip }, () => {
