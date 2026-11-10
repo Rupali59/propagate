@@ -28,6 +28,13 @@ Columns:
   checklist"): unload+disable LaunchAgent, remove code-review-graph registry
   entry, remove `.propagates.yml`, update hub repo map, record here.
 
+Sleep and the launchd rows below (workspace-hub#75; `man launchd.plist`, lines
+348-366): a `StartCalendarInterval` job that comes due while the Mac sleeps runs
+on the next wake, and missed firings coalesce into one, so it is late, not lost.
+`StartInterval` firings during sleep are skipped, and the next interval after
+wake runs. `propagate doctor` § "Scheduled jobs" checks that each daily job ran
+within 26 h (warn-only; a Mac that was powered off is the case it catches).
+
 ---
 
 | id | kind | status | supersedes / superseded_by | artifacts | liveness_probe | last_verified | adoption_date | retirement_checklist_done |

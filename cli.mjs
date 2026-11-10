@@ -1190,6 +1190,16 @@ async function doctor({ exitProcess = true } = {}) {
     problems += reporter.problems;
   }
 
+  // # Scheduled jobs (workspace-hub#75): launchd jobs that run this tree's code ran recently.
+  // Warn-only (SEVERITY in the module); a Mac that was off overnight must not turn doctor red.
+  {
+    const { checkScheduledJobs } = await import("./lib/report/doctor/scheduled-jobs.mjs");
+    const reporter = new Reporter();
+    checkScheduledJobs({ reporter, roots: SEARCH_ROOTS });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
   console.log(`\n${BOLD}# Log tail${RESET}`);
   if (existsSync(WATCHER_LOG)) {
     const raw = await readFile(WATCHER_LOG, "utf8");
