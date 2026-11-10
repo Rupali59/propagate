@@ -6,6 +6,21 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-10
+
+### Upgrading
+
+- Nothing an existing install stores changes: no state, ledger, sidecar-schema or settings shape moved. `sprint plan` is new and read-only. It needs `PROPAGATE_USAGE_WIDGET_DIR` to compute a budget; without it, it exits 2 and says so.
+
+### Added
+
+- sprint: `propagate sprint plan` reads whether the Ready work fits the usage left (#190)
+
+### Fixed
+
+- sprint: "could not compute" printed once, not twice; impact map re-recorded on main
+- release: a red run whose only failure is the map's own membership test rebuilds the map and passes (#235)
+
 ## [0.16.1] — 2026-11-09
 
 ### Fixed
