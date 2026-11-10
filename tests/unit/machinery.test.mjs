@@ -494,7 +494,7 @@ test("phase 4b history doctor: a recorded snapshot gives its time, outcome and o
 });
 
 test("phase 4b history monitor: parses what logRun writes, newest first, capped; an error line is 'could not look'; an unmatched line is counted; a log nothing parses is a blind scan, not quiet", () => {
-  assert.deepEqual(parseMonitorLine(LOG_LINES[0]), { at: "2026-10-17T07:36:28.915Z", rows: 1254, actionable: 142, notified: 8, suppressed: 134, ms: 3453, error: null, runId: "7d8e4a8a", raw: LOG_LINES[0] });
+  assert.deepEqual(parseMonitorLine(LOG_LINES[0]), { at: "2026-10-17T07:36:28.915Z", rows: 1254, actionable: 142, notified: 8, suppressed: 134, ms: 3453, error: null, doctor: null, runId: "7d8e4a8a", raw: LOG_LINES[0] }); // doctor: the #239 field, absent on pre-#239 lines
   assert.equal(parseMonitorLine(LOG_LINES[1]), null);
   assert.equal(parseMonitorLine(LOG_LINES[2]).error, 'reconcile "broke"', "the JSON-quoted error is decoded");
   assert.equal(parseMonitorLine("2026-10-17T07:36:28.915Z ran=1 rows=1 actionable=1 notified=1 suppressed=1 ms=1").runId, null, "a line from before run= existed still parses");
