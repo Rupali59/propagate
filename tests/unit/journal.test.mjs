@@ -128,7 +128,7 @@ test("a markered symlink is FOLLOWED and becomes a workspace; doctor still names
   await symlink(real, path.join(searchRoot, "linked-ws"));
 
   const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "cli.mjs");
-  const res = spawnSync(process.execPath, [cli, "doctor"], {
+  const res = spawnSync(process.execPath, [cli, "doctor", "--full"], {
     cwd: searchRoot,
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: searchRoot },
@@ -170,7 +170,7 @@ test("an UNMARKERED symlink is still not descended, and is still named", async (
   await symlink(real, path.join(searchRoot, "linked-plain"));
 
   const cli = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "cli.mjs");
-  const res = spawnSync(process.execPath, [cli, "doctor"], {
+  const res = spawnSync(process.execPath, [cli, "doctor", "--full"], {
     cwd: searchRoot, encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: searchRoot, PROPAGATE_STATE_DIR: searchRoot },
   });

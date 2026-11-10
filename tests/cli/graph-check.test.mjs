@@ -204,7 +204,7 @@ function runDoctor(root, { binDir, stateDir } = {}) {
   // a doctor with an INTACT bound was killed at 22s and the test reported a broken
   // bound. A harness timeout that can fire during normal operation is indistinguishable
   // from the failure it is meant to surface.
-  return spawnSync(process.execPath, [CLI_PATH, "doctor"], { cwd: root, encoding: "utf8", env, timeout: 90_000 });
+  return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], { cwd: root, encoding: "utf8", env, timeout: 90_000 });
 }
 
 test("doctor: never invokes `claude` at all — the subprocess is gone, not merely bounded", async () => {

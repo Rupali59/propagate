@@ -126,7 +126,7 @@ for (const [label, content, shouldFail] of [["EMPTY", "", false], ["one-row", ro
     await mkdir(path.join(wt, "docs"), { recursive: true });
     await writeFile(path.join(wt, ".propagates.yml"), "sources: {}\n", "utf8");
     await writeFile(path.join(wt, "docs", "PROPAGATION_LEDGER.jsonl"), content, "utf8");
-    const out = plain(run(root, ["doctor"]).stdout);
+    const out = plain(run(root, ["doctor", "--full"]).stdout);
     if (shouldFail) {
       assert.match(out, /✗\s*no unowned ledger files[^\n]*agent-x/, `a ledger with rows must still fail and be named:\n${out}`);
     } else {

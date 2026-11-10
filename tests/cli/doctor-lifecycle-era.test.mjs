@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 const CLI_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "cli.mjs");
 
 function runDoctor(root) {
-  return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
+  return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root },

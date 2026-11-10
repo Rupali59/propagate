@@ -6,7 +6,9 @@
  *   node cli.mjs status         — open rows for THIS project (the workspace at cwd)
  *   node cli.mjs status --all   — every workspace's queue
  *   node cli.mjs status --cross — the cross-repo ledger
- *   node cli.mjs doctor         — health check
+ *   node cli.mjs doctor         — health check, FOLDED: failures named, repeated warnings counted
+ *   node cli.mjs doctor --full  — every line (the pre-#107 output); --json is unchanged. Lines doctor
+ *                                 writes to stderr are not folded and may print out of place.
  *   node cli.mjs rules <list|check|selftest|promote> [--json]
  *                                            — canonical-rules lifecycle: which CLAUDE.md files
  *                                              RESTATE a rule instead of referencing it. `check`
@@ -5825,8 +5827,32 @@ if (_invokedDirectly) {
     if (failed) payload.error = failed;
     console.log(JSON.stringify(payload));
     process.exitCode = failed || problems > 0 ? 1 : 0;
-  } else if (mode === "doctor") {
+  } else if (mode === "doctor" && process.argv.includes("--full")) {
     await doctor();
+  } else if (mode === "doctor") {
+    // The DEFAULT view is the full view, folded (#107). Same capture as `--json`
+    // above and for the same reason: ~31 doctor console.log calls never touch a
+    // Reporter, so folding the rendered lines is the only fold that cannot omit a
+    // section. The exit code comes from `problems`, exactly as `--json` derives
+    // it, so the folded default and `--full` cannot disagree about pass/fail.
+    const { foldDoctorLines } = await import("./lib/report/doctor/fold.mjs");
+    const captured = [];
+    const realLog = console.log;
+    console.log = (...args) => { captured.push(args.join(" ")); };
+    let problems = 0;
+    try {
+      problems = await doctor({ exitProcess: false });
+    } catch (err) {
+      // A doctor that threw must not swallow what it had printed: show the
+      // full capture, then let the error propagate as it did before folding.
+      console.log = realLog;
+      for (const l of captured) console.log(l);
+      throw err;
+    } finally {
+      console.log = realLog;
+    }
+    for (const l of foldDoctorLines(captured, { dim: DIM, yellow: YELLOW, reset: RESET })) console.log(l);
+    process.exitCode = problems > 0 ? 1 : 0;
   } else if (mode === "rules") {
     await rulesCmd();
   } else if (mode === "setup") {

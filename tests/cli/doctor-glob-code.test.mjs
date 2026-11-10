@@ -37,7 +37,7 @@ function ws({ downstreamPath, kind }) {
 }
 
 function doctor(root) {
-  const r = spawnSync(process.execPath, [CLI, "doctor"], {
+  const r = spawnSync(process.execPath, [CLI, "doctor", "--full"], {
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: path.join(root, ".state") },
   });

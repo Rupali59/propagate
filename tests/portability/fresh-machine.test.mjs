@@ -294,7 +294,7 @@ test("an UNCONFIGURED cross-repo allowlist is not a doctor failure", () => {
       path.join(stateDir, "config.yml"),
       renderConfig({ roots: [hub], scheduler: "none", hub }),
     );
-    const out = run(["doctor"]);
+    const out = run(["doctor", "--full"]);
     assert.doesNotMatch(
       out,
       /✗ cross-repo edges resolve/,
@@ -365,7 +365,7 @@ test("ref registry does NOT fail when there is simply no snapshot", () => {
   // The other half. Six of seven workspaces have no ref snapshot; if absence
   // were a failure, doctor would be red everywhere for a feature nobody has
   // adopted yet. Absence must still be ATTRIBUTABLE, so it says what to run.
-  const r = runIsolated(["doctor"], {
+  const r = runIsolated(["doctor", "--full"], {
     searchRoots: (h) => {
       const root = path.join(h, "code");
       const ws = path.join(root, "myrepo");

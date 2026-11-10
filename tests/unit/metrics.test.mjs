@@ -113,7 +113,7 @@ test("doctor writes metrics.jsonl under PROPAGATE_STATE_DIR, not the production 
   const stateDir = await mkdtemp(path.join(tmpdir(), "metrics-doctor-state-"));
   await writeFile(path.join(root, ".propagates.yml"), "workspace: true\nsources: {}\n", "utf8");
 
-  const result = spawnSync(process.execPath, [CLI_PATH, "doctor"], {
+  const result = spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir },

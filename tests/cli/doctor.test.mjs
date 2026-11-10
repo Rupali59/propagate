@@ -60,7 +60,7 @@ function driftLine(id, overrides = {}) {
  * would append to the real production metrics.jsonl.
  */
 function runDoctor(root, stateDir = root, extraEnv = {}) {
-  return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
+  return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, ...extraEnv },
@@ -688,7 +688,7 @@ no real file contains by accident.
 
 /** runDoctor with HOME scoped too, so ~/.claude/rules resolves into the fixture. */
 function runDoctorWithHome(root, home) {
-  return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
+  return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root, HOME: home },
@@ -770,6 +770,39 @@ test("doctor does NOT fail the rules check on a machine with no rules layer", as
     assert.match(out, /canonical rules[^\n]*not installed/, "absence must be named, not silent");
   } finally {
     await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+// #107 output-shape test: the default render is the full render, folded.
+test("doctor's default view is shorter than --full, names every failure, and exits the same", async () => {
+  const { root } = await makeWorkspace([
+    driftLine("001"),
+    JSON.stringify({ type: "not-a-real-type", id: "002", timestamp: new Date().toISOString(), status: "open" }),
+  ]);
+  try {
+    const run = (extra) =>
+      spawnSync(process.execPath, [CLI_PATH, "doctor", ...extra], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root },
+      });
+    const folded = run([]);
+    const full = run(["--full"]);
+    const foldedLines = strip(folded.stdout).split("\n");
+    const fullLines = strip(full.stdout).split("\n");
+    const fullFails = fullLines.filter((l) => /^\s{2}✗ /.test(l));
+    assert.ok(fullFails.length > 0, `fixture must produce at least one failure, got: ${full.stdout.slice(0, 400)}`);
+    assert.ok(foldedLines.length < fullLines.length, `folded ${foldedLines.length} lines must be fewer than full ${fullLines.length}`);
+    // Compared by marker + label: the two runs are separate processes over one tree, and a
+    // detail may carry a count of files the first run itself wrote (it did: 4 vs 5).
+    const labelOf = (l) => l.split("  ")[1] ?? l;
+    const foldedFailLabels = foldedLines.filter((l) => /^\s{2}✗ /.test(l)).map(labelOf);
+    for (const f of fullFails) assert.ok(foldedFailLabels.includes(labelOf(f)), `failure missing from folded view: ${f}`);
+    assert.match(foldedLines[0], /^showing folded view: \d+ lines of \d+ \(doctor --full for all\)$/);
+    assert.notEqual(folded.status, 0);
+    assert.equal(folded.status, full.status, "folded default and --full must exit identically");
+  } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

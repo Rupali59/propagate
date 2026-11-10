@@ -193,7 +193,7 @@ async function makeWorkspaceWithBrokenSidecar() {
 }
 
 function runDoctor(root) {
-  return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
+  return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
     // G10: one override moves all the paths together — doctor now writes

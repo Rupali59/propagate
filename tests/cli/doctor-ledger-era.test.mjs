@@ -58,7 +58,7 @@ async function makeWorkspace({ frozen, liveLines }) {
 }
 
 function runDoctor(root) {
-  return spawnSync("node", [CLI_PATH, "doctor"], {
+  return spawnSync("node", [CLI_PATH, "doctor", "--full"], {
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root },
   });

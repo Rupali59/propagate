@@ -126,7 +126,7 @@ async function doctorOut(entryYaml) {
   await writeFile(path.join(w, "lit.md"), "# lit\n");
   for (const n of ["a", "b"]) await writeFile(path.join(w, "stubs", `${n}.md`), `${n}\n`);
   await writeFile(path.join(w, ".propagates.yml"), `workspace: true\nsources:\n  src.md:\n    propagates_to:\n${entryYaml}`);
-  const r = spawnSync(process.execPath, [CLI, "doctor"], {
+  const r = spawnSync(process.execPath, [CLI, "doctor", "--full"], {
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: path.join(root, ".state") },
   });

@@ -56,7 +56,7 @@ async function seedEventStore(stateDir) {
 }
 
 function runDoctor(root, stateDir = root) {
-  return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
+  return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir },

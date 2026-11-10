@@ -127,7 +127,7 @@ async function plantDotDirLedger(root, openRows = 1) {
 // what it claims to. Narrowing the assertions to the ledger section instead
 // would have kept a global claim the fixture cannot support.
 function runDoctor(root, stateDir = root) {
-  return spawnSync(process.execPath, [CLI_PATH, "doctor"], {
+  return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, HOME: root },
