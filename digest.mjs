@@ -24,6 +24,7 @@
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { existsSync, readdirSync, readFileSync, statSync, copyFileSync, mkdirSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
+import { readOnlyGitEnv } from "./lib/core/git-env.mjs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
@@ -561,7 +562,7 @@ function refsUncommitted(root) {
     const r = spawnSync(
       "git",
       ["-C", root, "status", "--porcelain", "--", "propagation/refs"],
-      { encoding: "utf8", timeout: 5000 },
+      { encoding: "utf8", timeout: 5000, env: readOnlyGitEnv() },
     );
     if (r.status !== 0) return null;
     return r.stdout.split("\n").filter((l) => l.trim()).length;
@@ -641,7 +642,7 @@ function fileHash(abs) {
 function mirrorProtection(root, relPath) {
   const run = (...args) => {
     try {
-      const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", timeout: 5000 });
+      const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", timeout: 5000, env: readOnlyGitEnv() });
       return r.status === 0 ? r.stdout : null;
     } catch {
       return null;

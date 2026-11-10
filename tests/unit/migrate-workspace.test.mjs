@@ -37,12 +37,25 @@ import {
   sidecarsNamingMoves,
 } from "../../lib/migrate/workspace.mjs";
 
-/** Recursive snapshot of every file path + content under `root`. */
+/**
+ * Recursive snapshot of every file path + content under `root`, EXCEPT git's own bookkeeping
+ * (#102). The property is "propagate wrote nothing", not "git refreshed no cache": a read-only
+ * `git status` may rewrite `.git/index` stat data, so hashing every byte of `.git/` flaked under
+ * load. Under `.git/` only `HEAD` and `refs/` count (a branch or commit moving is propagate's
+ * doing); the index, objects, logs and locks are git's.
+ */
 function treeSnapshot(root) {
   const out = [];
+  const gitDir = path.join(root, ".git");
+  const counts = (abs) => {
+    if (abs !== gitDir && !abs.startsWith(gitDir + path.sep)) return true;
+    const rel = path.relative(gitDir, abs);
+    return rel === "" || rel === "HEAD" || rel === "refs" || rel.startsWith("refs" + path.sep);
+  };
   const walk = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const abs = path.join(dir, e.name);
+      if (!counts(abs)) continue;
       if (e.isDirectory()) walk(abs);
       else out.push(`${path.relative(root, abs)}::${readFileSync(abs, "utf8")}`);
     }
@@ -793,4 +806,13 @@ test("N49: a fully tracked workspace still migrates — the preflight must not b
   // one is about something else, and says so rather than weakening the guard.
   await migrateWorkspace({ workspace: hub, apply: true, allowDirty: true, now: "2026-08-24T00:00:00Z" });
   assert.ok(existsSync(path.join(hub, "propagation", "state", "plainproj", "STATE.md")));
+});
+
+// #102 - the read-only git env: GIT_OPTIONAL_LOCKS=0 stops `git status` refreshing .git/index.
+test("readOnlyGitEnv sets GIT_OPTIONAL_LOCKS=0 without mutating the base env", async () => {
+  const { readOnlyGitEnv } = await import("../../lib/core/git-env.mjs");
+  const base = { A: "1" };
+  assert.deepEqual(readOnlyGitEnv(base), { A: "1", GIT_OPTIONAL_LOCKS: "0" });
+  assert.equal("GIT_OPTIONAL_LOCKS" in base, false, "must copy, not mutate");
+  assert.equal(readOnlyGitEnv().GIT_OPTIONAL_LOCKS, "0");
 });
