@@ -1613,6 +1613,33 @@ async function rulesCmd() {
     }
     if (pg.status === "fail") res.pass = false, res.failures.push(`paths: ${pg.reason}`);
 
+    // Load tiers (#218): every rule's `load:` checked against what Claude Code does with the file (no paths: means
+    // loaded at every session start; broken YAML means the same), companions with real parents, user-level globs that
+    // do not depend on the working directory, precedence pairs stated in both loaded bodies, and promotions to the
+    // always-loaded tier reported against HEAD. Spec: lib/rules/load-tier.mjs's header.
+    {
+      const { checkLoadTiers, readExcludes } = await import("./lib/rules/load-tier.mjs");
+      const { spawnSync: sp } = await import("node:child_process");
+      let realRules = RULES_DIR;
+      try { realRules = realpathSync(RULES_DIR); } catch { /* keep */ }
+      const headReader = (rel) => {
+        const r = sp("git", ["-C", realRules, "show", `HEAD:./${rel}`], { encoding: "utf8" });
+        return r.status === 0 ? r.stdout : null;
+      };
+      const ex = readExcludes();
+      const lt = checkLoadTiers({ rulesDir: RULES_DIR, excludes: ex.patterns, headReader });
+      const c = lt.counts;
+      const mark = lt.failures.length ? RED + "✗" + RESET : GREEN + "✓" + RESET;
+      console.log(
+        `\n  ${mark} load tiers ${lt.failures.length ? "FAIL" : "PASS"} — ${c.always} always (${(c.alwaysChars ?? 0).toLocaleString("en-US")} chars at session start) · ` +
+          `${c.scoped} scoped · ${c.companion} companion · ${c.excluded} excluded by claudeMdExcludes`,
+      );
+      for (const f of lt.failures) console.log(`      ${RED}✗${RESET} ${f}`);
+      for (const w of [...lt.warnings, ...ex.notes]) console.log(`      ${YELLOW}!${RESET} ${w}`);
+      for (const p of lt.promotions) console.log(`      ${YELLOW}↑${RESET} ${p}`);
+      if (lt.failures.length) res.pass = false, res.failures.push(`load tiers: ${lt.failures.length} problem(s)`);
+    }
+
     const probed = probes.size - unprobed.length;
     const probeNote = probes.size
       ? `${probed} of ${probes.size} rules probed${unprobed.length ? `, ${YELLOW}${unprobed.length} UNPROBED${RESET}` : ""}`

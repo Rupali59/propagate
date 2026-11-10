@@ -115,7 +115,7 @@ for (const f of files) {
   catch (e) { problems.push(`${f}: ${e.message}`); continue; }
   if (!r) {                                           // not a rule file (no `id:`)
     // ...unless it is a scoped companion: no id, but a `paths:` key. It is still native
-    // memory that loads on a matching read, so the summary must count it.
+    // memory that loads on a matching Read/Write/Edit, so the summary must count it.
     try {
       const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(path.join(RULES_DIR, f), "utf8"));
       if (fm && /^paths\s*:/m.test(fm[1])) idlessScoped += 1;
@@ -166,7 +166,7 @@ const alwaysCount = parsedAll.length - parsedAll.filter((r) => "paths" in r).len
 const summary =
   `_Rules: ${parsedAll.length + idlessScoped} canonical rule file(s) parsed in ~/.claude/rules/ ` +
   `(${alwaysCount} always-loaded + ${scopedCount} path-scoped), delivered natively by ` +
-  `Claude Code as user memory — path-scoped ones only when a matching file is read. ` +
+  `Claude Code as user memory — path-scoped ones only when a matching file is read, written or edited. ` +
   `This hook stopped injecting bodies on 2026-08-29 (they were arriving twice). ` +
   `Reference a rule as \`rule:<id>\`; never restate one in a CLAUDE.md. Restating is ` +
   `what produced 9 divergent copies of the tool-priority rule making 4 mutually ` +
