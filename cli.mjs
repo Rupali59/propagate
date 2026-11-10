@@ -743,9 +743,9 @@ async function doctor({ exitProcess = true } = {}) {
     const reporter = new Reporter();
     const { HUB_ROOT: hookHubRoot } = await import("./lib/core/config.mjs");
     const { planInstructionGate } = await import("./lib/report/hooks-gate.mjs");
-    const { ownedRemotes } = await import("./cli/hooks.mjs");
+    const { ownedRemotes, excludedRepos } = await import("./cli/hooks.mjs");
     const { owned: hookOwned } = ownedRemotes([]);
-    const gatePlan = planInstructionGate({ roots: SEARCH_ROOTS, workspaces: WORKSPACES, owned: hookOwned });
+    const gatePlan = planInstructionGate({ roots: SEARCH_ROOTS, workspaces: WORKSPACES, owned: hookOwned, exclude: excludedRepos() });
     await checkHooks({ reporter, roots: SEARCH_ROOTS, hubRoot: hookHubRoot, gatePlan, ownedAllowlist: hookOwned });
     renderDoctorEntries(reporter.drain());
     problems += reporter.problems;

@@ -32,10 +32,17 @@ export function ownedRemotes(args = [], env = process.env, config = CONFIG) {
   return { owned: [], source: "none configured" };
 }
 
+/** Repo names on an owned remote that are not ours to change (config `hooks.excludeRepos`). */
+export function excludedRepos(config = CONFIG) {
+  const c = config?.hooks?.excludeRepos;
+  return Array.isArray(c) ? c.map((x) => String(x).trim()).filter(Boolean) : [];
+}
+
 const tilde = (p) => (p ?? "").replace(os.homedir(), "~");
 
 function verdict(row) {
   if (row.action === "unreadable") return "unreadable";
+  if (row.action === "excluded") return "excluded (hooks.excludeRepos)";
   if (!row.owned) return "not owned: skipped";
   return { create: "would create", append: "would append", wire: "would wire", none: "nothing", "skip-external": "skipped (external hooksPath)", "skip-shebang": "skipped (not a shell hook)" }[row.action];
 }
@@ -52,7 +59,7 @@ export async function hooksCmd(args, inject = {}) {
   const asJson = rest.includes("--json");
   const { owned, source } = inject.owned ? { owned: inject.owned, source: "injected" } : ownedRemotes(rest);
 
-  const plan = planInstructionGate({ roots: inject.roots ?? SEARCH_ROOTS, workspaces: inject.workspaces ?? WORKSPACES, owned, repos: inject.repos, minRepos: inject.minRepos ?? 1 });
+  const plan = planInstructionGate({ roots: inject.roots ?? SEARCH_ROOTS, workspaces: inject.workspaces ?? WORKSPACES, owned, exclude: inject.exclude ?? excludedRepos(), repos: inject.repos, minRepos: inject.minRepos ?? 1 });
   if (plan.blind) {
     console.error(`${RED}hooks instructions-gate: ${plan.reason}${RESET}`);
     return 2;

@@ -278,13 +278,39 @@ test("doctor: a repo tracking an instruction file without the gate is a warn, ne
   try {
     w.make("ungated");
     w.make("gated", { hooksPath: ".githooks", hooks: `#!/bin/sh\n${GATE_SNIPPET}` });
+    // With an owner allowlist, each owned ungated repo is a warn, naming it.
     const gatePlan = planInstructionGate({ repos: w.repos, owned: [] });
+    for (const r of gatePlan.rows) r.owned = true; // treat the fixtures as owned: the allowlist path is under test, not remote parsing
     const reporter = new Reporter();
-    await checkHooks({ reporter, roots: [w.dir], gatePlan, ownedAllowlist: [] });
+    await checkHooks({ reporter, roots: [w.dir], gatePlan, ownedAllowlist: ["fixture-owner"] });
     const warns = reporter.drain().filter((e) => e.kind === "warn");
     assert.equal(warns.length, 1);
     assert.equal(warns[0].label, "instruction-budget gate missing");
     assert.match(warns[0].detail, /^ungated:/);
     assert.equal(reporter.problems, 0);
+  } finally { w.clean(); }
+});
+
+test("doctor: with NO owner allowlist the gaps are one info line, not a warn per repo (the first real run would have added 44 warnings)", async () => {
+  const w = world();
+  try {
+    w.make("ungated-a");
+    w.make("ungated-b");
+    const gatePlan = planInstructionGate({ repos: w.repos, owned: [] });
+    const reporter = new Reporter();
+    await checkHooks({ reporter, roots: [w.dir], gatePlan, ownedAllowlist: [] });
+    const entries = reporter.drain();
+    assert.deepEqual(entries.filter((e) => e.kind === "warn" && e.label === "instruction-budget gate missing"), []);
+    assert.match(JSON.stringify(entries), /2 repo\(s\) tracking an instruction file lack the gate; ownership is not configured/);
+  } finally { w.clean(); }
+});
+
+test("an excluded repo (hooks.excludeRepos) is reported and never planned for a write, even when owned", () => {
+  const w = world();
+  try {
+    w.make("fork");
+    const plan = planInstructionGate({ repos: w.repos, owned: [], exclude: [w.repos[0].name] });
+    assert.equal(plan.rows[0].action, "excluded");
+    assert.equal(plan.rows[0].owned, false);
   } finally { w.clean(); }
 });
