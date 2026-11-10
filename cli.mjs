@@ -470,28 +470,25 @@ export function assignSidecarsToWorkspaces(workspaces, sidecarsByWsRoot) {
 // file would throw ReferenceError at runtime, which node --check cannot see.
 export { classifyDownstreamPath } from "./lib/edges/edges.mjs";
 
-async function findSidecars(workspaceRoot) {
-  const found = [];
-  async function walk(dir, depth) {
-    if (depth > 6) return;
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (e.name === "node_modules" || e.name === ".next" || e.name === ".git") continue;
-        await walk(p, depth + 1);
-      } else if (e.isFile() && e.name === ".propagates.yml") {
-        found.push(p);
-      }
-    }
-  }
-  await walk(workspaceRoot, 0);
-  return found;
+/**
+ * The sidecars `doctor` validates under one workspace root.
+ *
+ * Delegates to `findAllSidecarsRecursive`, the walk `status`, `check` and
+ * `reconcile` use, so doctor validates exactly the sidecars those commands act
+ * on. It used to carry a private walk that skipped only node_modules/.next/.git:
+ * it descended into `.worktrees/` and `.claude/worktrees/`, whose sidecars are a
+ * second checkout of a repo already scanned, and resolved their `source:` keys
+ * against a tree where they were never meant to hold (#129: ~50 of 52 doctor
+ * failures). `findAllSidecarsRecursive` skips worktrees by design ("primary
+ * worktree's sidecar is canonical"); a worktree is usually on another branch
+ * too (GOTCHAS G87). `[]` for the second argument: nested-workspace hand-off is
+ * `assignSidecarsToWorkspaces`'s job here, not the walk's.
+ *
+ * @param {string} workspaceRoot
+ * @returns {Promise<string[]>}
+ */
+export async function findSidecars(workspaceRoot) {
+  return findAllSidecarsRecursive(workspaceRoot, []);
 }
 
 
