@@ -52,11 +52,12 @@ from git; the type and the staged `VERSION` change meet only when the commit is 
 2. suite green on the floor → CI matrix; node 20 is the below-floor probe, expected to fail
 3. make-public --check      → scrub complete, watchlist satisfied, else refuse
 4. stranger install         → HOME=$(mktemp -d): setup → bootstrap → doctor clean
+4b. upgrade path            → the previous tag's setup + bootstrap, then THIS version's doctor + status over the same state
 5. human tags and publishes → an annotated propagate-vX.Y.Z; never the tool
 6. GitHub Release lifecycle → scripts/release-publish.mjs: draft → pre-release → release → "Replaced by" on the previous
 ```
 
-Steps 1-4 are `node cli.mjs release --check` — see below. Steps 5 and 6 are a person, on purpose.
+Steps 1-4b are `node cli.mjs release --check` — see below. Steps 5 and 6 are a person, on purpose.
 
 **Tracking issue.** Each release has an issue from the `Release` template (`.github/ISSUE_TEMPLATE/release.md`), titled
 `Release: propagate X.Y.Z` and labelled `release`. It is **opened when the draft is created and closed when the release is
@@ -186,6 +187,33 @@ pass**: if a genuinely fresh workspace cannot reach a clean `doctor` today,
 that is real information about the rest of the tool, and papering over it
 here would be exactly the failure `rule:discernment-checks` exists to catch.
 
+### 4b · Upgrade path (#236)
+
+`stranger-install` is a fresh machine. It says nothing about the people who already have the previous release, and they
+are the ones a bad release hurts. The `upgrade-path` gate runs their path:
+
+1. the previous version tag (`propagate-v*` or `v*`, whichever is latest and not on HEAD) is extracted with
+   `git archive | tar -x` into a temp dir;
+2. the OLD `cli.mjs` runs `setup` + `bootstrap --baseline-from-git --apply` on the stranger fixture (the same builder
+   `stranger-install` uses), under an isolated `HOME` and state dir;
+3. the NEW `cli.mjs` runs `doctor` and `status` over the SAME `HOME` and state. Any non-zero exit fails the gate;
+4. the OLD `doctor` runs once more over what the new version left: the **downgrade** result. It is reported, never
+   blocking, because the convention does not promise downgrades.
+
+With no previous tag the gate is **skipped**, and says so. `PROPAGATE_UPGRADE_PATH_SKIP=<reason>` skips it knowingly
+and prints the reason; use it for nothing but a release whose previous tag cannot be extracted, and say why in the
+tracking issue.
+
+**Its blind spot is stated in every passing result:** it upgrades one fixture workspace, so a shape only a long-lived
+install holds is not built. If the tag's tree has no `node_modules`, the current one is symlinked in and a dependency
+change between the two releases is not exercised. **Deferred:** the persisted-shape diff from #236 (the `lib/` files
+that read or write state and changed since the tag, against a `### Upgrading` section).
+
+**The hand-run step, before tagging:** write the release's `### Upgrading` section in the CHANGELOG entry (0.17.0 is the
+model). It states what changes on disk for an existing user (state dir, ledgers, sidecar schema, settings, hooks), or
+`Nothing an existing install stores changes: ... (evidence: ...)`. The gate checks that the OLD version's state still
+works; only a person can say what moved.
+
 ### 5 · A human tags and publishes
 
 **Deliberately not automated, and there is no `--apply` flag anywhere in
@@ -233,7 +261,7 @@ node scripts/release-publish.mjs --step pre-release --apply     # one step: draf
 - Linking: `/releases/tag/<tag>`, never `/releases/latest`.
 
 Step 5 and this step stay a person for the reason above. The mechanical parts a script can verify live in `release --check`
-(tag form); the comparison of a published body against its CHANGELOG section is owed to
+(tag form, upgrade path); the comparison of a published body against its CHANGELOG section is owed to
 `propagate release check` (#135), and until it is built the `release` step prints the difference.
 
 ## `release --check`
@@ -242,7 +270,7 @@ Step 5 and this step stay a person for the reason above. The mechanical parts a 
 node cli.mjs release --check [--json]
 ```
 
-Runs gates 1-4 above, plus `release-kind` (see "Which bump"), `release-tag` (the annotated-tag form) and `plugin-validate` (Claude's own `claude plugin validate --json` on this plugin,
+Runs gates 1-4 above, plus `release-kind` (see "Which bump"), `release-tag` (the annotated-tag form), `upgrade-path` (step 4b, registered last, after `stranger-install`) and `plugin-validate` (Claude's own `claude plugin validate --json` on this plugin,
 read by `lib/core/plugin-validate.mjs`; the one pinned warning is the `skills/propagate/SKILL.md` symlink, #98), and exits:
 
 | Exit | Meaning |
@@ -251,8 +279,8 @@ read by `lib/core/plugin-validate.mjs`; the one pinned warning is the `skills/pr
 | `1` | **blocked** — at least one gate failed. |
 | `2` | **incomplete** — no gate failed, but at least one could not run (e.g. no identity map on this machine). Never conflated with "ready." |
 
-Each gate reports one of `passed` / `failed` / `could-not-run` (or `skipped`, only for `plugin-validate` when
-the `claude` CLI is not installed: stated, and it does not block), always with a
+Each gate reports one of `passed` / `failed` / `could-not-run` (or `skipped`, for `plugin-validate` when
+the `claude` CLI is not installed and for `upgrade-path` when there is no previous tag: stated, and it does not block), always with a
 reason or detail line — never a bare status. The `suite` gate reads node:test's junit reporter for both suites
 (`npm test` runs `test:propagate` then `test:curate-docs`), sums them, and names failing tests. `--json` emits the full
 structured result (`lib/core/release.mjs`'s `runReleaseCheck`).
