@@ -314,3 +314,41 @@ test("an excluded repo (hooks.excludeRepos) is reported and never planned for a 
     assert.equal(plan.rows[0].owned, false);
   } finally { w.clean(); }
 });
+
+test("a gate block written by an older version is planned as 'update', replaced by --apply, and then left alone", () => {
+  const w = world();
+  try {
+    // A literal old block: same markers, a different body (the pre-fix resolver). Not built from GATE_SNIPPET.
+    const old = "#!/bin/sh\n# >>> propagate instructions-gate (propagate#221) - old\n_pg_cli=\"/stale/cli.mjs\"\nnode \"$_pg_cli\" instructions --gate\n# <<< propagate instructions-gate\nexit 0\n";
+    w.make("stale", { hooksPath: ".githooks", hooks: old, remote: "https://github.com/me/stale.git" });
+    const p1 = planInstructionGate({ repos: w.repos, owned: ["me"] });
+    assert.equal(row(p1, "stale").action, "update");
+    applyPlan(p1.rows);
+    const now = readFileSync(path.join(w.repos[0].root, ".githooks", "pre-commit"), "utf8");
+    assert.ok(now.includes(GATE_SNIPPET.replace(/\n$/, "")), "the current block replaces the old one");
+    assert.ok(!now.includes("/stale/cli.mjs"), "the old body is gone");
+    assert.ok(now.trimEnd().endsWith("exit 0"), "text outside the markers is kept");
+    const p2 = planInstructionGate({ repos: w.repos, owned: ["me"] });
+    assert.equal(row(p2, "stale").action, "none", "idempotent after the update");
+  } finally { w.clean(); }
+});
+
+test("the hook resolves propagate from the directory marketplace before a stale cached installPath", () => {
+  const home = mkdtempSync(path.join(tmpdir(), "hooks-home-"));
+  try {
+    const live = path.join(home, "live"); const stale = path.join(home, "stale");
+    for (const d of [live, stale]) { mkdirSync(d, { recursive: true }); writeFileSync(path.join(d, "cli.mjs"), "// fake\n"); }
+    mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
+    writeFileSync(path.join(home, ".claude", "plugins", "known_marketplaces.json"), JSON.stringify({ propagate: { source: { source: "directory", path: live } } }));
+    writeFileSync(path.join(home, ".claude", "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "propagate@propagate": [{ installPath: stale }] } }));
+    // The resolver line, lifted from the snippet itself so the test exercises what ships.
+    const line = GATE_SNIPPET.split("\n").find((l) => l.includes("known_marketplaces.json"));
+    assert.ok(line, "the snippet must consult known_marketplaces.json");
+    const js = line.slice(line.indexOf("node -e '") + "node -e '".length, line.lastIndexOf("'"));
+    const out = execFileSync(process.execPath, ["-e", js], { env: { ...process.env, HOME: home }, encoding: "utf8" });
+    assert.equal(out, path.join(live, "cli.mjs"));
+    rmSync(path.join(home, ".claude", "plugins", "known_marketplaces.json"));
+    const fallback = execFileSync(process.execPath, ["-e", js], { env: { ...process.env, HOME: home }, encoding: "utf8" });
+    assert.equal(fallback, path.join(stale, "cli.mjs"), "with no directory marketplace it falls back to installPath");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

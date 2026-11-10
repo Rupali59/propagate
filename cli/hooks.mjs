@@ -44,7 +44,7 @@ function verdict(row) {
   if (row.action === "unreadable") return "unreadable";
   if (row.action === "excluded") return "excluded (hooks.excludeRepos)";
   if (!row.owned) return "not owned: skipped";
-  return { create: "would create", append: "would append", wire: "would wire", none: "nothing", "skip-external": "skipped (external hooksPath)", "skip-shebang": "skipped (not a shell hook)" }[row.action];
+  return { create: "would create", append: "would append", update: "would update", wire: "would wire", none: "nothing", "skip-external": "skipped (external hooksPath)", "skip-shebang": "skipped (not a shell hook)" }[row.action];
 }
 
 export async function hooksCmd(args, inject = {}) {
