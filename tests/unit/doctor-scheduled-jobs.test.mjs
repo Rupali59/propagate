@@ -10,7 +10,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -89,12 +89,28 @@ test("a fresh daily job is fine", { skip }, () => {
   assert.equal(res.jobs, 1);
 });
 
-test("a daily job 27 h old warns, 25 h does not", { skip }, () => {
-  const old = run(fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 27 }]));
+// LAST RUN is launchd's run counter, recorded per label in a ledger (the first real run read log mtime and called a
+// job that ran nightly 143 days stale). The ledger file is written as a literal here, not through the module.
+const ledgerFile = (obj) => { const d = mkdtempSync(path.join(tmpdir(), "sj-ledger-")); const p = path.join(d, "runs.json"); if (obj) writeFileSync(p, JSON.stringify(obj)); return p; };
+const H = 3600000;
+
+test("a daily job whose launchd run count is unchanged for over 26 h warns; 25 h does not", { skip }, () => {
+  const old = run(fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 1 }]), { ledgerPath: ledgerFile({ "t.daily": { runs: 7, firstSeen: NOW - 27 * H } }) });
   assert.equal(old.warns.length, 1);
-  assert.match(old.warns[0].detail, /over 26 h/);
-  const ok = run(fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 25 }]));
+  assert.match(old.warns[0].detail, /has not run for at least 27\.0 h \(launchd run count unchanged\), over 26 h/);
+  const ok = run(fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 1 }]), { ledgerPath: ledgerFile({ "t.daily": { runs: 7, firstSeen: NOW - 25 * H } }) });
   assert.deepEqual(ok.warns, []);
+});
+
+test("a stale launchd log with a moved run count is fresh (the job logs elsewhere); first sight records a baseline", { skip }, () => {
+  const moved = run(fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 3446 }]), { ledgerPath: ledgerFile({ "t.daily": { runs: 6, firstSeen: NOW - 400 * H } }) });
+  assert.deepEqual(moved.warns, [], "a 143-day-old log must not warn when the run count moved");
+  assert.match(JSON.stringify(moved.reporter.entries), /ran since the last check \(runs 6 -> 7\)/);
+  const p = ledgerFile(null);
+  const first = run(fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 3446 }]), { ledgerPath: p });
+  assert.deepEqual(first.warns, []);
+  assert.match(JSON.stringify(first.reporter.entries), /run-count baseline recorded/);
+  assert.equal(JSON.parse(readFileSync(p, "utf8"))["t.daily"].runs, 7, "the baseline is written");
 });
 
 test("a non-zero exit warns and names the exit reason", { skip }, () => {
@@ -117,11 +133,12 @@ test("a plist that runs nothing under the roots is excluded", { skip }, () => {
   assert.deepEqual(calls.map((c) => c[2].split("/").pop()), ["t.mine"], "launchctl is never asked about an excluded job");
 });
 
-test("no log path gives 'not derivable', never fresh", { skip }, () => {
-  const { reporter, warns, res } = run(fixture([{ label: "t.nolog", schedule: DAILY, noLogPath: true }]));
+test("no run count from launchd gives 'not derivable', never fresh", { skip }, () => {
+  const fx = fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 1 }], { launchctl: { "t.daily": "state = not running\nlast exit code = 0\n" } });
+  const { reporter, warns, res } = run(fx, { ledgerPath: ledgerFile(null) });
   assert.deepEqual(warns, []);
   assert.equal(res.notDerivable, 1);
-  assert.match(JSON.stringify(reporter.entries), /not derivable \(no log path in the plist\)/);
+  assert.match(JSON.stringify(reporter.entries), /not derivable \(launchd gave no run count\)/);
 });
 
 test("zero plists states the floor; a missing LaunchAgents dir is stated", { skip }, () => {
@@ -144,10 +161,10 @@ test("not macOS prints one skipped line", () => {
 
 test("an interval job gets no age verdict (a quiet log is not a stopped job), but a bad exit still warns", { skip }, () => {
   // The first real run read the 15-min usage sampler as 547 h stale: it writes samples.jsonl, not its launchd log.
-  const quiet = run(fixture([{ label: "t.int", schedule: every(1800), logAgeH: 500 }]));
+  const quiet = run(fixture([{ label: "t.int", schedule: every(1800), logAgeH: 500 }]), { ledgerPath: ledgerFile(null) });
   assert.deepEqual(quiet.warns, [], "a quiet interval job must not warn on log age");
-  const daily = run(fixture([{ label: "t.daily", schedule: DAILY, logAgeH: 27 }]));
-  assert.equal(daily.warns.length, 1, "the 26 h rule still applies to daily jobs");
+  const bad = run(fixture([{ label: "t.int", schedule: every(1800), logAgeH: 1 }], { launchctl: { "t.int": "state = not running\nruns = 9\nlast exit code = 1\n" } }));
+  assert.equal(bad.warns.length, 1, "a bad exit still warns on an interval job");
 });
 
 test("an unparseable launchctl reply is stated, and a failed print on a scheduled job warns", { skip }, () => {

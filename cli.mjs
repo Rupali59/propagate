@@ -1195,7 +1195,7 @@ async function doctor({ exitProcess = true } = {}) {
   {
     const { checkScheduledJobs } = await import("./lib/report/doctor/scheduled-jobs.mjs");
     const reporter = new Reporter();
-    checkScheduledJobs({ reporter, roots: SEARCH_ROOTS });
+    checkScheduledJobs({ reporter, roots: SEARCH_ROOTS, ledgerPath: path.join(CONFIG_ROOT_DIR, "scheduled-jobs-runs.json") });
     renderDoctorEntries(reporter.drain());
     problems += reporter.problems;
   }
@@ -5191,7 +5191,7 @@ async function monitorCmd() {
   // Skipped on --dry-run: a dry run that spends 37s and writes a file is not dry.
   if (!dryRun) {
     try {
-      console.error(`${DIM}monitor: doctor: ${doctorNote}${RESET}`);
+      console.log(`${DIM}monitor: doctor: ${doctorNote}${RESET}`); // stdout: a status line, not an error (doctor reads a newer stderr log as a crash sign)
       if (doctorDecision.run) {
         const { writeSnapshot, SNAPSHOT_PATH } = await import("./lib/report/doctor/snapshot.mjs");
         const { buildDoctorJson } = await import("./lib/report/doctor/structure.mjs");
