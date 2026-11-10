@@ -6,6 +6,36 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-11-10
+
+### Upgrading
+
+- **Release tags change name from this release on:** `propagate-vX.Y.Z`, annotated (`rule:release-versioning`). The old `v*` tags stay where they are, are never moved or deleted, and are listed as legacy tags. Anything that pins propagate by tag should switch to `propagate-v*`.
+- Nothing an existing install stores changes. The new `upgrade-path` release gate checked this: it installed v0.17.0, then ran this version's `doctor` and `status` over the same state, clean, and v0.17.0's `doctor` afterwards (the downgrade check) is also clean.
+- `doctor` no longer reads sidecars inside git worktrees, and an empty unowned ledger is info, not a failure. Expect far fewer findings.
+
+### Added
+
+- release: upgrade-path gate: the previous tag's install must survive this version (#236)
+- release: annotated propagate-vX.Y.Z tags, the release-tag gate, and the draft-to-replaced publish script (#238)
+- doctor: flag records left uncommitted and branches not on a remote (#131)
+
+### Fixed
+
+- release: a failing TODO test is not listed as failing, so the map self-heal fires (#235)
+- release: a deliberate PROPAGATE_UPGRADE_PATH_SKIP leaves the release INCOMPLETE, never READY (#236)
+- doctor: an empty unowned ledger is reported, not counted; agent worktrees are gitignored (#129)
+- doctor: validate sidecars with the walk status/reconcile use, so worktrees are skipped (#129)
+- git: read-only git calls set GIT_OPTIONAL_LOCKS=0; migrate test snapshot ignores git's index (#102)
+- skills: propagate-drift eval accepts propagate-status as a correct route (#128)
+
+### Changed
+
+- test-impact: map re-recorded on main after #129 (3407 pass; the only red was the map's own membership test)
+- test-impact: map re-recorded on main after #102 and #73 (3405 pass / 0 fail)
+- claims-judge: give the one state-writing test file its own PROPAGATE_STATE_DIR (#73)
+- test-impact: map re-recorded on main after #128 and #131 (3403 pass; the only red was the map's own membership test)
+
 ## [0.17.0] — 2026-11-10
 
 ### Upgrading
