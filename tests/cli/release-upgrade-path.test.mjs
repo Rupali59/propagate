@@ -157,11 +157,14 @@ test("a propagate-v* previous tag is found too (the first release after the rena
   } finally { rm(dir); }
 });
 
-test("PROPAGATE_UPGRADE_PATH_SKIP skips knowingly and prints the reason", () => {
+test("PROPAGATE_UPGRADE_PATH_SKIP skips knowingly, prints the reason, and leaves the release INCOMPLETE, never READY", () => {
   const dir = releaseRepo();
   try {
     const r = gateUpgradePath({ skillDir: dir, env: { PROPAGATE_UPGRADE_PATH_SKIP: "docs-only release" } });
-    assert.equal(r.status, "skipped");
+    // could-not-run, not skipped: runReleaseCheck treats "skipped" as non-blocking, so a knowing skip reported as
+    // "skipped" would let release --check print READY with the upgrade never tested.
+    assert.equal(r.status, "could-not-run");
+    assert.match(r.reason, /not READY until this gate runs/);
     assert.match(r.reason, /PROPAGATE_UPGRADE_PATH_SKIP=docs-only release/);
   } finally { rm(dir); }
 });
