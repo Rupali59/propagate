@@ -71,18 +71,20 @@ let input = ""; if (args.includes("--input")) input = fs.readFileSync(0, "utf8")
 if (args[0] !== "api") { console.error("stub: unexpected " + args.join(" ")); process.exit(1); }
 if (method === "GET") {
   const m = /releases\\?per_page=(\\d+)&page=(\\d+)/.exec(ep); const per = +m[1], page = +m[2];
-  console.log(JSON.stringify(db.releases.slice((page - 1) * per, page * per))); process.exit(0);
+  // lag mode: the list does not yet show the release just written (GitHub read-after-write), until the next read.
+  let rel = db.releases; if (db.lag) { rel = rel.filter((x) => !(db.fresh || []).includes(x.id)); db.fresh = []; save(); }
+  console.log(JSON.stringify(rel.slice((page - 1) * per, page * per))); process.exit(0);
 }
 const body = JSON.parse(input);
 if (method === "POST") {
   const r = { id: ++db.seq, html_url: "https://example.invalid/" + body.tag_name, assets: db.assets || [], ...body };
-  db.releases.unshift(r); save(); console.log(JSON.stringify(r)); process.exit(0);
+  db.releases.unshift(r); db.fresh = (db.fresh || []).concat(r.id); save(); console.log(JSON.stringify(r)); process.exit(0);
 }
 if (method === "PATCH") {
   const id = +ep.split("/").pop(); const r = db.releases.find((x) => x.id === id);
   if (!r) { console.error("stub: no release " + id); process.exit(1); }
   const { make_latest, ...rest } = body; Object.assign(r, rest); if (make_latest) r.make_latest = make_latest;
-  save(); console.log(JSON.stringify(r)); process.exit(0);
+  db.fresh = (db.fresh || []).concat(r.id); save(); console.log(JSON.stringify(r)); process.exit(0);
 }
 process.exit(1);
 `);
@@ -155,6 +157,24 @@ test("--apply runs the whole lifecycle: draft, pre-release, release (Latest), an
     const prev = s.releases.find((x) => x.tag_name === "v0.17.0");
     assert.equal(prev.body, "Replaced by propagate-v0.18.0\n\nold 0.17 body");
     assert.equal(r.writes, 4, "POST draft, PATCH pre-release, PATCH release, PATCH previous");
+  } finally { rm(f.root); }
+});
+
+test("--apply survives GitHub read-after-write lag: each step uses the release its own write returned, not a re-read list (propagate-v0.18.0 first run)", () => {
+  // Measured 2026-11-10 on the real repo: POST created the draft (id 439984813), the immediate list re-read did not show
+  // it, and the run refused "no release ... run the draft step first". The stub's lag mode hides the last write from
+  // the next list read.
+  const f = fixture();
+  try {
+    f.setState([{ id: 1, tag_name: "v0.17.0", name: "v0.17.0", body: "old 0.17 body", draft: false, prerelease: false, assets: [] }], { lag: true });
+    const r = f.run({ apply: true });
+    assert.equal(r.exitCode, 0, r.text);
+    const cur = f.state().releases.find((x) => x.tag_name === "propagate-v0.18.0");
+    assert.equal(cur.draft, false);
+    assert.equal(cur.prerelease, false);
+    assert.equal(cur.make_latest, "true");
+    assert.equal(f.state().releases.find((x) => x.tag_name === "v0.17.0").body, "Replaced by propagate-v0.18.0\n\nold 0.17 body");
+    assert.equal(r.writes, 4);
   } finally { rm(f.root); }
 });
 
