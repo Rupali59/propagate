@@ -395,6 +395,29 @@ test("gate 2 (#235): a rebuilt map that still fails its own check fails the gate
   }
 });
 
+test("gate 2 (#235): a failing TODO test is not listed as failing, so the map self-heal still fires", () => {
+  // Real node:test through the junit reporter: a TODO that throws gets <skipped type="todo"/> AND <failure>, but is
+  // not in node's `fail` count. Before the fix it was listed, failing.length exceeded failed, and the heal never ran.
+  const dir = impactFixture(`node --test t/a.test.mjs`);
+  mkdirSync(path.join(dir, "t"), { recursive: true });
+  writeFileSync(path.join(dir, "t", "a.test.mjs"),
+    `import { test } from "node:test";\n` +
+    `test(${JSON.stringify(MAP_MEMBERSHIP_TEST)}, () => { throw new Error("not in the map"); });\n` +
+    `test("NV x t7", { todo: "phase 2" }, () => { throw new Error("not implemented in phase 2"); });\n` +
+    `test("fine", () => {});\n`);
+  mkdirSync(path.join(dir, "tests", "unit"), { recursive: true });
+  writeFileSync(path.join(dir, "tests", "unit", "test-impact.test.mjs"), `import { test } from "node:test";\ntest("map check", () => {});\n`);
+  try {
+    const g = gateSuite({ skillDir: dir, env: { ...noRecordEnv(), NODE_TEST_CONTEXT: undefined } });
+    assert.equal(g.source, "junit", g.detail);
+    assert.deepEqual(g.failing, [MAP_MEMBERSHIP_TEST], "a TODO test must not be listed as failing");
+    assert.equal(g.status, "passed", g.detail);
+    assert.match(g.detail, /map rebuilt: the only red test was its own membership assertion/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
 test("gate 2: output with no parseable node:test summary is could-not-run, not a pass", () => {
   const dir = suiteFixture(`node -e "console.log('nothing that looks like a summary')"`);
   try {
