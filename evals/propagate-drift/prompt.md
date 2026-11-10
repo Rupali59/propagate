@@ -1,5 +1,5 @@
 ---
-description: propagate fires on a drift question
+description: propagate (or propagate-status) fires on a drift question
 tags: [skill-routing]
 runs: 1
 allowed_tools: [Read, Glob, Grep, Skill]
