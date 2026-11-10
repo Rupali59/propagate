@@ -6,6 +6,34 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-11-10
+
+### Upgrading
+
+- **`rules selftest` checks a `load: always | scoped | companion` line** on each propagate-format rule (one with an `id`) and on `*.evidence.md` companions, against what Claude Code does with the file. Add the line, or run the selftest to see the expected tier. Plain rule files without propagate frontmatter are tiered but never failed for lacking it.
+- **`doctor` adds two sections**, both warn-only: `# Unrecorded work` (already in 0.18.0) and `# Scheduled jobs` (macOS launchd jobs that run this tree's code; elsewhere it prints one skipped line).
+- **The monitor may skip `doctor`** when nothing in the tree changed. It keeps the fingerprint in a new sibling file, `doctor-snapshot.json.fingerprint.json`, and writes an optional `doctor=` field in `monitor.log`. Old snapshots and log lines still read; the first run after upgrading runs `doctor` once and writes the fingerprint.
+- Nothing else an existing install stores changes.
+
+### Added
+
+- doctor: # Scheduled jobs section, launchd jobs running this tree's code ran within 26 h (workspace-hub#75)
+- sprint: propagate sprint review, done against planned per board, carry-over moves only with --apply (#191)
+- rules: rules selftest checks every rule's load: tier against what Claude Code does with it (#218)
+- monitor: run doctor only when the tree changed: fingerprint skip, 24 h ceiling, SYSTEMS row (#239)
+
+### Fixed
+
+- rules: load: is required only of propagate-format rules and companions, so a public user's plain rule files do not fail rules selftest (#218)
+- doctor: scheduled jobs: no age verdict for interval jobs; a quiet log is not a stopped job (workspace-hub#75)
+- monitor: the doctor fingerprint covers every repo doctor sees, nested projects included (#239)
+- release: the publish script uses the release each write returned, not a re-read list (#238)
+
+### Changed
+
+- test-impact: map re-recorded on main after workspace-hub#75 (3497 pass; the only red was the map's own membership test)
+- monitor: the history parser's expected row carries #239's doctor field (null on pre-#239 lines); impact map re-recorded
+
 ## [0.18.0] — 2026-11-10
 
 ### Upgrading
