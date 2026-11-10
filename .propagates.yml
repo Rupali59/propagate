@@ -49,6 +49,15 @@
 # exists to catch undeclared couplings had none of its own.
 workspace: true
 sources:
+  tests/unit/test-impact.test.mjs:
+    propagates_to:
+      - path: lib/core/release.mjs
+        why: >-
+          gateSuite heals a red run ONLY when its sole failure is the test titled MAP_MEMBERSHIP_TEST,
+          on the premise that this test asserts map membership and nothing else (#235). The title is
+          shared by import, so a rename is safe; a change to WHAT that test asserts is not, because the
+          gate would then wave through a real failure under a membership-only label.
+        kind: code
   # The one-surface work, 2026-09-17. Declared because the review that produced it
   # found its defects by looking at COUPLINGS, not files
   # (rule:adversarial-review-reads-the-ledger §5: an adversarial review that ends

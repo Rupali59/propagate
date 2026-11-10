@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import {
   gateVersionManifests,
   gateSuite,
+  MAP_MEMBERSHIP_TEST,
   gatePluginValidate,
   gateMakePublicCheck,
   gateStrangerInstall,
@@ -322,6 +323,65 @@ test("gate 2: a red run does NOT rebuild the impact map, and says so", () => {
     assert.equal(g.status, "failed", g.detail);
     assert.ok(!existsSync(path.join(dir, "map-ran.txt")), "a red run rebuilt the map from a partial recording");
     assert.match(g.detail, /map NOT refreshed \(suite not green\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+// #235: the one red run that may still write the map is one whose ONLY failure is the map's own membership test.
+// Each case below spells its suite output out as literal console lines on purpose: do not refactor them onto a shared
+// builder, which is how a hostile case quietly stops being expressible (rule:mutate-behind-the-fixture-builder).
+// The fixture's own tests/unit/test-impact.test.mjs stands in for the re-run against the fresh map.
+function healFixture(suiteLines, mapTestBody) {
+  const dir = impactFixture(`node -e "${suiteLines.join("; ")}; process.exit(1)"`);
+  mkdirSync(path.join(dir, "tests", "unit"), { recursive: true });
+  writeFileSync(path.join(dir, "tests", "unit", "test-impact.test.mjs"),
+    `import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("map check", () => { ${mapTestBody} });\n`);
+  return dir;
+}
+
+test("gate 2 (#235): when the only red test is the map's membership test, the map is rebuilt with --allow-red and the gate passes", () => {
+  const dir = healFixture([
+    "console.log('ℹ tests 3')", "console.log('ℹ pass 2')", "console.log('ℹ fail 1')",
+    "console.log('✖ failing tests:')", `console.log('✖ ${MAP_MEMBERSHIP_TEST} (9.2ms)')`,
+  ], "assert.ok(true);");
+  try {
+    const g = gateSuite({ skillDir: dir, env: noRecordEnv() });
+    assert.equal(g.status, "passed", g.detail);
+    assert.equal(g.failed, 1, "the healed failure must stay counted, not be hidden");
+    const args = JSON.parse(readFileSync(path.join(dir, "map-ran.txt"), "utf8"));
+    assert.deepEqual(args.slice(0, 2), ["--reuse", "--allow-red"]);
+    assert.match(g.detail, /map rebuilt: the only red test was its own membership assertion \(1 fail healed\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 2 (#235): a second red test beside the membership test keeps the refusal, and the map is not touched", () => {
+  const dir = healFixture([
+    "console.log('ℹ tests 3')", "console.log('ℹ pass 1')", "console.log('ℹ fail 2')",
+    "console.log('✖ failing tests:')", `console.log('✖ ${MAP_MEMBERSHIP_TEST} (9.2ms)')`,
+    "console.log('✖ a real regression elsewhere (1.0ms)')",
+  ], "assert.ok(true);");
+  try {
+    const g = gateSuite({ skillDir: dir, env: noRecordEnv() });
+    assert.equal(g.status, "failed", g.detail);
+    assert.ok(!existsSync(path.join(dir, "map-ran.txt")), "a run with a real regression rebuilt the map");
+    assert.match(g.detail, /map NOT refreshed \(suite not green\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});
+
+test("gate 2 (#235): a rebuilt map that still fails its own check fails the gate", () => {
+  const dir = healFixture([
+    "console.log('ℹ tests 3')", "console.log('ℹ pass 2')", "console.log('ℹ fail 1')",
+    "console.log('✖ failing tests:')", `console.log('✖ ${MAP_MEMBERSHIP_TEST} (9.2ms)')`,
+  ], "assert.equal(1, 2);");
+  try {
+    const g = gateSuite({ skillDir: dir, env: { ...noRecordEnv(), NODE_TEST_CONTEXT: undefined } });
+    assert.equal(g.status, "failed", g.detail);
+    assert.match(g.detail, /the test-impact map this run wrote fails its own check/);
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }

@@ -18,6 +18,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { MAP_MEMBERSHIP_TEST } from "../../lib/core/release.mjs";
 import { REPO, listTestFiles, readSize } from "../../scripts/test-impact/lib.mjs";
 import { closure } from "../../scripts/test-impact/static.mjs";
 import { selectTests } from "../../scripts/test-impact/affected.mjs";
@@ -45,7 +46,7 @@ const fixtureMap = () => ({
 
 // ---- the committed map -----------------------------------------------------------
 
-test("every test file is in the map, and the map names no test that is gone", (t) => {
+test(MAP_MEMBERSHIP_TEST, (t) => {
   const onDisk = listTestFiles();
   const inMap = Object.keys(map.tests);
   assert.deepEqual(
