@@ -5804,6 +5804,9 @@ if (_invokedDirectly) {
   } else if (mode === "costs") {
     const { costsCmd } = await import("./cli/costs.mjs");
     process.exitCode = await costsCmd(process.argv.slice(3));
+  } else if (mode === "sprint") {
+    const { sprintCmd } = await import("./cli/sprint.mjs");
+    process.exitCode = await sprintCmd(process.argv.slice(3));
   } else if (mode === "queue") {
     const { queueCmd } = await import("./cli/queue.mjs");
     process.exitCode = await queueCmd(process.argv.slice(3));
