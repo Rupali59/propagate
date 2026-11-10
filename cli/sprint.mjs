@@ -1,5 +1,6 @@
 /**
- * sprint.mjs — `propagate sprint plan [--approvals N] [--json]` (propagate#190).
+ * sprint.mjs — `propagate sprint plan [--approvals N] [--json]` (propagate#190) and
+ * `propagate sprint review [--sprint <title>] [--apply] [--json]` (propagate#191; writes only with --apply).
  *
  * Read-only: no GitHub write, no ledger write. The daily-cap rule is NOT re-implemented here: it lives in the
  * usage widget (a separate private repo), and is imported from the directory named by PROPAGATE_USAGE_WIDGET_DIR
@@ -14,6 +15,7 @@ import { pathToFileURL } from "node:url";
 
 import { readCosts, samplesPath } from "../lib/core/costs.mjs";
 import { buildSprintPlan, parseSamples, renderPlan } from "../lib/report/sprint-plan.mjs";
+import { buildSprintReview, moveLines, renderReview } from "../lib/report/sprint-review.mjs";
 
 function value(args, flag) {
   const i = args.indexOf(flag);
@@ -53,6 +55,12 @@ export function ghFetcher(gh = process.env.PROPAGATE_GH_BIN || "gh") {
       if (res.errors?.length) throw new Error(res.errors.map((e) => e.message).join("; "));
       return res.data;
     },
+    // The only method that sends a mutation. sprint review reaches it solely behind --apply.
+    write: async (mutation) => {
+      const res = run(["api", "graphql", "-f", `query=${mutation}`]);
+      if (res.errors?.length) throw new Error(res.errors.map((e) => e.message).join("; "));
+      return res.data;
+    },
   };
 }
 
@@ -64,8 +72,9 @@ export function ghFetcher(gh = process.env.PROPAGATE_GH_BIN || "gh") {
 export async function sprintCmd(args, inject = {}) {
   const out = inject.out ?? ((s) => console.log(s));
   const err = inject.err ?? ((s) => console.error(s));
+  if (args[0] === "review") return sprintReview(args.slice(1), inject, out, err);
   if (args[0] !== "plan") {
-    err("sprint: usage: sprint plan [--approvals <n>] [--json]");
+    err("sprint: usage: sprint plan [--approvals <n>] [--json] | sprint review [--sprint <title>] [--apply] [--json]");
     return 2;
   }
   const rest = args.slice(1);
@@ -106,4 +115,39 @@ export async function sprintCmd(args, inject = {}) {
   if (rest.includes("--json")) out(JSON.stringify(plan, null, 2));
   else for (const line of renderPlan(plan)) out(line);
   return plan.exit;
+}
+
+async function sprintReview(rest, inject, out, err) {
+  const known = new Set(["--sprint", "--apply", "--json"]);
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === "--sprint") i++;
+    else if (!known.has(rest[i])) {
+      err(`sprint review: unknown argument ${rest[i]}`);
+      return 2;
+    }
+  }
+  const sprintTitle = value(rest, "--sprint");
+  if (rest.includes("--sprint") && !sprintTitle) {
+    err("sprint review: --sprint needs a title");
+    return 2;
+  }
+  const apply = rest.includes("--apply");
+  const json = rest.includes("--json");
+  const review = await buildSprintReview({
+    now: inject.now ?? Date.now(),
+    fetcher: inject.fetcher ?? ghFetcher(),
+    laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows,
+    sprintTitle,
+    apply,
+    // Printed before the first write, so what is about to change is on screen first.
+    beforeWrite: (r, mutations) => {
+      if (json) return;
+      out(`--apply: about to write ${r.moves.length} move(s), carry-over only, no re-prioritising:`);
+      for (const line of moveLines(r)) out(line);
+      for (const m of mutations) out(`  mutation: ${m}`);
+    },
+  });
+  if (json) out(JSON.stringify(review, null, 2));
+  else for (const line of renderReview(review, { apply })) out(line);
+  return review.exit;
 }
