@@ -90,3 +90,11 @@ test("a promotion to always is reported against HEAD, and an unchanged tier is n
   const same = run({ "a.md": RULE_ALWAYS }, () => ({ headReader: () => RULE_ALWAYS }));
   assert.deepEqual(same.promotions, []);
 });
+
+test("a plain rule file with no propagate frontmatter is tiered but not failed for lacking load: (upgrade path for public users)", () => {
+  const r = run({ "mine.md": "Always use tabs.\n", "a.md": RULE_ALWAYS }, opts0);
+  assert.deepEqual(r.failures, []);
+  assert.equal(r.counts.always, 2, "the plain file still counts as always-loaded");
+  const wrong = run({ "mine.md": "---\nload: scoped\n---\nAlways use tabs.\n" }, opts0);
+  assert.match(wrong.failures.join("\n"), /declares `load: scoped` but it has no paths:/, "an explicit load: is still checked");
+});
