@@ -1179,6 +1179,20 @@ async function doctor({ exitProcess = true } = {}) {
     instructionsContext = r.context;
   }
 
+  // # Unrecorded work (#131): records left uncommitted past N days, branches ahead of or
+  // missing an upstream. Warn-only by design (see SEVERITY in the module, and #129).
+  {
+    const { checkUnrecorded, DEFAULT_DAYS } = await import("./lib/report/doctor/unrecorded.mjs");
+    // Env only: doctor's flag allowlist (lib/core/commands.mjs) rejects unknown flags.
+    const raw = process.env.PROPAGATE_UNRECORDED_DAYS;
+    const parsed = Number(raw);
+    const days = raw !== undefined && Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_DAYS;
+    const reporter = new Reporter();
+    checkUnrecorded({ reporter, roots: SEARCH_ROOTS, workspaces: WORKSPACES, days });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
   console.log(`\n${BOLD}# Log tail${RESET}`);
   if (existsSync(WATCHER_LOG)) {
     const raw = await readFile(WATCHER_LOG, "utf8");
