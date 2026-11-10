@@ -20,12 +20,20 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
-import { judgeStatus, asQuestions, classifyUnjudged } from "../../lib/claims/judge.mjs";
-import { blockSha, splitBlocks } from "../../lib/claims/blocks.mjs";
-import { appendClaim } from "../../lib/claims/store.mjs";
+// Own state dir (#73): this file calls appendClaim, whose CLAIMS_DIR is fixed at import
+// time, so the env must be set BEFORE the dynamic imports below (same shape as ui-server.test.mjs).
+const STATE = mkdtempSync(path.join(tmpdir(), "claims-judge-state-"));
+process.env.PROPAGATE_STATE_DIR = STATE;
+process.on("exit", () => { try { rmSync(STATE, { recursive: true, force: true }); } catch {} });
+
+const { judgeStatus, asQuestions, classifyUnjudged } = await import("../../lib/claims/judge.mjs");
+const { blockSha, splitBlocks } = await import("../../lib/claims/blocks.mjs");
+const { appendClaim } = await import("../../lib/claims/store.mjs");
 
 const JUDGE_SRC = readFileSync(fileURLToPath(new URL("../../lib/claims/judge.mjs", import.meta.url)), "utf8");
 
