@@ -742,7 +742,11 @@ async function doctor({ exitProcess = true } = {}) {
     const { checkHooks } = await import("./lib/report/doctor/hooks.mjs");
     const reporter = new Reporter();
     const { HUB_ROOT: hookHubRoot } = await import("./lib/core/config.mjs");
-    await checkHooks({ reporter, roots: SEARCH_ROOTS, hubRoot: hookHubRoot });
+    const { planInstructionGate } = await import("./lib/report/hooks-gate.mjs");
+    const { ownedRemotes } = await import("./cli/hooks.mjs");
+    const { owned: hookOwned } = ownedRemotes([]);
+    const gatePlan = planInstructionGate({ roots: SEARCH_ROOTS, workspaces: WORKSPACES, owned: hookOwned });
+    await checkHooks({ reporter, roots: SEARCH_ROOTS, hubRoot: hookHubRoot, gatePlan, ownedAllowlist: hookOwned });
     renderDoctorEntries(reporter.drain());
     problems += reporter.problems;
   }
@@ -5887,6 +5891,9 @@ if (_invokedDirectly) {
   } else if (mode === "instructions") {
     const { instructionsCmd } = await import("./cli/instructions.mjs");
     process.exitCode = await instructionsCmd(process.argv.slice(3));
+  } else if (mode === "hooks") {
+    const { hooksCmd } = await import("./cli/hooks.mjs");
+    process.exitCode = await hooksCmd(process.argv.slice(3));
   } else if (mode === "context") {
     const { contextCmd } = await import("./cli/context.mjs");
     process.exitCode = await contextCmd(process.argv.slice(3));
