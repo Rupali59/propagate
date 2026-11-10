@@ -63,3 +63,6 @@ propagation/refs/lifecycle.jsonl
 
 # claude plugin eval run reports (local, regenerated per run)
 evals/results/
+
+# Agent worktrees (isolation: worktree) are checkouts of this repo, never content of it (#129).
+/.claude/worktrees/

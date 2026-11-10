@@ -112,6 +112,30 @@ test("doctor check `no unowned ledger files` passes when every ledger is owned",
   );
 });
 
+for (const [label, content, shouldFail] of [["EMPTY", "", false], ["one-row", row({ id: 39, type: "drift", status: "open", source: "b.md", downstream: [] }), true]]) {
+  test(`doctor check \`no unowned ledger files\`: an ${label} unowned worktree ledger ${shouldFail ? "FAILS" : "does not fail, and is still named"} (#129)`, async () => {
+    // Every worktree of a repo that tracks an empty ledger checks one out. Zero rows strand nothing, so it is info, not
+    // counted. The one-row twin proves this fixture path IS detected, so the empty case cannot pass vacuously.
+    // Literal tree, same shape as makeTreeWithUnownedLedger, deliberately not built through it.
+    const root = await mkdtemp(path.join(tmpdir(), "wholeledger-empty-"));
+    const ws = path.join(root, "workspace-a");
+    await mkdir(path.join(ws, "docs"), { recursive: true });
+    await writeFile(path.join(ws, ".propagates.yml"), "workspace: true\nsources: {}\n", "utf8");
+    await writeFile(path.join(ws, "docs", "PROPAGATION_LEDGER.jsonl"), row({ id: 1, type: "drift", status: "open", source: "a.md", downstream: [] }), "utf8");
+    const wt = path.join(ws, ".claude", "worktrees", "agent-x");
+    await mkdir(path.join(wt, "docs"), { recursive: true });
+    await writeFile(path.join(wt, ".propagates.yml"), "sources: {}\n", "utf8");
+    await writeFile(path.join(wt, "docs", "PROPAGATION_LEDGER.jsonl"), content, "utf8");
+    const out = plain(run(root, ["doctor"]).stdout);
+    if (shouldFail) {
+      assert.match(out, /✗\s*no unowned ledger files[^\n]*agent-x/, `a ledger with rows must still fail and be named:\n${out}`);
+    } else {
+      assert.doesNotMatch(out, /✗\s*no unowned ledger files/, `an empty unowned ledger must not fail the check:\n${out}`);
+      assert.match(out, /empty unowned ledger\(s\) \(nothing stranded, not counted\)[^\n]*agent-x/, `the empty ledger must still be named:\n${out}`);
+    }
+  });
+}
+
 test("status --all counts every open row, including ledgers discovery cannot reach", async () => {
   const { root } = await makeTreeWithUnownedLedger();
   const res = run(root, ["status", "--all"]);
