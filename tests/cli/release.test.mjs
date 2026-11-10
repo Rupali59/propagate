@@ -50,6 +50,14 @@ function tmp(prefix) {
   return mkdtempSync(path.join(tmpdir(), prefix));
 }
 
+/** A repo with one commit and NO tags: the release-tag and upgrade-path gates read tags from here, so the unit suite never runs against the real tags (the upgrade-path gate then reports a stated skip). */
+function untaggedRepo() {
+  const d = tmp("propagate-release-untagged-");
+  git(["init", "-q", "-b", "main"], d);
+  git(["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], d);
+  return d;
+}
+
 function git(args, cwd) {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
@@ -576,7 +584,7 @@ test("plugin-validate gate: no claude CLI is SKIPPED, stated, and does not block
   assert.equal(g.reason, "skipped — the claude CLI is not installed here");
   const result = runReleaseCheck({
     manifestsDir: SKILL_DIR, suiteDir: suiteFixture(`node -e "console.log('# tests 1'); console.log('# pass 1'); console.log('# fail 0')"`),
-    skillDir: SKILL_DIR, claudeBin: path.join(tmpdir(), "no-such-claude-binary"),
+    skillDir: SKILL_DIR, upgradeDir: untaggedRepo(), claudeBin: path.join(tmpdir(), "no-such-claude-binary"),
     makePublicEnv: { ...process.env, HOME: tmp("propagate-release-skip-"), PROPAGATE_STATE_DIR: path.join(tmp("propagate-release-skip2-"), "s") },
   });
   const pv = result.gates.find((x) => x.name === "plugin-validate");
@@ -694,9 +702,10 @@ test("runReleaseCheck: a could-not-run gate makes the run 'incomplete', never 'r
       hubMarketplacePath: hubPath(manifests),
       suiteDir: suite,
       skillDir: SKILL_DIR,
+      upgradeDir: untaggedRepo(),
       makePublicEnv: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") },
     });
-    assert.equal(result.gates.length, 6);
+    assert.equal(result.gates.length, 7);
     const g3 = result.gates.find((g) => g.name === "make-public-check");
     assert.equal(g3.status, "could-not-run");
     assert.notEqual(result.overall, "ready", "could-not-run must never be summarized as ready");
@@ -728,9 +737,9 @@ test("runReleaseCheck alone writes no state: the state dir is byte-identical bef
   const prev = process.env.PROPAGATE_STATE_DIR;
   process.env.PROPAGATE_STATE_DIR = stateDir;
   try {
-    const result = runReleaseCheck({ manifestsDir: manifests, hubMarketplacePath: hubPath(manifests), suiteDir: suite, skillDir: SKILL_DIR,
+    const result = runReleaseCheck({ manifestsDir: manifests, hubMarketplacePath: hubPath(manifests), suiteDir: suite, skillDir: SKILL_DIR, upgradeDir: untaggedRepo(),
       makePublicEnv: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: path.join(home, ".propagate") } });
-    assert.equal(result.gates.length, 6, "the aggregate really ran");
+    assert.equal(result.gates.length, 7, "the aggregate really ran");
     assert.equal(treeSnapshot(stateDir), before, "runReleaseCheck must not write into the state dir");
     assert.equal(existsSync(path.join(stateDir, "release-checks.jsonl")), false);
   } finally {

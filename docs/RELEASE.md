@@ -4,9 +4,9 @@
 
 How a release is cut. Mechanics only, as of the plan that scoped this doc
 (`~/.claude/plans/status-temporal-plum.md` §3): this defines the procedure and
-gives it a machine-checkable preview (`release --check`). **It does not
-publish anything, and it is not meant to yet** — see "Why step 5 has no
-flag" below.
+gives it a machine-checkable preview (`release --check`). **`release --check`
+publishes nothing.** Publishing is a person running `scripts/release-publish.mjs`
+(#238) — see steps 5 and 6.
 
 ## Which bump (#234)
 
@@ -52,11 +52,16 @@ from git; the type and the staged `VERSION` change meet only when the commit is 
 2. suite green on the floor → CI matrix; node 20 is the below-floor probe, expected to fail
 3. make-public --check      → scrub complete, watchlist satisfied, else refuse
 4. stranger install         → HOME=$(mktemp -d): setup → bootstrap → doctor clean
-5. human publishes          → never the tool
-6. GitHub Release           → gh release create vX --notes-file <section>, by the person publishing
+5. human tags and publishes → an annotated propagate-vX.Y.Z; never the tool
+6. GitHub Release lifecycle → scripts/release-publish.mjs: draft → pre-release → release → "Replaced by" on the previous
 ```
 
 Steps 1-4 are `node cli.mjs release --check` — see below. Steps 5 and 6 are a person, on purpose.
+
+**Tracking issue.** Each release has an issue from the `Release` template (`.github/ISSUE_TEMPLATE/release.md`), titled
+`Release: propagate X.Y.Z` and labelled `release`. It is **opened when the draft is created and closed when the release is
+published**; its checklist is the lifecycle above. The release body and that issue are the record
+(`rule:release-versioning`).
 
 ### 0 · Notes
 
@@ -76,13 +81,38 @@ It covers COMMITTED work, which is why a release is **two commits**, the same sh
 
 One commit carrying both the work and the bump would leave the work out of its own notes. Avoid it.
 
-### The tag sits on the release commit
+### The tag sits on the release commit, and it is annotated (#238)
 
 The tag goes on the commit that bumps `VERSION`, never on a follow-up. The impact-map refresh that `release --check`
 writes is staged INTO the release commit; v0.15.53's tag landed on a separate `chore(test-impact)` commit instead.
-Check it after tagging with `git describe --tags --exact-match HEAD`, which must print the new tag. **`--tags` is
-required: propagate's tags are lightweight, and plain `git describe --exact-match` only matches annotated ones**
-(it failed on v0.15.59).
+
+**From the first release under `rule:release-versioning`, the tag is `propagate-vX.Y.Z` and it is annotated:**
+
+```
+git tag -a propagate-vX.Y.Z -m "propagate X.Y.Z"
+git describe --tags --exact-match HEAD      # must print propagate-vX.Y.Z
+```
+
+(The legacy `v*` tags are mostly lightweight, which is why `--tags` is required for them: plain
+`git describe --exact-match` failed on v0.15.59.) The `release-tag` gate in `release --check` refuses a **lightweight**
+`propagate-v*` tag on HEAD, and a `v*`-only tag on HEAD with no `propagate-v*` alias. Run `release --check` again after
+tagging to see it work; before tagging HEAD carries no version tag and the gate says so. A tag is never moved or deleted
+once pushed: a wrong tag gets the next version.
+
+**The legacy `v*` tags** (v0.15.50 to v0.17.0) keep their names, because links out already use them, and are declared as
+`legacy_tags` under `releases:` in propagate's `.sidecar.yml`. Each gets an annotated alias in the new form:
+
+```
+node scripts/release-tag-aliases.mjs                   # dry run (default): what --apply would create
+node scripts/release-tag-aliases.mjs --apply           # creates LOCAL annotated propagate-vX.Y.Z tags; never moves or pushes
+node scripts/release-tag-aliases.mjs --print-sidecar   # the legacy_tags block, derived from git tag, for .sidecar.yml
+```
+
+**Upgrade path of this change (#238):** nothing an installed user stores changes. Plugin installs load the working tree
+in place, never a tag name, so only the tag names change, from the next release on.
+
+Pushing the aliases is yours: `git push origin 'refs/tags/propagate-v*'`. The release-kind path and `release notes`
+find the last tag in either form, so the first `propagate-v*` release is measured from the right commit.
 
 ### 1 · VERSION bumped
 
@@ -156,7 +186,7 @@ pass**: if a genuinely fresh workspace cannot reach a clean `doctor` today,
 that is real information about the rest of the tool, and papering over it
 here would be exactly the failure `rule:discernment-checks` exists to catch.
 
-### 5 · A human publishes
+### 5 · A human tags and publishes
 
 **Deliberately not automated, and there is no `--apply` flag anywhere in
 `lib/core/release.mjs` to make it one.** Two reasons, both load-bearing:
@@ -174,16 +204,37 @@ here would be exactly the failure `rule:discernment-checks` exists to catch.
 So step 5 stays a person, reviewing the tree `make-public.mjs` (without
 `--check`) writes, and pushing it by hand.
 
-### 6 · A GitHub Release
+### 6 · The GitHub Release lifecycle (#238)
 
-After the person has pushed and tagged, they publish the same text as a GitHub Release:
+After the person has pushed the annotated tag, one script walks the release through the states
+`rule:release-versioning` names. **It is a script a person runs, not a gate:** nothing in `release --check` reaches it,
+and without `--apply` it only prints.
 
 ```
-awk '/^## \[X\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > /tmp/notes-X.md   # the [X] section
-gh release create vX --notes-file /tmp/notes-X.md --title vX
+node scripts/release-publish.mjs                       # dry run: READS gh, prints every call it would make, sends no write
+node scripts/release-publish.mjs --apply               # draft → pre-release → release (Latest) → "Replaced by" on the previous
+node scripts/release-publish.mjs --step pre-release --apply     # one step: draft | pre-release | release | replaced
 ```
 
-Like step 5 it is not automated: it is outward-facing.
+| Step | Reads first | Acts when | Does |
+|---|---|---|---|
+| draft | the release list | no release exists for the tag | `POST` a **draft** (a workflow cannot read a draft) |
+| pre-release | the release | it is a draft | `PATCH` to **pre-release**; its assets are checked (`--expect-asset <name>`, repeatable; propagate ships none) |
+| release | the release | it is a pre-release | `PATCH` to **release**, marked Latest (`--no-latest` to not) |
+| replaced | the previous full release | its body does not begin `Replaced by` | `PATCH` `Replaced by propagate-vX.Y.Z` onto the top of its body |
+
+- **Every step is idempotent**: a re-run after a stop continues where it stopped, and a re-run after a finish sends
+  no write. The order is enforced: `--step release` on a draft refuses.
+- **The body is the CHANGELOG section for the version, extracted** (`## [X.Y.Z]` up to the next `## [`), never written
+  separately. No section, no release. A published release whose body differs from its section is reported, not edited.
+- **Refuses `--apply`** when the tag is missing locally, is lightweight (a legacy `v*` name is the exception), holds a
+  different `VERSION`, or is not on the remote: GitHub would create a missing tag from a branch head, as a lightweight one.
+  A dry run reports these and keeps going.
+- Linking: `/releases/tag/<tag>`, never `/releases/latest`.
+
+Step 5 and this step stay a person for the reason above. The mechanical parts a script can verify live in `release --check`
+(tag form); the comparison of a published body against its CHANGELOG section is owed to
+`propagate release check` (#135), and until it is built the `release` step prints the difference.
 
 ## `release --check`
 
@@ -191,7 +242,7 @@ Like step 5 it is not automated: it is outward-facing.
 node cli.mjs release --check [--json]
 ```
 
-Runs gates 1-4 above, plus `release-kind` (see "Which bump") and `plugin-validate` (Claude's own `claude plugin validate --json` on this plugin,
+Runs gates 1-4 above, plus `release-kind` (see "Which bump"), `release-tag` (the annotated-tag form) and `plugin-validate` (Claude's own `claude plugin validate --json` on this plugin,
 read by `lib/core/plugin-validate.mjs`; the one pinned warning is the `skills/propagate/SKILL.md` symlink, #98), and exits:
 
 | Exit | Meaning |

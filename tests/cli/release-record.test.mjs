@@ -33,7 +33,7 @@ function sandbox() {
   const state = path.join(root, "state");
   mkdirSync(home); mkdirSync(state);
   const run = (args, over = {}) => {
-    const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, HOME: home, PROPAGATE_STATE_DIR: state, ...over };
+    const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, HOME: home, PROPAGATE_STATE_DIR: state, PROPAGATE_UPGRADE_PATH_SKIP: "release-record test: the real tags are not exercised from the unit suite", ...over };
     delete env.NODE_TEST_CONTEXT;
     return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", env, timeout: 120000 });
   };
@@ -56,7 +56,7 @@ test("release --check appends exactly one line with every gate, matching what it
     assert.equal(rec.exitCode, printed.exitCode);
     assert.equal(r.status, printed.exitCode, "the exit code is the verdict's, record or no record");
     assert.equal(rec.version, JSON.parse(readFileSync(path.join(SKILL_DIR, "package.json"), "utf8")).version);
-    assert.deepEqual(rec.gates.map((g) => g.name), ["version-manifests", "release-kind", "suite", "plugin-validate", "make-public-check", "stranger-install"]);
+    assert.deepEqual(rec.gates.map((g) => g.name), ["version-manifests", "release-kind", "release-tag", "suite", "plugin-validate", "make-public-check", "stranger-install"]);
     assert.deepEqual(rec.gates.map((g) => g.status), printed.gates.map((g) => g.status));
     for (const g of rec.gates) assert.ok(typeof (g.detail ?? g.reason) === "string" && (g.detail ?? g.reason).length > 0, `${g.name} carries its detail or reason`);
     assert.equal("raw" in rec.gates[0], false, "gate output is not stored");
