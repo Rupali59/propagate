@@ -5089,6 +5089,37 @@ async function monitorCmd() {
   }
   if (backlogErr) console.error(`${YELLOW}monitor: backlog check could not run:${RESET} ${backlogErr}`);
 
+  // #239: decide BEFORE logRun whether doctor will run, so the run log can say so (never silent). The
+  // fingerprint costs seconds against doctor's ~67 s; doctor itself still runs after the log line below.
+  let doctorDecision = null;
+  let doctorFp = null;
+  if (!dryRun) {
+    try {
+      const fp = await import("./lib/report/doctor/fingerprint.mjs");
+      const { readSnapshot, SNAPSHOT_PATH } = await import("./lib/report/doctor/snapshot.mjs");
+      const { INTEGRATIONS } = await import("./lib/core/config.mjs");
+      const t0 = Date.now();
+      doctorFp = await fp.computeFingerprint({
+        repos: WORKSPACES.map((w) => w.root),
+        extraFiles: [CONFIG_PATH, INTEGRATIONS.healthExceptionsFile],
+      });
+      const envCeil = Number(process.env.PROPAGATE_DOCTOR_CEILING_MS);
+      doctorDecision = fp.decideDoctorRun({
+        snapshot: await readSnapshot(SNAPSHOT_PATH),
+        stored: await fp.readFingerprint(SNAPSHOT_PATH),
+        current: doctorFp,
+        ceilingMs: envCeil > 0 ? envCeil : fp.DEFAULT_CEILING_MS,
+      });
+      doctorDecision.fingerprintMs = Date.now() - t0;
+    } catch (e) {
+      // Cannot decide -> run. A broken skip-check must never be why doctor stops running.
+      doctorDecision = { run: true, reason: `fingerprint check threw: ${String(e?.message ?? e)}` };
+    }
+  }
+  const doctorNote = doctorDecision
+    ? (doctorDecision.run ? `running (${doctorDecision.reason})` : `skipped (fingerprint unchanged since ${doctorDecision.since})`)
+    : null;
+
   const stats = {
     rows: rows.length,
     actionable: actionable.length,
@@ -5098,6 +5129,7 @@ async function monitorCmd() {
     backlogNotified: dryRun ? 0 : defectPick.toNotify.length,
     backlogError: backlogErr,
     ...(trackerRefresh ? { trackerRefresh } : {}),
+    ...(doctorNote ? { doctor: doctorNote } : {}),
     ms: Date.now() - started,
     runId: monitorRunId,
   };
@@ -5118,24 +5150,29 @@ async function monitorCmd() {
   // Skipped on --dry-run: a dry run that spends 37s and writes a file is not dry.
   if (!dryRun) {
     try {
-      const { writeSnapshot } = await import("./lib/report/doctor/snapshot.mjs");
-      const { buildDoctorJson } = await import("./lib/report/doctor/structure.mjs");
-      const snap = await writeSnapshot({
-        runDoctor: async () => {
-          const captured = [];
-          const realLog = console.log;
-          console.log = (...a) => { captured.push(a.join(" ")); };
-          try {
-            // exitProcess:false is load-bearing — the default kills the process
-            // mid-monitor and the run would never log its own completion.
-            const problems = await doctor({ exitProcess: false });
-            return buildDoctorJson(captured, { problems, generatedAt: new Date().toISOString() });
-          } finally {
-            console.log = realLog;
-          }
-        },
-      });
-      if (snap?.error) console.error(`${YELLOW}monitor: doctor snapshot failed:${RESET} ${snap.error}`);
+      console.error(`${DIM}monitor: doctor: ${doctorNote}${RESET}`);
+      if (doctorDecision.run) {
+        const { writeSnapshot, SNAPSHOT_PATH } = await import("./lib/report/doctor/snapshot.mjs");
+        const { buildDoctorJson } = await import("./lib/report/doctor/structure.mjs");
+        const { writeFingerprint } = await import("./lib/report/doctor/fingerprint.mjs");
+        const snap = await writeSnapshot({
+          runDoctor: async () => {
+            const captured = [];
+            const realLog = console.log;
+            console.log = (...a) => { captured.push(a.join(" ")); };
+            try {
+              // exitProcess:false is load-bearing — the default kills the process
+              // mid-monitor and the run would never log its own completion.
+              const problems = await doctor({ exitProcess: false });
+              return buildDoctorJson(captured, { problems, generatedAt: new Date().toISOString() });
+            } finally {
+              console.log = realLog;
+            }
+          },
+        });
+        if (snap?.error) console.error(`${YELLOW}monitor: doctor snapshot failed:${RESET} ${snap.error}`);
+        else if (doctorFp?.ok) await writeFingerprint(SNAPSHOT_PATH, { fingerprint: doctorFp.fingerprint, snapshotGeneratedAt: snap.generatedAt });
+      }
     } catch (e) {
       // Even the writer failing must not end the monitor run.
       console.error(`${YELLOW}monitor: could not write doctor snapshot:${RESET} ${String(e?.message ?? e)}`);
