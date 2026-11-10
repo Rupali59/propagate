@@ -5099,8 +5099,12 @@ async function monitorCmd() {
       const { readSnapshot, SNAPSHOT_PATH } = await import("./lib/report/doctor/snapshot.mjs");
       const { INTEGRATIONS } = await import("./lib/core/config.mjs");
       const t0 = Date.now();
+      // Every repo doctor can see, nested projects included (the #131 census), not only workspace roots: most
+      // projects are nested repos, so a commit inside one must re-run doctor. Measured 2026-11-10: 59 repos, about 3 s
+      // cold, against 23 workspace roots.
+      const { listRepos } = await import("./lib/report/doctor/unrecorded.mjs");
       doctorFp = await fp.computeFingerprint({
-        repos: WORKSPACES.map((w) => w.root),
+        repos: [...new Set([...WORKSPACES.map((w) => w.root), ...listRepos(SEARCH_ROOTS, WORKSPACES).map((r) => r.root)])],
         extraFiles: [CONFIG_PATH, INTEGRATIONS.healthExceptionsFile],
       });
       const envCeil = Number(process.env.PROPAGATE_DOCTOR_CEILING_MS);
