@@ -1,5 +1,9 @@
-# Two allowlists that bound every cross-repo edge. Realpath-checked at load AND fire.
-# partner_roots: absolute repo roots an edge target may resolve into. Nothing else.
+# Two allowlists read by the decision-relay cross ledger (`status --cross`) and by doctor.
+# They do NOT gate which ordinary `.propagates.yml` edges fire: those fire across repos with
+# no allowlist (propagate#117). Doctor reads `partner_roots` (realpath'd, existing roots only,
+# minus any root that contains the hub) as the SHARED PLATFORM ROOTS: an edge joining two
+# different client workspaces is a doctor failure unless one end is under one of them.
+# partner_roots: absolute repo roots; a root listed here is a shared platform, not a client.
 partner_roots: []
 # ^ EMPTY BY DEFAULT, and that is the safe default: an empty allowlist permits no
 # cross-repo edge, so a fresh install cannot fire one it was never configured for.

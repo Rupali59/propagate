@@ -295,16 +295,20 @@ test("an UNCONFIGURED cross-repo allowlist is not a doctor failure", () => {
       renderConfig({ roots: [hub], scheduler: "none", hub }),
     );
     const out = run(["doctor", "--full"]);
+    // propagate#117 changed this deliberately. The allowlist no longer gates anything doctor
+    // reports, so "unconfigured allowlist" is no longer a state doctor describes or fails on.
+    // What the fixture's `.propagates-cross.yml` now produces is the retired-format finding:
+    // the entry never fired, so doctor fails it and says where to move it. Everything the
+    // original test protected still holds: nothing here fails for the ALLOWLIST being empty.
     assert.doesNotMatch(
       out,
-      /✗ cross-repo edges resolve/,
-      "an unconfigured allowlist must not FAIL a fresh install",
+      /outside-allowlist|cross-repo edges resolve/,
+      "the retired allowlist check must not come back, and an empty allowlist must not fail a fresh install",
     );
-    assert.match(out, /allowlist/i, "but it must still say the allowlist is unconfigured");
     assert.match(
       out,
-      /1 outside-allowlist/,
-      "the fixture must carry a cross edge outside the allowlist, or this test proves nothing",
+      /✗ legacy \.propagates-cross\.yml entry .*repo-a.*move it to \.propagates\.yml \(propagate#117\)/,
+      "the fixture's legacy entry must be named with the move instruction, or this test proves nothing",
     );
   } finally {
     // maxRetries, because `force` does NOT cover ENOTEMPTY. The CLI under test

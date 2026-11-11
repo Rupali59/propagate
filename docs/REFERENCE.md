@@ -538,6 +538,29 @@ watcher — so `check` won't warn on a glob-declared code edge. Declare
 non-glob `kind: code` edges for files you want the commit-time gate to
 actually catch.
 
+## Cross-repo edges (propagate#117)
+
+There is **one format**: an ordinary `.propagates.yml`. A downstream (or a source key) may be a path that
+leaves the repo, and `reconcile`, `status` and `check --changed` treat it like any other edge; the row
+carries `sameRepo: false`. Nothing needs an allowlist to fire.
+
+**Client isolation is a doctor check, not a load-time gate.** `doctor` reads the `reconcile()` rows it already
+computed and fails on any cross-repo edge that joins two **different client workspaces** with no shared platform
+root at either end (`crossClientViolations`, `lib/edges/cross-repo.mjs`). Owner of a path is the discovered
+workspace that is a direct child of `hubRoot` and contains it (by realpath); the hub itself and tooling have no
+owner, so hub-to-client and a client to its own nested repo always pass. The platform roots are `partner_roots`
+in `cross-allow.yml` (existing roots only, realpath'd), minus any root that contains the hub. A scan over fewer
+than 10 workspaces, or one that finds no cross-repo rows, is reported `inconclusive` (and fails doctor), never
+as a pass. With no `hubRoot` configured there is no client boundary, and doctor says so as an info line.
+
+**`.propagates-cross.yml` is retired.** Its `platform_contracts` and `shared_conventions` entries never fired:
+no command read them for drift. The file is still parsed (`propagates-cross.schema.json`) only so `doctor` can
+fail on every entry left in one: "declared in a format nothing fires; move it to `.propagates.yml`". Move an
+entry into the sidecar of the repo holding its source and delete the file in the same commit. The
+`status --cross` ledger (decision relay) is unaffected.
+
+**Upgrade note:** `.propagates-cross.yml` entries now fail `doctor`; move them to `.propagates.yml`.
+
 ## The inbound view — delivery for cross-repo drift (2026-08 plan Part 2)
 
 An edge crossing a repo boundary records its drift wherever it fired — in the

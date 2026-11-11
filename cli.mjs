@@ -161,7 +161,6 @@ import {
 } from "./lib/edges/ledger.mjs";
 import { findLedgersUnder } from "./lib/edges/refs.mjs";
 import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatter.mjs";
-import { discoverCrossReposSync, loadCrossRepoSync, resolveTarget } from "./lib/edges/cross-repo.mjs";
 import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
 import { reconcile, STATES, groupRows, inboundRows, edgeIdFor, isGlobPattern, expandDownstream } from "./lib/edges/reconcile.mjs";
 import { ACTIONABLE, ACTIONS, DISPLAY_ORDER, actionOf } from "./lib/edges/states.mjs";
@@ -187,37 +186,6 @@ import {
   appendMetricsRecord,
 } from "./lib/report/metrics.mjs";
 
-/**
- * Validate cross-repo edges: load each .propagates-cross.yml, resolve every
- * source/watch/affects target, count missing + outside-allowlist. Exported for test.
- */
-export async function checkCrossRepo(searchRoots = SEARCH_ROOTS) {
-  const repos = discoverCrossReposSync(searchRoots);
-  let edges = 0, missing = 0, outsideAllowlist = 0;
-  // N68: report the CORPUS, not only the verdict. `0 missing` over a corpus
-  // that was silently short is indistinguishable from `0 missing` over the
-  // whole tree, and for a month it was the former — the walk stopped at the
-  // first sidecar it found, hiding 7 dead edges one directory deeper. Saying
-  // how many sidecar files were opened, and how many could not be, is what
-  // makes "found nothing" and "looked at nothing" different outputs
-  // (rule:discernment-checks §2).
-  let sidecars = 0, unreadable = 0;
-  for (const repo of repos) {
-    let e;
-    try { e = loadCrossRepoSync(repo.root); sidecars++; } catch { unreadable++; continue; }
-    const targets = [
-      ...e.pushEdges.flatMap((p) => p.affects.map((a) => a.path)),
-      ...e.pullEdges.map((p) => p.watch),
-    ];
-    for (const t of targets) {
-      edges++;
-      const r = resolveTarget(repo.root, t);
-      if (r.reason === "missing") missing++;
-      else if (r.reason === "outside-partner" || r.reason === "not-contract") outsideAllowlist++;
-    }
-  }
-  return { edges, missing, outsideAllowlist, sidecars, unreadable };
-}
 import { discoverWorkspacesSync, isWorkspaceMarker, liveLedgerCandidates } from "./lib/core/discovery.mjs";
 import { parseRootsArg, probeRoots, renderConfig, verifyDiscovery, PROBE_LAYOUTS, migrateLegacyState } from "./lib/core/setup.mjs";
 import { updateNotice, formatUpdateNotice } from "./lib/core/update-notice.mjs";
@@ -796,48 +764,23 @@ async function doctor({ exitProcess = true } = {}) {
 
   console.log(`\n${BOLD}# Cross-repo${RESET}`);
   try {
-    const x = await checkCrossRepo();
-    // "Outside the allowlist" means two different things, and conflating them made every
-    // fresh install red. If the allowlist is EMPTY, cross-repo is simply not configured —
-    // the shipped cross-allow.yml is deliberately empty so a new machine permits no cross
-    // edge it was never told about (Phase 2). Failing an install for not having
-    // configured an optional feature is the same mistake as failing it for the retired
-    // watcher's state.json.
-    //
-    // If the allowlist is NON-EMPTY and an edge still falls outside it, that IS a
-    // failure: a declared edge reaches past a bound someone deliberately set.
-    //
-    // The safety property is untouched either way — an empty allowlist still permits
-    // nothing. This changes only how doctor DESCRIBES that state.
-    let allowlistConfigured = false;
-    try {
-      const { CROSS_ALLOW_PATH } = await import("./lib/core/config.mjs");
-      const parsedAllow = YAML.parse(readFileSync(CROSS_ALLOW_PATH, "utf8"));
-      allowlistConfigured = Array.isArray(parsedAllow?.partner_roots) && parsedAllow.partner_roots.length > 0;
-    } catch {
-      allowlistConfigured = false;
-    }
-    // N68: name the corpus first. A verdict over an unstated corpus is what let
-    // `0 missing` stand for a month while a whole sidecar went unopened.
-    const crossDetail =
-      `${x.sidecars} sidecar file(s) scanned` +
-      (x.unreadable ? `, ${x.unreadable} UNREADABLE` : "") +
-      ` — ${x.edges} edges, ${x.missing} missing, ${x.outsideAllowlist} outside-allowlist`;
-    if (!allowlistConfigured && x.outsideAllowlist > 0 && x.missing === 0) {
-      info(
-        "cross-repo edges resolve",
-        `${crossDetail} — allowlist is empty, so cross-repo is UNCONFIGURED, not violated. ` +
-          `Add partner_roots to $PROPAGATE_STATE_DIR/cross-allow.yml to enable these edges.`,
-      );
-    } else {
-      // `unreadable` fails too: a sidecar that could not be parsed is the check
-      // declining to look, and a decline must never render as a pass.
-      check(
-        "cross-repo edges resolve",
-        x.missing === 0 && x.outsideAllowlist === 0 && x.unreadable === 0,
-        crossDetail,
-      );
-    }
+    // propagate#117: the cross-client guard over the reconcile rows doctor already
+    // computed (one reconcile per run, D8), plus the retired-format leftovers check.
+    // This replaced "cross-repo edges resolve", which resolved a format nothing fired.
+    const { checkCrossRepoEdges } = await import("./lib/report/doctor/cross.mjs");
+    const { loadPlatformRoots } = await import("./lib/edges/cross-repo.mjs");
+    const { HUB_ROOT: crossHubRoot } = await import("./lib/core/config.mjs");
+    const crossReporter = new Reporter();
+    checkCrossRepoEdges({
+      reporter: crossReporter,
+      rows: doctorReconcileRows,
+      hubRoot: crossHubRoot,
+      workspaces: WORKSPACES,
+      platformRoots: loadPlatformRoots(crossHubRoot),
+      searchRoots: SEARCH_ROOTS,
+    });
+    renderDoctorEntries(crossReporter.drain());
+    problems += crossReporter.problems;
     // G7: every fired row must carry a normalized `partner` join key.
     //
     // READS BOTH ERAS. This used to read the live ledger only. Once Phase D
@@ -5425,7 +5368,7 @@ async function graphCmd() {
 }
 
 // Only dispatch when executed directly (node cli.mjs ...), NOT when a test imports
-// checkCrossRepo from this module.
+// a named export from this module.
 //
 // Both sides must be realpath-resolved before comparing. `import.meta.url` is
 // already realpathed by the ESM loader, but `process.argv[1]` is the literal

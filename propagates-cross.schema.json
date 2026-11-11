@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://vipinkaushik.local/propagates-cross.schema.json",
   "title": "Cross-repo propagation sidecar",
+  "description": "RETIRED (propagate#117). Entries in this format never fire. This schema is kept only so doctor can parse leftover .propagates-cross.yml files and report each entry; declare cross-repo edges in an ordinary .propagates.yml.",
   "type": "object",
   "additionalProperties": false,
   "properties": {

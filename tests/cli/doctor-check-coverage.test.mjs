@@ -106,7 +106,6 @@ const KNOWN_UNCOVERED = [
   // so it needed a fixture rather than a rule. Removed, not deferred.
   "cross rows carry partner",
   "cross-repo check ran",
-  "cross-repo edges resolve",
   "discovery not degraded",
   "event store lines all parseable",
   "ledger JSONL exists",
