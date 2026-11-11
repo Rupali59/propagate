@@ -250,6 +250,25 @@ test("the hook snippet: passes through exit 0/2, blocks on 1, skips with a notic
   } finally { w.clean(); }
 });
 
+test("the snippet as the LAST thing in a hook still exits 0 on a pass (no trailing exit 0 to hide behind)", () => {
+  // 2026-11-11: the block ended `[ "$_pg_rc" -eq 2 ] && echo ...`. On a pass that test is false, so a hook with nothing
+  // after the block exited 1 and blocked every commit, silently: 5 of 28 gated hooks ended at the block. The test above
+  // always appends `exit 0`, the one shape that hides it. Literal hook text, no builder (rule:mutate-behind-the-fixture-builder).
+  const w = world();
+  try {
+    const run = (code) => {
+      const f = path.join(w.dir, `cli-${code}.mjs`);
+      writeFileSync(f, `process.exit(${code});\n`);
+      const hook = path.join(w.dir, "last.sh");
+      writeFileSync(hook, `#!/bin/sh\necho earlier step\n${GATE_SNIPPET}`);
+      try { execFileSync("sh", [hook], { stdio: "pipe", env: { ...process.env, HOME: w.dir, PROPAGATE_CLI: f } }); return 0; } catch (e) { return e.status; }
+    };
+    assert.equal(run(0), 0, "a passing gate at the end of a hook must not block the commit");
+    assert.equal(run(2), 0, "could-not-judge is allowed");
+    assert.equal(run(1), 1, "and a real over-limit still blocks");
+  } finally { w.clean(); }
+});
+
 test("the hook resolves the installed plugin from installed_plugins.json (no relative path)", () => {
   const w = world();
   try {
