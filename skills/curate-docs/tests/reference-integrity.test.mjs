@@ -108,6 +108,49 @@ test("verdict rows: STALE names at most 5 names, ok counts names, stale exemptio
   assert.match(exempt.why, /exemption/);
 });
 
+test("a path in the WORKSPACE above the repo resolves (docs live above the repo)", () => {
+  const ws = repoWith({
+    ".propagates.yml": "workspace: true\nsources: {}\n",
+    "docs/astro/ASSETS.md": "# assets\n",
+    "app/.git/HEAD": "ref: refs/heads/main\n",
+    "app/src/gate.ts": CODE,
+  });
+  const repo = path.join(ws, "app");
+  const doc = "See `docs/astro/ASSETS.md` and `docs/astro/MISSING.md`.\n";
+  const r = checkReferences({ docText: doc, docDir: repo, repoRoot: repo, io: realIO(repo) });
+  assert.deepEqual(r.unresolved, ["docs/astro/MISSING.md"], "the workspace file resolves, the absent one does not");
+});
+
+test("a path that exists only ABOVE the hub does not resolve", () => {
+  // outer/shared/ONLYABOVE.md exists; outer/hub is a git checkout (the hub); outer/hub/proj is a repo.
+  // The walk stops at the hub, so a file above it must not count.
+  const outer = repoWith({
+    "shared/ONLYABOVE.md": "# above\n",
+    "hub/.git/HEAD": "ref: refs/heads/main\n",
+    "hub/shared/INHUB.md": "# in hub\n",
+    "hub/proj/.git/HEAD": "ref: refs/heads/main\n",
+    "hub/proj/src/gate.ts": CODE,
+  });
+  const proj = path.join(outer, "hub", "proj");
+  const r = checkReferences({
+    docText: "Names `shared/ONLYABOVE.md` and `shared/INHUB.md`.\n",
+    docDir: proj, repoRoot: proj, io: realIO(proj),
+  });
+  assert.deepEqual(r.unresolved, ["shared/ONLYABOVE.md"], "the hub itself is searched, nothing above it");
+});
+
+test("age is only the fallback: an integrity-ok doc 400 days old is ok; a blind old doc says why", () => {
+  const old = { date: new Date(Date.now() - 400 * 86400000).toISOString() };
+  const base = { kind: "design", inDegree: 1, hubDistance: 1, lastTouched: old };
+  const okRes = verdict({ ...base, integrity: { asserted: ["AaBb1"], unresolved: [], staleExemptions: [], blind: false } }, 30);
+  assert.equal(okRes.flag, "ok", "400d old, every name resolves: integrity alone decides");
+  const blind = verdict({ ...base, integrity: { asserted: [], unresolved: [], staleExemptions: [], blind: true } }, 30);
+  assert.equal(blind.flag, "STALE");
+  assert.match(blind.why, /^no assertable names; 400d since last change$/);
+  const youngBlind = verdict({ ...base, lastTouched: { date: new Date().toISOString() }, integrity: { asserted: [], unresolved: [], staleExemptions: [], blind: true } }, 30);
+  assert.equal(youngBlind.flag, "NO-NAMES");
+});
+
 test("the extractor classes and the search scope are the ones the plan names", () => {
   assert.equal(IDENTIFIER_CLASSES.length, 2);
   assert.ok(PATH_CLASS.test("lib/a-b/c_d.dart") && !PATH_CLASS.test("a.exe"));

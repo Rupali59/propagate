@@ -130,6 +130,9 @@ export function checkReferences({ docText, docDir, repoRoot, io }) {
   let basenames = null;
   const hasPath = (p) => {
     if (io.exists(path.resolve(docDir, p)) || io.exists(path.resolve(repoRoot, p))) return true;
+    // Docs live in the workspace, ABOVE the repo (rule:workspace-docs-layout), so a doc inside the
+    // repo can name `docs/x/ASSETS.md` that exists one directory up. Bounded by `ancestorDirs`.
+    if ((io.ancestorDirs?.() ?? []).some((a) => io.exists(path.resolve(a, p)))) return true;
     basenames ??= io.trackedBasenames();
     return basenames.has(path.basename(p));
   };
@@ -138,6 +141,34 @@ export function checkReferences({ docText, docDir, repoRoot, io }) {
   const unresolved = asserted.filter((n) => !exemptSet.has(n) && !resolves(n));
   const staleExemptions = exempt.filter((n) => resolves(n));
   return { asserted, unresolved, staleExemptions, blind: asserted.length === 0 };
+}
+
+/**
+ * The directories above a repo where its docs may live: each ancestor, nearest first, up to and
+ * including the nearest WORKSPACE root (a dir whose `.propagates.yml` says `workspace: true`).
+ * Never above the hub: an ancestor that is itself a git checkout is the hub (or an enclosing
+ * repo) and is the last one searched. Floor: the filesystem root ends the walk.
+ */
+export function ancestorDirs(repoRoot) {
+  const out = [];
+  if (isWorkspaceRoot(repoRoot)) return out; // the repo IS the workspace: its docs are already inside it
+  let dir = path.dirname(path.resolve(repoRoot));
+  for (let i = 0; i < 64; i++) {
+    out.push(dir);
+    if (isWorkspaceRoot(dir) || existsSync(path.join(dir, ".git"))) break;
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return out;
+}
+
+function isWorkspaceRoot(dir) {
+  try {
+    return /^workspace:\s*true\s*$/m.test(readFileSync(path.join(dir, ".propagates.yml"), "utf8"));
+  } catch {
+    return false;
+  }
 }
 
 /** Production reader for one repo. `git ls-files` (tracked plus untracked-not-ignored) so
@@ -179,6 +210,7 @@ export function realIO(repoRoot) {
         });
     },
     exists: (abs) => existsSync(abs),
+    ancestorDirs: () => ancestorDirs(repoRoot),
     trackedBasenames: () => new Set(list().map((r) => path.basename(r))),
   };
 }

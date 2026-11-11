@@ -26,27 +26,46 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), "..", "..", "..");
 
-/** The discoverable skills. `SKILL.md` is the same file as
- *  `skills/propagate/SKILL.md`, which is a symlink to it — budgeting the target
- *  covers both, and editing either writes through. */
-const ROUTERS = [
-  { name: "propagate", file: path.join(ROOT, "SKILL.md") },
-  { name: "curate-docs", file: path.join(ROOT, "skills", "curate-docs", "SKILL.md") },
-];
+/** The discoverable skills, DERIVED (rule:derive-dont-curate): every `skills/<name>/SKILL.md` plus the root
+ *  `SKILL.md`, deduped by realpath because `skills/propagate/SKILL.md` is a symlink to the root one
+ *  (budgeting the target covers both, and editing either writes through). A hand-kept list let
+ *  `design-workflow` escape the budget. */
+function discoverRouters() {
+  const files = [path.join(ROOT, "SKILL.md")];
+  for (const d of readdirSync(path.join(ROOT, "skills"), { withFileTypes: true })) {
+    const f = path.join(ROOT, "skills", d.name, "SKILL.md");
+    if (d.isDirectory() && existsSync(f)) files.push(f);
+  }
+  const seen = new Set();
+  const routers = [];
+  for (const f of files) {
+    const real = realpathSync(f);
+    if (seen.has(real)) continue;
+    seen.add(real);
+    routers.push({ name: real === realpathSync(path.join(ROOT, "SKILL.md")) ? "propagate" : path.basename(path.dirname(real)), file: real });
+  }
+  return routers;
+}
+const ROUTERS = discoverRouters();
 
-const SECTIONS = [
-  path.join(ROOT, "skills", "propagate", "sections", "routing.md"),
-  path.join(ROOT, "skills", "propagate", "sections", "reconcile.md"),
-  path.join(ROOT, "skills", "propagate", "sections", "settle.md"),
-  path.join(ROOT, "skills", "curate-docs", "sections", "design.md"),
-  path.join(ROOT, "skills", "curate-docs", "sections", "eng.md"),
-];
+/** Every `skills/<skill>/sections/*.md`, derived. */
+const SECTIONS = readdirSync(path.join(ROOT, "skills"), { withFileTypes: true })
+  .filter((d) => d.isDirectory() && existsSync(path.join(ROOT, "skills", d.name, "sections")))
+  .flatMap((d) => readdirSync(path.join(ROOT, "skills", d.name, "sections"))
+    .filter((n) => n.endsWith(".md"))
+    .map((n) => path.join(ROOT, "skills", d.name, "sections", n)));
+
+test("the derived populations are not blind", () => {
+  assert.ok(ROUTERS.length >= 3, `only ${ROUTERS.length} routers found — the scan has gone blind, it has not found nothing`);
+  assert.ok(SECTIONS.length >= 5, `only ${SECTIONS.length} sections found — the scan has gone blind`);
+  assert.ok(ROUTERS.some((r) => r.name === "design-workflow"), "design-workflow/SKILL.md must be in the budgeted set");
+});
 
 /** Word count of everything after the closing `---` of YAML frontmatter. */
 function bodyWordCount(file) {

@@ -65,6 +65,11 @@ export function verdict(row, staleDays, hubless = false) {
     // is a caller that did not look, and is reported as blind, never as ok.
     const ri = row.integrity;
     if (!ri || ri.blind) {
+      // Age is the wrong axis for a design doc, so it is only a FALLBACK: used when integrity has
+      // nothing to say (0 assertable names), and then the flag says why it fell back.
+      if (age !== null && age > staleDays) {
+        return { flag: "STALE", why: `no assertable names; ${age}d since last change` };
+      }
       return { flag: "NO-NAMES", why: "no backticked identifier or file path found — the check is blind here, not clean" };
     }
     if (ri.unresolved.length) {
@@ -73,8 +78,8 @@ export function verdict(row, staleDays, hubless = false) {
     if (ri.staleExemptions.length) {
       return { flag: "STALE", why: `designed-not-built names now resolve, remove the exemption: ${nameList(ri.staleExemptions)}` };
     }
-    // The kind's former rule still applies on top: a surface that changed with no doc change.
-    if (age !== null && age > staleDays) return { flag: "STALE", why: `${age}d since last change (${ri.asserted.length} names resolve)` };
+    // With at least one asserted name, integrity alone decides: a 400-day-old doc whose names
+    // all resolve is ok. Age does not override it.
     return { flag: "ok", why: `${ri.asserted.length} names resolve` };
   }
   if (rule === "age" && age !== null && age > staleDays) return { flag: "STALE", why: `${age}d since last change` };
