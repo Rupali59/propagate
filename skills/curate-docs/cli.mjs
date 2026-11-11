@@ -26,7 +26,7 @@
  * EXIT CODES:  0 ok · 1 error · 2 bad usage · 3 taxonomy unavailable · 4 no hub · 5 refused
  */
 
-import { writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
@@ -39,6 +39,8 @@ import { impact, drainPrecheck } from "./lib/impact.mjs";
 import { classifyDangling } from "./lib/branches.mjs";
 import { gather, lastTouched, declaredState } from "./lib/evidence.mjs";
 import { renderMarkdown, verdict } from "./lib/report.mjs";
+import { stalenessRule } from "./lib/taxonomy.mjs";
+import { checkReferences, realIO, repoRootOf } from "./lib/reference-integrity.mjs";
 
 const MODES = ["report", "orphans", "detached", "dangling", "graph", "state", "impact", "drain"];
 
@@ -106,6 +108,16 @@ function repoRootFor(dir) {
   return path.resolve(dir);
 }
 
+/** One scan of source per git repo, shared by every design doc in it. */
+const ioByRepo = new Map();
+function integrityFor(abs, root) {
+  const repoRoot = repoRootOf(path.dirname(abs), root);
+  if (!ioByRepo.has(repoRoot)) ioByRepo.set(repoRoot, realIO(repoRoot));
+  let docText = "";
+  try { docText = readFileSync(abs, "utf8"); } catch { /* unreadable reads as blind: empty text extracts nothing */ }
+  return checkReferences({ docText, docDir: path.dirname(abs), repoRoot, io: ioByRepo.get(repoRoot) });
+}
+
 async function analyse(opts, root) {
   const cfg = loadConfig(root, {
     flags: {
@@ -163,6 +175,7 @@ async function analyse(opts, root) {
       declaredState: k.kind === "plan" ? declaredState(root, abs, { hub: graph.seeds[0], nodes: graph.nodes }) : null,
       outbound: node.outbound.map((o) => path.relative(root, o).split(path.sep).join("/")),
     };
+    if (stalenessRule(row.kind) === "reference-integrity") row.integrity = integrityFor(abs, root);
     row.verdict = verdict(row, staleDays, graph.hubless);
     return row;
   });

@@ -11,6 +11,7 @@
 import path from "node:path";
 import { stalenessRule } from "./taxonomy.mjs";
 import { ageDays } from "./evidence.mjs";
+import { nameList } from "./reference-integrity.mjs";
 
 const SECTIONS = [
   { title: "Reference & architecture", kinds: ["functionality-spec", "page-spec", "ops", "design"],
@@ -58,6 +59,23 @@ export function verdict(row, staleDays, hubless = false) {
   if (row.hubDistance === null) return { flag: "DETACHED", why: `cited only from outside the ${row.hubName} tree` };
   if (rule === "declared-state" && row.declaredState?.state === "undeclared") {
     return { flag: "NO-STATE", why: row.declaredState.why };
+  }
+  if (rule === "reference-integrity") {
+    // `row.integrity` is computed by cli.mjs (it needs the repo's source); a row without it
+    // is a caller that did not look, and is reported as blind, never as ok.
+    const ri = row.integrity;
+    if (!ri || ri.blind) {
+      return { flag: "NO-NAMES", why: "no backticked identifier or file path found — the check is blind here, not clean" };
+    }
+    if (ri.unresolved.length) {
+      return { flag: "STALE", why: `${ri.unresolved.length} of ${ri.asserted.length} asserted names do not resolve: ${nameList(ri.unresolved)}` };
+    }
+    if (ri.staleExemptions.length) {
+      return { flag: "STALE", why: `designed-not-built names now resolve, remove the exemption: ${nameList(ri.staleExemptions)}` };
+    }
+    // The kind's former rule still applies on top: a surface that changed with no doc change.
+    if (age !== null && age > staleDays) return { flag: "STALE", why: `${age}d since last change (${ri.asserted.length} names resolve)` };
+    return { flag: "ok", why: `${ri.asserted.length} names resolve` };
   }
   if (rule === "age" && age !== null && age > staleDays) return { flag: "STALE", why: `${age}d since last change` };
   return { flag: "ok", why: age === null ? "age unknown" : `${age}d` };
@@ -138,6 +156,15 @@ export function renderMarkdown(result) {
     for (const r of triage) {
       L.push(`### \`${r.rel}\` — ${r.verdict.flag}`);
       L.push(`- kind **${r.kind ?? "undeclared"}** (${r.kindSource}) · ${r.verdict.why}`);
+      // A triaged design doc still gets its integrity answer: ORPHAN outranks it in the flag,
+      // but "nothing cites it" must not hide "and 3 of its names do not exist".
+      if (r.integrity) {
+        const ri = r.integrity;
+        L.push(ri.blind ? "- reference integrity: NO-NAMES (blind, no backticked names found)"
+          : `- reference integrity: ${ri.asserted.length - ri.unresolved.length} of ${ri.asserted.length} names resolve` +
+            (ri.unresolved.length ? `; unresolved ${nameList(ri.unresolved)}` : "") +
+            (ri.staleExemptions.length ? `; stale exemptions ${nameList(ri.staleExemptions)}` : ""));
+      }
       const i = r.evidence?.introducedBy;
       L.push(
         i?.status === "ok"

@@ -173,7 +173,7 @@ test("frontmatter absent is not an error, and every KIND documents its lifecycle
 // Every kind is a RECORD now, not a string, and every record must carry all five
 // fields non-empty. A kind missing one is half-registered: it classifies docs but
 // tells nobody what should create, maintain, link or never restate.
-const MAINTAIN_RULES = ["age", "declared-state", "append-only", "completeness", "none"];
+const MAINTAIN_RULES = ["age", "declared-state", "append-only", "completeness", "reference-integrity", "none"];
 
 test("every KIND record carries all five guideline fields, non-empty", () => {
   for (const [k, rec] of Object.entries(KINDS)) {
@@ -189,6 +189,33 @@ test("every KIND record carries all five guideline fields, non-empty", () => {
       `${k}.maintain.rule "${rec.maintain.rule}" must be one of ${MAINTAIN_RULES.join(", ")}`,
     );
   }
+});
+
+// propagate#242 — design docs are inferred by name and by a /designs/ directory, and a
+// declared kind still wins. Literal fixtures on purpose: no shared builder.
+test("DESIGN.md and a /designs/ directory infer kind design; frontmatter still wins", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "dockind-design-"));
+  await mkdir(path.join(root, "docs", "designs"), { recursive: true });
+  const byName = path.join(root, "DESIGN.md");
+  const byDir = path.join(root, "docs", "designs", "UI-COMPONENTS.md");
+  const declared = path.join(root, "docs", "designs", "BRAND.md");
+  await writeFile(byName, "# Design\n");
+  await writeFile(byDir, "# UI components\n");
+  await writeFile(declared, "---\nkind: plan\n---\n# Brand\n");
+  assert.deepEqual(
+    { kind: kindOf(byName).kind, source: kindOf(byName).source },
+    { kind: "design", source: "filename" },
+  );
+  assert.deepEqual(
+    { kind: kindOf(byDir).kind, source: kindOf(byDir).source },
+    { kind: "design", source: "directory" },
+  );
+  assert.deepEqual(
+    { kind: kindOf(declared).kind, source: kindOf(declared).source },
+    { kind: "plan", source: "frontmatter" },
+    "a human's declared kind is never out-voted by the /designs/ heuristic",
+  );
+  assert.equal(KINDS.design.maintain.rule, "reference-integrity");
 });
 
 test("broken-path citations: narrow by design, because the naive rule was 12x noise", async () => {

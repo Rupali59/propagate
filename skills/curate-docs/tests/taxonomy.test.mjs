@@ -93,6 +93,7 @@ test("every candidate is reported when none resolves", () => {
 test("plan staleness is a declared-state question, not an age question", () => {
   assert.equal(stalenessRule("plan"), "declared-state");
   assert.equal(stalenessRule("page-spec"), "age");
+  assert.equal(stalenessRule("design"), "reference-integrity");
   assert.equal(stalenessRule("decision-log"), "append-only");
   assert.equal(stalenessRule(null), "none", "undeclared is a value, never a silence");
 });
@@ -109,9 +110,9 @@ test("STALENESS's key set cannot silently diverge from KINDS (plan D3)", async (
   );
 });
 
-test("every KINDS[k].maintain.rule is one of the five staleness enum values", async () => {
+test("every KINDS[k].maintain.rule is one of the six staleness enum values", async () => {
   const { KINDS } = await loadTaxonomy();
-  const allowed = new Set(["age", "declared-state", "append-only", "completeness", "none"]);
+  const allowed = new Set(["age", "declared-state", "append-only", "completeness", "reference-integrity", "none"]);
   for (const [kind, { maintain }] of Object.entries(KINDS)) {
     assert.ok(
       allowed.has(maintain?.rule),

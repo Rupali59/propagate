@@ -101,6 +101,8 @@ meant only that nobody had copy-pasted.
 
 ## Out of scope here
 
+Building or changing UI, tokens, motion or a DESIGN.md is the `design-workflow` skill, not a command here.
+
 `declare` and the legacy `drain` walkthrough are agent workflows, not routing —
 see `sections/reconcile.md`; settling v2 edges is `sections/settle.md`. The `skills-*` command
 family (skill lifecycle: create/promote/demote/reap) is a separate manager

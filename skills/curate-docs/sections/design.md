@@ -30,6 +30,8 @@ human's evidence, can close:
 | `UNLINKED-INDEX` | findable only if you already know it — who is meant to find it? |
 | `NO-STATE` | did it land, or was it dropped? |
 | `STALE` | it describes something still standing, gone quiet. Is it still true? |
+| `STALE` (design docs) | names the doc asserts that resolve to nothing in the code (comment-only mentions do not count), or `designed-not-built:` exemptions that now resolve. Fix the doc or build the thing |
+| `NO-NAMES` | a design doc with no backticked identifier or file path: the check is blind, not clean. Name its components in backticks |
 | `BAD-STATUS` | a `status:` outside the taxonomy — a typo reading as healthy |
 
 A document nothing calls is not wrong. It is **undecided**, and this skill is how the

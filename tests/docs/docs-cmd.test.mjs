@@ -119,7 +119,7 @@ test("--doctrine <kind> prints all five fields for that kind", async () => {
   const printed = logs.join("\n");
   assert.match(printed, /design\/IA intent; follows its surface/); // what
   assert.match(printed, /when a rendered surface exists that someone else must extend consistently/); // create
-  assert.match(printed, /age — it follows its surface/); // maintain
+  assert.match(printed, /reference-integrity — it names components, tokens and files that must exist/); // maintain (was age; #242)
   assert.match(printed, /the surface it governs; the canonical playbook it specialises/); // link
   assert.match(printed, /restate the playbook's token or component vocabulary/); // never
 });

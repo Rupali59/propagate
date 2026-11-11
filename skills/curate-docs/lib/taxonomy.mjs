@@ -134,7 +134,7 @@ export async function loadTaxonomy(env = process.env, home = os.homedir(), selfD
  * tested contract unreachable. Caught here for the identical reason and handled the identical
  * way: same exception type, same "propagate absent is a declared state, not silence" posture.
  */
-const MAINTAIN_RULES = new Set(["age", "declared-state", "append-only", "completeness", "none"]);
+const MAINTAIN_RULES = new Set(["age", "declared-state", "append-only", "completeness", "reference-integrity", "none"]);
 let SOURCE_KINDS = {};
 try {
   ({ KINDS: SOURCE_KINDS } = await loadTaxonomy());
@@ -145,7 +145,7 @@ try {
   // exactly like cli.mjs's kindFromConfig() fallback: undeclared, not wrong.
 }
 
-/** The same five values doc-kind.mjs's own comment names above `KINDS`. Checked here so a
+/** The same six values doc-kind.mjs's own comment names above `KINDS`. Checked here so a
  *  typo'd or widened `maintain.rule` upstream fails loudly at import time, rather than
  *  silently producing a wrong answer three call frames later. */
 export const STALENESS = Object.fromEntries(
