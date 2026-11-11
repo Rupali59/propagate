@@ -109,6 +109,26 @@ test("$HOME is expanded before the file is looked for", () => {
   }
 });
 
+test("a RELATIVE target resolves against the repo root, not doctor's cwd (git runs hooks from the top level)", () => {
+  // Literal hook text and a literal file, not a builder (rule:mutate-behind-the-fixture-builder).
+  const { dir, clean } = tmp("hooks-rel-");
+  try {
+    const r = repo(path.join(dir, "proj"), {
+      hooks: { "pre-commit": "#!/bin/sh\n# propagate gate\nnode scripts/finding.mjs check-staged\n" },
+    });
+    mkdirSync(path.join(r, "scripts"), { recursive: true });
+    writeFileSync(path.join(r, "scripts", "finding.mjs"), "//\n");
+    assert.notEqual(process.cwd(), r, "the test is only meaningful run from somewhere other than the repo");
+    const [row] = probeRepo(r);
+    assert.equal(row.state, "live", "scripts/finding.mjs exists under the repo root; reading it against cwd called it dead");
+    assert.equal(row.checked, 1);
+    rmSync(path.join(r, "scripts", "finding.mjs"));
+    assert.equal(probeRepo(r)[0].state, "dead", "…and a relative target genuinely missing from the repo is still dead");
+  } finally {
+    clean();
+  }
+});
+
 /* ── the false positive that shipped first, asserted absent ──────────────── */
 
 test("a command SUBSTITUTION is not a dead path — propagate's own hook", () => {
