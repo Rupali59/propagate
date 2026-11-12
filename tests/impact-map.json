@@ -10733,8 +10733,10 @@
   "tests/unit/agents.test.mjs": {
    "deps": [
     "agents/",
+    "agents/doc-curator.md",
     "agents/edge-settler.md",
     "hooks/agent-guard.mjs",
+    "scripts/check-curator.mjs",
     "tests/unit/agents.test.mjs"
    ],
    "size": "small"
@@ -18351,6 +18353,13 @@
    "deps": [
     "lib/core/worktrees.mjs",
     "tests/watcher/watcher.regression.test.mjs"
+   ],
+   "size": "small"
+  },
+  "tests/unit/check-curator.test.mjs": {
+   "deps": [
+    "scripts/check-curator.mjs",
+    "tests/unit/check-curator.test.mjs"
    ],
    "size": "small"
   }

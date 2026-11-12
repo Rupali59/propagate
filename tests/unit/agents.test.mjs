@@ -4,7 +4,7 @@
 // declaration is prose and its Bash is unguarded. Public-repo leaks are make-public --check's job (tracked files).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,9 +42,15 @@ for (const { file, src } of agents) {
   });
 }
 
+test("doc-curator ships with its deterministic gate (scripts/check-curator.mjs)", () => {
+  const ROOT = path.join(DIR, "..");
+  assert.ok(agents.some((a) => a.file === "doc-curator.md"), "agents/doc-curator.md is missing");
+  assert.ok(existsSync(path.join(ROOT, "scripts", "check-curator.mjs")), "doc-curator has no checker: an agent without a deterministic gate is not shipped");
+});
+
 test("every READ_ONLY name the guard protects is either a shipped agent or still to land (no stale names after #251)", () => {
   const shipped = new Set(agents.map((a) => a.file.replace(/\.md$/, "")));
   const pending = READ_ONLY.filter((n) => !shipped.has(n));
   // Until #251 step 4 lands, doc-curator and adversarial-reviewer are pending; after it, none may be.
-  assert.ok(pending.every((n) => ["doc-curator", "adversarial-reviewer"].includes(n)), `stale READ_ONLY names: ${pending.join(", ")}`);
+  assert.ok(pending.every((n) => ["adversarial-reviewer"].includes(n)), `stale READ_ONLY names: ${pending.join(", ")}`);
 });
