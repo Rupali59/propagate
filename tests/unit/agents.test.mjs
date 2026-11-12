@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { READ_ONLY } from "../../hooks/agent-guard.mjs";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
-const FLOOR = 1; // raised as agents land; #251 ships 3
+const FLOOR = 3; // #251 shipped edge-settler, doc-curator, adversarial-reviewer
 
 function frontmatter(src) {
   const m = src.match(/^---\n([\s\S]*?)\n---\n/);
@@ -42,15 +42,22 @@ for (const { file, src } of agents) {
   });
 }
 
-test("doc-curator ships with its deterministic gate (scripts/check-curator.mjs)", () => {
-  const ROOT = path.join(DIR, "..");
-  assert.ok(agents.some((a) => a.file === "doc-curator.md"), "agents/doc-curator.md is missing");
-  assert.ok(existsSync(path.join(ROOT, "scripts", "check-curator.mjs")), "doc-curator has no checker: an agent without a deterministic gate is not shipped");
-});
+// Rupali, 2026-11-12: "if we are replacing a functionality, it better have a deterministic check at the end".
+// Derived from each agent body, not a list: the body must name its gate, and the gate must exist. A gate is either
+// a checker script (scripts/check-*.mjs) or a propagate command flag (`settle <file> --check`, cli/settle.mjs).
+for (const { file, src } of agents) {
+  test(`${file}: names a deterministic gate that exists`, () => {
+    const ROOT = path.join(DIR, "..");
+    const scripts = [...src.matchAll(/scripts\/check-[a-z-]+\.mjs/g)].map((m) => m[0]);
+    const settleCheck = /settle <file> --check/.test(src);
+    assert.ok(scripts.length || settleCheck, `${file} names no gate: an agent without a deterministic check is not shipped`);
+    for (const p of scripts) assert.ok(existsSync(path.join(ROOT, p)), `${file} names ${p}, which does not exist`);
+    if (settleCheck) assert.match(readFileSync(path.join(ROOT, "cli", "settle.mjs"), "utf8"), /--check/, "settle has no --check");
+  });
+}
 
 test("every READ_ONLY name the guard protects is either a shipped agent or still to land (no stale names after #251)", () => {
   const shipped = new Set(agents.map((a) => a.file.replace(/\.md$/, "")));
   const pending = READ_ONLY.filter((n) => !shipped.has(n));
-  // Until #251 step 4 lands, doc-curator and adversarial-reviewer are pending; after it, none may be.
-  assert.ok(pending.every((n) => ["adversarial-reviewer"].includes(n)), `stale READ_ONLY names: ${pending.join(", ")}`);
+  assert.deepEqual(pending, [], `READ_ONLY names with no agent file (stale guard entries): ${pending.join(", ")}`);
 });

@@ -565,7 +565,9 @@ propagate ships subagents in `agents/`, registered as `propagate:<name>`. **An a
 
 | Agent | Proposes | The check |
 |---|---|---|
-| `edge-settler` | a disposition, reason and SHA evidence for every edge on one file | `settle <file> --check <proposals.json>` |
+| `edge-settler` | a disposition, reason and SHA evidence for every edge on one file | `settle <file> --check <proposals.json>`: the id set equals the worklist; each disposition is in `allowed` (none that needs `--out-of-order`); each SHA is real, touched one side, and **postdates the last verify**; then a `verify` dry run |
+| `doc-curator` | whether a doc's CONTENT still holds: `stale` or `current` claims, each with the doc's statement and a quoted evidence line | `node scripts/check-curator.mjs <proposals.json>`: both files exist; the statement is in the doc; the quote is byte-exact at `file:line` (within 5 lines). A **structural** claim (orphan, unlinked, broken link) is refused with the curate-docs command that derives it. A passing claim is INFERRED: shown, never applied. An empty list exits 1 |
+| `adversarial-reviewer` | findings on one artifact and on every edge declared for it, each with a read-only demonstration | `node scripts/check-review.mjs <artifact> <report.json>`: `edges_reviewed` equals the declared edges, derived by propagate's reconcile, never by the report; each finding is at a real `file:line`. Each `demo_cmd` passes the agent guard's `decide()`, then re-runs (30 s) and must match `expect`. Outcomes: verified, unverified (listed, not counted) or refuted (fails). An artifact with 0 declared edges fails as vacuous coverage unless `--allow-undeclared` |
 
 **Delegation is offered by a hook, not remembered.** Rupali: *"the session takes care of itself, it asks the agent to be run on a hook"*. `hooks/agent-nudge.mjs` (PostToolUse, Bash) adds one line of context after a main-session `settle <file> --json` lists 3 or more edges that are not all NEVER_VERIFIED. The line names `propagate:edge-settler` and the `--check` gate. It is silent inside subagents and never blocks.
 
