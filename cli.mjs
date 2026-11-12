@@ -5872,6 +5872,9 @@ if (_invokedDirectly) {
   } else if (mode === "sprint") {
     const { sprintCmd } = await import("./cli/sprint.mjs");
     process.exitCode = await sprintCmd(process.argv.slice(3));
+  } else if (mode === "day") {
+    const { dayCmd } = await import("./cli/day.mjs");
+    process.exitCode = await dayCmd(process.argv.slice(3));
   } else if (mode === "queue") {
     const { queueCmd } = await import("./cli/queue.mjs");
     process.exitCode = await queueCmd(process.argv.slice(3));

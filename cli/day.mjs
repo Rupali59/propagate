@@ -1,0 +1,84 @@
+/**
+ * day.mjs — `propagate day open [--json]` and `propagate day close [--apply] [--json]` (propagate#240).
+ *
+ * open is read-only. close is a dry-run unless --apply, which writes only promotions and closure fixes.
+ * The usage-widget and GitHub plumbing is cli/sprint.mjs's (loadWidget, ghFetcher); nothing is re-implemented.
+ * Exit: open 0 enough, 1 short or over, 2 cannot judge; close 0 proposed/applied, 1 read-back mismatch, 2 could not compute.
+ */
+
+import { readFileSync } from "node:fs";
+
+import { readCosts, samplesPath } from "../lib/core/costs.mjs";
+import { parseSamples } from "../lib/report/sprint-plan.mjs";
+import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose } from "../lib/report/day.mjs";
+import { ghFetcher, loadWidget } from "./sprint.mjs";
+
+const USAGE = "day: usage: day open [--json] | day close [--apply] [--json]";
+
+/**
+ * @param {string[]} args argv after the command name (starts with `open` or `close`)
+ * @param {{out?: Function, err?: Function, now?: number, fetcher?: object, samplesRaw?: string, laneRows?: object[], widget?: object, widgetDir?: string}} [inject] tests
+ * @returns {Promise<number>} exit code
+ */
+export async function dayCmd(args, inject = {}) {
+  const out = inject.out ?? ((s) => console.log(s));
+  const err = inject.err ?? ((s) => console.error(s));
+  const sub = args[0];
+  if (sub !== "open" && sub !== "close") {
+    err(USAGE);
+    return 2;
+  }
+  const rest = args.slice(1);
+  const known = new Set(sub === "close" ? ["--apply", "--json"] : ["--json"]);
+  for (const a of rest) {
+    if (!known.has(a)) {
+      err(`day ${sub}: unknown argument ${a}`);
+      return 2;
+    }
+  }
+  const json = rest.includes("--json");
+  const apply = sub === "close" && rest.includes("--apply");
+
+  let widget = inject.widget ?? null;
+  let widgetMissing;
+  if (!widget) {
+    const w = await loadWidget(inject.widgetDir ?? process.env.PROPAGATE_USAGE_WIDGET_DIR);
+    widget = w.widget;
+    widgetMissing = w.missing;
+  }
+  let raw = inject.samplesRaw;
+  if (raw === undefined) {
+    try {
+      raw = readFileSync(samplesPath(), "utf8");
+    } catch {
+      raw = "";
+    }
+  }
+  const { rows } = parseSamples(raw);
+  const now = inject.now ?? Date.now();
+  const fetcher = inject.fetcher ?? ghFetcher();
+
+  if (sub === "open") {
+    const r = await buildDayOpen({ sampleRows: rows, now, widget, widgetMissing, fetcher, laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows });
+    if (json) out(JSON.stringify(r, null, 2));
+    else for (const line of renderDayOpen(r)) out(line);
+    return r.exit;
+  }
+  const r = await buildDayClose({
+    sampleRows: rows,
+    now,
+    widget,
+    fetcher,
+    apply,
+    // Printed before the first write, so what is about to change is on screen first.
+    beforeWrite: (res, mutations) => {
+      if (json) return;
+      out(`--apply: about to write ${res.operations.length} field value(s):`);
+      for (const o of res.operations) out(`  ${o}`);
+      for (const m of mutations) out(`  mutation: ${m}`);
+    },
+  });
+  if (json) out(JSON.stringify(r, null, 2));
+  else for (const line of renderDayClose(r, { apply })) out(line);
+  return r.exit;
+}
