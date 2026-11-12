@@ -11,7 +11,12 @@
  * (agent_type set), so edge-settler's own `settle --json` never tells it to dispatch itself.
  */
 import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+// #253: `propagate` is not on PATH; skills call `node ${CLAUDE_PLUGIN_ROOT}/cli.mjs`. A hook gets
+// CLAUDE_PLUGIN_ROOT in its env, so the nudge names the absolute CLI it can actually run.
+const CLI = path.join(process.env.CLAUDE_PLUGIN_ROOT || path.dirname(path.dirname(fileURLToPath(import.meta.url))), "cli.mjs");
 
 export const NUDGE_AT = 3;
 
@@ -50,7 +55,7 @@ export function nudge(input) {
   const file = w.file ?? "<file>";
   return (
     `propagate: ${items.length} edges to settle on ${w.fileShort ?? file}. Dispatch the propagate:edge-settler agent on it ` +
-    `instead of walking them here; save its JSON and gate it with \`propagate settle '${file}' --check <proposals.json>\`. ` +
+    `instead of walking them here; save its JSON and gate it with \`node '${CLI}' settle '${file}' --check <proposals.json>\`. ` +
     `Apply only what the check passes; take every refused edge back to the user as a question.`
   );
 }

@@ -44,15 +44,19 @@ for (const { file, src } of agents) {
 
 // Rupali, 2026-11-12: "if we are replacing a functionality, it better have a deterministic check at the end".
 // Derived from each agent body, not a list: the body must name its gate, and the gate must exist. A gate is either
-// a checker script (scripts/check-*.mjs) or a propagate command flag (`settle <file> --check`, cli/settle.mjs).
+// a propagate subcommand run as `node ${CLAUDE_PLUGIN_ROOT}/cli.mjs <gate>` (#253: a repo-relative script path cannot
+// be found from another workspace, and `propagate` is not on PATH): `check-curator`, `check-review`, or `settle … --check`.
 for (const { file, src } of agents) {
   test(`${file}: names a deterministic gate that exists`, () => {
     const ROOT = path.join(DIR, "..");
-    const scripts = [...src.matchAll(/scripts\/check-[a-z-]+\.mjs/g)].map((m) => m[0]);
-    const settleCheck = /settle <file> --check/.test(src);
-    assert.ok(scripts.length || settleCheck, `${file} names no gate: an agent without a deterministic check is not shipped`);
-    for (const p of scripts) assert.ok(existsSync(path.join(ROOT, p)), `${file} names ${p}, which does not exist`);
-    if (settleCheck) assert.match(readFileSync(path.join(ROOT, "cli", "settle.mjs"), "utf8"), /--check/, "settle has no --check");
+    assert.doesNotMatch(src, /(?<!\/)scripts\/check-|`propagate (settle|graph|check)/, `${file} names a gate by a repo-relative path or a bare \`propagate\`, which a session in another workspace cannot run (#253)`);
+    const gates = [...src.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs (check-curator|check-review|settle <file> --check)/g)].map((m) => m[1]);
+    assert.ok(gates.length, `${file} names no gate: an agent without a deterministic check is not shipped`);
+    const cli = readFileSync(path.join(ROOT, "cli.mjs"), "utf8");
+    for (const g of gates) {
+      if (g.startsWith("settle")) assert.match(readFileSync(path.join(ROOT, "cli", "settle.mjs"), "utf8"), /"--check"/, "settle has no --check");
+      else assert.match(cli, new RegExp(`mode === "${g}"`), `${file} names ${g}, which cli.mjs does not dispatch`);
+    }
   });
 }
 

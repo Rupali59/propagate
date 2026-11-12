@@ -5878,6 +5878,14 @@ if (_invokedDirectly) {
   } else if (mode === "queue") {
     const { queueCmd } = await import("./cli/queue.mjs");
     process.exitCode = await queueCmd(process.argv.slice(3));
+  } else if (mode === "check-curator") {
+    // #253: the doc-curator gate, reachable from any cwd as a subcommand (a repo-relative script path is not).
+    const { main } = await import("./scripts/check-curator.mjs");
+    process.exitCode = main([process.argv[0], "check-curator", ...process.argv.slice(3)]);
+  } else if (mode === "check-review") {
+    // #253: the adversarial-reviewer gate, the same way.
+    const { main } = await import("./scripts/check-review.mjs");
+    process.exitCode = await main(process.argv.slice(3));
   } else if (mode === "settle") {
     // Lazy, like queue/surface: the worklist derivation (graph, history, diffs)
     // is not something `status` should pay for. READ-ONLY -- see the module.

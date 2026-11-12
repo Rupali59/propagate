@@ -14,7 +14,8 @@ import { fileURLToPath } from "node:url";
 
 const STRUCTURAL = /\b(orphan(s|ed)?|unlinked|unreferenced|broken[ -]links?|dead[ -]links?|dangling|no inbound)\b/i;
 const MAX_SPAN = 5;
-const CURATE = "node skills/curate-docs/cli.mjs <orphans|detached|dangling|report> <dir>";
+// Absolute, from this file: the gate runs from any cwd (#253), and a repo-relative command would not.
+const CURATE = `node ${JSON.stringify(path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), "skills", "curate-docs", "cli.mjs"))} <orphans|detached|dangling|report> <dir>`;
 
 /**
  * @param {unknown} proposals  {root, claims: [...]} or a bare claims array
@@ -63,7 +64,7 @@ export function checkCurator(proposals, { readFile, exists }) {
   return out;
 }
 
-function main(argv) {
+export function main(argv) {
   const file = argv[2];
   if (!file) {
     console.error("usage: node scripts/check-curator.mjs <proposals.json>");
