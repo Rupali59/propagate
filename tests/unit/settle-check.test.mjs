@@ -14,14 +14,17 @@ const item = (edge_id, extra = {}) => ({
   allowed: ["propagated", "no-change-needed", "deferred", "wontfix", "baselined", "decoupled"],
   viaOutOfOrder: [],
   blockedBy: [],
+  since: { commit: "base000" },
   ...extra,
 });
 const worklist = { items: [item("e1"), item("e2")] };
 const GOOD = "abc1234";
 // A fake git: GOOD exists and touched src.md; "dead999" exists but touched nothing on these edges.
+// "0dd1234" exists and touched src.md but predates the last verify ("base000").
 const git = {
-  exists: (sha) => sha === GOOD || sha === "dead999",
-  touched: (sha, file) => sha === GOOD && file.endsWith("src.md"),
+  exists: (sha) => [GOOD, "dead999", "0dd1234"].includes(sha),
+  touched: (sha, file) => (sha === GOOD || sha === "0dd1234") && file.endsWith("src.md"),
+  after: (sha, since) => since === "base000" && sha === GOOD,
 };
 const prop = (edge_id, extra = {}) => ({ edge_id, disposition: "no-change-needed", reason: "down.md:12 still holds", shas: [GOOD], ...extra });
 
@@ -118,4 +121,13 @@ test("settle --check: a verify dry-run refusal fails the check even when checkPr
   assert.equal(bad, 1);
   assert.ok(lines.some((l) => /FAIL e2.*blocked upstream/.test(l)));
   assert.equal(await settleCheck(w, join(dir, "absent.json"), { io, asJson: false, deps: { git } }), 2);
+});
+
+test("evidence: a SHA that touched the file but predates the last verify is refused (the b5bd5b7 case)", () => {
+  const r = checkProposals({ items: [item("e1")] }, [prop("e1", { shas: ["0dd1234"] })], git);
+  assert.equal(r.ok, false);
+  assert.match(r.rejected[0].reasons.join(), /not after the last verify \(base000\)/);
+  // A NEVER_VERIFIED edge has no last verify, so any touching commit is evidence.
+  const nv = checkProposals({ items: [item("e1", { since: null })] }, [prop("e1", { shas: ["0dd1234"] })], git);
+  assert.equal(nv.ok, true);
 });
