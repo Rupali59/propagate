@@ -377,3 +377,49 @@ test("readCosts #223: lanesOnly ignores legacy empty-agent_type ENOENT rows, cou
     }
   });
 });
+
+test("summarizeTranscript: run_in_background tool calls are counted once per tool_use id; the row carries it (#251)", async () => {
+  await withTmp(async (dir) => {
+    const bg = (msgId, toolId, background) =>
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-11-12T10:00:00.000Z",
+        message: {
+          id: msgId,
+          model: "claude-sonnet-5-5",
+          usage: { input_tokens: 1, output_tokens: 1 },
+          content: [{ type: "tool_use", id: toolId, name: "Bash", input: { command: "npm test", run_in_background: background } }],
+        },
+      });
+    // t1 appears twice (one message logged on two lines) and counts once; t2 is a foreground call.
+    const p = await writeTranscript(dir, "bg", [bg("m1", "t1", true), bg("m1", "t1", true), bg("m2", "t2", false)]);
+    const s = summarizeTranscript(p);
+    assert.equal(s.backgrounded, 1);
+    assert.equal(buildCostRow({ agent_id: "x" }, {}, s, { missing: "r" }, { missing: "r" }).backgrounded, 1);
+
+    const fg = await writeTranscript(dir, "fg", [bg("m3", "t3", false)]);
+    assert.equal(summarizeTranscript(fg).backgrounded, 0, "a lane that never backgrounded reads 0, not missing");
+    assert.equal(buildCostRow({ agent_id: "x" }, {}, { unreadable: true, reason: "ENOENT" }, { missing: "r" }, { missing: "r" }).backgrounded, null,
+      "an unreadable transcript is unknown (null), never 0");
+  });
+});
+
+test("costs lanes: grouped by agent_type, BACKGROUNDED counted, a pre-#251 row is unknown not 0 (#251)", async () => {
+  const { costsCmd, laneGroups } = await import("../../cli/costs.mjs");
+  const rows = [
+    { agent_id: "a", agent_type: "propagate:edge-settler", usage: { input: 10, output: 5 }, minutes: 2, backgrounded: 0 },
+    { agent_id: "b", agent_type: "propagate:edge-settler", usage: { input: 1, output: 1 }, minutes: 1, backgrounded: 2 },
+    { agent_id: "c", agent_type: "Explore", usage: null, minutes: 3 },
+  ];
+  const g = laneGroups(rows);
+  const settler = g.find((x) => x.agent_type === "propagate:edge-settler");
+  assert.deepEqual([settler.lanes, settler.tokens, settler.backgrounded, settler.backgroundedUnknown], [2, 17, 1, 0]);
+  const explore = g.find((x) => x.agent_type === "Explore");
+  assert.deepEqual([explore.unread, explore.backgroundedUnknown, explore.backgrounded], [1, 1, 0]);
+
+  const lines = [];
+  const code = await costsCmd(["lanes", "--agent-type", "propagate:edge-settler"], { out: (s) => lines.push(s), readCosts: () => ({ rows, malformed: 0 }) });
+  assert.equal(code, 0);
+  assert.match(lines.join("\n"), /2 lanes.*\n.*propagate:edge-settler.*17 tokens.*1 BACKGROUNDED/);
+  assert.equal(await costsCmd(["lanes", "--bogus"], { out: () => {}, err: () => {}, readCosts: () => ({ rows, malformed: 0 }) }), 2);
+});

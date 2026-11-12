@@ -32,6 +32,16 @@ Parent skill: `propagate` (premise, Contract, Important Rules). Command flags: `
 6. **Blocked edges.** `blockedBy` lists the unsettled upstream edges with a `route` (`propagate settle '<path>'`) — a NEVER_VERIFIED upstream has no diff but is settled the same way. Offer, in this order: settle the upstream first (run its route), then `deferred`/`decoupled` (allowed as-is), and only last `outOfOrderCommands` — which override the ordering guard and are **recorded in the event** (`out_of_order`, `bypassed_upstreams`). Do not reach for `--out-of-order` to make the list shorter; the refusal is a finding (G62).
 7. **After the last edge, re-run `settle <file> --json`** and report what is left and why.
 
+## Many edges on one file: the `edge-settler` agent and `--check` (#251)
+
+For a file with several drifted edges, dispatch `propagate:edge-settler` on it instead of walking each edge in this turn. It proposes a disposition per edge, with SHA evidence, as JSON. **Never act on its report.** Save the JSON and run:
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/cli.mjs settle <file> --check <proposals.json>
+```
+
+It refuses: an edge missing from the proposals, an extra or duplicated one (ids are matched by id, never by position), a disposition outside the edge's `allowed` list (including anything that needs `--out-of-order`), an empty or placeholder reason, and a SHA that does not exist or touched neither side. Then it runs each accepted command through `verify` **without** `--apply`. Exit 0 only when every edge passed both gates; it then prints the `--apply` commands. A rejected edge goes back through the walkthrough above, as a question to the user. The agent is read-only, enforced by `hooks/agent-guard.mjs`.
+
 ## What the events record
 
 `by_kind: human` — a walkthrough choice is the human's decision. `executed_by: agent` and `session_id` are stamped automatically when the verify runs inside Claude Code (`docs/DATA_MODEL.md` § The v2 event record). Do not set `PROPAGATE_BY_KIND`.

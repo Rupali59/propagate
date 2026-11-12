@@ -31,13 +31,19 @@
  */
 
 import path from "node:path";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import { checkProposals, realGit } from "../lib/edges/settle-check.mjs";
 
 import { allowedDispositions, verifyCommand, shellQuote, REASON_PLACEHOLDER } from "../lib/edges/disposition.mjs";
 import { buildGraph, fixOrder, matchNodePaths } from "../lib/graph/graph.mjs";
 import { historyByEdge, defaultDeps } from "../lib/report/queue.mjs";
 import { edgeDiff } from "../lib/report/evidence.mjs";
 import { shortPath } from "../lib/core/config.mjs";
+
+const CLI = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), "cli.mjs");
 
 /** Lines of each diff shown in text mode; `--json` carries the full (clamped) text. */
 const TEXT_DIFF_LINES = 24;
@@ -284,9 +290,48 @@ export function renderSettle(w, { colour: useColour = false } = {}) {
   return out;
 }
 
+/**
+ * `settle <file> --check <proposals.json>` (propagate#251): gate an agent's proposals. Two independent gates, and
+ * the parent acts only on what passes both: checkProposals (coverage, predicate, SHA evidence), then each accepted
+ * command run through `verify` WITHOUT --apply. Still read-only: the dry run writes nothing (verify's own test).
+ * Exit 0 all accepted and every dry run passed; 1 anything refused; 2 could not read the proposals.
+ */
+export async function settleCheck(w, file, { io, asJson, deps }) {
+  let proposals;
+  try {
+    proposals = JSON.parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    io.log(`settle --check: cannot read proposals ${file ?? "(no path given)"}: ${err?.code || err?.message}`);
+    return 2;
+  }
+  const git = deps?.git ?? realGit(spawnSync, path);
+  const r = checkProposals(w, proposals, git);
+  const runVerify = deps?.runVerify ?? ((a) => spawnSync(process.execPath, [CLI, "verify", ...a], { encoding: "utf8", timeout: 120000 }));
+  for (const a of r.accepted) {
+    const v = runVerify(["--edge", a.edge_id, "--disposition", a.disposition, "--reason", a.reason]);
+    a.dryRunExit = v.status;
+    if (v.status !== 0) {
+      r.ok = false;
+      a.dryRunError = String(v.stderr || v.stdout).trim().split("\n").slice(-3).join(" | ");
+    }
+  }
+  if (asJson) io.log(JSON.stringify({ read_only: true, file: w.file, ...r }));
+  else {
+    io.log(`settle --check ${w.fileShort}: ${r.ok ? "PASS" : "FAIL"}  ${r.error ?? ""}`);
+    for (const a of r.accepted) io.log(`  ${a.dryRunExit === 0 ? "ok  " : "FAIL"} ${a.edge_id} ${a.disposition}${a.dryRunError ? `  verify dry run: ${a.dryRunError}` : ""}`);
+    for (const x of r.rejected) io.log(`  REFUSED ${x.edge_id ?? "(no id)"}: ${x.reasons.join("; ")}`);
+    for (const id of r.missing) io.log(`  MISSING ${id} (on the worklist, not proposed)`);
+    for (const id of r.extra) io.log(`  EXTRA ${id} (proposed, not on this file's worklist)`);
+    for (const id of r.duplicate) io.log(`  DUPLICATE ${id}`);
+    if (r.ok) for (const a of r.accepted) io.log(`  apply: ${a.apply}`);
+  }
+  return r.error ? 2 : r.ok ? 0 : 1;
+}
+
 export async function settleCmd(argv = [], io = console, deps = null) {
   const asJson = argv.includes("--json");
-  const sel = argv.find((a) => !a.startsWith("--"));
+  const checkIdx = argv.indexOf("--check");
+  const sel = argv.find((a, i) => !a.startsWith("--") && !(checkIdx !== -1 && i === checkIdx + 1));
   const walkStarted = new Date().toISOString();
 
   if (!sel) {
@@ -314,6 +359,9 @@ export async function settleCmd(argv = [], io = console, deps = null) {
     }
     return w.code;
   }
+
+  const checkAt = argv.indexOf("--check");
+  if (checkAt !== -1) return settleCheck(w, argv[checkAt + 1], { io, asJson, deps });
 
   if (asJson) {
     io.log(

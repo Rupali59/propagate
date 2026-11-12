@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "SIX registrations, not five hooks. gotcha-guard.mjs is registered TWICE, against",
+    "EIGHT registrations, not seven hooks. gotcha-guard.mjs is registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
     "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
@@ -75,6 +75,21 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/rule-guard.mjs\""
           }
         ]
+      },
+      {
+        "_comment": [
+          "agent-guard, added 2026-11-12 (#251). Denies writes to propagate's READ-ONLY subagents",
+          "(edge-settler, doc-curator, adversarial-reviewer), keyed on the payload's agent_type. Plugin",
+          "agents cannot carry their own hooks or permissionMode (docs), so this is the only enforcement.",
+          "Silent and allowing for the main session and every other agent."
+        ],
+        "matcher": "Bash|Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-guard.mjs\""
+          }
+        ]
       }
     ],
     "SubagentStop": [
@@ -90,6 +105,22 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-cost.mjs\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "_comment": [
+          "agent-nudge, added 2026-11-12 (#251). After a `settle --json` listing 3+ edges,",
+          "adds one line telling the MAIN session to dispatch propagate:edge-settler and gate it with",
+          "`settle --check`. Informs only; silent inside subagents."
+        ],
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-nudge.mjs\""
           }
         ]
       }
