@@ -15,8 +15,23 @@ import { pathToFileURL } from "node:url";
 
 export const NUDGE_AT = 3;
 
-/** Bash's tool_response carries stdout; accept a bare string too, since the shape is the harness's, not ours. */
-const stdoutOf = (r) => (typeof r === "string" ? r : typeof r?.stdout === "string" ? r.stdout : "");
+/**
+ * Bash's tool_response carries stdout; accept a bare string too, since the shape is the harness's, not ours.
+ * A LARGE output is truncated in `stdout` and the full text is in `persistedOutputPath`. Measured on the first live
+ * run (2026-11-12): a 10-edge worklist was 51.6 KB, `stdout` held 29,957 chars, the JSON did not parse and the nudge
+ * stayed silent. A worklist big enough to nudge is exactly the one that gets truncated, so the file is read first.
+ */
+function stdoutOf(r) {
+  if (typeof r === "string") return r;
+  if (typeof r?.persistedOutputPath === "string") {
+    try {
+      return readFileSync(r.persistedOutputPath, "utf8");
+    } catch {
+      /* fall through to the truncated stdout; it will fail to parse and the hook stays silent */
+    }
+  }
+  return typeof r?.stdout === "string" ? r.stdout : "";
+}
 
 /** @returns {string|null} the context line, or null */
 export function nudge(input) {

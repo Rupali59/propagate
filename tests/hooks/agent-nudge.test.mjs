@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import { nudge, NUDGE_AT } from "../../hooks/agent-nudge.mjs";
 
@@ -37,4 +39,18 @@ test("the real hook process: JSON additionalContext when it nudges, silent exit 
     assert.equal(r.status, 0);
     assert.equal(r.stdout, "");
   }
+});
+
+test("a large output: truncated stdout plus persistedOutputPath is read from the file (the first live run)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "nudge-"));
+  const full = worklist(10);
+  const file = path.join(dir, "out.txt");
+  writeFileSync(file, full);
+  const truncated = full.slice(0, Math.floor(full.length / 2)); // what Claude Code puts in stdout
+  const p = payload(truncated);
+  assert.equal(nudge(p), null, "truncated JSON alone cannot parse");
+  p.tool_response = { stdout: truncated, persistedOutputPath: file, persistedOutputSize: full.length };
+  assert.match(nudge(p), /10 edges to settle/);
+  p.tool_response.persistedOutputPath = path.join(dir, "gone.txt");
+  assert.equal(nudge(p), null, "an unreadable persisted file falls back to stdout, which stays silent");
 });
