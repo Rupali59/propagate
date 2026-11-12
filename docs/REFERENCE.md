@@ -538,6 +538,27 @@ watcher — so `check` won't warn on a glob-declared code edge. Declare
 non-glob `kind: code` edges for files you want the commit-time gate to
 actually catch.
 
+## `propagate day`: day open and day close (propagate#240)
+
+`propagate day open [--json]` is read-only.
+- **Budget:** today's daily cap minus today's use, from the usage widget (`PROPAGATE_USAGE_WIDGET_DIR`).
+- **Supply:** the Ready items across every open board whose Status uses Backlog / Ready / In progress / Done. A board with other options is named and skipped.
+- **Costing:** a calibrated Size is costed per Size. Everything else uses a **count basis** derived each run: the week-% consumed over 7 days, divided by the items with a Finished date in those 7 days. The output labels it, because it costs every item the same whatever its Size.
+- **Also listed:** In progress carry-over, and Ready items with no Size.
+- **Verdict:** `short by ~N points` (with the top promotable Backlog items), `enough` (budget ≤ supply ≤ 2× budget), or `over` (with what will not fit).
+- **Exit:** 0 enough; 1 short or over; 2 cannot judge (no good sample, no count basis, the rate limit too low, or the read went blind).
+
+`propagate day close [--apply] [--json]` is a dry run unless `--apply`. It proposes:
+- **(a) Promotions** from Backlog to Ready. An item qualifies when it is open, in Backlog, has a Size and a stated "Done when", is not an Epic, and has no block / question / decision / waiting / needs- label. Order: priority label, then smaller Size, then lower number. Each board is topped up to 3 Ready.
+- **(b) Refused candidates,** each naming what is missing.
+- **(c) Closed items whose Status is not Done:** set to Done, with Finished set to closedAt's local date.
+- **(d) Cost gaps:** a missing Finished, Tokens or Minutes on an item closed today is named, never filled.
+- **(e) In progress items** to comment on, or to move back.
+
+`--apply` writes only (a) and (c), 20 per request. It then reads each written item back by node id and prints MATCH n/n, or the mismatches with exit 1.
+
+"Done when" counts only when it is **stated**. The matcher strips fenced code and backtick spans, then needs a heading, a bold marker or a sentence that starts with the phrase. The workspace-hub#13 false positive is the case it excludes. Each item connection is read with `first:100` and not paged, and a truncated connection is noted in the output.
+
 ## Subagents (propagate#251)
 
 propagate ships subagents in `agents/`, registered as `propagate:<name>`. **An agent proposes; the parent acts only on what a deterministic check accepts.** Rupali, 2026-11-12: *"if we are replacing a functionality, it better have a deterministic check at the end"*. Mechanical work stays in code: an agent exists only for a judgment, and that judgment is gated.
