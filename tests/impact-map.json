@@ -11817,6 +11817,15 @@
    ],
    "size": "small"
   },
+  "tests/unit/check-review.test.mjs": {
+   "deps": [
+    "hooks/agent-guard.mjs",
+    "package.json",
+    "scripts/check-review.mjs",
+    "tests/unit/check-review.test.mjs"
+   ],
+   "size": "small"
+  },
   "tests/unit/claims-check-boundary.test.mjs": {
    "deps": [
     "lib/claims/",
