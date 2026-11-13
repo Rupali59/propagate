@@ -216,3 +216,14 @@ test("a Ready or In progress group cut off at 100 is named in notChecked, never 
   };
   assert.deepEqual(boardsForGoals(read)[0].truncated, ["board 7 ready: 100 of 140"]);
 });
+
+test("boards with no Goal field and no Ready / In progress items fold into one notChecked line; a board with items keeps its own", () => {
+  const r = checkGoals({
+    files: [goalsFile(g1)],
+    boards: [board([okReady]), board([], { number: 30, title: "A", hasGoalField: false }), board([], { number: 31, title: "B", hasGoalField: false }), board([okReady], { number: 32, title: "C", hasGoalField: false })],
+    now: NOW,
+  });
+  assert.ok(r.notChecked.includes("2 board(s) with no Goal field and nothing Ready or In progress: 30, 31"), JSON.stringify(r.notChecked));
+  assert.ok(r.notChecked.some((n) => n.startsWith("board 32 C: has no Goal field, so its 1 Ready")), JSON.stringify(r.notChecked));
+  assert.equal(r.notChecked.filter((n) => /^board 3[01] /.test(n)).length, 0, "an idle board must not also get its own line");
+});

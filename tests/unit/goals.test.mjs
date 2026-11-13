@@ -402,3 +402,22 @@ test("goalId is the heading's own id", () => {
   assert.equal(goalId(a), "G2");
   assert.equal(goalId(b), "7");
 });
+
+test("an active goal whose Active-since paragraph wraps past the marker window is still active (#264 live run)", () => {
+  // The shape of astro-darpan's G2 on 2026-11-13: the Active-since paragraph wraps over 3 lines, so Done when is the
+  // 4th non-empty line and the reader's status is "unknown". Active must not depend on where Done when sits.
+  const p = goalsFile(`# W
+
+## G2 · App reaches parity (committed, cycle 1)
+
+**Active since 2026-11-13 · appetite 4 weeks** (approved: hub plan
+"G2"; the cycle's method is the workflow doc). Active alongside the hub's G1.
+E and S below are folded in as its conditions 2 and 3.
+
+**Done when:** every screen is at parity.
+`);
+  const e = parseGoalsFile(p).entries[0];
+  assert.equal(e.status, "unknown", "the fixture must put Done when outside the window, or this test proves nothing");
+  assert.equal(e.active, true, "a wrapped Active-since paragraph made G2 read inactive");
+  assert.equal(e.appetiteWeeks, 4);
+});
