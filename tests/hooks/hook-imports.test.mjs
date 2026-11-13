@@ -100,7 +100,7 @@ test("doc-authority distinguishes ABSENT from BROKEN", () => {
  * silently stop guarding every shell command while the check still passed. That is the
  * doc-authority failure shape reproduced inside the verification written to catch it.
  */
-test("hooks.json declares exactly 10 registrations, and every command resolves", () => {
+test("hooks.json declares exactly 11 registrations, and every command resolves", () => {
   const manifest = JSON.parse(readFileSync(path.join(HOOKS, "hooks.json"), "utf8"));
   const seen = [];
   for (const [event, groups] of Object.entries(manifest.hooks)) {
@@ -111,7 +111,7 @@ test("hooks.json declares exactly 10 registrations, and every command resolves",
     }
   }
 
-  assert.equal(seen.length, 10,
+  assert.equal(seen.length, 11,
     `expected 10 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
       `design (Edit|Write and Bash); collapsing it to one silently stops guarding Bash.`);
   // #188: the cost ledger is written only by this registration. Without it, lanes finish unrecorded.
@@ -130,8 +130,12 @@ test("hooks.json declares exactly 10 registrations, and every command resolves",
   // tool_input, verified live 2026-08-28. Narrowing this matcher would leave the rule
   // loaded and unable to fire, which reads identically to "no violations".
   const ruleMatchers = seen.filter((r) => r.command.includes("rule-guard")).map((r) => r.matcher);
-  assert.deepEqual(ruleMatchers, ["Agent|Task|ExitPlanMode"],
-    "rule-guard must stay registered against Agent|Task|ExitPlanMode");
+  assert.deepEqual(ruleMatchers, ["Agent|Task|ExitPlanMode", "Bash"],
+    "rule-guard must stay registered against Agent|Task|ExitPlanMode, and on Bash for shell-command triggers");
+  // The Bash registration is narrowed by an `if` (the owner's option b, 2026-11-13): rule-guard runs only for
+  // commands mentioning vercel. A rule whose trigger is another shell command needs this widened.
+  const bashRule = manifest.hooks.PreToolUse.find((g) => g.matcher === "Bash" && g.hooks.some((h) => h.command.includes("rule-guard")));
+  assert.equal(bashRule?.hooks.find((h) => h.command.includes("rule-guard"))?.if, "Bash(*vercel*)");
 
   // Both gotcha-guard matchers must survive.
   const guardMatchers = seen

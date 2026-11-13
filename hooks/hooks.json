@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "TEN registrations, not nine hooks. gotcha-guard.mjs is registered TWICE, against",
+    "ELEVEN registrations, not nine hooks. gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
     "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
@@ -92,6 +92,23 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/plan-goal.mjs\""
+          }
+        ]
+      },
+      {
+        "_comment": [
+          "rule-guard on Bash, added 2026-11-13 for rule:deploy-to-the-environment-the-check-needs, the first rule whose",
+          "trigger is a shell command (`vercel --prod`). The owner chose option (b): register on Bash with an `if` condition,",
+          "so rule-guard runs only for commands mentioning vercel and not on every shell command (measured 208-323 ms each).",
+          "Widen the `if` the moment another rule declares a Bash trigger, or the new trigger loads and can never fire.",
+          "Verified live after /reload-plugins: see the commit that added this."
+        ],
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(*vercel*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/rule-guard.mjs\""
           }
         ]
       },
