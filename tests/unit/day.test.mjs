@@ -768,3 +768,22 @@ test("paging: day open reports the stop note and the truncated group, and still 
   assert.ok(r.notes.some((n) => /paging stopped/.test(n)), JSON.stringify(r.notes));
   assert.ok(r.notes.some((n) => /board 7 backlog: 100 of 250/.test(n)), JSON.stringify(r.notes));
 });
+
+test("every GraphQL query this module builds defines exactly the fragments it spreads (GitHub rejects an unused one)", async () => {
+  // Found live 2026-11-13: the paging query carried both fragments and spread one, and GitHub answered "Fragment I
+  // was defined, but not used". The fake fetcher never validated GraphQL, so this asserts the property directly.
+  const { dayDetailQuery, dayPageQuery, GROUPS } = await import("../../lib/report/day.mjs");
+  const check = (q, label) => {
+    const defined = [...q.matchAll(/fragment (\w+) on /g)].map((m) => m[1]).sort();
+    const used = [...new Set([...q.matchAll(/\.\.\.(\w+)\b/g)].map((m) => m[1]).filter((n) => n !== "on"))].sort();
+    assert.deepEqual(defined, used, `${label}: defined ${defined} but spreads ${used}`);
+  };
+  check(dayDetailQuery([7, 26], "2026-11-06"), "detail query");
+  let pages = 0;
+  for (const g of GROUPS) {
+    check(dayPageQuery(7, g, "2026-11-06", "CURSOR"), `page query for ${g}`);
+    pages++;
+  }
+  assert.equal(pages, GROUPS.length);
+  assert.ok(GROUPS.length >= 6, "the group list went blind");
+});
