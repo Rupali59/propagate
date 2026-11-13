@@ -579,8 +579,8 @@ the same function from the boards it already read, with no second GraphQL read. 
 | `**Retro 2026-11-15:** continue` (or `reshape`, `stop`) | anywhere in the section body, never inside a fenced block | a retro decision; the latest date counts |
 | `**Parked (cycle N, date):** …` | the same window (propagate#55) | not active |
 
-**Active** means an Active-since line and status open. A closed or parked goal is never active; a goal with an
-Active-since line whose status is unknown (no Done when, no Resolved) is not counted and is named in `notChecked`.
+**Active** means an Active-since line, and the goal is neither closed nor parked. Where its Done when sits does not
+matter (8e14732: astro-darpan's G2 wrapped its Active-since paragraph past the 3-line window and read inactive).
 
 **Clauses** (each violation carries `clause`, `subject`, `reason`):
 
@@ -590,9 +590,12 @@ Active-since line whose status is unknown (no Done when, no Resolved) is not cou
 | `goal-undeclared` | a Ready or In progress item's Goal names a goal that no file declares active (the reason says declared-but-not-active or declared nowhere) |
 | `item-fields` | a Ready or In progress item lacks Goal (or its Goal is Parked or Idea), Priority, Model, Size or a stated "Done when"; **Ready items also need Order**, In progress items carry none by design (finish first) |
 | `appetite` | an active goal records no appetite ("no appetite recorded"), or is past it (its end date is before today) with no Retro line dated on or after the end |
+| `plan-goal` | a plan approved in the last 7 days named a goal that is not active now (parked or closed since). Read from `<state dir>/plans/approvals.jsonl`, which the plan-goal hook writes |
 
 **Not checked, never passed:**
-- `plan names a goal: needs #244` is always listed: the plan-approval check does not exist yet.
+- `no plan approval recorded in 7 days` when the approval log is missing or holds nothing recent. Otherwise the
+  output summarises the week's approvals per goal and names each `goal_reason` override; an override is **listed,
+  never a violation**, because it is the sanctioned escape.
 - A board with no Goal field is named, and its items are not counted clean.
 - A GOALS.md the reader could not parse is named.
 
@@ -607,7 +610,7 @@ scan never exits 0.
 - **Supply:** the Ready items across every open board whose Status uses Backlog / Ready / In progress / Done. A board with other options is named and skipped.
 - **Costing:** a calibrated Size is costed per Size. Everything else uses a **count basis** derived each run: the week-% consumed over 7 days, divided by the items with a Finished date in those 7 days. The output labels it, because it costs every item the same whatever its Size.
 - **Also listed:** In progress carry-over, and Ready items with no Size.
-- **Per active goal (propagate#240):** one block per active goal in the GOALS.md files (the same files and the same `active` flag as `goals check`), built from the boards already read, with no extra GraphQL call. It shows the goal id and title, the appetite and days left (`no appetite recorded` when none), and the counts of In progress, Ready, Backlog and Done items whose Goal is that id. A group cut off at `first:100` prints as `≥N`, never as a total. Then **Ready by Order**: each Ready item with Order (`–` when unset), Priority, Model, Size, ref and title, in the promotion order below. Then one line naming the Ready items not under an active goal. The same data is in the `--json` result (`goalBlocks`, `readyNotUnderActiveGoal`). The budget, supply and verdict lines are unchanged.
+- **Per active goal (propagate#240):** one block per active goal in the GOALS.md files (the same files and the same `active` flag as `goals check`), built from the boards already read, with no extra GraphQL call. It shows the goal id and title, the appetite and days left (`no appetite recorded` when none), and the counts of In progress, Ready, Backlog and Done items whose Goal is that id. A group the reader could not fully page (see paging below) prints as `≥N`, never as a total. Then **Ready by Order**: each Ready item with Order (`–` when unset), Priority, Model, Size, ref and title, in the promotion order below. Then one line naming the Ready items not under an active goal. The same data is in the `--json` result (`goalBlocks`, `readyNotUnderActiveGoal`). The budget, supply and verdict lines are unchanged.
 - **Verdict:** `short by ~N points` (with the top promotable Backlog items), `enough` (budget ≤ supply ≤ 2× budget), or `over` (with what will not fit).
 - **Exit:** 0 enough; 1 short or over; 2 cannot judge (no good sample, no count basis, the rate limit too low, or the read went blind).
 
@@ -624,6 +627,29 @@ scan never exits 0.
 `--apply` writes only (a) and (c), 20 per request. It then reads each written item back by node id and prints MATCH n/n, or the mismatches with exit 1.
 
 "Done when" counts only when it is **stated**. The matcher strips fenced code and backtick spans, then needs a heading, a bold marker or a sentence that starts with the phrase. The workspace-hub#13 false positive is the case it excludes. Each item connection is read with `first:100` and not paged, and a truncated connection is noted in the output.
+
+## Board reads page past 100 (propagate#214)
+
+`day open`, `day close`, `goals check` and the dispatch snapshot share one reader (`lib/report/day.mjs`
+`readBoards`). Each status group is read 100 at a time and **paged** with its own cursor and the same filter:
+- **Up to 10 pages per group** (1,000 items). Past that, the group stays in `truncated` as `board N group: X of Y`.
+- **The rate limit is checked before every page.** Below 100 remaining, paging stops for that group and every later
+  one, a note names the stop, and their `truncated` entries stay. It is never a failure.
+- Every follow-up page counts in the printed GraphQL call count.
+
+## The plan-goal check at plan approval (G3; the mechanism #244 will extend)
+
+`hooks/plan-goal.mjs` runs on PreToolUse for `ExitPlanMode` and is silent for every other tool.
+- **Plan text:** `tool_input.plan`; otherwise the newest `*.md` modified in the last 15 minutes in the plans directory
+  (`plansDirectory` in `~/.claude/settings.json`, else `~/.claude/plans`). None → allowed, "plan goal not checked: no
+  plan text found".
+- **Active goals:** the same discovery and `active` flag as `goals check`. None readable → allowed, "plan goal not
+  checked: no active goal was read". A missing goals file never blocks a plan.
+- **The rule:** the plan has a line `Goal: G<n>` (bold or plain, any case) naming an active goal → allowed, and one row
+  `{ts, plan, goal}` goes to `<state dir>/plans/approvals.jsonl`. Otherwise **denied**, naming the active ids and both
+  fixes, unless a `goal_reason: <why>` line is present: then it is allowed and logged with `goal: null`.
+- **Fails open on its own bugs**, saying so in `additionalContext`.
+- **#244's own clause** (a UI plan must carry `design deps` output) is not built: it needs #243. It belongs in this hook.
 
 ## The dispatch model check (propagate#265, #214 part 2)
 

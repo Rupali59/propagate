@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "NINE registrations, not eight hooks. gotcha-guard.mjs is registered TWICE, against",
+    "TEN registrations, not nine hooks. gotcha-guard.mjs is registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
     "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
@@ -72,7 +72,12 @@
           "group and shares its matcher: it ignores ExitPlanMode itself. It refuses a dispatch whose",
           "model differs from its issue's Model field (read from the snapshot `day open` writes, no",
           "GraphQL read) unless the prompt carries `model_reason:`, and on an allow moves a Backlog or",
-          "Ready item to In progress. It fails open on its own bugs, saying so."
+          "Ready item to In progress. It fails open on its own bugs, saying so.",
+          "",
+          "plan-goal, added 2026-11-13 (#244 goal clause, G3), is the third registration in this group and",
+          "also shares its matcher: it acts only on ExitPlanMode. It denies a plan that names no active",
+          "goal (`Goal: G<n>`) and carries no `goal_reason:` line, and logs each approval to",
+          "$PROPAGATE_STATE_DIR/plans/approvals.jsonl for `goals check`. Blind reads allow, saying so."
         ],
         "matcher": "Agent|Task|ExitPlanMode",
         "hooks": [
@@ -83,6 +88,10 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-model.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/plan-goal.mjs\""
           }
         ]
       },

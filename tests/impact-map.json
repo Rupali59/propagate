@@ -1,15 +1,15 @@
 {
  "header": {
-  "recordedAt": "2026-11-13T10:26:29.081Z",
-  "commit": "5ca67369062a475b4f3d4d2b8053b3bb9c15e47c",
+  "recordedAt": "2026-11-13T10:54:12.747Z",
+  "commit": "655b75b848466217ad8ff19f19af8b632fdf47ce",
   "node": "v26.13.0",
-  "tests": 303,
+  "tests": 304,
   "withStaticDeps": 239,
-  "withRecordedSpawnDeps": 106,
+  "withRecordedSpawnDeps": 107,
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 1809,
+  "recordedProcesses": 1827,
   "unresolvedStaticSpecifiers": 92
  },
  "tests": {
@@ -1530,6 +1530,7 @@
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
+    "tests/hooks/plan-goal.test.mjs",
     "tests/portability/cli-imports.test.mjs",
     "tests/portability/config-file.test.mjs",
     "tests/portability/config-state-dir.test.mjs",
@@ -8274,6 +8275,7 @@
     "hooks/gotcha-guard.mjs",
     "hooks/hooks.json",
     "hooks/load-rules.mjs",
+    "hooks/plan-goal.mjs",
     "hooks/rule-guard.mjs",
     "hooks/subagent-cost.mjs",
     "lib/core/config.mjs",
@@ -8298,6 +8300,17 @@
     "tests/hooks/load-rules-drift.test.mjs"
    ],
    "size": "medium"
+  },
+  "tests/hooks/plan-goal.test.mjs": {
+   "deps": [
+    "hooks/plan-goal.mjs",
+    "lib/core/paths.mjs",
+    "lib/docs/tokens.mjs",
+    "lib/report/goals.mjs",
+    "lib/report/handovers.mjs",
+    "tests/hooks/plan-goal.test.mjs"
+   ],
+   "size": "small"
   },
   "tests/portability/cli-imports.test.mjs": {
    "deps": [
@@ -8806,6 +8819,7 @@
     "hooks/gotcha-guard.test.mjs",
     "hooks/hooks.json",
     "hooks/load-rules.mjs",
+    "hooks/plan-goal.mjs",
     "hooks/rule-guard.mjs",
     "hooks/subagent-cost.mjs",
     "index.mjs",
@@ -9157,6 +9171,7 @@
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
+    "tests/hooks/plan-goal.test.mjs",
     "tests/portability/cli-imports.test.mjs",
     "tests/portability/config-file.test.mjs",
     "tests/portability/config-state-dir.test.mjs",
@@ -9477,6 +9492,7 @@
     "hooks/gotcha-guard.test.mjs",
     "hooks/hooks.json",
     "hooks/load-rules.mjs",
+    "hooks/plan-goal.mjs",
     "hooks/rule-guard.mjs",
     "hooks/subagent-cost.mjs",
     "index.mjs",
@@ -9826,6 +9842,7 @@
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
+    "tests/hooks/plan-goal.test.mjs",
     "tests/portability/cli-imports.test.mjs",
     "tests/portability/config-file.test.mjs",
     "tests/portability/config-state-dir.test.mjs",
@@ -10074,6 +10091,7 @@
     "hooks/gotcha-guard.mjs",
     "hooks/gotcha-guard.test.mjs",
     "hooks/load-rules.mjs",
+    "hooks/plan-goal.mjs",
     "hooks/rule-guard.mjs",
     "hooks/subagent-cost.mjs",
     "lib/claims/blocks.mjs",
@@ -10554,6 +10572,7 @@
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
+    "tests/hooks/plan-goal.test.mjs",
     "tests/portability/cli-imports.test.mjs",
     "tests/portability/config-file.test.mjs",
     "tests/portability/config-state-dir.test.mjs",
@@ -16920,6 +16939,7 @@
     "hooks/gotcha-guard.test.mjs",
     "hooks/hooks.json",
     "hooks/load-rules.mjs",
+    "hooks/plan-goal.mjs",
     "hooks/rule-guard.mjs",
     "hooks/subagent-cost.mjs",
     "lib/",
@@ -17748,6 +17768,7 @@
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
+    "tests/hooks/plan-goal.test.mjs",
     "tests/portability/cli-imports.test.mjs",
     "tests/portability/cli/...",
     "tests/portability/cli/....cjs",

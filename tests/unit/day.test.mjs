@@ -17,7 +17,7 @@ import path from "node:path";
 process.env.PROPAGATE_STATE_DIR = mkdtempSync(path.join(tmpdir(), "day-test-state-"));
 
 import { dayCmd } from "../../cli/day.mjs";
-import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose, hasDoneWhen, countBasis, promotionOrder } from "../../lib/report/day.mjs";
+import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose, hasDoneWhen, countBasis, promotionOrder, readBoards } from "../../lib/report/day.mjs";
 
 const NOW = new Date(2026, 10, 12, 10, 0, 0).getTime(); // local Thu 2026-11-12 10:00
 const iso = (d) => new Date(d).toISOString();
@@ -91,16 +91,46 @@ const item = (n, { goal = "G1", priority = null, model = null, order = null, sta
 
 const stat = (it) => it.fieldValues.nodes.find((v) => v.field?.name === "Status")?.name;
 const closed = (it) => it.content.state === "CLOSED";
-const conn = (nodes) => ({ totalCount: nodes.length, nodes });
+const PAGE = 100;
+/** One page of a group: `after` is the cursor the previous page returned ("c<offset>"), or null for the first. */
+const conn = (nodes, after = null) => {
+  const start = after === null ? 0 : Number(after.slice(1));
+  const end = start + PAGE;
+  return {
+    totalCount: nodes.length,
+    pageInfo: { hasNextPage: end < nodes.length, endCursor: end < nodes.length ? `c${end}` : null },
+    nodes: nodes.slice(start, end),
+  };
+};
+/** The items of one board group, by the Status filter dayDetailQuery / dayPageQuery send for it. */
+const groupItems = (b, filter) => {
+  const s = (n) => b.items.filter((i) => stat(i) === n);
+  if (filter === "status:Ready") return s("Ready");
+  if (filter === 'status:"In progress"') return s("In progress");
+  if (filter === "status:Backlog") return s("Backlog");
+  if (filter === "is:closed -status:Done") return b.items.filter((i) => closed(i) && stat(i) !== "Done");
+  return s("Done"); // done, and recent (the fake does not filter by date)
+};
 
 /** The fake: honours the alias names of dayDetailQuery, applies writes to the store, counts them. */
 function fetcher(store, { remaining = 5000, dropWriteFor = null } = {}) {
   const f = {
     writes: [],
     graphqlCalls: 0,
-    rateLimit: () => ({ graphql: { remaining, limit: 5000 } }),
+    pageCalls: [], // the follow-up (after:) queries, in order
+    rateChecks: 0,
+    rateLimit: () => {
+      f.rateChecks++;
+      return { graphql: { remaining: typeof remaining === "function" ? remaining(f) : remaining, limit: 5000 } };
+    },
     graphql: async (q) => {
       f.graphqlCalls++;
+      const pg = /projectV2\(number:(\d+)\)\{items\(first:100,after:("(?:[^"\\]|\\.)*"),query:("(?:[^"\\]|\\.)*")\)/.exec(q);
+      if (pg) {
+        f.pageCalls.push(q);
+        const b = store.boards.find((x) => x.number === Number(pg[1]));
+        return { viewer: { projectV2: { items: conn(groupItems(b, JSON.parse(pg[3])), JSON.parse(pg[2])) } } };
+      }
       if (q.includes("projectsV2(first:100)")) {
         return { viewer: { projectsV2: { totalCount: store.boards.length, nodes: store.boards.map(({ items, ...b }) => b) } } };
       }
@@ -115,16 +145,15 @@ function fetcher(store, { remaining = 5000, dropWriteFor = null } = {}) {
       const viewer = {};
       for (const m of q.matchAll(/b(\d+):projectV2/g)) {
         const b = store.boards.find((x) => x.number === Number(m[1]));
-        const s = (n) => b.items.filter((i) => stat(i) === n);
         viewer[`b${b.number}`] = {
           number: b.number,
           title: b.title,
-          ready: conn(s("Ready")),
-          prog: conn(s("In progress")),
-          backlog: conn(s("Backlog")),
-          done: conn(s("Done")),
-          recent: conn(s("Done")),
-          stale: conn(b.items.filter((i) => closed(i) && stat(i) !== "Done")),
+          ready: conn(groupItems(b, "status:Ready")),
+          prog: conn(groupItems(b, 'status:"In progress"')),
+          backlog: conn(groupItems(b, "status:Backlog")),
+          done: conn(groupItems(b, "status:Done")),
+          recent: conn(groupItems(b, "status:Done")),
+          stale: conn(groupItems(b, "is:closed -status:Done")),
         };
       }
       return { viewer };
@@ -663,4 +692,79 @@ test("a snapshot write failure becomes a note and never fails day open", async (
   assert.notEqual(r.exit, 2, `day open must still judge: ${r.reason}`);
   assert.ok(r.notes.some((n) => /dispatch snapshot not written/.test(n)), `notes: ${JSON.stringify(r.notes)}`);
   process.env.PROPAGATE_STATE_DIR = mkdtempSync(path.join(tmpdir(), "day-test-state-"));
+});
+
+// ── paging: a group longer than 100 is read in full, up to 10 pages ─────────
+
+const backlogN = (k) => Array.from({ length: k }, (_, i) => item(1000 + i, { status: "Backlog", size: "S" }));
+/** readBoards with its own call counter, the way day open / day close count GraphQL calls. */
+const readPaged = async (nItems, fopts = {}) => {
+  const f = fetcher({ boards: [boardNode(7, { items: backlogN(nItems) })] }, fopts);
+  let calls = 0;
+  const read = await readBoards({ fetcher: f, now: NOW, count: () => calls++ });
+  return { f, read, calls };
+};
+
+test("paging: a 250-item Backlog is read in full, with no truncated entry and exactly 2 follow-up calls, counted", async () => {
+  const { f, read, calls } = await readPaged(250);
+  assert.equal(read.stop, undefined, read.stop);
+  const items = read.byBoard.get(7).backlog;
+  assert.equal(items.length, 250);
+  assert.deepEqual(items.map((i) => i.number), backlogN(250).map((i) => i.content.number), "pages are appended in order, none repeated");
+  assert.deepEqual(read.truncated, []);
+  assert.equal(f.pageCalls.length, 2);
+  assert.match(f.pageCalls[0], /after:"c100"/);
+  assert.match(f.pageCalls[1], /after:"c200"/);
+  assert.match(f.pageCalls[0], /query:"status:Backlog"/, "the follow-up carries the group's own filter");
+  assert.equal(calls, 2 + 2, "listing + detail + 2 follow-ups");
+  assert.equal(calls, f.graphqlCalls, "the counted calls are the calls made");
+});
+
+test("paging: a day open over a 250-item Backlog prints the true call count and no truncation note", async () => {
+  const f = fetcher({ boards: [boardNode(7, { items: [...finished3(), ...backlogN(250)] })] });
+  const r = await buildDayOpen({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, laneRows: [] });
+  assert.equal(r.graphqlCalls, f.graphqlCalls);
+  assert.equal(f.pageCalls.length, 2);
+  assert.ok(!r.notes.some((n) => /truncated/.test(n)), JSON.stringify(r.notes));
+});
+
+test("paging: a 1,050-item group hits the 10-page cap: 1,000 read, truncated names 1000 of 1050", async () => {
+  const { f, read, calls } = await readPaged(1050);
+  assert.equal(read.byBoard.get(7).backlog.length, 1000);
+  assert.deepEqual(read.truncated, ["board 7 backlog: 1000 of 1050"]);
+  assert.equal(f.pageCalls.length, 9, "10 pages per group, the first included");
+  assert.equal(calls, 2 + 9);
+});
+
+test("paging: remaining below MIN_RATE_LIMIT before page 2 stops paging with a note, not a failure; the truncation stays", async () => {
+  const { f, read } = await readPaged(250, { remaining: (fx) => (fx.rateChecks <= 1 ? 5000 : 50) });
+  assert.equal(read.stop, undefined, "a low rate limit while paging is never a failure");
+  assert.equal(f.pageCalls.length, 0);
+  assert.equal(read.byBoard.get(7).backlog.length, 100);
+  assert.deepEqual(read.truncated, ["board 7 backlog: 100 of 250"]);
+  assert.equal(read.notes.length, 1);
+  assert.match(read.notes[0], /paging stopped: GraphQL remaining 50 is below 100/);
+});
+
+test("paging: a stop mid-run keeps what was read, and the later groups stay truncated", async () => {
+  // ready 150 + backlog 150: the check before the Ready follow-up passes, every later one is low.
+  const items = [
+    ...Array.from({ length: 150 }, (_, i) => item(2000 + i, { status: "Ready", size: "S" })),
+    ...Array.from({ length: 150 }, (_, i) => item(3000 + i, { status: "Backlog", size: "S" })),
+  ];
+  const f = fetcher({ boards: [boardNode(7, { items })] }, { remaining: (fx) => (fx.rateChecks <= 2 ? 5000 : 50) });
+  const read = await readBoards({ fetcher: f, now: NOW, count: () => {} });
+  assert.equal(f.pageCalls.length, 1);
+  assert.equal(read.byBoard.get(7).ready.length, 150, "the Ready group was fully paged before the stop");
+  assert.equal(read.byBoard.get(7).backlog.length, 100);
+  assert.deepEqual(read.truncated, ["board 7 backlog: 100 of 150"]);
+  assert.match(read.notes[0], /paging stopped/);
+});
+
+test("paging: day open reports the stop note and the truncated group, and still judges", async () => {
+  const f = fetcher({ boards: [boardNode(7, { items: [...finished3(), ...backlogN(250)] })] }, { remaining: (fx) => (fx.rateChecks <= 1 ? 5000 : 50) });
+  const r = await buildDayOpen({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, laneRows: [] });
+  assert.notEqual(r.exit, 2, r.reason);
+  assert.ok(r.notes.some((n) => /paging stopped/.test(n)), JSON.stringify(r.notes));
+  assert.ok(r.notes.some((n) => /board 7 backlog: 100 of 250/.test(n)), JSON.stringify(r.notes));
 });

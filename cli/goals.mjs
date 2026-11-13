@@ -33,6 +33,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseGoalsFile, goalCounts } from "../lib/report/goals.mjs";
 import { discoverBacklogFiles } from "../lib/report/backlog.mjs";
+import { stateDir } from "../lib/core/paths.mjs";
 import { checkGoals } from "../lib/report/goals-check.mjs";
 import { readBoards, boardsForGoals } from "../lib/report/day.mjs";
 import { ghFetcher } from "./sprint.mjs";
@@ -152,11 +153,31 @@ export function checkDoneCmd(argv, { files, now = new Date(), run = runDerived, 
   return refused ? 1 : 0;
 }
 
+/** Rows of <stateDir>/plans/approvals.jsonl (written by hooks/plan-goal.mjs); [] when there is no log or a line is unreadable. */
+function readApprovals() {
+  let text;
+  try {
+    text = readFileSync(path.join(stateDir(), "plans", "approvals.jsonl"), "utf8");
+  } catch {
+    return [];
+  }
+  const rows = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch {
+      /* a torn line is skipped, not fatal */
+    }
+  }
+  return rows;
+}
+
 /**
  * `goals check [--json]` (propagate#264). Exit 0 pass, 1 violations, 2 could not check (no GOALS.md, or the boards
  * could not be read: a blind scan is never a pass). `fetcher` is injectable for tests.
  */
-export async function checkCmd(argv, { files, fetcher, now = Date.now(), out = (s) => console.log(s), err = (s) => console.error(s) } = {}) {
+export async function checkCmd(argv, { files, fetcher, approvals, now = Date.now(), out = (s) => console.log(s), err = (s) => console.error(s) } = {}) {
   const json = argv.includes("--json");
   for (const a of argv) {
     if (a !== "--json") {
@@ -175,7 +196,7 @@ export async function checkCmd(argv, { files, fetcher, now = Date.now(), out = (
     err(`goals check: could not read the boards: ${read.stop}`);
     return 2;
   }
-  const result = checkGoals({ files: parsed, boards: boardsForGoals(read), now });
+  const result = checkGoals({ files: parsed, boards: boardsForGoals(read), approvals: approvals ?? readApprovals(), now });
   if (result.blind) {
     err(`goals check: ${result.blind}`);
     return 2;
@@ -189,6 +210,12 @@ export async function checkCmd(argv, { files, fetcher, now = Date.now(), out = (
   out(`  ${c.files} file(s) · ${c.goals} goal(s) · ${c.active} active · ${c.boards} board(s) · ${c.itemsChecked} Ready / In progress item(s) checked`);
   for (const v of result.violations) out(`  ${RED}violation${RESET} [${v.clause}] ${v.subject}: ${v.reason}`);
   for (const n of result.notChecked) out(`  ${YELLOW}not checked${RESET} ${n}`);
+  const ap = result.approvals;
+  if (ap.total > 0) {
+    const per = Object.entries(ap.byGoal).map(([g, n]) => `${g} x${n}`).join(", ") || "none under a goal";
+    out(`  plan approvals, last ${ap.days} days: ${ap.total} · ${per} · ${ap.overrides.length} goal_reason override(s)`);
+    for (const o of ap.overrides) out(`    ${YELLOW}override${RESET} ${o.ts.slice(0, 10)} ${o.plan}: ${o.reason}`);
+  }
   out(result.ok ? `${GREEN}pass${RESET}: no violations (the not-checked lines above are not passes)` : `${RED}${result.violations.length} violation(s)${RESET}`);
   return result.ok ? 0 : 1;
 }

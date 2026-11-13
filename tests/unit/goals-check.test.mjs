@@ -14,7 +14,7 @@ import { checkCmd } from "../../cli/goals.mjs";
 
 const NOW = Date.UTC(2026, 10, 20, 12, 0, 0); // 2026-11-20
 
-const PLAN_CLAUSE = "plan names a goal: needs #244";
+const PLAN_CLAUSE = "no plan approval recorded in 7 days";
 const clauses = (r) => r.violations.map((v) => v.clause);
 
 // A complete Ready item and a complete In progress item, as literals reused only where the test is about something else.
@@ -175,7 +175,7 @@ const files = [goalsFile(g1)];
 
 test("checkCmd: a clean read is exit 0 and prints the not-checked plan clause", async () => {
   const o = sink();
-  const code = await checkCmd([], { files, fetcher: fakeFetcher([goalBoard], [readyNode]), now: NOW, out: o.fn, err: o.fn });
+  const code = await checkCmd([], { files, approvals: [], fetcher: fakeFetcher([goalBoard], [readyNode]), now: NOW, out: o.fn, err: o.fn });
   assert.equal(code, 0, o.lines.join("\n"));
   assert.ok(o.lines.join("\n").includes(PLAN_CLAUSE));
 });
@@ -226,4 +226,53 @@ test("boards with no Goal field and no Ready / In progress items fold into one n
   assert.ok(r.notChecked.includes("2 board(s) with no Goal field and nothing Ready or In progress: 30, 31"), JSON.stringify(r.notChecked));
   assert.ok(r.notChecked.some((n) => n.startsWith("board 32 C: has no Goal field, so its 1 Ready")), JSON.stringify(r.notChecked));
   assert.equal(r.notChecked.filter((n) => /^board 3[01] /.test(n)).length, 0, "an idle board must not also get its own line");
+});
+
+// plan-goal (G3 Done-when 2): the approval log hooks/plan-goal.mjs writes. Rows are literals.
+const daysAgo = (d) => new Date(NOW - d * 24 * 3600 * 1000).toISOString();
+const plain = (approvals) => checkGoals({ files: [goalsFile(g1)], boards: [board([okReady, okProg])], approvals, now: NOW });
+
+test("plan-goal: a row older than 7 days is ignored, even one naming a goal that is not active", () => {
+  const r = plain([{ ts: daysAgo(8), plan: "/p/old.md", goal: "G9" }]);
+  assert.equal(r.ok, true, JSON.stringify(r.violations));
+  assert.ok(r.notChecked.includes(PLAN_CLAUSE), "an all-stale log is the same as no log");
+});
+
+test("plan-goal: an approval naming a goal that is not active now is a plan-goal violation", () => {
+  const parked = { n: "G2", title: "two", status: "parked", active: false, activeSince: null, appetiteWeeks: null, retros: [] };
+  const r = checkGoals({
+    files: [goalsFile(g1, parked)],
+    boards: [board([okReady, okProg])],
+    approvals: [{ ts: daysAgo(2), plan: "/p/new.md", goal: "G2" }, { ts: daysAgo(1), plan: "/p/ok.md", goal: "G1" }],
+    now: NOW,
+  });
+  assert.deepEqual(clauses(r), ["plan-goal"]);
+  assert.equal(r.violations[0].subject, "/p/new.md");
+  assert.match(r.violations[0].reason, /G2.*not active now/);
+  assert.deepEqual(r.approvals.byGoal, { G2: 1, G1: 1 });
+  assert.equal(r.ok, false);
+});
+
+test("plan-goal: an override is listed in the approvals summary, never a violation", () => {
+  const r = plain([{ ts: daysAgo(1), plan: "/p/side.md", goal: null, reason: "one-off repair" }]);
+  assert.equal(r.ok, true, JSON.stringify(r.violations));
+  assert.deepEqual(r.violations, []);
+  assert.equal(r.approvals.total, 1);
+  assert.deepEqual(r.approvals.overrides, [{ ts: daysAgo(1), plan: "/p/side.md", reason: "one-off repair" }]);
+  assert.ok(!r.notChecked.includes(PLAN_CLAUSE), "a recorded approval is not 'not checked'");
+});
+
+test("plan-goal: no rows, or no approvals argument, is 'not checked', never clean", () => {
+  assert.ok(plain([]).notChecked.includes(PLAN_CLAUSE));
+  assert.ok(plain(undefined).notChecked.includes(PLAN_CLAUSE));
+});
+
+test("checkCmd: prints the approvals summary and the override lines", async () => {
+  const o = sink();
+  const rows = [{ ts: daysAgo(1), plan: "/p/a.md", goal: "G1" }, { ts: daysAgo(1), plan: "/p/b.md", goal: null, reason: "repair" }];
+  const code = await checkCmd([], { files, approvals: rows, fetcher: fakeFetcher([goalBoard], [readyNode]), now: NOW, out: o.fn, err: o.fn });
+  assert.equal(code, 0, o.lines.join("\n"));
+  const text = o.lines.join("\n");
+  assert.match(text, /plan approvals, last 7 days: 2 .*G1 x1.*1 goal_reason override/);
+  assert.match(text, /override.*\/p\/b\.md: repair/);
 });
