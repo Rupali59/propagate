@@ -625,6 +625,17 @@ scan never exits 0.
 
 "Done when" counts only when it is **stated**. The matcher strips fenced code and backtick spans, then needs a heading, a bold marker or a sentence that starts with the phrase. The workspace-hub#13 false positive is the case it excludes. Each item connection is read with `first:100` and not paged, and a truncated connection is noted in the output.
 
+## The dispatch model check (propagate#265, #214 part 2)
+
+`propagate day open` also writes `<state dir>/day/items.json`: `{ generatedAt, items: { "<owner/repo>#<n>": { model, goal, status, projectId, itemId, statusFieldId, inProgressOptionId } } }`, one entry per item it read on every board, written atomically from the read it already holds (no extra GraphQL call). A write failure is a note in the day open output, never a failed run.
+
+`hooks/dispatch-model.mjs` runs on PreToolUse for `Agent` and `Task` and reads that file, so a dispatch costs no read:
+- **Refs:** `owner/repo#n` and github.com issue URLs in the prompt. A bare `#n` counts only when the prompt names exactly one repo. No ref: silent, exit 0.
+- **Not checked, allowed, and said so:** no snapshot, an unreadable one, or one not generated today ("model not checked: no day snapshot from today (run propagate day open)"); a ref not on a board; an item with no Model.
+- **Mismatch:** the item's Model (case-insensitive) against `tool_input.model`. An omitted model is a mismatch, because the subagent would inherit the parent's. Without a `model_reason: <text>` line at the start of a prompt line the dispatch is **denied**, naming the ref, both models and both fixes. With one it is allowed and a row `{ts, ref, expected, actual, reason, subagent_type}` is appended to `<state dir>/day/overrides.jsonl`. With several refs, any unreasoned mismatch denies the whole dispatch.
+- **The one write:** on an allow, an item in Backlog or Ready is set to In progress (one `updateProjectV2ItemFieldValue` through `gh api graphql`, 5 s timeout; `PROPAGATE_GH_BIN` overrides the binary). A deny writes nothing; In progress, In review and Done are never written. A failed write is reported in `additionalContext` and the dispatch is still allowed. After a success the snapshot's status is updated so a second dispatch does not write again.
+- **Fails open on its own bugs**, reporting the error in `additionalContext`. Exit code is always 0.
+
 ## Subagents (propagate#251)
 
 propagate ships subagents in `agents/`, registered as `propagate:<name>`. **An agent proposes; the parent acts only on what a deterministic check accepts.** Rupali, 2026-11-12: *"if we are replacing a functionality, it better have a deterministic check at the end"*. Mechanical work stays in code: an agent exists only for a judgment, and that judgment is gated.

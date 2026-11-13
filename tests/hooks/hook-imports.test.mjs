@@ -54,7 +54,7 @@ function skillJoinTargets(src) {
 
 test("hooks/ contains the hooks the plugin ships", () => {
   const names = hookFiles().map((f) => path.basename(f)).sort();
-  assert.deepEqual(names, ["agent-guard.mjs", "agent-nudge.mjs", "doc-authority.mjs", "gotcha-guard.mjs", "load-rules.mjs", "rule-guard.mjs", "subagent-cost.mjs"],
+  assert.deepEqual(names, ["agent-guard.mjs", "agent-nudge.mjs", "dispatch-model.mjs", "doc-authority.mjs", "gotcha-guard.mjs", "load-rules.mjs", "rule-guard.mjs", "subagent-cost.mjs"],
     "a hook was added or removed without updating this assertion");
 });
 
@@ -100,7 +100,7 @@ test("doc-authority distinguishes ABSENT from BROKEN", () => {
  * silently stop guarding every shell command while the check still passed. That is the
  * doc-authority failure shape reproduced inside the verification written to catch it.
  */
-test("hooks.json declares exactly 8 registrations, and every command resolves", () => {
+test("hooks.json declares exactly 9 registrations, and every command resolves", () => {
   const manifest = JSON.parse(readFileSync(path.join(HOOKS, "hooks.json"), "utf8"));
   const seen = [];
   for (const [event, groups] of Object.entries(manifest.hooks)) {
@@ -111,8 +111,8 @@ test("hooks.json declares exactly 8 registrations, and every command resolves", 
     }
   }
 
-  assert.equal(seen.length, 8,
-    `expected 8 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
+  assert.equal(seen.length, 9,
+    `expected 9 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
       `design (Edit|Write and Bash); collapsing it to one silently stops guarding Bash.`);
   // #188: the cost ledger is written only by this registration. Without it, lanes finish unrecorded.
   assert.ok(seen.some((s) => s.event === "SubagentStop" && /subagent-cost\.mjs/.test(s.command)),

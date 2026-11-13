@@ -9,6 +9,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+// `day open` writes the dispatch snapshot (propagate#265) under stateDir(); keep every test off the real one.
+process.env.PROPAGATE_STATE_DIR = mkdtempSync(path.join(tmpdir(), "day-test-state-"));
 
 import { dayCmd } from "../../cli/day.mjs";
 import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose, hasDoneWhen, countBasis, promotionOrder } from "../../lib/report/day.mjs";
@@ -616,4 +622,45 @@ test("open: the per-goal block makes no GraphQL call of its own (call count unch
   assert.equal(f2.graphqlCalls, f1.graphqlCalls);
   assert.equal(withGoals.graphqlCalls, without.graphqlCalls);
   assert.ok(withGoals.goalBlocks.length === 2, "and the blocks were built");
+});
+
+// ── the dispatch snapshot (propagate#265) ───────────────────────────────────
+
+test("day open writes <stateDir>/day/items.json from the read it already did: no extra GraphQL call", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "day-snap-"));
+  process.env.PROPAGATE_STATE_DIR = dir;
+  const store = openStore([
+    item(200, { status: "Ready", size: "S", model: "Sonnet", goal: "G1" }),
+    item(201, { status: "Backlog", goal: "G1" }),
+  ]);
+  const f = fetcher(store);
+  const r = await buildDayOpen({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, laneRows: [] });
+  assert.equal(f.graphqlCalls, 2, "one listing read and one detail read, exactly what day open did before the snapshot");
+  assert.equal(r.graphqlCalls, f.graphqlCalls);
+  const snap = JSON.parse(readFileSync(path.join(dir, "day", "items.json"), "utf8"));
+  assert.equal(snap.generatedAt, new Date(NOW).toISOString());
+  assert.deepEqual(snap.items["o/r#200"], {
+    model: "Sonnet",
+    goal: "G1",
+    status: "Ready",
+    projectId: "P7",
+    itemId: "I200",
+    statusFieldId: "FS7",
+    inProgressOptionId: "o-p",
+  });
+  assert.equal(snap.items["o/r#201"].status, "Backlog");
+  assert.equal(snap.items["o/r#201"].model, null, "an unset Model is null, not a guess");
+  assert.ok(snap.items["o/r#901"], "Done items are covered too");
+  assert.deepEqual(readdirSync(path.join(dir, "day")), ["items.json"], "the temp file was renamed away");
+  process.env.PROPAGATE_STATE_DIR = mkdtempSync(path.join(tmpdir(), "day-test-state-"));
+});
+
+test("a snapshot write failure becomes a note and never fails day open", async () => {
+  const blocker = path.join(mkdtempSync(path.join(tmpdir(), "day-snap-")), "afile");
+  writeFileSync(blocker, "x");
+  process.env.PROPAGATE_STATE_DIR = blocker; // a file where a directory is needed
+  const r = await open(openStore(readyN(3)));
+  assert.notEqual(r.exit, 2, `day open must still judge: ${r.reason}`);
+  assert.ok(r.notes.some((n) => /dispatch snapshot not written/.test(n)), `notes: ${JSON.stringify(r.notes)}`);
+  process.env.PROPAGATE_STATE_DIR = mkdtempSync(path.join(tmpdir(), "day-test-state-"));
 });
