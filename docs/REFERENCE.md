@@ -538,6 +538,31 @@ watcher — so `check` won't warn on a glob-declared code edge. Declare
 non-glob `kind: code` edges for files you want the commit-time gate to
 actually catch.
 
+## `propagate goals allow` and `goals check-done`: goals can close (propagate#55)
+
+`propagate goals` stays read-only and runs nothing. These two run a goal's `Derived by:` command, and only an
+approved one.
+
+`propagate goals allow <GOALS.md> <goal-id>` approves one goal's **exact** command text: its SHA-256 goes to
+`$PROPAGATE_STATE_DIR/goals/trusted.json` with the file, the goal and the date. Run it yourself; it is the trust
+decision. An edit to the command changes the hash, so the goal is untrusted again (the `direnv allow` pattern).
+Exit 2 when the goal does not exist or names no command.
+
+`propagate goals check-done [--apply] [--timeout <s>] [--json]` reads every GOALS.md under the search roots.
+- **A trusted command runs** with `bash -c`, cwd = the GOALS.md's git root, a 120 s timeout (`--timeout <s>` for a long suite). On a timeout the whole process
+  group is killed, so a suite's children never outlive it. Exit 0 is **met**;
+  anything else is **unmet**, with the exit code and the last output lines. A timeout is unmet and says so.
+- **Never run:** an untrusted or edited command (reported with the `goals allow` line to approve it), a
+  `Judgement, not derivable` goal (it needs a person), a parked goal, a closed goal.
+- **`--apply`** writes one line per met goal, directly under its heading:
+  `**Resolved:** <date> · derived: `<cmd>` exited 0 (propagate goals check-done)`. Under the heading, because the
+  reader takes a marker only from the first 3 non-empty lines (`MARKER_WINDOW`). Nothing else in the file changes.
+  Without `--apply` the files are byte-identical (tested by snapshot, across every outcome).
+- **Exit:** 0 ran; 1 a met goal's section could not be found, so nothing was written for it; 2 no GOALS.md found.
+
+**Parked** is a status of its own: a `**Parked (cycle N, date):** <reason>; returns when <condition>` line in
+the same 3-line window. It is never counted as open. A later `Resolved:` wins.
+
 ## `propagate day`: day open and day close (propagate#240)
 
 `propagate day open [--json]` is read-only.

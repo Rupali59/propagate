@@ -33,7 +33,9 @@ const FORBIDDEN_LITERAL = ["rupali", "b"].join(".");
 let root, hub, stateDir, emptyState, ghBin, ghLog;
 
 function git(dir, ...args) {
-  const r = spawnSync("git", ["-c", "commit.gpgsign=false", "-C", dir, ...args], {
+  // Auto-maintenance off, as in tests/cli/tasks-export (#252): a background `git maintenance`/`gc` rewrites .git
+  // during the run, and the INERT snapshot below reads that as the plan writing a file (181 -> 180 entries, 2026-11-13).
+  const r = spawnSync("git", ["-c", "commit.gpgsign=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-C", dir, ...args], {
     encoding: "utf8",
     env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
   });
@@ -43,6 +45,10 @@ function git(dir, ...args) {
 function repo(dir, origin) {
   mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q");
+  // In the repo's own config too, so the git calls the CODE UNDER TEST makes (rev-parse for blob URLs) are covered,
+  // not only this helper's.
+  git(dir, "config", "maintenance.auto", "false");
+  git(dir, "config", "gc.auto", "0");
   if (origin) git(dir, "remote", "add", "origin", origin);
 }
 
@@ -53,7 +59,7 @@ function put(rel, text) {
   return p;
 }
 
-/** sha256 of every file's bytes + the full sorted path list. Any create/delete/edit changes it. */
+/** One row per directory and per file (with its sha256), sorted. Any create, delete or edit changes it. */
 function snapshot(...dirs) {
   const rows = [];
   const walk = (d) => {
@@ -64,7 +70,16 @@ function snapshot(...dirs) {
     }
   };
   for (const d of dirs) walk(d);
-  return createHash("sha256").update(rows.sort().join("\n")).digest("hex") + ` (${rows.length} entries)`;
+  return rows.sort();
+}
+
+/** Equal snapshots, or a failure that NAMES what changed (#252: a bare hash pair said only "181 -> 180"). */
+function assertSame(after, before, msg) {
+  const b = new Set(before);
+  const a = new Set(after);
+  const added = after.filter((r) => !b.has(r));
+  const removed = before.filter((r) => !a.has(r));
+  assert.ok(!added.length && !removed.length, `${msg}\n  added:   ${added.join("\n           ") || "(none)"}\n  removed: ${removed.join("\n           ") || "(none)"}`);
 }
 
 function plan(extra = {}) {
@@ -174,7 +189,7 @@ test("INERT: the plan changes no file, creates none, and gh sees only `repo view
   const p = plan();
   assert.equal(p.ok, true);
   assert.ok(p.files.length >= 8, `only ${p.files.length} register files planned — the scan has gone blind`);
-  assert.equal(snapshot(hub, stateDir), before, "tasks export must not touch the hub or the state dir");
+  assertSame(snapshot(hub, stateDir), before, "tasks export must not touch the hub or the state dir");
   const log = readFileSync(ghLog, "utf8").trim().split("\n");
   assert.ok(log.length >= 4, "gh was never asked about any repo");
   for (const line of log) {

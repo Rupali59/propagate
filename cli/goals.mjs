@@ -5,19 +5,33 @@
  * across the tree, whether each is open / closed / unknown, and — the axis
  * this command exists for — whether anyone could check it at all.
  *
- * READ-ONLY, AND IT DOES NOT RUN THE COMMANDS. Every `Derived by:` is printed
- * for a person to run. Executing them would mean running shell written inside
- * a markdown file, which `lib/report/handovers.mjs` refuses in those words and
- * `tests/unit/goals.test.mjs` pins with a canary. There is deliberately no
- * `--apply` and no `--run`.
+ * `propagate goals` IS READ-ONLY AND RUNS NOTHING. Every `Derived by:` is printed
+ * for a person to run; `tests/unit/goals.test.mjs` pins that with a canary.
+ *
+ * Two subcommands run commands, and only APPROVED ones (propagate#55; this
+ * supersedes the earlier "no --apply and no --run", DECISIONS 2026-11-13):
+ *
+ *   goals allow <GOALS.md> <goal-id>   the owner approves one goal's exact command text.
+ *                                      Its SHA-256 goes to $PROPAGATE_STATE_DIR/goals/trusted.json.
+ *   goals check-done [--apply]         runs each TRUSTED command (bash -c, cwd = the repo
+ *                                      root, 120 s or --timeout <s>); exit 0 = met. An untrusted or edited
+ *                                      command is reported and never run. Judgement goals are
+ *                                      never closed. --apply writes one `**Resolved:**` line
+ *                                      per met goal; without it the files are untouched.
+ *
+ * `allow` is the trust decision, so propagate's agents may not run it
+ * (hooks/agent-guard.mjs keeps every `goals` call out of their read list).
  *
  * Import prefix is `../lib/…` from here — G60: a specifier copied out of
  * cli.mjs is relative to the REPO ROOT and fails only at runtime.
  */
 
 import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./ansi.mjs";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { parseGoalsFile, goalCounts } from "../lib/report/goals.mjs";
 import { discoverBacklogFiles } from "../lib/report/backlog.mjs";
+import { RUN_TIMEOUT_MS, allow, readTrust, planChecks, runDerived, repoRoot, writeResolved, trustPath } from "../lib/report/goals-run.mjs";
 
 function short(file, cwd) {
   const home = process.env.HOME ?? "";
@@ -25,9 +39,117 @@ function short(file, cwd) {
   return home && file.startsWith(home) ? `~${file.slice(home.length)}` : file;
 }
 
-const STATUS_COLOUR = { open: YELLOW, closed: GREEN, unknown: RED };
+const STATUS_COLOUR = { open: YELLOW, closed: GREEN, parked: DIM, unknown: RED };
+
+/** `goals allow <file> <goal-id>`: approve one command. Exit 0 approved, 2 not found or no command. */
+export function allowCmd(argv, { now = new Date() } = {}) {
+  const [file, id] = argv.filter((a) => !a.startsWith("--"));
+  if (!file || id == null) {
+    console.error("usage: propagate goals allow <GOALS.md> <goal-id>");
+    return 2;
+  }
+  const abs = path.resolve(file);
+  const parsed = parseGoalsFile(abs);
+  if (parsed.unread) {
+    console.error(`${abs}: ${parsed.reason}`);
+    return 2;
+  }
+  const e = parsed.entries.find((x) => String(x.n) === String(id));
+  if (!e) {
+    console.error(`${abs}: no goal ${id} (goals here: ${parsed.entries.map((x) => x.n).join(", ")})`);
+    return 2;
+  }
+  if (e.derivation !== "claimed" || !e.command) {
+    console.error(`goal ${id} names no Derived by: command (${e.derivation}); nothing to approve`);
+    return 2;
+  }
+  const h = allow({ file: abs, goal: id, cmd: e.command, now });
+  console.log(`approved goal ${id} in ${abs}`);
+  console.log(`  command: ${e.command.split("\n").join("\n           ")}`);
+  console.log(`  sha256 ${h.slice(0, 12)} in ${trustPath()}. An edit to the command makes it untrusted again.`);
+  return 0;
+}
+
+/**
+ * `goals check-done [--apply] [--json]`. Exit 0 when every trusted command ran
+ * (met or not); 1 when a write was refused; 2 when no GOALS.md was found.
+ */
+export function checkDoneCmd(argv, { files, now = new Date(), run = runDerived, root = repoRoot } = {}) {
+  const apply = argv.includes("--apply");
+  const json = argv.includes("--json");
+  const ti = argv.indexOf("--timeout");
+  const timeout = ti === -1 ? RUN_TIMEOUT_MS : Number(argv[ti + 1]) * 1000;
+  if (!(timeout > 0)) {
+    console.error("--timeout takes a number of seconds");
+    return 2;
+  }
+  const paths = files ?? discoverBacklogFiles().goalsMd ?? [];
+  if (!paths.length) {
+    console.error("no GOALS.md found under the search roots: an empty scan, not a clean one");
+    return 2;
+  }
+  const store = readTrust();
+  const date = now.toISOString().slice(0, 10);
+  const results = [];
+  let refused = 0;
+  for (const file of paths) {
+    const parsed = parseGoalsFile(file);
+    if (parsed.unread) {
+      results.push({ file, unread: true, reason: parsed.reason });
+      continue;
+    }
+    const met = [];
+    for (const e of planChecks(parsed, store)) {
+      const r = { file, n: e.n, title: e.title, outcome: e.outcome, command: e.command ?? null };
+      if (e.outcome === "run") {
+        Object.assign(r, run(e.command, root(file), { timeout }));
+        r.outcome = r.met ? "met" : "unmet";
+        if (r.met) met.push(e);
+      }
+      results.push(r);
+    }
+    // THE --apply GUARD. Everything above reads; the write is below it, and only here.
+    if (!apply || !met.length) continue;
+    let text = readFileSync(file, "utf8");
+    // Last section first: sections are counted by heading, so order is only for readability of the diff.
+    for (const e of [...met].sort((a, b) => b.section - a.section)) {
+      const line = `**Resolved:** ${date} · derived: \`${e.command.split("\n").join(" && ")}\` exited 0 (propagate goals check-done)`;
+      const next = writeResolved(text, e.section, line);
+      if (next === null) {
+        refused += 1;
+        results.find((x) => x.file === file && x.n === e.n).written = false;
+        continue;
+      }
+      text = next;
+      results.find((x) => x.file === file && x.n === e.n).written = true;
+    }
+    writeFileSync(file, text);
+  }
+
+  if (json) {
+    console.log(JSON.stringify({ generatedAt: now.toISOString(), apply, results }, null, 2));
+    return refused ? 1 : 0;
+  }
+  const n = (o) => results.filter((r) => r.outcome === o).length;
+  console.log(`${BOLD}# goals check-done${RESET}  ${DIM}(${apply ? "--apply: met goals get a Resolved line" : "dry run: no file is written"})${RESET}`);
+  console.log(`  ${GREEN}${n("met")} met${RESET} · ${n("unmet")} unmet · ${YELLOW}${n("untrusted")} untrusted${RESET} · ${n("judgement")} need a person · ${n("parked")} parked · ${n("closed")} already closed`);
+  for (const r of results) {
+    if (r.unread) console.log(`  ${RED}unread${RESET} ${short(r.file, process.cwd())}: ${r.reason}`);
+    else if (r.outcome === "met" || r.outcome === "unmet") {
+      const col = r.outcome === "met" ? GREEN : YELLOW;
+      const w = r.written === true ? " · Resolved written" : r.written === false ? ` ${RED}· section not found, nothing written${RESET}` : "";
+      console.log(`  ${col}${r.outcome.padEnd(9)}${RESET} ${r.n} · ${r.title}  ${DIM}${short(r.file, process.cwd())}: ${r.reason}${RESET}${w}`);
+    } else if (r.outcome === "untrusted") {
+      console.log(`  ${YELLOW}untrusted${RESET} ${r.n} · ${r.title}  ${DIM}not run; approve with: propagate goals allow ${r.file} ${r.n}${RESET}`);
+    }
+  }
+  if (!apply && n("met")) console.log(`${DIM}pass --apply to write the ${n("met")} Resolved line(s).${RESET}`);
+  return refused ? 1 : 0;
+}
 
 export async function goalsCmd(argv = []) {
+  if (argv[0] === "allow") return allowCmd(argv.slice(1));
+  if (argv[0] === "check-done") return checkDoneCmd(argv.slice(1));
   const json = argv.includes("--json");
   const cwd = process.cwd();
 
@@ -56,7 +178,7 @@ export async function goalsCmd(argv = []) {
 
   console.log(
     `  ${counts.files} file(s) · ${counts.total} goal(s) — ` +
-      `${counts.open} open · ${counts.closed} closed · ${counts.unknown} unknown`,
+      `${counts.open} open · ${counts.closed} closed · ${counts.parked} parked · ${counts.unknown} unknown`,
   );
   console.log(
     `  ${DIM}derivation:${RESET} ${counts.claimed} name a command · ${counts.waived} declare themselves judgement · ` +
