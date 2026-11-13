@@ -11,7 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { dayCmd } from "../../cli/day.mjs";
-import { buildDayOpen, buildDayClose, renderDayOpen, hasDoneWhen, countBasis, promotionOrder } from "../../lib/report/day.mjs";
+import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose, hasDoneWhen, countBasis, promotionOrder } from "../../lib/report/day.mjs";
 
 const NOW = new Date(2026, 10, 12, 10, 0, 0).getTime(); // local Thu 2026-11-12 10:00
 const iso = (d) => new Date(d).toISOString();
@@ -493,26 +493,33 @@ test("close: a goal gap is named beside a Size or Done when gap", async () => {
   assert.deepEqual(r.refused.map((x) => x.missing), ["Done when; Goal is Parked, not an active goal"]);
 });
 
-test("close: FAIL CLOSED, no goal read means exit 2, 0 promotions and 0 writes, with --apply", async () => {
+test("close: no goal read SKIPS promotions with a warning; closed -> Done and the cost gaps still run (Rupali: skip with warning)", async () => {
   for (const goalFiles of [null, [], [{ file: "/x/GOALS.md", unread: true, entries: [], reason: "unreadable" }], goalsFile(goalEntry("G1", { active: false }))]) {
     const store = closeStore(); // would promote item 1 and close item 4 if goals were read
-    const f = fetcher(store);
-    const before = JSON.stringify(store);
-    const r = await buildDayClose({ goalFiles, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
-    assert.equal(r.exit, 2);
-    assert.match(r.reason, /no active goal was read/);
-    assert.equal(f.writes.length, 0, "no write call");
-    assert.deepEqual(r.promote ?? [], []);
-    assert.equal(JSON.stringify(store), before);
+    const r = await buildDayClose({ goalFiles, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: fetcher(store) });
+    assert.notEqual(r.exit, 2, "a skipped promotion is a warning, not a could-not-judge");
+    assert.match(r.promotionsSkipped ?? "", /no active goal was read/);
+    assert.deepEqual(r.promote, []);
+    assert.ok(r.closeFix.length >= 1, "closed -> Done must still be proposed without goals");
+    assert.ok(!r.refused.some((x) => /no active goal/.test(x.missing)), "the skip is one warning, not a refusal per item");
+    assert.match(renderDayClose(r).slice(0, 2).join("\n"), /WARNING: promotions skipped/, "the warning is printed first");
   }
 });
 
-test("dayCmd close: no active goal read exits 2 and writes nothing", async () => {
+test("close --apply with no goal read writes the Done fix and never a promotion", async () => {
   const store = closeStore();
   const f = fetcher(store);
-  const code = await dayCmd(["close", "--apply"], { goalFiles: [], out: out().fn, now: NOW, fetcher: f, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [] });
-  assert.equal(code, 2);
-  assert.equal(f.writes.length, 0);
+  const r = await buildDayClose({ goalFiles: [], sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
+  assert.deepEqual(r.promote, []);
+  assert.ok(f.writes.length >= 1, "the Done fix is written");
+  assert.ok(!f.writes.join("\n").includes("Status -> Ready") && !r.writes.some((w) => /Ready/.test(w.what ?? "")), "no promotion is written");
+});
+
+test("dayCmd close: no active goal read prints the warning and does not exit 2", async () => {
+  const o = out();
+  const code = await dayCmd(["close"], { goalFiles: [], out: o.fn, now: NOW, fetcher: fetcher(closeStore()), samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [] });
+  assert.notEqual(code, 2);
+  assert.match(o.lines.join("\n"), /WARNING: promotions skipped/);
 });
 
 test("open: an unread goal source offers no promotable Backlog item (fail closed there too)", async () => {
