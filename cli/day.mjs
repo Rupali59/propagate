@@ -11,6 +11,8 @@ import { readFileSync } from "node:fs";
 import { readCosts, samplesPath } from "../lib/core/costs.mjs";
 import { parseSamples } from "../lib/report/sprint-plan.mjs";
 import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose } from "../lib/report/day.mjs";
+import { parseGoalsFile } from "../lib/report/goals.mjs";
+import { discoverBacklogFiles } from "../lib/report/backlog.mjs";
 import { ghFetcher, loadWidget } from "./sprint.mjs";
 
 const USAGE = "day: usage: day open [--json] | day close [--apply] [--json]";
@@ -59,7 +61,9 @@ export async function dayCmd(args, inject = {}) {
   const fetcher = inject.fetcher ?? ghFetcher();
 
   if (sub === "open") {
-    const r = await buildDayOpen({ sampleRows: rows, now, widget, widgetMissing, fetcher, laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows });
+    // The goals summary line reads the GOALS.md files here and the boards buildDayOpen already read (propagate#264).
+    const goalFiles = inject.goalFiles ?? (discoverBacklogFiles().goalsMd ?? []).map(parseGoalsFile);
+    const r = await buildDayOpen({ sampleRows: rows, now, widget, widgetMissing, fetcher, goalFiles, laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows });
     if (json) out(JSON.stringify(r, null, 2));
     else for (const line of renderDayOpen(r)) out(line);
     return r.exit;

@@ -13,7 +13,9 @@
  *
  *   goals allow <GOALS.md> <goal-id>   the owner approves one goal's exact command text.
  *                                      Its SHA-256 goes to $PROPAGATE_STATE_DIR/goals/trusted.json.
- *   goals check-done [--apply]         runs each TRUSTED command (bash -c, cwd = the repo
+ *   goals check [--json]               read-only standing check (propagate#264): active-goal limit, appetite, board items
+ *                                      carry a declared active goal and the fields that make them startable. Exit 0 / 1 / 2.
+ *   goals check-done [--apply]       runs each TRUSTED command (bash -c, cwd = the repo
  *                                      root, 120 s or --timeout <s>); exit 0 = met. An untrusted or edited
  *                                      command is reported and never run. Judgement goals are
  *                                      never closed. --apply writes one `**Resolved:**` line
@@ -31,6 +33,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseGoalsFile, goalCounts } from "../lib/report/goals.mjs";
 import { discoverBacklogFiles } from "../lib/report/backlog.mjs";
+import { checkGoals } from "../lib/report/goals-check.mjs";
+import { readBoards, boardsForGoals } from "../lib/report/day.mjs";
+import { ghFetcher } from "./sprint.mjs";
 import { RUN_TIMEOUT_MS, allow, readTrust, planChecks, runDerived, repoRoot, writeResolved, trustPath } from "../lib/report/goals-run.mjs";
 
 function short(file, cwd) {
@@ -147,9 +152,51 @@ export function checkDoneCmd(argv, { files, now = new Date(), run = runDerived, 
   return refused ? 1 : 0;
 }
 
+/**
+ * `goals check [--json]` (propagate#264). Exit 0 pass, 1 violations, 2 could not check (no GOALS.md, or the boards
+ * could not be read: a blind scan is never a pass). `fetcher` is injectable for tests.
+ */
+export async function checkCmd(argv, { files, fetcher, now = Date.now(), out = (s) => console.log(s), err = (s) => console.error(s) } = {}) {
+  const json = argv.includes("--json");
+  for (const a of argv) {
+    if (a !== "--json") {
+      err(`goals check: unknown argument ${a}`);
+      return 2;
+    }
+  }
+  const paths = files ?? discoverBacklogFiles().goalsMd ?? [];
+  const parsed = paths.map((f) => (typeof f === "string" ? parseGoalsFile(f) : f));
+  if (!parsed.length) {
+    err("goals check: no GOALS.md found under the search roots: an empty scan, not a clean one");
+    return 2;
+  }
+  const read = await readBoards({ fetcher: fetcher ?? ghFetcher(), now, count: () => {} });
+  if (read.stop) {
+    err(`goals check: could not read the boards: ${read.stop}`);
+    return 2;
+  }
+  const result = checkGoals({ files: parsed, boards: boardsForGoals(read), now });
+  if (result.blind) {
+    err(`goals check: ${result.blind}`);
+    return 2;
+  }
+  if (json) {
+    out(JSON.stringify({ generatedAt: new Date(now).toISOString(), ...result }, null, 2));
+    return result.ok ? 0 : 1;
+  }
+  const c = result.counts;
+  out(`${BOLD}# goals check${RESET}  ${DIM}(read-only)${RESET}`);
+  out(`  ${c.files} file(s) · ${c.goals} goal(s) · ${c.active} active · ${c.boards} board(s) · ${c.itemsChecked} Ready / In progress item(s) checked`);
+  for (const v of result.violations) out(`  ${RED}violation${RESET} [${v.clause}] ${v.subject}: ${v.reason}`);
+  for (const n of result.notChecked) out(`  ${YELLOW}not checked${RESET} ${n}`);
+  out(result.ok ? `${GREEN}pass${RESET}: no violations (the not-checked lines above are not passes)` : `${RED}${result.violations.length} violation(s)${RESET}`);
+  return result.ok ? 0 : 1;
+}
+
 export async function goalsCmd(argv = []) {
   if (argv[0] === "allow") return allowCmd(argv.slice(1));
   if (argv[0] === "check-done") return checkDoneCmd(argv.slice(1));
+  if (argv[0] === "check") return checkCmd(argv.slice(1));
   const json = argv.includes("--json");
   const cwd = process.cwd();
 

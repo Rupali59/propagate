@@ -26,7 +26,7 @@ import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { parseGoalsFile, goalCounts } from "../../lib/report/goals.mjs";
+import { parseGoalsFile, goalCounts, goalId } from "../../lib/report/goals.mjs";
 
 function goalsFile(body) {
   const dir = mkdtempSync(path.join(tmpdir(), "goals-"));
@@ -285,4 +285,120 @@ test("a file of only prose headings stays UNREAD, never read as zero goals", () 
   const r = parseGoalsFile(p);
   assert.equal(r.unread, true);
   assert.equal(r.entries.length, 0);
+});
+
+// ── propagate#264: the three line formats `goals check` reads ───────────────
+
+test("Active since parses its date and its appetite; the darpan form is active with no appetite", () => {
+  const p = goalsFile(`# W
+
+## G1 · With appetite
+
+**Active since 2026-11-13 · appetite 4 weeks**
+
+**Done when:** x.
+
+## G2 · Without appetite
+
+**Active since 2026-11-13** (approved by the owner: hub plan, "G2").
+
+**Done when:** y.
+`);
+  const [a, b] = parseGoalsFile(p).entries;
+  assert.equal(a.active, true);
+  assert.equal(a.activeSince, "2026-11-13");
+  assert.equal(a.appetiteWeeks, 4);
+  assert.equal(b.active, true);
+  assert.equal(b.activeSince, "2026-11-13");
+  assert.equal(b.appetiteWeeks, null);
+});
+
+test("an Active since line outside the 3-line window is not active", () => {
+  const p = goalsFile(`# W
+
+## G1 · Buried
+
+Line one of prose.
+Line two of prose.
+Line three of prose.
+**Active since 2026-11-13 · appetite 4 weeks**
+
+**Done when:** x.
+`);
+  const e = parseGoalsFile(p).entries[0];
+  assert.equal(e.active, false);
+  assert.equal(e.activeSince, null);
+});
+
+test("a parked goal and a closed goal are never active, whatever their Active since line says", () => {
+  const p = goalsFile(`# W
+
+## G1 · Parked
+
+**Active since 2026-11-13 · appetite 4 weeks**
+**Parked (cycle 1, 2026-11-14):** waits; returns when the owner says.
+
+**Done when:** x.
+
+## G2 · Closed
+
+**Active since 2026-11-13 · appetite 4 weeks**
+
+**Done when:** y.
+**Resolved:** 2026-11-14 · met.
+`);
+  const [parked, closed] = parseGoalsFile(p).entries;
+  assert.equal(parked.status, "parked");
+  assert.equal(parked.active, false);
+  assert.equal(closed.status, "closed");
+  assert.equal(closed.active, false);
+});
+
+test("Retro lines accumulate anywhere in the section, the latest wins, and a fenced Retro is ignored", () => {
+  const p = goalsFile(`# W
+
+## G1 · Retros
+
+**Active since 2026-11-13 · appetite 2 weeks**
+
+**Done when:** x.
+
+Some prose in the middle.
+
+**Retro 2026-11-20:** continue
+
+More prose.
+
+**Retro 2026-11-27:** reshape
+
+The format is written like this:
+
+\`\`\`md
+**Retro 2026-12-31:** stop
+\`\`\`
+
+A prose mention: Retro 2026-12-01 is when we decide, but this is no decision line.
+`);
+  const e = parseGoalsFile(p).entries[0];
+  assert.deepEqual(e.retros, [
+    { date: "2026-11-20", decision: "continue" },
+    { date: "2026-11-27", decision: "reshape" },
+  ]);
+  assert.deepEqual(e.retro, { date: "2026-11-27", decision: "reshape" });
+});
+
+test("goalId is the heading's own id", () => {
+  const p = goalsFile(`# W
+
+## G2 · Letter id
+
+**Done when:** x.
+
+## 7 · Number id
+
+**Done when:** y.
+`);
+  const [a, b] = parseGoalsFile(p).entries;
+  assert.equal(goalId(a), "G2");
+  assert.equal(goalId(b), "7");
 });

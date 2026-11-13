@@ -563,6 +563,43 @@ Exit 2 when the goal does not exist or names no command.
 **Parked** is a status of its own: a `**Parked (cycle N, date):** <reason>; returns when <condition>` line in
 the same 3-line window. It is never counted as open. A later `Resolved:` wins.
 
+## `propagate goals check` (propagate#264)
+
+`propagate goals check [--json]` is the standing check behind the goal workflow. It is read-only: it reads every
+GOALS.md under the search roots and the Ready and In progress items of every open board (the same read as
+`propagate day open`), then checks them against each other. `day open` prints a one-line `goals:` summary computed by
+the same function from the boards it already read, with no second GraphQL read. The check itself is the pure function
+`checkGoals({ files, boards, now })` in `lib/report/goals-check.mjs`.
+
+**Line formats** (in GOALS.md; the goal's id is its heading's, `## G2 · …`, and a board's Goal field carries that id):
+
+| Line | Where | Meaning |
+|---|---|---|
+| `**Active since 2026-11-13 · appetite 4 weeks**` | in the 3-line marker window under the heading (`markerInWindow`, fenced lines consume it) | the goal is active; its appetite ends that many weeks after the date. The appetite part is optional: `**Active since 2026-11-13** (approved by …)` parses as active with no appetite |
+| `**Retro 2026-11-15:** continue` (or `reshape`, `stop`) | anywhere in the section body, never inside a fenced block | a retro decision; the latest date counts |
+| `**Parked (cycle N, date):** …` | the same window (propagate#55) | not active |
+
+**Active** means an Active-since line and status open. A closed or parked goal is never active; a goal with an
+Active-since line whose status is unknown (no Done when, no Resolved) is not counted and is named in `notChecked`.
+
+**Clauses** (each violation carries `clause`, `subject`, `reason`):
+
+| clause | A violation when |
+|---|---|
+| `active-goals` | 0 active goals, or more than 3 across all files |
+| `goal-undeclared` | a Ready or In progress item's Goal names a goal that no file declares active (the reason says declared-but-not-active or declared nowhere) |
+| `item-fields` | a Ready or In progress item lacks Goal (or its Goal is Parked or Idea), Priority, Model, Size or a stated "Done when"; **Ready items also need Order**, In progress items carry none by design (finish first) |
+| `appetite` | an active goal records no appetite ("no appetite recorded"), or is past it (its end date is before today) with no Retro line dated on or after the end |
+
+**Not checked, never passed:**
+- `plan names a goal: needs #244` is always listed: the plan-approval check does not exist yet.
+- A board with no Goal field is named, and its items are not counted clean.
+- A GOALS.md the reader could not parse is named.
+
+**Floors and exit:** 0 pass (the `notChecked` lines are not passes); 1 violations; 2 could not check: no GOALS.md
+found, or no board read (a rate limit, a listing that returned 0 open boards, an item with no field values). A blind
+scan never exits 0.
+
 ## `propagate day`: day open and day close (propagate#240)
 
 `propagate day open [--json]` is read-only.
