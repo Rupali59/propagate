@@ -68,7 +68,9 @@ export async function dayCmd(args, inject = {}) {
     else for (const line of renderDayOpen(r)) out(line);
     return r.exit;
   }
+  const goalFiles = inject.goalFiles ?? (discoverBacklogFiles().goalsMd ?? []).map(parseGoalsFile);
   const r = await buildDayClose({
+    goalFiles,
     sampleRows: rows,
     now,
     widget,

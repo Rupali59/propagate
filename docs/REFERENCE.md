@@ -607,12 +607,16 @@ scan never exits 0.
 - **Supply:** the Ready items across every open board whose Status uses Backlog / Ready / In progress / Done. A board with other options is named and skipped.
 - **Costing:** a calibrated Size is costed per Size. Everything else uses a **count basis** derived each run: the week-% consumed over 7 days, divided by the items with a Finished date in those 7 days. The output labels it, because it costs every item the same whatever its Size.
 - **Also listed:** In progress carry-over, and Ready items with no Size.
+- **Per active goal (propagate#240):** one block per active goal in the GOALS.md files (the same files and the same `active` flag as `goals check`), built from the boards already read, with no extra GraphQL call. It shows the goal id and title, the appetite and days left (`no appetite recorded` when none), and the counts of In progress, Ready, Backlog and Done items whose Goal is that id. A group cut off at `first:100` prints as `≥N`, never as a total. Then **Ready by Order**: each Ready item with Order (`–` when unset), Priority, Model, Size, ref and title, in the promotion order below. Then one line naming the Ready items not under an active goal. The same data is in the `--json` result (`goalBlocks`, `readyNotUnderActiveGoal`). The budget, supply and verdict lines are unchanged.
 - **Verdict:** `short by ~N points` (with the top promotable Backlog items), `enough` (budget ≤ supply ≤ 2× budget), or `over` (with what will not fit).
 - **Exit:** 0 enough; 1 short or over; 2 cannot judge (no good sample, no count basis, the rate limit too low, or the read went blind).
 
 `propagate day close [--apply] [--json]` is a dry run unless `--apply`. It proposes:
-- **(a) Promotions** from Backlog to Ready. An item qualifies when it is open, in Backlog, has a Size and a stated "Done when", is not an Epic, and has no block / question / decision / waiting / needs- label. Order: priority label, then smaller Size, then lower number. Each board is topped up to 3 Ready.
-- **(b) Refused candidates,** each naming what is missing.
+- **(a) Promotions** from Backlog to Ready. An item qualifies when it is open, in Backlog, **is under an active goal**, has a Size and a stated "Done when", is not an Epic, and has no block / question / decision / waiting / needs- label. Each board is topped up to 3 Ready.
+  - **Goal gaps:** no Goal value is `no Goal`; a Goal of Parked or Idea (any case), or a G-id that no active goal carries, is `Goal is <X>, not an active goal`. The Goal is read from the item's Goal field, field name case-insensitive.
+  - **Fails closed:** when no active goal was read (no GOALS.md, an unreadable one, or none with an active goal), every item is refused with `no active goal was read`, and `day close` exits 2 before reading or writing anything, `--apply` included. An unread goal source never permits a promotion. `day open` likewise offers no promotable Backlog item then.
+  - **Order:** the Order field ascending (unordered after ordered), then the Priority field P0 to P3, then the priority label as the tie-breaker, then smaller Size, then lower number.
+- **(b) Refused candidates,** each naming what is missing: Size, Done when, and the goal gap above.
 - **(c) Closed items whose Status is not Done:** set to Done, with Finished set to closedAt's local date.
 - **(d) Cost gaps:** a missing Finished, Tokens or Minutes on an item closed today is named, never filled.
 - **(e) In progress items** to comment on, or to move back.

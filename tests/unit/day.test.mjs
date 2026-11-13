@@ -11,12 +11,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { dayCmd } from "../../cli/day.mjs";
-import { buildDayOpen, buildDayClose, hasDoneWhen, countBasis, promotionOrder } from "../../lib/report/day.mjs";
+import { buildDayOpen, buildDayClose, renderDayOpen, hasDoneWhen, countBasis, promotionOrder } from "../../lib/report/day.mjs";
 
 const NOW = new Date(2026, 10, 12, 10, 0, 0).getTime(); // local Thu 2026-11-12 10:00
 const iso = (d) => new Date(d).toISOString();
 const RESET = iso(new Date(2026, 10, 15, 12, 30));
 const TODAY_CLOSE = iso(new Date(2026, 10, 12, 8, 0));
+
+// ── goals: one active goal, G1 (parseGoalsFile's shape) ─────────────────────
+
+const goalEntry = (n, over = {}) => ({ n, title: `goal ${n}`, status: "open", active: true, activeSince: "2026-11-09", appetiteWeeks: 4, retros: [], ...over });
+const goalsFile = (...entries) => [{ file: "/x/GOALS.md", unread: false, entries }];
+const GOALS = goalsFile(goalEntry("G1"));
 
 // ── samples and widget ──────────────────────────────────────────────────────
 
@@ -58,13 +64,17 @@ const todoBoard = (number) =>
   });
 
 /** Valid items only. Hostile cases below are literals. */
-const item = (n, { status = "Backlog", size = null, body = "", labels = [], itemType = null, state = "OPEN", closedAt = null, finished = null, tokens = null, minutes = null } = {}) => ({
+const item = (n, { goal = "G1", priority = null, model = null, order = null, status = "Backlog", size = null, body = "", labels = [], itemType = null, state = "OPEN", closedAt = null, finished = null, tokens = null, minutes = null } = {}) => ({
   id: `I${n}`,
   content: { number: n, title: `item ${n}`, body, state, closedAt, repository: { nameWithOwner: "o/r" }, milestone: null, labels: { nodes: labels.map((name) => ({ name })) } },
   fieldValues: {
     nodes: [
       { name: status, field: { name: "Status" } },
       ...(size ? [{ name: size, field: { name: "Size" } }] : []),
+      ...(goal ? [{ name: goal, field: { name: "Goal" } }] : []),
+      ...(priority ? [{ name: priority, field: { name: "Priority" } }] : []),
+      ...(model ? [{ name: model, field: { name: "Model" } }] : []),
+      ...(order !== null ? [{ number: order, field: { name: "Order" } }] : []),
       ...(itemType ? [{ name: itemType, field: { name: "Item type" } }] : []),
       ...(finished ? [{ date: finished, field: { name: "Finished" } }] : []),
       ...(tokens !== null ? [{ number: tokens, field: { name: "Tokens" } }] : []),
@@ -153,7 +163,7 @@ const openStore = (ready, extra = []) => ({
 });
 const readyN = (k) => Array.from({ length: k }, (_, i) => item(200 + i, { status: "Ready", size: "S" }));
 const open = (store, over = {}) =>
-  buildDayOpen({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: fetcher(store), laneRows: [], ...over });
+  buildDayOpen({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: fetcher(store), laneRows: [], ...over });
 
 // ── hasDoneWhen ─────────────────────────────────────────────────────────────
 
@@ -301,7 +311,7 @@ const closeStore = () => ({
   ],
 });
 const close = (store, over = {}) =>
-  buildDayClose({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: fetcher(store), ...over });
+  buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: fetcher(store), ...over });
 
 test("close: proposes every kind (a)-(e) and the summary line", async () => {
   const r = await close(closeStore());
@@ -319,7 +329,7 @@ test("close WITHOUT --apply: zero write calls and the board data is byte-identic
   const store = closeStore();
   const f = fetcher(store);
   const before = JSON.stringify(store);
-  const r = await buildDayClose({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: false });
+  const r = await buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: false });
   assert.ok(r.operations.length > 0, "the fixture must have proposed writes, or this test proves nothing");
   assert.equal(f.writes.length, 0, "no write call without --apply");
   assert.equal(JSON.stringify(store), before, "the board data must be byte-identical");
@@ -328,7 +338,7 @@ test("close WITHOUT --apply: zero write calls and the board data is byte-identic
   const store2 = closeStore();
   const f2 = fetcher(store2);
   const before2 = JSON.stringify(store2);
-  const code = await dayCmd(["close"], { out: o.fn, now: NOW, fetcher: f2, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [] });
+  const code = await dayCmd(["close"], { goalFiles: GOALS, out: o.fn, now: NOW, fetcher: f2, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [] });
   assert.equal(code, 0);
   assert.equal(f2.writes.length, 0);
   assert.equal(JSON.stringify(store2), before2);
@@ -337,7 +347,7 @@ test("close WITHOUT --apply: zero write calls and the board data is byte-identic
 test("close WITH --apply: writes only (a) and (c), then reads back MATCH n/n", async () => {
   const store = closeStore();
   const f = fetcher(store);
-  const r = await buildDayClose({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
+  const r = await buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
   assert.equal(r.exit, 0);
   assert.deepEqual([...r.writes].sort(), ["o/r#1: Status -> Ready", "o/r#4: Finished = 2026-11-12", "o/r#4: Status -> Done"]);
   assert.deepEqual(r.readBack, { matched: 2, total: 2, mismatches: [] });
@@ -353,7 +363,7 @@ test("close --apply: writes are batched 20 per request", async () => {
   const items = Array.from({ length: 25 }, (_, i) => item(500 + i, { status: "Ready", state: "CLOSED", closedAt: TODAY_CLOSE }));
   const store = { boards: [boardNode(7, { items })] };
   const f = fetcher(store);
-  const r = await buildDayClose({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
+  const r = await buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
   assert.equal(r.exit, 0);
   assert.equal(f.writes.length, 3); // 50 ops: 20 + 20 + 10
   assert.deepEqual(f.writes.map((w) => (w.match(/updateProjectV2ItemFieldValue/g) ?? []).length), [20, 20, 10]);
@@ -363,7 +373,7 @@ test("close --apply: writes are batched 20 per request", async () => {
 test("close --apply: a fake that drops one value on read-back is exit 1 naming the item", async () => {
   const store = closeStore();
   const f = fetcher(store, { dropWriteFor: "I4" });
-  const r = await buildDayClose({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
+  const r = await buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
   assert.equal(r.exit, 1);
   assert.equal(r.readBack.matched, 1);
   assert.deepEqual(r.readBack.mismatches.map((m) => m.ref), ["o/r#4"]);
@@ -399,7 +409,7 @@ test("close: tops up to 3 Ready per board", async () => {
 
 test("close: 0 open boards is exit 2 'gone blind' and no write", async () => {
   const f = fetcher({ boards: [] });
-  const r = await buildDayClose({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
+  const r = await buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
   assert.equal(r.exit, 2);
   assert.match(r.reason, /gone blind/);
   assert.equal(f.writes.length, 0);
@@ -415,7 +425,7 @@ test("close: an item with no field values is exit 2 'gone blind' and no write, e
     if (d.viewer?.b7) d.viewer.b7.backlog = conn([hostile]);
     return d;
   };
-  const r = await buildDayClose({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
+  const r = await buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
   assert.equal(r.exit, 2);
   assert.match(r.reason, /gone blind/);
   assert.equal(f.writes.length, 0);
@@ -432,7 +442,7 @@ test("close: a closed item with Status unset (no field values) is NOT blindness;
     if (d.viewer?.b7) d.viewer.b7.stale = conn([bare]);
     return d;
   };
-  const r = await buildDayClose({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f });
+  const r = await buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f });
   assert.equal(r.exit, 0);
   assert.deepEqual(r.closeFix.map((c) => [c.ref, c.from]), [["o/r#127", "no status"]]);
 });
@@ -442,4 +452,161 @@ test("dayCmd: usage and unknown flags are exit 2; --apply is refused on open", a
   assert.equal(await dayCmd([], { err: (s) => e.push(s) }), 2);
   assert.equal(await dayCmd(["open", "--apply"], { err: (s) => e.push(s) }), 2);
   assert.equal(await dayCmd(["close", "--bogus"], { err: (s) => e.push(s) }), 2);
+});
+
+// ── goal-aware promotion and the per-goal block (propagate#240) ─────────────
+// Guard fixtures below are LITERAL items, never built through `item`: the builder defaults Goal to an active goal and
+// can only make valid items, which is exactly what these refusals must not depend on. Do not tidy them onto it
+// (rule:mutate-behind-the-fixture-builder).
+
+const lit = (id, n, goalValue) => ({
+  id,
+  content: { number: n, title: `lit ${n}`, body: "## Done when\n- x", state: "OPEN", closedAt: null, repository: { nameWithOwner: "o/r" }, milestone: null, labels: { nodes: [] } },
+  fieldValues: {
+    nodes: [
+      { name: "Backlog", field: { name: "Status" } },
+      { name: "S", field: { name: "Size" } },
+      ...(goalValue === undefined ? [] : [{ name: goalValue, field: { name: "Goal" } }]),
+    ],
+  },
+});
+const parked = lit("LP", 71, "Parked");
+const idea = lit("LI", 72, "idea"); // case-insensitive
+const noGoal = lit("LN", 73, undefined);
+const inactive = lit("LX", 74, "G9"); // a G-id no active goal carries
+const goodLit = lit("LG", 75, "G1");
+
+test("close: a Parked, an Idea, a Goal-less and an inactive-G-id item are each refused with the reason named, and never promoted", async () => {
+  const store = { boards: [boardNode(7, { items: [parked, idea, noGoal, inactive, goodLit] })] };
+  const r = await close(store);
+  assert.deepEqual(r.promote.map((p) => p.ref), ["o/r#75"]);
+  const by = Object.fromEntries(r.refused.map((x) => [x.ref, x.missing]));
+  assert.equal(by["o/r#71"], "Goal is Parked, not an active goal");
+  assert.equal(by["o/r#72"], "Goal is idea, not an active goal");
+  assert.equal(by["o/r#73"], "no Goal");
+  assert.equal(by["o/r#74"], "Goal is G9, not an active goal");
+});
+
+test("close: a goal gap is named beside a Size or Done when gap", async () => {
+  const lacking = { ...lit("LD", 76, "Parked"), content: { ...lit("LD", 76, "x").content, body: "no condition" } };
+  const r = await close({ boards: [boardNode(7, { items: [lacking] })] });
+  assert.deepEqual(r.refused.map((x) => x.missing), ["Done when; Goal is Parked, not an active goal"]);
+});
+
+test("close: FAIL CLOSED, no goal read means exit 2, 0 promotions and 0 writes, with --apply", async () => {
+  for (const goalFiles of [null, [], [{ file: "/x/GOALS.md", unread: true, entries: [], reason: "unreadable" }], goalsFile(goalEntry("G1", { active: false }))]) {
+    const store = closeStore(); // would promote item 1 and close item 4 if goals were read
+    const f = fetcher(store);
+    const before = JSON.stringify(store);
+    const r = await buildDayClose({ goalFiles, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true });
+    assert.equal(r.exit, 2);
+    assert.match(r.reason, /no active goal was read/);
+    assert.equal(f.writes.length, 0, "no write call");
+    assert.deepEqual(r.promote ?? [], []);
+    assert.equal(JSON.stringify(store), before);
+  }
+});
+
+test("dayCmd close: no active goal read exits 2 and writes nothing", async () => {
+  const store = closeStore();
+  const f = fetcher(store);
+  const code = await dayCmd(["close", "--apply"], { goalFiles: [], out: out().fn, now: NOW, fetcher: f, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [] });
+  assert.equal(code, 2);
+  assert.equal(f.writes.length, 0);
+});
+
+test("open: an unread goal source offers no promotable Backlog item (fail closed there too)", async () => {
+  const store = openStore([], [item(300, { status: "Backlog", size: "S", body: "## Done when\nx" })]);
+  const r = await open(store, { goalFiles: [] });
+  assert.equal(r.verdict, "short");
+  assert.deepEqual(r.fill, []);
+});
+
+test("promotionOrder: Order first (unordered last), then Priority field P0..P3, then label rank, then Size, then number", () => {
+  // Literals on purpose.
+  const o = promotionOrder([
+    { number: 1, size: "XS", labels: ["priority:P0"], fields: {} }, // unordered: after every ordered item
+    { number: 2, size: "XL", labels: [], fields: { Order: 2, Priority: "P3" } },
+    { number: 3, size: "XL", labels: [], fields: { Order: 1, Priority: "P3" } },
+    { number: 4, size: "S", labels: [], fields: { Priority: "P1" } },
+    { number: 5, size: "S", labels: [], fields: { Priority: "P0" } },
+    { number: 6, size: "S", labels: ["priority:P0"], fields: { Priority: "P1" } }, // field P1, label P0: beats #4 on the label tie-break
+    { number: 7, size: "S", labels: [], fields: {} },
+  ]);
+  assert.deepEqual(o.map((x) => x.number), [3, 2, 5, 6, 4, 1, 7]);
+});
+
+const readyOf = (k, extra = {}) => item(k, { status: "Ready", size: "S", goal: "G1", ...extra });
+const goalStore = () => ({
+  boards: [
+    boardNode(7, {
+      items: [
+        ...finished3(),
+        readyOf(210, { order: 2, priority: "P2", model: "Haiku" }),
+        readyOf(211, { order: 1, priority: "P1", model: "Sonnet" }),
+        readyOf(212, { priority: "P0" }), // Ready with no Order: after the ordered ones
+        item(213, { status: "Ready", size: "M", goal: "Parked", model: "Opus" }), // not under an active goal
+        item(214, { status: "Ready", size: "M", goal: null }), // no Goal at all
+        item(215, { status: "In progress", size: "S", goal: "G1" }),
+        item(216, { status: "Backlog", goal: "G1" }),
+        item(217, { status: "Backlog", goal: "G1" }),
+        item(218, { status: "Backlog", goal: "G2" }), // a different goal: not counted under G1
+      ],
+    }),
+    todoBoard(9),
+  ],
+});
+
+test("open: one block per active goal with counts, Ready by Order with Model, and the not-under-an-active-goal line", async () => {
+  const r = await open(goalStore(), { goalFiles: goalsFile(goalEntry("G1", { title: "First goal" }), goalEntry("G2", { title: "Second", appetiteWeeks: null })) });
+  assert.equal(r.goalBlocks.length, 2);
+  const g1 = r.goalBlocks[0];
+  assert.deepEqual(g1.counts, {
+    prog: { n: 1, atLeast: false },
+    ready: { n: 3, atLeast: false },
+    backlog: { n: 2, atLeast: false },
+    done: { n: 3, atLeast: false }, // the three finished3() items carry the builder default Goal G1
+  });
+  assert.deepEqual(g1.readyByOrder.map((i) => [i.order, i.priority, i.model, i.ref]), [
+    [1, "P1", "Sonnet", "o/r#211"],
+    [2, "P2", "Haiku", "o/r#210"],
+    [null, "P0", null, "o/r#212"],
+  ]);
+  assert.deepEqual(r.readyNotUnderActiveGoal.map((i) => i.ref), ["o/r#213", "o/r#214"]);
+  assert.equal(r.goalBlocks[1].counts.backlog.n, 1);
+  const text = renderDayOpen(r).join("\n");
+  assert.match(text, /G1 · First goal\s+appetite: 4 weeks from 2026-11-09, 25 days left/);
+  assert.match(text, /G2 · Second\s+no appetite recorded/);
+  assert.match(text, /In progress 1 · Ready 3 · Backlog 2 · Done 3/);
+  assert.match(text, /Ready by Order:\n\s+1  P1  Sonnet  S  o\/r#211/);
+  assert.match(text, /–  P0  –  S  o\/r#212/);
+  assert.match(text, /not under an active goal: 2 Ready item\(s\): o\/r#213, o\/r#214/);
+  assert.match(text, /goals: /); // the existing goals summary line is still there
+});
+
+test("open: a truncated Done group prints as an at-least count, never a total", async () => {
+  const store = goalStore();
+  store.boards[0].items.push(item(220, { status: "Done", state: "CLOSED", goal: "G1", finished: "2026-11-11" }));
+  const f = fetcher(store);
+  const orig = f.graphql;
+  f.graphql = async (q) => {
+    const d = await orig(q);
+    if (d.viewer?.b7) d.viewer.b7.done = { totalCount: 250, nodes: d.viewer.b7.done.nodes }; // 250 exist, the nodes hold fewer
+    return d;
+  };
+  const r = await open(store, { fetcher: f });
+  assert.equal(r.goalBlocks[0].counts.done.atLeast, true);
+  assert.match(renderDayOpen(r).join("\n"), /Done ≥4\b/);
+  assert.doesNotMatch(renderDayOpen(r).join("\n"), /Done 4\b/);
+});
+
+test("open: the per-goal block makes no GraphQL call of its own (call count unchanged with goalFiles)", async () => {
+  const f1 = fetcher(goalStore());
+  const f2 = fetcher(goalStore());
+  const without = await buildDayOpen({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f1, laneRows: [] });
+  const withGoals = await buildDayOpen({ goalFiles: goalsFile(goalEntry("G1"), goalEntry("G2")), sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f2, laneRows: [] });
+  assert.ok(f1.graphqlCalls >= 2, "the baseline must have made the listing and detail reads");
+  assert.equal(f2.graphqlCalls, f1.graphqlCalls);
+  assert.equal(withGoals.graphqlCalls, without.graphqlCalls);
+  assert.ok(withGoals.goalBlocks.length === 2, "and the blocks were built");
 });
