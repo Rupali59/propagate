@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { sessionsCmd } from "../../cli/sessions.mjs";
 import { append, assocPath, fold } from "../../lib/sessions/assoc.mjs";
-import { CODES, fail } from "../../lib/sessions/errors.mjs";
+import { ACT_CODES, CODES, fail } from "../../lib/sessions/errors.mjs";
 import { checkShape, readLive, rowKeyOf } from "../../lib/sessions/live.mjs";
 import { buildCheckouts, folderOf } from "../../lib/sessions/resolve.mjs";
 import { buildView, renderView } from "../../lib/sessions/view.mjs";
@@ -111,7 +111,8 @@ async function run(argv, { cfg = { fixture: FIXTURE }, state = fresh(), snapshot
 
 after(() => {
   // every code in the contract was emitted by some test below
-  const missing = Object.keys(CODES).filter((c) => !emitted.has(c));
+  // the act half's codes (ACT_CODES) are reached by sessions-act.test.mjs, which checks them the same way
+  const missing = Object.keys(CODES).filter((c) => !Object.hasOwn(ACT_CODES, c) && !emitted.has(c));
   assert.deepEqual(missing, [], `codes no test reached: ${missing.join(", ")}`);
 });
 
@@ -464,4 +465,23 @@ test("docs/REFERENCE.md §sessions lists exactly the codes in the contract", () 
   const lane = new Set(documented.filter((c) => !Object.hasOwn(CODES, c)));
   assert.deepEqual([...lane], [], "REFERENCE documents a code the contract does not define");
   assert.deepEqual(Object.keys(CODES).filter((c) => !documented.includes(c)), [], "a code in the contract is missing from REFERENCE");
+});
+
+// A launch whose outcome is not a known session is SHOWN, never hidden (CEO review state machine). Built as literals,
+// not through a fold helper: the fold must not be what decides whether the hostile case is expressible.
+test("buildView shows an unknown launch and an orphaned approval, and drops a launch once its item is associated later", () => {
+  const ev = (event, item, ts, extra = {}) => ({ event, rowKey: "x", item, name: "p · G3 · #1", cwd: "/w/acme/repo-a", ts, ...extra });
+  const byKey = new Map([
+    ["launch:2026-11-14T06:00:00.000Z:aaaaaa", { assoc: null, last: ev("unknown", "o/r#1", "2026-11-14T06:00:01.000Z", { reason: "no live row matched" }), history: [] }],
+    ["launch:2026-11-14T06:05:00.000Z:bbbbbb", { assoc: null, last: ev("approved", "o/r#2", "2026-11-14T06:05:00.000Z"), history: [] }],
+    ["launch:2026-11-14T06:10:00.000Z:cccccc", { assoc: null, last: ev("unknown", "o/r#3", "2026-11-14T06:10:01.000Z"), history: [] }],
+    ["background:found:", { assoc: ev("associate", "o/r#3", "2026-11-14T06:20:00.000Z"), last: ev("associate", "o/r#3", "2026-11-14T06:20:00.000Z"), history: [] }],
+  ]);
+  const view = buildView({ rows: [], readAt: "t" }, { byKey, corrupt: 0 }, CTX);
+  assert.deepEqual(view.unresolved.map((u) => u.item).sort(), ["o/r#1", "o/r#2"], "#3 was associated after its launch, so it is resolved");
+  assert.equal(view.counts.unknown, 2);
+  const lines = renderView(view, { now: NOW });
+  assert.ok(lines.some((l) => /launches with no known session/.test(l)), "the section is printed");
+  assert.ok(lines.some((l) => /o\/r#1.*unknown \(no live row matched\)/.test(l)));
+  assert.ok(lines.some((l) => /claude agents --json, then propagate sessions assoc/.test(l)), "it names the next command");
 });

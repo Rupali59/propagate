@@ -200,6 +200,40 @@ const readyN = (k) => Array.from({ length: k }, (_, i) => item(200 + i, { status
 const open = (store, over = {}) =>
   buildDayOpen({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: fetcher(store), laneRows: [], ...over });
 
+
+// ── propagate#272 (ENG-D2): every `open:` case runs with the sessions reader ok, empty and failing ────────────────
+// Each keeps its exit code and every existing output line; only the sessions lines may differ.
+
+const liveSession = (over = {}) => ({ project: "proj", folder: { workspace: "ws", project: "proj" }, cwd: "/x/proj", state: "working", startedAt: NOW - 2 * 3600 * 1000, association: { goal: "G1", item: "o/r#211" }, ...over });
+const SESSION_STATES = [
+  { name: "ok", sessions: { ok: true, view: { sessions: [liveSession(), liveSession({ association: { goal: "G1", item: "o/r#200" } }), liveSession({ association: null })] } } },
+  { name: "empty", sessions: { ok: true, view: { sessions: [] } } },
+  { name: "failing", sessions: { ok: false, code: "SESSION_READER_FAILED", what: "could not read claude agents (exit 1)" } },
+];
+const SESSIONS_LINE = /^\s*(sessions:|no session:)/;
+const withoutSessions = (r) => renderDayOpen(r).filter((l) => !SESSIONS_LINE.test(l));
+
+function openCase(name, fn) {
+  for (const ST of SESSION_STATES) {
+    test(`${name} [sessions ${ST.name}]`, () =>
+      fn({
+        // `open` also runs the same case with NO reader and compares: same exit, same reason, same lines bar the sessions ones.
+        open: async (store, over = {}) => {
+          const r = await open(store, { sessions: ST.sessions, ...over });
+          if (!over.fetcher && !("sessions" in over)) {
+            const base = await open(store, over);
+            assert.equal(r.exit, base.exit, "a sessions reader must not change the exit code");
+            assert.equal(r.reason, base.reason);
+            assert.deepEqual(withoutSessions(r), withoutSessions(base), "existing output lines are unchanged");
+            if (r.goalBlocks?.length) assert.match(renderDayOpen(r).join("\n"), /sessions: /, "the sessions line (or the error line) is printed");
+          }
+          return r;
+        },
+        buildDayOpen: (a) => buildDayOpen({ sessions: ST.sessions, ...a }),
+      }));
+  }
+}
+
 // ── hasDoneWhen ─────────────────────────────────────────────────────────────
 
 test("hasDoneWhen: the four real forms are true", () => {
@@ -223,7 +257,7 @@ test("hasDoneWhen: prose that only discusses the marker is false (workspace-hub#
 
 // ── day open ────────────────────────────────────────────────────────────────
 
-test("open: short fixture is exit 1 'short by ~N points' and lists a promotable Backlog item", async () => {
+openCase("open: short fixture is exit 1 'short by ~N points' and lists a promotable Backlog item", async ({ open, buildDayOpen }) => {
   const store = openStore([], [item(300, { status: "Backlog", size: "S", body: "## Done when\nx" })]);
   const r = await open(store);
   assert.equal(r.exit, 1);
@@ -233,27 +267,27 @@ test("open: short fixture is exit 1 'short by ~N points' and lists a promotable 
   assert.match(r.basis.label, /count basis \(derived: 30 pts \/ 3 items, 7 d\)/);
 });
 
-test("open: enough fixture is exit 0", async () => {
+openCase("open: enough fixture is exit 0", async ({ open, buildDayOpen }) => {
   const r = await open(openStore(readyN(1))); // 10 points against a budget of 5: within 2x
   assert.equal(r.exit, 0);
   assert.equal(r.verdict, "enough");
 });
 
-test("open: over fixture is exit 1 and names what will not fit", async () => {
+openCase("open: over fixture is exit 1 and names what will not fit", async ({ open, buildDayOpen }) => {
   const r = await open(openStore(readyN(3))); // 30 points against 5
   assert.equal(r.exit, 1);
   assert.equal(r.verdict, "over");
   assert.ok(r.cut.items.length >= 1);
 });
 
-test("open: carry-over In progress and Ready with no Size are listed", async () => {
+openCase("open: carry-over In progress and Ready with no Size are listed", async ({ open, buildDayOpen }) => {
   const store = openStore([item(210, { status: "Ready" })], [item(211, { status: "In progress", size: "S" })]);
   const r = await open(store);
   assert.deepEqual(r.inProgress.map((i) => i.ref), ["o/r#211"]);
   assert.deepEqual(r.readyNoSize.map((i) => i.ref), ["o/r#210"]);
 });
 
-test("open: no good sample is exit 2 with a reason, and nothing is fetched", async () => {
+openCase("open: no good sample is exit 2 with a reason, and nothing is fetched", async ({ open, buildDayOpen }) => {
   const f = fetcher(openStore(readyN(1)));
   const r = await buildDayOpen({ sampleRows: [], now: NOW, widget: widget(), fetcher: f, laneRows: [] });
   assert.equal(r.exit, 2);
@@ -261,7 +295,7 @@ test("open: no good sample is exit 2 with a reason, and nothing is fetched", asy
   assert.equal(f.graphqlCalls, 0);
 });
 
-test("open: uncalibrated items with no Finished item in 7 days is exit 2 'cannot judge'", async () => {
+openCase("open: uncalibrated items with no Finished item in 7 days is exit 2 'cannot judge'", async ({ open, buildDayOpen }) => {
   const store = { boards: [boardNode(7, { items: readyN(2) })] }; // no Done items at all
   const r = await open(store);
   assert.equal(r.exit, 2);
@@ -269,26 +303,26 @@ test("open: uncalibrated items with no Finished item in 7 days is exit 2 'cannot
   assert.match(r.reason, /no item has a Finished date/);
 });
 
-test("open: no sample span for the count basis is exit 2", async () => {
+openCase("open: no sample span for the count basis is exit 2", async ({ open, buildDayOpen }) => {
   const r = await open(openStore(readyN(1)), { sampleRows: [sample(new Date(2026, 10, 12, 9, 50), 40)] });
   assert.equal(r.exit, 2);
   assert.match(r.reason, /no sample span/);
 });
 
-test("open: a board on Todo / In Progress / Done is named and skipped, never guessed", async () => {
+openCase("open: a board on Todo / In Progress / Done is named and skipped, never guessed", async ({ open, buildDayOpen }) => {
   const r = await open(openStore(readyN(1)));
   assert.equal(r.skipped.length, 1);
   assert.equal(r.skipped[0].number, 9);
   assert.match(r.skipped[0].why, /Backlog, Ready/);
 });
 
-test("open: 0 open boards is exit 2 'gone blind', not 'nothing to do'", async () => {
+openCase("open: 0 open boards is exit 2 'gone blind', not 'nothing to do'", async ({ open, buildDayOpen }) => {
   const r = await open({ boards: [] });
   assert.equal(r.exit, 2);
   assert.match(r.reason, /gone blind/);
 });
 
-test("open: an item that comes back with no field values is exit 2 'gone blind'", async () => {
+openCase("open: an item that comes back with no field values is exit 2 'gone blind'", async ({ open, buildDayOpen }) => {
   // Literal: a valid-item builder cannot express this.
   const hostile = { id: "IX", content: { number: 5, title: "x", state: "OPEN", repository: { nameWithOwner: "o/r" }, labels: { nodes: [] } }, fieldValues: { nodes: [] } };
   const store = { boards: [boardNode(7, { items: [] })] };
@@ -304,7 +338,7 @@ test("open: an item that comes back with no field values is exit 2 'gone blind'"
   assert.match(r.reason, /gone blind/);
 });
 
-test("open: low rate limit refuses before fetching", async () => {
+openCase("open: low rate limit refuses before fetching", async ({ open, buildDayOpen }) => {
   const f = fetcher(openStore(readyN(1)), { remaining: 10 });
   const r = await buildDayOpen({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, laneRows: [] });
   assert.equal(r.exit, 2);
@@ -557,7 +591,7 @@ test("dayCmd close: no active goal read prints the warning and does not exit 2",
   assert.match(o.lines.join("\n"), /WARNING: promotions skipped/);
 });
 
-test("open: an unread goal source offers no promotable Backlog item (fail closed there too)", async () => {
+openCase("open: an unread goal source offers no promotable Backlog item (fail closed there too)", async ({ open, buildDayOpen }) => {
   const store = openStore([], [item(300, { status: "Backlog", size: "S", body: "## Done when\nx" })]);
   const r = await open(store, { goalFiles: [] });
   assert.equal(r.verdict, "short");
@@ -599,7 +633,7 @@ const goalStore = () => ({
   ],
 });
 
-test("open: one block per active goal with counts, Ready by Order with Model, and the not-under-an-active-goal line", async () => {
+openCase("open: one block per active goal with counts, Ready by Order with Model, and the not-under-an-active-goal line", async ({ open, buildDayOpen }) => {
   const r = await open(goalStore(), { goalFiles: goalsFile(goalEntry("G1", { title: "First goal" }), goalEntry("G2", { title: "Second", appetiteWeeks: null })) });
   assert.equal(r.goalBlocks.length, 2);
   const g1 = r.goalBlocks[0];
@@ -626,7 +660,7 @@ test("open: one block per active goal with counts, Ready by Order with Model, an
   assert.match(text, /goals: /); // the existing goals summary line is still there
 });
 
-test("open: a truncated Done group prints as an at-least count, never a total", async () => {
+openCase("open: a truncated Done group prints as an at-least count, never a total", async ({ open, buildDayOpen }) => {
   const store = goalStore();
   store.boards[0].items.push(item(220, { status: "Done", state: "CLOSED", goal: "G1", finished: "2026-11-11" }));
   const f = fetcher(store);
@@ -642,7 +676,7 @@ test("open: a truncated Done group prints as an at-least count, never a total", 
   assert.doesNotMatch(renderDayOpen(r).join("\n"), /Done 4\b/);
 });
 
-test("open: the per-goal block makes no GraphQL call of its own (call count unchanged with goalFiles)", async () => {
+openCase("open: the per-goal block makes no GraphQL call of its own (call count unchanged with goalFiles)", async ({ open, buildDayOpen }) => {
   const f1 = fetcher(goalStore());
   const f2 = fetcher(goalStore());
   const without = await buildDayOpen({ sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f1, laneRows: [] });
@@ -651,6 +685,81 @@ test("open: the per-goal block makes no GraphQL call of its own (call count unch
   assert.equal(f2.graphqlCalls, f1.graphqlCalls);
   assert.equal(withGoals.graphqlCalls, without.graphqlCalls);
   assert.ok(withGoals.goalBlocks.length === 2, "and the blocks were built");
+});
+
+// ── sessions under each goal (propagate#272, DX9 / ENG-D2) ──────────────────────────────────────────────────────
+
+const G1_SESSIONS = (...sessions) => ({ ok: true, view: { sessions } });
+
+test("open sessions: a goal with 2 associated sessions and 1 uncovered Ready item", async () => {
+  const r = await open(goalStore(), { sessions: G1_SESSIONS(liveSession({ association: { goal: "G1", item: "o/r#211" } }), liveSession({ project: "other", folder: { workspace: "ws", project: "other" }, state: "idle", startedAt: NOW - 5 * 60 * 1000, association: { goal: "G1", item: "o/r#210" } })) });
+  assert.deepEqual(r.goalBlocks[0].sessions, {
+    live: [
+      { project: "proj", item: "o/r#211", state: "working", since: "2h" },
+      { project: "other", item: "o/r#210", state: "idle", since: "5m" },
+    ],
+    uncovered: ["o/r#212"],
+  });
+  const lines = renderDayOpen(r);
+  assert.ok(lines.includes("  sessions: proj \u00b7 #211 (working, 2h)"));
+  assert.ok(lines.includes("  sessions: other \u00b7 #210 (idle, 5m)"));
+  assert.ok(lines.includes("  no session: #212"));
+});
+
+test("open sessions: none prints `sessions: none`, and the no-session line is omitted when every Ready item is covered", async () => {
+  const none = await open(goalStore(), { sessions: G1_SESSIONS() });
+  assert.ok(renderDayOpen(none).includes("  sessions: none"));
+  assert.ok(renderDayOpen(none).includes("  no session: #211, #210, #212"));
+  const all = await open(goalStore(), { sessions: G1_SESSIONS(...["o/r#211", "o/r#210", "o/r#212"].map((item) => liveSession({ association: { goal: "G1", item } }))) });
+  assert.equal(renderDayOpen(all).filter((l) => /no session:/.test(l)).length, 0);
+});
+
+test("open sessions: an association to an inactive goal is printed under no active goal", async () => {
+  const r = await open(goalStore(), { sessions: G1_SESSIONS(liveSession({ association: { goal: "G9", item: "o/r#999" } })) });
+  const text = renderDayOpen(r).join("\n");
+  assert.deepEqual(r.goalBlocks[0].sessions.live, []);
+  assert.ok(!/#999/.test(text) && !/G9/.test(text), "nothing of the G9 session is printed");
+  assert.match(text, /sessions: none/);
+});
+
+test("open sessions: a reader failure prints the code line once and every goal's --json field carries the error", async () => {
+  const failing = { ok: false, code: "SESSION_READER_FAILED", what: "could not read claude agents (boom)" };
+  const r = await open(goalStore(), { goalFiles: goalsFile(goalEntry("G1"), goalEntry("G2")), sessions: failing });
+  const lines = renderDayOpen(r);
+  assert.equal(lines.filter((l) => l === "sessions: could not read (SESSION_READER_FAILED: could not read claude agents (boom))").length, 1);
+  assert.equal(lines.filter((l) => /^\s*(sessions: (none|\w+ \u00b7)|no session:)/.test(l)).length, 0);
+  assert.deepEqual(r.goalBlocks.map((g) => g.sessions), [{ error: { code: failing.code, what: failing.what } }, { error: { code: failing.code, what: failing.what } }]);
+});
+
+test("dayCmd open: the sessions reader is injected, called once, and never moves the exit code (ok, empty, failing, throwing)", async () => {
+  const run = async (sessions) => {
+    const o = out();
+    const code = await dayCmd(["open"], { goalFiles: GOALS, out: o.fn, now: NOW, fetcher: fetcher(goalStore()), samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions });
+    return { code, text: o.lines.join("\n") };
+  };
+  const real = process.env.PROPAGATE_CLAUDE_BIN;
+  process.env.PROPAGATE_CLAUDE_BIN = "/nonexistent/claude-must-not-run"; // the default reader would fail loudly: it must not be reached
+  try {
+    const base = await run(() => ({ ok: true, view: { sessions: [] } }));
+    for (const [name, fn] of [
+      ["ok", () => G1_SESSIONS(liveSession())],
+      ["failing", () => ({ ok: false, code: "SESSION_SHAPE_UNKNOWN", what: "shape" })],
+      ["throwing", () => { throw new Error("kaboom"); }],
+      ["async", async () => G1_SESSIONS(liveSession())],
+    ]) {
+      let calls = 0;
+      const r = await run(() => (calls++, fn()));
+      assert.equal(calls, 1, `${name}: the reader is called once per run`);
+      assert.equal(r.code, base.code, `${name}: exit code unchanged`);
+    }
+    assert.match((await run(() => { throw new Error("kaboom"); })).text, /sessions: could not read \(SESSION_READER_FAILED: kaboom\)/);
+    const j = out();
+    await dayCmd(["open", "--json"], { goalFiles: GOALS, out: j.fn, now: NOW, fetcher: fetcher(goalStore()), samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions: () => G1_SESSIONS(liveSession()) });
+    assert.deepEqual(Object.keys(JSON.parse(j.lines.join("\n")).goalBlocks[0].sessions), ["live", "uncovered"]);
+  } finally {
+    if (real === undefined) delete process.env.PROPAGATE_CLAUDE_BIN;
+    else process.env.PROPAGATE_CLAUDE_BIN = real;
+  }
 });
 
 // ── the dispatch snapshot (propagate#265) ───────────────────────────────────

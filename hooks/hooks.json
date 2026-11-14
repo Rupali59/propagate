@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "ELEVEN registrations, not nine hooks. gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
+    "TWELVE registrations, not ten hooks. gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
     "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
@@ -29,6 +29,15 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/load-rules.mjs\""
+          }
+        ]
+      },
+      {
+        "_comment": "propagate#272 session-guide: no matcher, so it fires on EVERY source (startup, resume, clear, compact, fork); compaction summarises earlier context, so it must repeat. Needs /reload-plugins.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-guide.mjs\""
           }
         ]
       }

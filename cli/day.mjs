@@ -15,12 +15,28 @@ import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose } from "../l
 import { parseGoalsFile } from "../lib/report/goals.mjs";
 import { discoverBacklogFiles } from "../lib/report/backlog.mjs";
 import { ghFetcher, loadWidget } from "./sprint.mjs";
+import { fold } from "../lib/sessions/assoc.mjs";
+import { fail } from "../lib/sessions/errors.mjs";
+import { readLive } from "../lib/sessions/live.mjs";
+import { loadContext } from "../lib/sessions/resolve.mjs";
+import { buildView } from "../lib/sessions/view.mjs";
+
+/** The real sessions reader: `claude agents --json` + the association fold + the folder resolver, once per run. */
+export function readSessions(now) {
+  const live = readLive({ now: () => now });
+  if (!live.ok) return live;
+  try {
+    return { ok: true, view: buildView(live, fold(), loadContext()) };
+  } catch (e) {
+    return fail("SESSION_ASSOC_UNREADABLE", `could not read the session associations (${e.message})`, "run propagate sessions");
+  }
+}
 
 const USAGE = "day: usage: day open [--json] | day close [--apply] [--json]";
 
 /**
  * @param {string[]} args argv after the command name (starts with `open` or `close`)
- * @param {{out?: Function, err?: Function, now?: number, fetcher?: object, samplesRaw?: string, laneRows?: object[], widget?: object, widgetDir?: string}} [inject] tests
+ * @param {{sessions?: () => object, out?: Function, err?: Function, now?: number, fetcher?: object, samplesRaw?: string, laneRows?: object[], widget?: object, widgetDir?: string}} [inject] tests
  * @returns {Promise<number>} exit code
  */
 export async function dayCmd(args, inject = {}) {
@@ -64,7 +80,14 @@ export async function dayCmd(args, inject = {}) {
   if (sub === "open") {
     // The goals summary line reads the GOALS.md files here and the boards buildDayOpen already read (propagate#264).
     const goalFiles = inject.goalFiles ?? (discoverBacklogFiles().goalsMd ?? []).map(parseGoalsFile);
-    const r = await buildDayOpen({ sampleRows: rows, now, widget, widgetMissing, fetcher, goalFiles, laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows });
+    // Sessions are information beside the verdict: a reader that fails or throws becomes a line, never an exit code.
+    let sessions;
+    try {
+      sessions = await (inject.sessions ?? (() => readSessions(now)))();
+    } catch (e) {
+      sessions = { ok: false, code: "SESSION_READER_FAILED", what: e.message };
+    }
+    const r = await buildDayOpen({ sessions, sampleRows: rows, now, widget, widgetMissing, fetcher, goalFiles, laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows });
     if (json) out(JSON.stringify(r, null, 2));
     else for (const line of renderDayOpen(r)) out(line);
     return r.exit;

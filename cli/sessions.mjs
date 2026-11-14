@@ -1,6 +1,7 @@
 /**
  * `propagate sessions [--json]`, `sessions show <id|name> [--json]`, `sessions assoc <id> ...` (propagate#272, the read
- * half). Live state is derived from `claude agents --json` on every call; the only thing written is the association
+ * half), and `sessions new`, `stop`, `rm`, `stop --force` (the act half: dry run unless `--apply`; lib/sessions/create.mjs
+ * and delete.mjs). Live state is derived from `claude agents --json` on every call; the only thing written is the association
  * (`sessions assoc`, one line in assoc.jsonl) and the folder cache (checkouts.json).
  *
  * EXIT CODES. 0 read or associated; 1 refused (not found, ambiguous, goal unknown, association not written);
@@ -12,13 +13,15 @@ import path from "node:path";
 
 import { stateDir } from "../lib/core/paths.mjs";
 import { append, fold } from "../lib/sessions/assoc.mjs";
+import { applyCreate, planCreate, renderPlan } from "../lib/sessions/create.mjs";
+import { force, rm, stop } from "../lib/sessions/delete.mjs";
 import { exitOf, fail, renderFailure } from "../lib/sessions/errors.mjs";
 import { readLive } from "../lib/sessions/live.mjs";
 import { loadContext } from "../lib/sessions/resolve.mjs";
 import { buildShow, renderShow, selectSession } from "../lib/sessions/show.mjs";
 import { buildView, renderView } from "../lib/sessions/view.mjs";
 
-const USAGE = "usage: propagate sessions [--json] | sessions show <id|name> [--json] | sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/repo#n) [--json]";
+const USAGE = "usage: propagate sessions [--json] | sessions show <id|name> [--json] | sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/repo#n) [--json] | sessions new (--from owner/repo#n | <folder> --goal G<n> --item owner/repo#n) [--name <n>] [--again] [--apply] [--json] | sessions stop <id|name> [--force] [--apply] [--json] | sessions rm <id|name> [--apply] [--json]";
 const ITEM_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+$/;
 const GOAL_RE = /^G\d+$/;
 const SNAPSHOT_STALE_MS = 24 * 60 * 60 * 1000;
@@ -57,6 +60,9 @@ export async function sessionsCmd(argv = [], inject = {}) {
   const asJson = argv.includes("--json");
   if (sub === "show") return showCmd(argv.slice(1), inject, io);
   if (sub === "assoc") return assocCmd(argv.slice(1), inject, io);
+  if (sub === "new") return newCmd(argv.slice(1), inject, io);
+  if (sub === "stop") return deleteCmd("stop", argv.slice(1), inject, io);
+  if (sub === "rm") return deleteCmd("rm", argv.slice(1), inject, io);
   const p = parse(argv, [], ["--json"]);
   if (p.error || p.pos.length) return emitFailure(p.error ?? fail("SESSION_USAGE", `unknown subcommand "${p.pos[0]}"`, USAGE), asJson, io);
   const got = await readAll(inject);
@@ -164,6 +170,70 @@ async function assocCmd(rest, inject, io) {
   else {
     for (const w of warnings) io.error(`warning: ${w}`);
     io.log(`associated ${s.name || s.id || s.sessionId.slice(0, 8)} (${s.id || s.sessionId.slice(0, 8)}) with ${item} for ${goal}`);
+  }
+  return 0;
+}
+
+async function newCmd(rest, inject, io) {
+  const asJson = rest.includes("--json");
+  const p = parse(rest, ["--from", "--goal", "--item", "--name"], ["--json", "--apply", "--again"]);
+  if (p.error) return emitFailure(p.error, asJson, io);
+  if (p.pos.length > 1) return emitFailure(fail("SESSION_USAGE", "new takes at most one <folder>", USAGE), asJson, io);
+  const { "--from": from, "--goal": goal, "--item": item, "--name": name } = p.flags;
+  const folder = p.pos[0];
+  if (from && item) return emitFailure(fail("SESSION_USAGE", "--from already names the item; --item is for the explicit form", USAGE), asJson, io);
+  if (!from && !(folder && goal && item)) return emitFailure(fail("SESSION_USAGE", "name the work: --from owner/repo#n, or <folder> --goal G<n> --item owner/repo#n", USAGE), asJson, io);
+  const stateDirPath = inject.stateDirPath ?? stateDir();
+  const now = inject.now ?? Date.now;
+  // The dry run reads the dispatch snapshot and the folder map and nothing else: no claude call, no association write.
+  const ctx = inject.ctx ?? loadContext({ stateDirPath, now: now() });
+  const planned = planCreate({ from, folder, goal, item, name, snapshot: from ? readSnapshot(inject) : null, ctx, now: now() });
+  if (!planned.ok) return emitFailure(planned, asJson, io);
+  const plan = planned.plan;
+  if (!p.flags["--apply"]) {
+    if (asJson) io.log(JSON.stringify({ ok: true, dryRun: true, plan }, null, 2));
+    else {
+      for (const w of plan.warnings) io.error(`warning: ${w}`);
+      for (const l of renderPlan(plan, { now: now() })) io.log(l);
+    }
+    return 0;
+  }
+  const res = await applyCreate(plan, { again: p.flags["--again"] === true, stateDirPath, now, readLive: inject.readLive, ...inject.createOpts });
+  if (!res.ok) return emitFailure(res, asJson, io);
+  if (asJson) io.log(JSON.stringify({ ok: true, sessionId: res.sessionId, id: res.id, name: res.name, cwd: res.cwd, state: res.state }, null, 2));
+  else {
+    for (const w of plan.warnings) io.error(`warning: ${w}`);
+    io.log(`started ${res.name} (${res.id}) in ${res.cwd}, state ${res.state}`);
+    io.log(`next: propagate sessions show ${res.id}`);
+  }
+  return 0;
+}
+
+/** stop (background), rm (background) and stop --force (interactive SIGTERM). A dry run unless --apply. */
+async function deleteCmd(verb, rest, inject, io) {
+  const asJson = rest.includes("--json");
+  const p = parse(rest, [], verb === "stop" ? ["--json", "--apply", "--force"] : ["--json", "--apply"]);
+  if (p.error) return emitFailure(p.error, asJson, io);
+  if (p.pos.length !== 1) return emitFailure(fail("SESSION_USAGE", `${verb} takes exactly one <id|name>`, USAGE), asJson, io);
+  const got = await readAll(inject);
+  if (!got.ok) return emitFailure(got, asJson, io);
+  const view = buildView(got.live, got.fold, got.ctx);
+  const pick = selectSession(p.pos[0], view);
+  if (!pick.ok) return emitFailure(pick, asJson, io);
+  if (!pick.session) return emitFailure(fail("SESSION_NOT_FOUND", `"${p.pos[0]}" is an ended session; there is nothing live to ${verb}`, "propagate sessions"), asJson, io);
+  const o = { apply: p.flags["--apply"] === true, stateDirPath: inject.stateDirPath, now: inject.now, readLive: inject.readLive, env: inject.env, ...inject.deleteOpts };
+  const s = pick.session;
+  // `stop` on an interactive session is refused by stop() with the `--force` next step; `--force` on a background one is refused by force().
+  const res = verb === "rm" ? await rm(s, o) : p.flags["--force"] ? await force(s, o) : await stop(s, o);
+  if (!res.ok) return emitFailure(res, asJson, io);
+  if (asJson) io.log(JSON.stringify(res, null, 2));
+  else if (res.dryRun) {
+    const what = res.action === "force" ? `send ${res.signal} to pid ${res.pid}` : `run claude ${res.argv.join(" ")}`;
+    io.log(`dry run: would ${what} for ${res.target}. Nothing was done.`);
+    io.log(`apply:   ${res.next}`);
+  } else {
+    io.log(`${res.action === "rm" ? "removed" : "stopped"} ${res.target}${res.state ? `, now ${res.state}` : ""}`);
+    io.log(`next:    ${res.next}`);
   }
   return 0;
 }

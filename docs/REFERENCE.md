@@ -603,7 +603,7 @@ matter (8e14732: astro-darpan's G2 wrapped its Active-since paragraph past the 3
 found, or no board read (a rate limit, a listing that returned 0 open boards, an item with no field values). A blind
 scan never exits 0.
 
-## `propagate sessions`: who works where (propagate#272, the read half)
+## `propagate sessions`: who works where (propagate#272)
 
 Which Claude Code sessions are live, in which folder, on which goal and item. Live state is derived from `claude agents --json` on every call and never cached; propagate stores only the association and a folder cache, both in the state directory (`$PROPAGATE_STATE_DIR/sessions/`), never in a repo.
 
@@ -611,6 +611,9 @@ Which Claude Code sessions are live, in which folder, on which goal and item. Li
 propagate sessions [--json]
 propagate sessions show <id|name> [--json]
 propagate sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/repo#n) [--json]
+propagate sessions new (--from owner/repo#n | <folder> --goal G<n> --item owner/repo#n) [--name <n>] [--again] [--apply] [--json]
+propagate sessions stop <id|name> [--force] [--apply] [--json]
+propagate sessions rm <id|name> [--apply] [--json]
 ```
 
 - **The table:** grouped by workspace, columns `project`, `goal`, `item`, `state`, `since`, then `id` and `name`. A session with no association says `unassociated` in the item column, and the table closes with `assoc: propagate sessions assoc <id> --from owner/repo#n`. An empty list prints `0 live sessions (claude agents read <ts>)`. A cwd at the hub root reads `hub (all)`; one outside every workspace is grouped as `unplaced`.
@@ -621,6 +624,12 @@ propagate sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/re
 - **`assoc --from`:** reads the goal from the dispatch snapshot (`$STATE/day/items.json`, written by `day open`). A null or missing goal refuses with `SESSION_GOAL_UNKNOWN`; a snapshot older than 24 h warns and does not refuse.
 - **`--json`:** `{ok, readAt, sessions, ended, counts: {live, unassociated, unplaced, unknown, ended}}`.
 - **Testing:** `PROPAGATE_CLAUDE_BIN` names the binary (default `claude`); `PROPAGATE_CLAUDE_TIMEOUT_MS` overrides the 15 s read timeout. `claude --bg --help` starts a session rather than printing help, so no test and no code path may pass `claude` anything but `agents --json` from this half; `lib/sessions/live.mjs` is the only place `claude` is run.
+
+**The act half (create and delete).** `new`, `stop`, `rm` and `stop --force` are a dry run unless `--apply`; the dry run starts, stops and signals nothing and writes nothing to `assoc.jsonl` (`stop`, `rm` and `--force` still READ `claude agents --json` to find their session; `new` makes no `claude` call at all).
+- **`new`:** `--from owner/repo#n` derives the folder (the one checkout whose origin is that repo), the goal (the dispatch snapshot; a null goal is `SESSION_GOAL_UNKNOWN`) and the name `<project> · G<n> · #<n>`; a positional `<folder>`, `--goal` and `--name` override. The dry run prints the derived facts, the snapshot age and the exact argv. `--apply` takes ONE lock on `assoc.jsonl` across: read live, refuse `SESSION_ITEM_LIVE` when a live session already serves the item (unless `--again`), append `approved`, run `claude --bg -n <name> <prompt>` in the folder (30 s bound), identify the session (parse `backgrounded · <id>`, else join `claude agents --json` on name + cwd + startedAt at or after the launch, within 10 s), append `created` and `associate`, release. The argv never carries a permission-mode, bypass or help flag. The prompt carries references only (the issue URL and the guidance file paths), never an issue body. `--apply --json` prints `{ok, sessionId, id, name, cwd, state}`.
+- **`stop` / `rm`:** background sessions only (`claude stop <id>`, `claude rm <id>`); `rm` is refused unless the session is `stopped` or `done`. Intent events (`stop-requested`, `rm-requested`) are appended before the call, `stopped` / `removed` after it.
+- **`stop --force`:** sends SIGTERM to an interactive session by its pid, never SIGKILL. Immediately before the signal the list is re-read and the same pid + sessionId + cwd must still be listed, else `SESSION_PID_CHANGED` and 0 signals were sent. The current session (Claude Code's own session-id environment variable), this process and its parent are refused. The list is then re-read for up to 10 s; still listed is `SESSION_STILL_PRESENT`.
+- **Events in `assoc.jsonl`:** `approved`, `created`, `create-failed`, `unknown`, `stop-requested`, `stop-aborted`, `stop-unconfirmed`, `stopped`, `rm-requested`, `removed`.
 
 **Errors.** Every failure prints `<CODE>: <what>. Next: <command>` on stderr, or with `--json` `{ok:false, code, what, next, side_effects}`. Exit 2 = could not read, or usage; exit 1 = refused.
 
@@ -634,6 +643,36 @@ propagate sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/re
 | `SESSION_AMBIGUOUS` | 1 | more than one session matches; the `Next:` names a `pid:` selector |
 | `SESSION_GOAL_UNKNOWN` | 1 | `assoc --from` found no goal for the item in the dispatch snapshot |
 | `SESSION_ASSOC_WRITE_FAILED` | 1 | the association line could not be appended; nothing changed |
+| `SESSION_ITEM_LIVE` | 1 | `new --apply`: a live session already serves the item; `--again` starts another |
+| `SESSION_LOCKED` | 1 | `new --apply`: another create holds the association lock; nothing was started |
+| `SESSION_FOLDER_UNKNOWN` | 1 | `new`: no checkout, more than one checkout, or a folder outside every workspace |
+| `SESSION_LAUNCH_FAILED` | 1 | `claude --bg` exited non-zero |
+| `SESSION_LAUNCH_TIMEOUT` | 1 | `claude --bg` did not return within 30 s (a trust prompt looks like this); a session may have started |
+| `SESSION_ID_UNKNOWN` | 1 | the launch returned no id and the join found 0 or more than 1 row; a session started and is not retried |
+| `SESSION_WRONG_KIND` | 1 | `stop` / `rm` on an interactive session, or `--force` on a background one |
+| `SESSION_NOT_STOPPED` | 1 | `rm` on a session that is not stopped or done |
+| `SESSION_SELF` | 1 | the target is the current session, or this process or its parent |
+| `SESSION_PID_CHANGED` | 1 | `--force`: pid + sessionId + cwd no longer match at the re-read; 0 signals sent |
+| `SESSION_STILL_PRESENT` | 1 | `--force` (still listed 10 s after SIGTERM) or `rm` (still listed after `claude rm`) |
+| `SESSION_ACT_FAILED` | 1 | `claude stop` / `claude rm` failed, or the signal could not be sent |
+
+**Launches with no known session.** A create whose outcome is not a known session (its last event is `approved`, or `unknown`: a session may have started but no id was joined) is listed under `launches with no known session` and counted in `counts.unknown`. It is never hidden and never retried. It drops out once a later association for the same item exists.
+
+**No test can run the real `claude`.** `lib/sessions/live.mjs` `runClaude` is the only new spawner. Under the test runner (`NODE_TEST_CONTEXT`, set by node in every test process and the processes it spawns) with no `PROPAGATE_CLAUDE_BIN`, it refuses rather than fall back to `claude`, so a test that loses its stub fails instead of launching a session (GOTCHAS G91: `claude --bg --help` starts one).
+
+**The session-guide hook** (SessionStart, every source: startup, resume, clear, compact, fork) tells the session its folder, repos, goal and item, and which guidance files to read first:
+
+```
+Session: <project> (<workspace>) · repos: a, b · goal G<n> · item owner/repo#n. Read first: <files>.
+```
+
+- With no association it says `unassociated: propagate sessions assoc <id> --from owner/repo#n`.
+- The block is at most 2,000 characters; a long repo list ends with `+N more: propagate sessions show <id>`.
+- It reads only `$STATE/sessions/checkouts.json` (refreshed by the sessions CLI), `assoc.jsonl` and `.propagates.yml` markers up the cwd ancestry. Its state dir comes from `lib/core/paths.mjs`.
+- It never calls `claude`, the network or git, except one `git rev-parse --git-common-dir` when cwd is inside `.claude/worktrees/`.
+- A cwd outside every workspace, or no cache, injects nothing.
+- Any error appends one line to `$STATE/sessions/errors.log`, and the hook exits 0 silently.
+- Plugin hook registrations: 12. It applies after `/reload-plugins`, and does not run under `--bare` or in cloud sessions.
 
 ## `propagate day`: day open and day close (propagate#240)
 
@@ -643,6 +682,7 @@ propagate sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/re
 - **Costing:** a calibrated Size is costed per Size. Everything else uses a **count basis** derived each run: the week-% consumed over 7 days, divided by the items with a Finished date in those 7 days. The output labels it, because it costs every item the same whatever its Size.
 - **Also listed:** In progress carry-over, and Ready items with no Size.
 - **Per active goal (propagate#240):** one block per active goal in the GOALS.md files (the same files and the same `active` flag as `goals check`), built from the boards already read, with no extra GraphQL call. It shows the goal id and title, the appetite and days left (`no appetite recorded` when none), and the counts of In progress, Ready, Backlog and Done items whose Goal is that id. A group the reader could not fully page (see paging below) prints as `≥N`, never as a total. Then **Ready by Order**: each Ready item with Order (`–` when unset), Priority, Model, Size, ref and title, in the promotion order below. Then one line naming the Ready items not under an active goal. The same data is in the `--json` result (`goalBlocks`, `readyNotUnderActiveGoal`). The budget, supply and verdict lines are unchanged.
+- **Sessions per goal (propagate#272):** under every goal block, one `sessions: <project> · #<n> (<state>, <since>)` line per live session associated with that goal (`sessions: none` when there are none), then `no session: #a, #b` for that goal's Ready items no live associated session covers (omitted when every Ready item is covered). The sessions come from `claude agents --json` joined to `propagate sessions assoc` records, read once per run. If that read fails, one line `sessions: could not read (<CODE>: <what>)` follows the goal blocks. **The exit code is the same whether the reader succeeds, returns nothing or fails:** sessions are information beside the capacity verdict. `--json`: each `goalBlocks` entry carries `sessions: {live:[{project,item,state,since}], uncovered:["owner/repo#n"]}`, or `sessions: {error:{code,what}}`.
 - **Verdict:** `short by ~N points` (with the top promotable Backlog items), `enough` (budget ≤ supply ≤ 2× budget), or `over` (with what will not fit).
 - **Exit:** 0 enough; 1 short or over; 2 cannot judge (no good sample, no count basis, the rate limit too low, or the read went blind).
 
