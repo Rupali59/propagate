@@ -70,6 +70,7 @@ if (argv[0] === "agents") {
   process.stdout.write(JSON.stringify(rows));
 } else if (argv[0] === "--bg") {
   if (cfg.sleepMs) await new Promise((r) => setTimeout(r, cfg.sleepMs));
+  if (cfg.bgStderr) { process.stderr.write(cfg.bgStderr); process.exit(cfg.bgCode ?? 1); }
   const spawned = read("spawned.json", []);
   const count = cfg.spawnRows ?? 1;
   let lastId = "";
@@ -356,6 +357,21 @@ test("new --apply: claude exiting non-zero is SESSION_LAUNCH_FAILED with a `crea
   assert.equal(t.json.code, "SESSION_LAUNCH_FAILED");
   assert.deepEqual(events(state).map((e) => e.event), ["approved", "create-failed"]);
 });
+
+// DX-T8, measured 2026-11-14 on Claude Code 2.1.311: in an untrusted folder `claude --bg` refuses in ~1.6 s with this
+// exact text and starts nothing. Both exit statuses are covered: the code must come from the text, never from the status.
+const UNTRUSTED_MSG = "Workspace not trusted. Run `claude` in /w/acme/repo-a once and accept the trust prompt, then retry.\n";
+for (const bgCode of [1, 0]) {
+  test(`new --apply: an untrusted folder (claude exits ${bgCode}) is SESSION_FOLDER_UNTRUSTED, says no session started, and never joins`, async () => {
+    const state = fresh();
+    const t = await run([...NEW, "--apply", "--json"], { state, cfg: { bgStderr: UNTRUSTED_MSG, bgCode } });
+    assert.equal(t.json.code, "SESSION_FOLDER_UNTRUSTED");
+    assert.deepEqual(t.json.side_effects, [], "nothing started, so nothing to reconcile");
+    assert.match(t.json.next, /open claude once in .* and accept the trust prompt/);
+    assert.deepEqual(events(state).map((e) => e.event), ["approved", "create-failed"]);
+    assert.ok(!events(state).some((e) => e.event === "unknown" || e.event === "created" || e.event === "associate"), "never read as a launch");
+  });
+}
 
 test("the act code never passes a bypass flag and never escalates a signal (derived from the source)", () => {
   const files = readdirSync(path.join(ROOT, "lib", "sessions")).filter((f) => f.endsWith(".mjs"));

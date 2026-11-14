@@ -647,7 +647,8 @@ propagate sessions rm <id|name> [--apply] [--json]
 | `SESSION_LOCKED` | 1 | `new --apply`: another create holds the association lock; nothing was started |
 | `SESSION_FOLDER_UNKNOWN` | 1 | `new`: no checkout, more than one checkout, or a folder outside every workspace |
 | `SESSION_LAUNCH_FAILED` | 1 | `claude --bg` exited non-zero |
-| `SESSION_LAUNCH_TIMEOUT` | 1 | `claude --bg` did not return within 30 s (a trust prompt looks like this); a session may have started |
+| `SESSION_LAUNCH_TIMEOUT` | 1 | `claude --bg` did not return within 30 s; a session may have started |
+| `SESSION_FOLDER_UNTRUSTED` | 1 | `claude --bg` refused: the folder has never been trusted (measured 2026-11-14: it refuses in ~1.6 s, it does not hang); no session started. Next: open `claude` once there and accept the prompt |
 | `SESSION_ID_UNKNOWN` | 1 | the launch returned no id and the join found 0 or more than 1 row; a session started and is not retried |
 | `SESSION_WRONG_KIND` | 1 | `stop` / `rm` on an interactive session, or `--force` on a background one |
 | `SESSION_NOT_STOPPED` | 1 | `rm` on a session that is not stopped or done |
