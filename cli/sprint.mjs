@@ -3,7 +3,7 @@
  * `propagate sprint review [--sprint <title>] [--apply] [--json]` (propagate#191; writes only with --apply).
  *
  * Read-only: no GitHub write, no ledger write. The daily-cap rule is NOT re-implemented here: it lives in the
- * usage widget (a separate private repo), and is imported from the directory named by PROPAGATE_USAGE_WIDGET_DIR
+ * usage widget (a separate private repo), and is imported from INTEGRATIONS.usageWidgetDir (PROPAGATE_USAGE_WIDGET_DIR, else config.yml integrations.usageWidgetDir)
  * (src/collect/daily-cap.mjs and day-used.mjs). Unset or unimportable: exit 2, never a guess.
  * Exit: 0 fits; 1 over (cut list); 2 could not compute or cannot judge fit.
  */
@@ -11,6 +11,8 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+
+import { INTEGRATIONS } from "../lib/core/config.mjs";
 import { pathToFileURL } from "node:url";
 
 import { readCosts, samplesPath } from "../lib/core/costs.mjs";
@@ -23,7 +25,7 @@ function value(args, flag) {
 }
 
 /** @returns {Promise<{widget: {dailyCap: Function, dayUsed: Function}|null, missing?: string}>} */
-export async function loadWidget(dir = process.env.PROPAGATE_USAGE_WIDGET_DIR) {
+export async function loadWidget(dir = INTEGRATIONS.usageWidgetDir) {
   if (!dir) return { widget: null };
   try {
     const collect = path.join(dir, "src", "collect");
@@ -88,7 +90,7 @@ export async function sprintCmd(args, inject = {}) {
     }
   }
 
-  const { widget, missing } = await loadWidget(inject.widgetDir ?? process.env.PROPAGATE_USAGE_WIDGET_DIR);
+  const { widget, missing } = await loadWidget(inject.widgetDir ?? INTEGRATIONS.usageWidgetDir);
   let raw = inject.samplesRaw;
   let samplesNote = null;
   if (raw === undefined) {

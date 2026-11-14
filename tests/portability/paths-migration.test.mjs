@@ -136,6 +136,7 @@ test("migration equality — all 36 pre-existing config.mjs exports are byte-ide
       healthExceptionsFile: null,
       telegramDir: null,
       notifier: null,
+      usageWidgetDir: null,
     });
     assert.equal(
       after["searchRootsExplain()"],

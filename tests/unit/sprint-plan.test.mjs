@@ -187,7 +187,7 @@ test("no widget configured is exit 2 with the stated reason, never a guess", asy
   const f = fetcher({ boards: [], ready: [] });
   const p = await plan({ widget: null, fetcher: f });
   assert.equal(p.exit, 2);
-  assert.match(p.reason, /could not compute \(daily-cap source not configured: set PROPAGATE_USAGE_WIDGET_DIR\)/);
+  assert.match(p.reason, /could not compute \(daily-cap source not configured: set PROPAGATE_USAGE_WIDGET_DIR, or integrations\.usageWidgetDir in ~\/\.propagate\/config\.yml\)/);
   assert.equal(f.calls, 0);
 });
 

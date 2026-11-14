@@ -8,6 +8,7 @@
 
 import { readFileSync } from "node:fs";
 
+import { INTEGRATIONS } from "../lib/core/config.mjs";
 import { readCosts, samplesPath } from "../lib/core/costs.mjs";
 import { parseSamples } from "../lib/report/sprint-plan.mjs";
 import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose } from "../lib/report/day.mjs";
@@ -44,7 +45,7 @@ export async function dayCmd(args, inject = {}) {
   let widget = inject.widget ?? null;
   let widgetMissing;
   if (!widget) {
-    const w = await loadWidget(inject.widgetDir ?? process.env.PROPAGATE_USAGE_WIDGET_DIR);
+    const w = await loadWidget(inject.widgetDir ?? INTEGRATIONS.usageWidgetDir);
     widget = w.widget;
     widgetMissing = w.missing;
   }
