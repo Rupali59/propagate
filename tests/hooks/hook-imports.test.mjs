@@ -179,3 +179,36 @@ test("doc-authority resolves its skill root from the plugin, not from HOME", () 
   assert.match(src, /fileURLToPath\(import\.meta\.url\)/,
     "must fall back to its own location so direct invocation and tests still work");
 });
+
+/**
+ * propagate#272 (Eng finding "the original arrangement spreads CLI knowledge"): lib/sessions/live.mjs is the only
+ * code that runs `claude` for sessions. `claude --bg --help` STARTS a session, so a second spawner is a second chance
+ * to launch one by accident. The population is derived by walking lib/ cli/ hooks/, with a floor.
+ *
+ * EXEMPT lists the spawners that predate the sessions work and are not session code: each carries its reason, and
+ * a stale entry (one that no longer spawns claude) fails below.
+ */
+test("only lib/sessions/live.mjs spawns `claude` for sessions (derived walk, with exemptions named)", () => {
+  const EXEMPT = {
+    "lib/skills/skills-create.mjs": "`claude -p <prompt>` to generate a skill; not a session",
+    "lib/core/plugin-validate.mjs": "`claude plugin validate`; not a session",
+    "lib/core/release.mjs": "the release gate's `claude plugin validate`; not a session",
+  };
+  const spawnsClaude = (src) =>
+    /\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync)\(\s*["'`]claude\b/.test(src) ||
+    /\b[A-Za-z]*[bB]in\s*=\s*["']claude["']/.test(src) ||
+    /PROPAGATE_CLAUDE_BIN/.test(src);
+  const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) return e.name === "node_modules" ? [] : walk(p);
+    return e.name.endsWith(".mjs") ? [p] : [];
+  });
+  const files = ["lib", "cli", "hooks"].flatMap((d) => walk(path.join(ROOT, d))).concat(path.join(ROOT, "cli.mjs"));
+  assert.ok(files.length >= 50, `only ${files.length} source files walked: the scan has gone blind, it has not found nothing`);
+  const hits = files.filter((f) => spawnsClaude(readFileSync(f, "utf8"))).map((f) => path.relative(ROOT, f));
+  assert.ok(hits.includes("lib/sessions/live.mjs"), "the scan cannot see live.mjs, so it is blind");
+  const offenders = hits.filter((h) => h !== "lib/sessions/live.mjs" && !Object.hasOwn(EXEMPT, h));
+  assert.deepEqual(offenders, [], `these files run the claude binary outside lib/sessions/live.mjs: ${offenders.join(", ")}`);
+  const stale = Object.keys(EXEMPT).filter((e) => !hits.includes(e));
+  assert.deepEqual(stale, [], `exemptions that no longer spawn claude, delete them: ${stale.join(", ")}`);
+});

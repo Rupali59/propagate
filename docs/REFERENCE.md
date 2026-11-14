@@ -603,6 +603,38 @@ matter (8e14732: astro-darpan's G2 wrapped its Active-since paragraph past the 3
 found, or no board read (a rate limit, a listing that returned 0 open boards, an item with no field values). A blind
 scan never exits 0.
 
+## `propagate sessions`: who works where (propagate#272, the read half)
+
+Which Claude Code sessions are live, in which folder, on which goal and item. Live state is derived from `claude agents --json` on every call and never cached; propagate stores only the association and a folder cache, both in the state directory (`$PROPAGATE_STATE_DIR/sessions/`), never in a repo.
+
+```
+propagate sessions [--json]
+propagate sessions show <id|name> [--json]
+propagate sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/repo#n) [--json]
+```
+
+- **The table:** grouped by workspace, columns `project`, `goal`, `item`, `state`, `since`, then `id` and `name`. A session with no association says `unassociated` in the item column, and the table closes with `assoc: propagate sessions assoc <id> --from owner/repo#n`. An empty list prints `0 live sessions (claude agents read <ts>)`. A cwd at the hub root reads `hub (all)`; one outside every workspace is grouped as `unplaced`.
+- **Row key:** `(kind, id || sessionId, pid)`. `sessionId` is not unique (one id appears as both a background and an interactive row), so rows are never deduped on it.
+- **Selecting a session:** `pid:<n>`, then the background `id`, then `sessionId` (exact, or a prefix of 6+ characters), then the name. The first form that matches wins; more than one match inside it is `SESSION_AMBIGUOUS`.
+- **Repos:** a session works in every repo whose checkout is at or below its folder, plus the deepest checkout containing it. The repo to checkout map is `$STATE/sessions/checkouts.json`, rebuilt on every CLI read from discovery plus `git remote get-url origin`; a linked worktree resolves to its main checkout through `git rev-parse --git-common-dir`.
+- **Ended:** an association whose session is absent from `claude agents --json` reads `ended (not in claude agents)` and is never dropped. The text view lists the 10 newest; `--json` lists all.
+- **`assoc --from`:** reads the goal from the dispatch snapshot (`$STATE/day/items.json`, written by `day open`). A null or missing goal refuses with `SESSION_GOAL_UNKNOWN`; a snapshot older than 24 h warns and does not refuse.
+- **`--json`:** `{ok, readAt, sessions, ended, counts: {live, unassociated, unplaced, unknown, ended}}`.
+- **Testing:** `PROPAGATE_CLAUDE_BIN` names the binary (default `claude`); `PROPAGATE_CLAUDE_TIMEOUT_MS` overrides the 15 s read timeout. `claude --bg --help` starts a session rather than printing help, so no test and no code path may pass `claude` anything but `agents --json` from this half; `lib/sessions/live.mjs` is the only place `claude` is run.
+
+**Errors.** Every failure prints `<CODE>: <what>. Next: <command>` on stderr, or with `--json` `{ok:false, code, what, next, side_effects}`. Exit 2 = could not read, or usage; exit 1 = refused.
+
+| Code | Exit | Meaning |
+|---|---|---|
+| `SESSION_READER_FAILED` | 2 | `claude agents --json` is missing, exited non-zero, timed out, or printed non-JSON |
+| `SESSION_SHAPE_UNKNOWN` | 2 | it printed JSON whose shape is not understood (rows need string `cwd`, `kind`, `sessionId`); never an empty list |
+| `SESSION_USAGE` | 2 | wrong arguments |
+| `SESSION_ASSOC_UNREADABLE` | 2 | `assoc.jsonl` exists but cannot be read |
+| `SESSION_NOT_FOUND` | 1 | no live session (or ended association) matches |
+| `SESSION_AMBIGUOUS` | 1 | more than one session matches; the `Next:` names a `pid:` selector |
+| `SESSION_GOAL_UNKNOWN` | 1 | `assoc --from` found no goal for the item in the dispatch snapshot |
+| `SESSION_ASSOC_WRITE_FAILED` | 1 | the association line could not be appended; nothing changed |
+
 ## `propagate day`: day open and day close (propagate#240)
 
 `propagate day open [--json]` is read-only.

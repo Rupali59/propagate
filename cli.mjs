@@ -5961,6 +5961,10 @@ if (_invokedDirectly) {
     // Dynamic, same reason as tasks (D5). Without --apply `broadcast new` makes gh READ calls only.
     const { broadcastCmd } = await import("./cli/broadcast.mjs");
     process.exitCode = await broadcastCmd(process.argv.slice(3));
+  } else if (mode === "sessions") {
+    // Dynamic like broadcast. Reads `claude agents --json` through lib/sessions/live.mjs, the only place claude is run.
+    const { sessionsCmd } = await import("./cli/sessions.mjs");
+    process.exitCode = await sessionsCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
     console.error(renderUsage());
