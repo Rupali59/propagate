@@ -5957,6 +5957,10 @@ if (_invokedDirectly) {
     // external call is `gh repo view`; `--apply` (R2) is built in lib/tasks/export.mjs.
     const { tasksCmd } = await import("./cli/tasks.mjs");
     process.exitCode = await tasksCmd(process.argv.slice(3));
+  } else if (mode === "broadcast") {
+    // Dynamic, same reason as tasks (D5). Without --apply `broadcast new` makes gh READ calls only.
+    const { broadcastCmd } = await import("./cli/broadcast.mjs");
+    process.exitCode = await broadcastCmd(process.argv.slice(3));
   } else {
     console.error(`unknown mode: ${mode}`);
     console.error(renderUsage());
