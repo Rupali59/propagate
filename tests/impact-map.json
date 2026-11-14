@@ -1,7 +1,7 @@
 {
  "header": {
-  "recordedAt": "2026-11-14T06:43:19.599Z",
-  "commit": "95168f06a33ac4435572dfadf078b6ca479f3dad",
+  "recordedAt": "2026-11-14T07:06:13.348Z",
+  "commit": "10a9912cc8f6fe53943e6881d8e4dc9ae25c7680",
   "node": "v26.13.0",
   "tests": 309,
   "withStaticDeps": 243,
@@ -9,7 +9,7 @@
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 1979,
+  "recordedProcesses": 2018,
   "unresolvedStaticSpecifiers": 94
  },
  "tests": {
@@ -9375,6 +9375,7 @@
     "hooks/load-rules.mjs",
     "hooks/plan-goal.mjs",
     "hooks/rule-guard.mjs",
+    "hooks/session-guide.mjs",
     "hooks/subagent-cost.mjs",
     "index.mjs",
     "lib/broadcast/gh.mjs",
@@ -9525,6 +9526,8 @@
     "lib/rules/paths-guard.mjs",
     "lib/rules/rules-check.mjs",
     "lib/sessions/assoc.mjs",
+    "lib/sessions/create.mjs",
+    "lib/sessions/delete.mjs",
     "lib/sessions/errors.mjs",
     "lib/sessions/live.mjs",
     "lib/sessions/resolve.mjs",
@@ -9736,6 +9739,7 @@
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
     "tests/hooks/plan-goal.test.mjs",
+    "tests/hooks/session-guide.test.mjs",
     "tests/portability/cli-imports.test.mjs",
     "tests/portability/config-file.test.mjs",
     "tests/portability/config-state-dir.test.mjs",
@@ -9901,6 +9905,7 @@
     "tests/unit/rules-paths-guard.test.mjs",
     "tests/unit/runs.test.mjs",
     "tests/unit/services.test.mjs",
+    "tests/unit/sessions-act.test.mjs",
     "tests/unit/sessions.test.mjs",
     "tests/unit/settle-check.test.mjs",
     "tests/unit/sidecar-dedup.test.mjs",
