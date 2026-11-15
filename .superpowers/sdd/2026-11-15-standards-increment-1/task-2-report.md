@@ -16,3 +16,6 @@ Replaced `if (ls.length > 1) problems.push` with `if (false) ...`: "a duplicate 
 - Registry shape (schema_version + `standards:` map, like services.yml) is my choice from design §2.1; Task 3+ should confirm.
 - Version field is raw text ("acme-tool 3.47.7"); Task 3 must extract semver.
 - No tests/unit/config*.test.mjs exists; only paths-migration pins the keys.
+
+## Fix round 1
+parse.mjs now reports: row-like malformed headings, field lines outside a row, unknown field names, command/test checks with no target; strips a leading BOM. Added tests for each plus CRLF, the `command: node -e "a:b"` colon case, and a two-standard loadStandards with one missing page. Mutation: the looks-like-a-row report disabled turned the malformed-heading test red (21/22); restored byte-identical, 22/22 green.

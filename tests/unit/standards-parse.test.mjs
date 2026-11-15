@@ -174,3 +174,54 @@ test("loadStandards: a missing page is a problem naming the file, other standard
 test("loadStandards: unconfigured propagates the reason", () => {
   assert.deepEqual(loadStandards({ standardsFile: null, standardsDir: null }), { ok: false, reason: "standards not configured", problems: [] });
 });
+
+test("a heading that looks like a row but is malformed is reported, not dropped", () => {
+  for (const h of ["### acme-tool-003 - Wrong separator", "## acme-tool-003 · Wrong level", "### acme-tool-003 · "]) {
+    const p = parsePage(PAGE + `\n${h}\n**State:** adopted\n`, "acme-tool.md");
+    assert.ok(p.problems.some((x) => x.includes("looks like a row")), `${h} -> ${p.problems.join("|")}`);
+  }
+});
+
+test("a field line outside any row is reported", () => {
+  const p = parsePage("---\nid: a\nkind: tool\n---\n**State:** adopted\n", "a.md");
+  assert.ok(p.problems.some((x) => x.includes('field "State" outside any row')));
+});
+
+test("an unknown field name is reported", () => {
+  const p = parsePage(PAGE.replace("**Check:** test:", "**Chekc:** test:"), "acme-tool.md");
+  assert.ok(p.problems.some((x) => x.includes('unknown field "Chekc"')), p.problems.join("|"));
+});
+
+test("a leading BOM does not hide the frontmatter", () => {
+  const p = parsePage("\uFEFF" + PAGE, "acme-tool.md");
+  assert.deepEqual(p.problems, []);
+  assert.equal(p.id, "acme-tool");
+});
+
+test("CRLF pages parse the same", () => {
+  const p = parsePage(PAGE.replace(/\n/g, "\r\n"), "acme-tool.md");
+  assert.deepEqual(p.problems, []);
+  assert.equal(p.rows.length, 2);
+  assert.equal(p.rows[0].check.target, "**/support.dart contains settleBounded");
+});
+
+test("a command check keeps colons in its target", () => {
+  const p = parsePage(PAGE.replace("**Check:** test: **/support.dart contains settleBounded", '**Check:** command: node -e "a:b"'), "acme-tool.md");
+  assert.deepEqual(p.rows[0].check, { kind: "command", target: 'node -e "a:b"' });
+});
+
+test("a command or test check with no target is a problem", () => {
+  const p = parsePage(PAGE.replace("**Check:** test: **/support.dart contains settleBounded", "**Check:** command"), "acme-tool.md");
+  assert.ok(p.problems.includes('row acme-tool-001: check "command" has no target'), p.problems.join("|"));
+});
+
+test("loadStandards: with two standards, one missing page does not stop the other", () => {
+  const reg = REG + `  beta-tool:\n    kind: tool\n    page: beta-tool.md\n`;
+  const f = fixture(reg, { "acme-tool.md": PAGE });
+  const r = loadStandards({ standardsFile: f.file, standardsDir: f.pdir });
+  assert.equal(r.ok, true);
+  assert.equal(r.standards.length, 2);
+  assert.equal(r.standards.find((s) => s.id === "acme-tool").page.rows.length, 2);
+  assert.equal(r.standards.find((s) => s.id === "beta-tool").page, null);
+  assert.ok(r.problems.some((x) => x.includes("beta-tool") && x.includes("not found")));
+});
