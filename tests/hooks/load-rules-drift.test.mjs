@@ -26,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HOOK = fileURLToPath(new URL("../../hooks/load-rules.mjs", import.meta.url));
+const CLI = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
 
 const RULE = `---
 id: fixture-rule
@@ -56,16 +57,26 @@ async function withFixture(fn) {
   }
 }
 
-function runHook({ home, roots }) {
+function fixtureEnv({ home, roots }) {
+  return {
+    ...process.env,
+    HOME: home,
+    PROPAGATE_SEARCH_ROOTS: roots,
+    PROPAGATE_STATE_DIR: path.join(home, ".propagate"),
+  };
+}
+
+/**
+ * The hook READS a census that `propagate rules check` writes (#283); it no longer scans. So a
+ * fixture that expects a finding must compute the census first, as a user's CLI run would.
+ * `cached: false` skips that, to test the no-cache path.
+ */
+function runHook({ home, roots }, { cached = true } = {}) {
+  if (cached) spawnSync(process.execPath, [CLI, "rules", "check"], { encoding: "utf8", env: fixtureEnv({ home, roots }) });
   const r = spawnSync(process.execPath, [HOOK], {
     encoding: "utf8",
     input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup" }),
-    env: {
-      ...process.env,
-      HOME: home,
-      PROPAGATE_SEARCH_ROOTS: roots,
-      PROPAGATE_STATE_DIR: path.join(home, ".propagate"),
-    },
+    env: fixtureEnv({ home, roots }),
   });
   let ctx = "";
   try {
@@ -174,5 +185,50 @@ test("SILENT when a root exists but holds no CLAUDE.md — nothing to check is n
     const { ctx } = runHook({ home, roots }); // roots exists, contains nothing
     assert.doesNotMatch(ctx, /RULES CHECK could not run/, `an empty root must be silent:\n${ctx.slice(-400)}`);
     assert.doesNotMatch(ctx, /RESTATEMENT/, "and must not claim findings either");
+  });
+});
+
+test("NO cached census: one attributable line, never silence and never a scan (#283)", async () => {
+  await withFixture(async ({ home, roots }) => {
+    // A restating file exists, but with no census the hook must not go find it.
+    await writeFile(path.join(roots, "CLAUDE.md"), "# P\n\nthe sky is plaid on tuesdays.\n");
+    const { ctx } = runHook({ home, roots }, { cached: false });
+    assert.match(ctx, /RULES CHECK not computed: no cached census/, ctx.slice(-400));
+    assert.match(ctx, /propagate rules check/, "must name the command that writes it");
+    assert.doesNotMatch(ctx, /RESTATEMENT/, "the hook must not scan at session start");
+  });
+});
+
+const median = (a) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+function timeRun(cmd, args, opts) {
+  const t = process.hrtime.bigint();
+  spawnSync(cmd, args, { encoding: "utf8", ...opts });
+  return Number(process.hrtime.bigint() - t) / 1e6;
+}
+
+test("hook latency: median over 10 real runs adds under 300 ms over bare node startup (#283)", async () => {
+  await withFixture(async ({ home, roots }) => {
+    await writeFile(path.join(roots, "CLAUDE.md"), "# P\n\nthe sky is plaid on tuesdays.\n");
+    // A tree big enough that an inline scan is visible: 80 nested CLAUDE.md of ~40 KB each.
+    const filler = "Some ordinary project prose that restates nothing at all.\n".repeat(700);
+    for (let i = 0; i < 80; i++) {
+      const d = path.join(roots, `p${i}`, "sub");
+      await mkdir(d, { recursive: true });
+      await writeFile(path.join(d, "CLAUDE.md"), filler);
+    }
+    const env = fixtureEnv({ home, roots });
+    spawnSync(process.execPath, [CLI, "rules", "check"], { encoding: "utf8", env });
+    const input = JSON.stringify({ hook_event_name: "SessionStart", source: "startup" });
+    const hook = [], bare = [];
+    for (let i = 0; i < 10; i++) {
+      hook.push(timeRun(process.execPath, [HOOK], { env, input }));
+      bare.push(timeRun(process.execPath, ["-e", ""], { env }));
+    }
+    // Why relative: interpreter startup alone is machine-dependent (1.1 s on a loaded laptop), and
+    // not the hook's to fix. What this guards is the hook's own work. The pre-fix hook added 24-27 s
+    // (restatement scan at every session start), so 300 ms is generous for CI noise and still ~80x
+    // under the regression.
+    const added = median(hook) - median(bare);
+    assert.ok(added < 300, `hook adds ${added.toFixed(0)} ms over bare node (hook median ${median(hook).toFixed(0)}, bare ${median(bare).toFixed(0)})`);
   });
 });

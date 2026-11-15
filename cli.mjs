@@ -1638,6 +1638,14 @@ async function rulesCmd() {
     exclude: [globalMd],
     registryFile: INTEGRATIONS.healthExceptionsFile,
   });
+  // Refresh the census the SessionStart hook reads (#283). The hook's scan has no `extra`/`exclude`,
+  // so it is its own scan, not a reshaping of this one.
+  try {
+    const { computeCensus, writeCensus } = await import("./lib/rules/census-cache.mjs");
+    writeCensus(await computeCensus());
+  } catch (err) {
+    console.error(`rules check: could not refresh the session-start census: ${err?.message ?? err}`);
+  }
   if (asJson) {
     const strip = ({ lines, ...f }) => f;
     console.log(

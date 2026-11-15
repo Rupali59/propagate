@@ -156,16 +156,19 @@ function scopedHome(f) {
 }
 
 function hookCtx(f) {
+  const env = {
+    ...process.env,
+    HOME: scopedHome(f),
+    PROPAGATE_SEARCH_ROOTS: f.hub,
+    PROPAGATE_HEALTH_EXCEPTIONS_FILE: f.registryFile,
+    PROPAGATE_STATE_DIR: path.join(f.hub, "_state"),
+  };
+  // The hook reads the census `rules check` writes and no longer scans (#283): write it first.
+  spawnSync(process.execPath, [CLI, "rules", "check"], { encoding: "utf8", env, input: "" });
   const r = spawnSync(process.execPath, [HOOK], {
     encoding: "utf8",
     input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup" }),
-    env: {
-      ...process.env,
-      HOME: scopedHome(f),
-      PROPAGATE_SEARCH_ROOTS: f.hub,
-      PROPAGATE_HEALTH_EXCEPTIONS_FILE: f.registryFile,
-      PROPAGATE_STATE_DIR: path.join(f.hub, "_state"),
-    },
+    env,
   });
   try {
     return JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
