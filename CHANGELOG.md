@@ -6,6 +6,10 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
+### Upgrading
+- **Node >= 22.13 is now required** (was 22.0). `propagate work` keeps its queue in Node's built-in `node:sqlite`, which is unflagged from 22.13.0. On the 22.x line that module is still marked experimental; propagate hides only its SQLite warning. Check with `node --version` before upgrading.
+- **`propagate work` creates `$PROPAGATE_STATE_DIR/work/queue.db`** (plus `-wal` and `-shm`) on first use. These files are state, not cache: never delete them as part of a cache clean.
+
 ## [0.19.0] — 2026-11-10
 
 ### Upgrading
