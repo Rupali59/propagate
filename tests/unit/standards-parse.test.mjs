@@ -1,0 +1,176 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { parsePage } from "../../lib/standards/parse.mjs";
+import { loadRegistry, loadStandards } from "../../lib/standards/registry.mjs";
+
+const PAGE = `---
+id: acme-tool
+kind: tool
+authority:
+  - {name: "Acme docs", url: https://docs.acme.example, scope: "behaviour of the SDK"}
+version_probe: acme-tool
+supersedes: []
+---
+
+# Acme tool
+
+## Rows
+
+### acme-tool-001 · Cap settle waits
+**State:** adopted
+**Source:** Acme API docs https://docs.acme.example/settle · **Version:** acme-tool 3.47.7 · **Checked:** 2026-11-14
+**Apply:** cap settle waits in helpers
+**Check:** test: **/support.dart contains settleBounded
+**Fails when:** the cap is removed
+**Broadcast:** no
+**Superseded by:** —
+
+### acme-tool-002 · Pin the lockfile
+**State:** draft
+**Source:** Acme guide
+**Apply:** commit the lockfile
+**Check:** review: reviewer confirms
+**Broadcast:** yes
+**Superseded by:** acme-tool-009
+`;
+
+test("a 2-row page parses both rows with every field", () => {
+  const p = parsePage(PAGE, "acme-tool.md");
+  assert.equal(p.id, "acme-tool");
+  assert.equal(p.kind, "tool");
+  assert.equal(p.versionProbe, "acme-tool");
+  assert.deepEqual(p.authority, [{ name: "Acme docs", url: "https://docs.acme.example", scope: "behaviour of the SDK" }]);
+  assert.deepEqual(p.supersedes, []);
+  assert.deepEqual(p.problems, []);
+  assert.equal(p.rows.length, 2);
+  const [a, b] = p.rows;
+  assert.equal(a.id, "acme-tool-001");
+  assert.equal(a.title, "Cap settle waits");
+  assert.equal(a.state, "adopted");
+  assert.equal(a.source, "Acme API docs https://docs.acme.example/settle");
+  assert.equal(a.version, "acme-tool 3.47.7");
+  assert.equal(a.checked, "2026-11-14");
+  assert.equal(a.apply, "cap settle waits in helpers");
+  assert.deepEqual(a.check, { kind: "test", target: "**/support.dart contains settleBounded" });
+  assert.equal(a.failsWhen, "the cap is removed");
+  assert.equal(a.broadcast, false);
+  assert.equal(a.supersededBy, null);
+  assert.equal(a.line, 14);
+  assert.equal(b.state, "draft");
+  assert.equal(b.broadcast, true);
+  assert.equal(b.supersededBy, "acme-tool-009");
+  assert.equal(b.version, null);
+  assert.equal(b.checked, null);
+  assert.equal(b.check.kind, "review");
+});
+
+test("a duplicate row id is a problem, never silently last-wins", () => {
+  const text = PAGE + `\n### acme-tool-001 · Same id again\n**State:** adopted\n**Check:** none\n`;
+  const p = parsePage(text, "acme-tool.md");
+  assert.ok(p.problems.includes("duplicate row id acme-tool-001 (lines 14, 31)"), p.problems.join("|"));
+  assert.equal(p.rows.filter((r) => r.id === "acme-tool-001").length, 2);
+});
+
+test("a row missing Check gets kind none", () => {
+  const text = PAGE.replace(/\*\*Check:\*\* review: reviewer confirms\n/, "");
+  const p = parsePage(text, "acme-tool.md");
+  assert.deepEqual(p.rows[1].check, { kind: "none", target: null });
+  assert.deepEqual(p.problems, []);
+});
+
+test("an unknown check kind is a problem", () => {
+  const text = PAGE.replace("**Check:** review: reviewer confirms", "**Check:** vibes: it feels fine");
+  const p = parsePage(text, "acme-tool.md");
+  assert.ok(p.problems.some((x) => x.includes("unknown check kind") && x.includes("vibes")), p.problems.join("|"));
+});
+
+test("an unknown state is a problem", () => {
+  const p = parsePage(PAGE.replace("**State:** draft", "**State:** maybe"), "acme-tool.md");
+  assert.ok(p.problems.some((x) => x.includes("unknown state") && x.includes("maybe")));
+});
+
+test("a page with no frontmatter reports a problem instead of parsing as empty", () => {
+  const p = parsePage("### acme-tool-001 · x\n**State:** adopted\n", "x.md");
+  assert.ok(p.problems.some((x) => x.includes("frontmatter")));
+});
+
+function fixture(registryYaml, pages = {}) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "std-"));
+  const file = path.join(dir, "standards.yml");
+  if (registryYaml !== null) writeFileSync(file, registryYaml);
+  const pdir = path.join(dir, "pages");
+  mkdirSync(pdir, { recursive: true });
+  for (const [n, t] of Object.entries(pages)) writeFileSync(path.join(pdir, n), t);
+  return { dir, file, pdir };
+}
+
+const REG = `schema_version: 1
+standards:
+  acme-tool:
+    kind: tool
+    page: acme-tool.md
+    authority: [Acme docs]
+    detect: {files: [acme.yaml]}
+    probe: acme-tool
+    pointer_globs: ["**/AGENTS.md"]
+`;
+
+test("loadRegistry: null file is 'standards not configured'", () => {
+  assert.deepEqual(loadRegistry(null), { ok: false, reason: "standards not configured" });
+});
+
+test("loadRegistry: a broken file is 'standards.yml unreadable: <err>'", () => {
+  const f = fixture("standards: [unclosed\n  : :");
+  const r = loadRegistry(f.file);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /^standards\.yml unreadable: /);
+  const missing = loadRegistry(path.join(f.dir, "nope.yml"));
+  assert.match(missing.reason, /^standards\.yml unreadable: not found/);
+});
+
+test("loadRegistry: a good file yields standards keyed by id", () => {
+  const f = fixture(REG);
+  const r = loadRegistry(f.file);
+  assert.equal(r.ok, true);
+  assert.equal(r.standards["acme-tool"].kind, "tool");
+  assert.equal(r.standards["acme-tool"].page, "acme-tool.md");
+  assert.deepEqual(r.standards["acme-tool"].pointer_globs, ["**/AGENTS.md"]);
+});
+
+test("loadRegistry: a registry with no standards mapping is not 'zero standards'", () => {
+  const f = fixture("schema_version: 1\nstandards: {}\n");
+  const r = loadRegistry(f.file);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no `standards:` mapping/);
+});
+
+test("loadStandards: a page id that differs from the registry key is a problem", () => {
+  const f = fixture(REG, { "acme-tool.md": PAGE.replace("id: acme-tool\n", "id: other-tool\n") });
+  const r = loadStandards({ standardsFile: f.file, standardsDir: f.pdir });
+  assert.equal(r.ok, true);
+  assert.ok(r.problems.some((x) => x.includes("other-tool") && x.includes("acme-tool")), r.problems.join("|"));
+});
+
+test("loadStandards: joins registry entry and parsed page; page problems surface", () => {
+  const f = fixture(REG, { "acme-tool.md": PAGE });
+  const r = loadStandards({ standardsFile: f.file, standardsDir: f.pdir });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.problems, []);
+  assert.equal(r.standards.length, 1);
+  assert.equal(r.standards[0].page.rows.length, 2);
+  assert.equal(r.standards[0].id, "acme-tool");
+});
+
+test("loadStandards: a missing page is a problem naming the file, other standards still load", () => {
+  const f = fixture(REG);
+  const r = loadStandards({ standardsFile: f.file, standardsDir: f.pdir });
+  assert.equal(r.ok, true);
+  assert.ok(r.problems.some((x) => x.includes("acme-tool.md")));
+});
+
+test("loadStandards: unconfigured propagates the reason", () => {
+  assert.deepEqual(loadStandards({ standardsFile: null, standardsDir: null }), { ok: false, reason: "standards not configured", problems: [] });
+});
