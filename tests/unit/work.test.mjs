@@ -270,10 +270,22 @@ test("engines.node and the pinned CI floor job agree", () => {
   const m = /^>=(\d+\.\d+)$/.exec(pkg.engines.node);
   assert.ok(m, `engines.node ${pkg.engines.node} is not of the form >=MAJOR.MINOR`);
   const yml = fs.readFileSync(path.join(ROOT, ".github/workflows/test.yml"), "utf8");
-  const pins = [...yml.matchAll(/node-version:\s*"(\d+\.\d+\.\d+)"/g)].map((x) => x[1]);
-  assert.ok(pins.length >= 1, "no exact node-version pin found in test.yml: the floor job is missing");
-  assert.ok(pins.some((p) => p === `${m[1]}.0`), `no CI job pinned to ${m[1]}.0; pins: ${pins.join(", ")}`);
-  assert.match(yml, /work\*\.test\.mjs|work\.test\.mjs/, "the floor job must run the work tests");
+  // The job block: from its key to the next top-level job key (two-space indent) or the end. A missing block is
+  // "job not found", never a pass. Pin and run step are asserted INSIDE it, so a comment elsewhere cannot satisfy them.
+  const start = yml.search(/^  work-node-floor:\s*$/m);
+  assert.ok(start >= 0, "job not found: test.yml has no `work-node-floor:` job");
+  const after = yml.slice(start).split("\n").slice(1);
+  const end = after.findIndex((l) => /^  [A-Za-z0-9_-]+:\s*$/.test(l));
+  const job = after.slice(0, end < 0 ? after.length : end);
+  assert.ok(job.length >= 5, `job block for work-node-floor is only ${job.length} lines: the extraction has gone blind`);
+  const code = job.filter((l) => !/^\s*#/.test(l)).join("\n");
+  const pin = /node-version:\s*"(\d+\.\d+\.\d+)"/.exec(code);
+  assert.ok(pin, "work-node-floor has no exact node-version pin");
+  assert.equal(pin[1], `${m[1]}.0`, `work-node-floor is pinned to ${pin[1]}, engines.node says ${m[1]}`);
+  assert.ok(
+    /^\s*(?:run:\s*)?(?:-\s*run:\s*)?.*node --test\b.*tests\/unit\/work/m.test(code),
+    "work-node-floor has no run step executing `node --test tests/unit/work...`",
+  );
 });
 
 // ---- C4 / R7: the read-only open --------------------------------------------------------------------------------
