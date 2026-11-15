@@ -18,6 +18,7 @@ import {
   keepOrder,
   parseSamples,
   okFalseRate,
+  sampleChecks,
 } from "../../lib/report/sprint-plan.mjs";
 
 const NOW = new Date(2026, 10, 10, 10, 0, 0).getTime(); // local Tue 2026-11-10 10:00
@@ -156,8 +157,9 @@ test("a missing samples file is exit 2 with the reason", async () => {
   }
 });
 
-test("a week_resets_at boundary inside the measured span is exit 2", async () => {
-  const rows = [sample(new Date(2026, 10, 9, 23, 0), { week_resets_at: OLD_RESET }), sample(new Date(2026, 10, 10, 9, 50))];
+test("a week_resets_at boundary inside the measured span, with no new-week sample after it, is exit 2", async () => {
+  // The baseline's reset (10 Nov 12:30) is after every new-week sample (latest 09:50): none was taken past the boundary.
+  const rows = [sample(new Date(2026, 10, 9, 23, 0), { week_resets_at: iso(new Date(2026, 10, 10, 12, 30)) }), sample(new Date(2026, 10, 10, 9, 50))];
   const p = await plan({ sampleRows: rows });
   assert.equal(p.exit, 2);
   assert.match(p.reason, /week_resets_at boundary falls inside the measured span/);
@@ -336,4 +338,35 @@ test("--approvals must be a non-negative integer", async () => {
   assert.equal(await sprintCmd(["plan", "--approvals", "x"], { err: (s) => errs.push(s) }), 2);
   assert.match(errs.join(), /non-negative integer/);
   assert.equal(await sprintCmd(["nope"], { err: (s) => errs.push(s) }), 2);
+});
+
+// ── #279: a quota-reset day is measured from the new week, not refused ──────
+
+const resetDayWidget = {
+  dailyCap: () => ({ cap: 10, flooredCap: 10, basis: "stub cap 10" }),
+  // The widget's baseline is the day's first sample, from the OLD week.
+  dayUsed: (rows) => ({ status: "ok", usedPct: 99, baseline: rows[0], unattributed: { pct: 0 } }),
+};
+const OLD_WEEK_RESET = iso(new Date(2026, 10, 15, 12, 30));
+const NEW_WEEK_RESET = iso(new Date(2026, 10, 22, 12, 30));
+const RESET_NOW = new Date(2026, 10, 15, 15, 30).getTime();
+
+test("#279: reset day with a new-week sample after the boundary uses the new week's week_pct", () => {
+  const rows = [
+    sample(new Date(2026, 10, 15, 0, 0), { week_pct: 97, week_resets_at: OLD_WEEK_RESET }),
+    sample(new Date(2026, 10, 15, 15, 0), { week_pct: 6, week_resets_at: NEW_WEEK_RESET }),
+  ];
+  const r = sampleChecks({ rows, now: RESET_NOW, widget: resetDayWidget });
+  assert.equal(r.ok, true, r.reason);
+  assert.equal(r.usedPct, 6);
+});
+
+test("#279: a boundary with no new-week sample after it is still refused", () => {
+  const rows = [
+    sample(new Date(2026, 10, 15, 0, 0), { week_pct: 97, week_resets_at: OLD_WEEK_RESET }),
+    sample(new Date(2026, 10, 15, 11, 0), { week_pct: 98, week_resets_at: NEW_WEEK_RESET }), // before the 12:30 boundary
+  ];
+  const r = sampleChecks({ rows, now: RESET_NOW, widget: resetDayWidget });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /boundary falls inside the measured span/);
 });
