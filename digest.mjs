@@ -766,6 +766,92 @@ async function eventsBackupSnapshot(dryRun) {
   return { dryRun, dest, rel, results, protection };
 }
 
+const DESK_CATEGORIES = [
+  ["awaiting_accept", "answers awaiting acceptance"],
+  ["needs_verdict", "needing an interpretive verdict"],
+  ["accepted_open", "accepted but still open on GitHub"],
+  ["dev_on_desk", "dev items on the desk"],
+  ["overdue", "overdue"],
+];
+
+/**
+ * DESK — runs the Granth desk check (`$PROPAGATE_DESK_CHECK --json`, default the
+ * sanskrit-texts `scripts/desk-check.sh`) and reports what waits on the desk.
+ *
+ * Same rider shape as accessSnapshot(). READ-ONLY, so `dryRun` changes nothing.
+ * Contract: exit 0 = checked, quiet; 1 = checked, findings; 2 = could not check.
+ * stdout JSON: {awaiting_accept, needs_verdict, accepted_open, dev_on_desk,
+ * overdue: [{id,title,age_days}], could_not_run: null | {kind, detail}}.
+ * Every way of failing to RUN is `{error}`, never an empty result.
+ */
+async function deskSnapshot(dryRun, timeoutMs) { // eslint-disable-line no-unused-vars
+  const script =
+    process.env.PROPAGATE_DESK_CHECK ||
+    path.join(os.homedir(), "Documents", "GitHub", "Vipin Kaushik", "sanskrit-texts", "scripts", "desk-check.sh");
+  if (!existsSync(script)) return { error: `desk check not installed (${script})` };
+
+  const envMs = Number(process.env.PROPAGATE_DESK_TIMEOUT_MS);
+  const ms = timeoutMs ?? (envMs > 0 ? envMs : 120_000);
+  const r = spawnSync("bash", [script, "--json"], { encoding: "utf8", timeout: ms });
+  if (r.error?.code === "ETIMEDOUT" || r.signal) {
+    return { error: `timed out after ${Math.round((ms / 1000) * 10) / 10}s`, kind: "timeout" };
+  }
+  if (r.error) return { error: String(r.error.message ?? r.error).slice(0, 200) };
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch { /* handled below */ }
+
+  if (r.status === 2) {
+    const cnr = parsed?.could_not_run;
+    if (cnr && typeof cnr === "object") {
+      return { error: String(cnr.detail ?? "no detail").slice(0, 200), kind: String(cnr.kind ?? "other") };
+    }
+    const first = `${r.stderr || ""}\n${r.stdout || ""}`.split("\n").map((l) => l.trim()).find(Boolean);
+    return { error: (first || "exit 2 with no output").slice(0, 200) };
+  }
+  if (r.status !== 0 && r.status !== 1) {
+    const first = `${r.stderr || ""}\n${r.stdout || ""}`.split("\n").map((l) => l.trim()).find(Boolean);
+    return { error: (first || `exit ${r.status} with no output`).slice(0, 200) };
+  }
+  if (!parsed || typeof parsed !== "object") return { error: "unreadable output" };
+  if (parsed.could_not_run) {
+    return { error: String(parsed.could_not_run.detail ?? "no detail").slice(0, 200), kind: String(parsed.could_not_run.kind ?? "other") };
+  }
+  const out = {};
+  let total = 0;
+  for (const [key] of DESK_CATEGORIES) {
+    const v = parsed[key];
+    if (!Array.isArray(v)) return { error: "unreadable output" };
+    out[key] = v;
+    total += v.length;
+  }
+  if (r.status === 1 && total === 0) return { error: "exit 1 but no findings in output" };
+  if (r.status === 0 && total > 0) return { error: "exit 0 but findings in output" };
+  return out;
+}
+
+/** Pure: render a deskSnapshot() result. Quiet => []. Counts and up to 3 oldest titles; never body text. */
+function deskLines(desk) {
+  if (!desk) return [];
+  if (desk.error) {
+    const label = { credentials: "credentials", store_suspended: "store suspended", schema_mismatch: "schema mismatch", timeout: "timeout" }[desk.kind];
+    return [`could not run — ${label ? `${label}: ` : ""}${desk.error}`];
+  }
+  const lines = [];
+  for (const [key, label] of DESK_CATEGORIES) {
+    const items = desk[key] || [];
+    if (items.length === 0) continue;
+    const oldest = [...items]
+      .sort((a, b) => (Number(b?.age_days) || 0) - (Number(a?.age_days) || 0))
+      .slice(0, 3)
+      .map((i) => `#${i?.id} ${String(i?.title ?? "").slice(0, 60)} (${Number(i?.age_days) || 0}d)`);
+    lines.push(`${items.length} ${label}: ${oldest.join("; ")}`.slice(0, 280));
+  }
+  return lines;
+}
+
 /**
  * ACCESS — runs the hub's `scripts/access-check.sh --json` and reports findings.
  *
@@ -906,6 +992,13 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     access = { error: String(err?.message ?? err) };
   }
 
+  let desk;
+  try {
+    desk = await deskSnapshot(dryRun);
+  } catch (err) {
+    desk = { error: String(err?.message ?? err) };
+  }
+
   const metrics = await metricsSnapshot();
   // ONE reconcile() call, shared by INBOUND and DRIFT (task constraint — see
   // reconcileOnce()'s doc comment). Neither downstream snapshot re-derives it.
@@ -987,6 +1080,7 @@ async function buildSnapshot(indexDb = null, { dryRun = false } = {}) {
     refs,
     eventsBackup,
     access,
+    desk,
     metrics,
     inbound,
     drift,
@@ -1619,6 +1713,7 @@ export function computeDiff(snapshot, prior) {
   // ── Access ────────────────────────────────────────────────────────────
   // Empty on a healthy day (hub DECISIONS 2026-08-10); could-not-run is a line.
   const accessLinesOut = accessLines(snapshot.access);
+  const deskLinesOut = deskLines(snapshot.desk);
 
   // ── Skills ────────────────────────────────────────────────────────────
   // Diff-only, for the same reason disk is threshold-only: a block that
@@ -1885,6 +1980,7 @@ export function computeDiff(snapshot, prior) {
     refsLines,
     backupLines,
     accessLines: accessLinesOut,
+    deskLines: deskLinesOut,
     metricLines,
     inboundLines,
     driftLines,
@@ -1998,6 +2094,13 @@ export function formatDigest(diff) {
   if (accessOut.length > 0) {
     lines.push(`ACCESS:`);
     for (const l of accessOut) lines.push(`  ${l}`);
+    lines.push("");
+  }
+
+  const deskOut = diff.deskLines || [];
+  if (deskOut.length > 0) {
+    lines.push(`DESK:`);
+    for (const l of deskOut) lines.push(`  ${l}`);
     lines.push("");
   }
 
@@ -2233,4 +2336,6 @@ export {
   mirrorProtection as mirrorProtectionForTest,
   accessSnapshot as accessSnapshotForTest,
   accessLines as accessLinesForTest,
+  deskSnapshot as deskSnapshotForTest,
+  deskLines as deskLinesForTest,
 };
