@@ -341,3 +341,314 @@ test("openDbReadOnly: a newer store, and an open that throws SQLITE_BUSY, are un
   assert.match(r.reason, /database is locked/);
   assert.equal(r.db, undefined);
 });
+
+// ======================================================================================================================
+// Task 2: queue operations (lib/work/queue.mjs)
+// ======================================================================================================================
+import {
+  enqueue, enqueueInTx, claim, claimInTx, ack, ackInTx, release, releaseInTx, unpark, unparkInTx, expire, expireInTx, list,
+  DEFAULT_TTL_MS,
+} from "../../lib/work/queue.mjs";
+
+const clock = (t0 = 1_000_000) => { const c = { t: t0, now: () => c.t }; return c; };
+const mk = () => { const dir = tmp(); const c = clock(); return { dir, c, o: { stateDirPath: dir, now: c.now } }; };
+const item = (key, extra = {}) => ({ kind: "evaluate", scope: "acme/hub", dedupe_key: key, payload: { n: 1 }, ttlMs: 10 * LEASE_MS, ...extra });
+const events = (dir) => {
+  const { db } = openDb(dir);
+  try { return rows(db, "SELECT seq, id, op, session, detail FROM work_events ORDER BY seq"); } finally { db.close(); }
+};
+const itemRows = (dir) => {
+  const { db } = openDb(dir);
+  try { return rows(db, "SELECT * FROM work_items ORDER BY created, id"); } finally { db.close(); }
+};
+
+test("queue: a second enqueue with the same key is created:false with one row; after expire the key enqueues anew", () => {
+  const { dir, o } = mk();
+  const a = enqueue(item("evaluate:github.com/acme/x"), o);
+  assert.equal(a.created, true);
+  assert.equal(a.item.state, "pending");
+  assert.equal(a.item.payload, JSON.stringify({ n: 1 }));
+  const b = enqueue(item("evaluate:github.com/acme/x"), o);
+  assert.equal(b.created, false);
+  assert.equal(b.item.id, a.item.id);
+  assert.equal(itemRows(dir).length, 1);
+  expire(a.item.id, { reason: "issue closed" }, o);
+  const c = enqueue(item("evaluate:github.com/acme/x"), o);
+  assert.equal(c.created, true);
+  assert.notEqual(c.item.id, a.item.id);
+  assert.equal(itemRows(dir).length, 2);
+});
+
+test("queue: the default ttl and the default id shape", () => {
+  const { o, c } = mk();
+  const { item: it } = enqueue({ kind: "evaluate", dedupe_key: "k1" }, o);
+  assert.equal(it.expires_at, c.t + DEFAULT_TTL_MS);
+  assert.match(it.id, /^w_[0-9a-z]+_[0-9a-f]{6}$/);
+  assert.equal(it.scope, null);
+  const x = enqueue({ kind: "evaluate", dedupe_key: "k2", newId: () => "w_fixed" }, o);
+  assert.equal(x.item.id, "w_fixed");
+});
+
+test("queue: claim on an empty queue returns null, and a claim of another kind does not see the item", () => {
+  const { o } = mk();
+  assert.equal(claim({ kind: "evaluate", session: "s1" }, o), null);
+  enqueue(item("k1"), o);
+  assert.equal(claim({ kind: "other", session: "s1" }, o), null);
+});
+
+test("queue: FIFO, the older item is claimed first", () => {
+  const { o, c } = mk();
+  const first = enqueue(item("k-old"), o).item;
+  c.t += 5;
+  const second = enqueue(item("k-new"), o).item;
+  assert.equal(claim({ kind: "evaluate", session: "s1" }, o).id, first.id);
+  assert.equal(claim({ kind: "evaluate", session: "s2" }, o).id, second.id);
+  assert.equal(claim({ kind: "evaluate", session: "s3" }, o), null);
+});
+
+test("queue: claim returns state claimed, a lease, a token and claims+1", () => {
+  const { o, c } = mk();
+  enqueue(item("k1"), o);
+  const got = claim({ kind: "evaluate", session: "s1" }, o);
+  assert.equal(got.state, "claimed");
+  assert.equal(got.session, "s1");
+  assert.equal(got.lease_until, c.t + LEASE_MS);
+  assert.equal(got.claims, 1);
+  assert.match(got.token, /^[0-9a-f-]{20,}$/);
+});
+
+test("queue P3: a late ack after a re-claim is WORK_LEASE_EXPIRED naming `work list --kind`; the new claimant owns it", () => {
+  const { dir, o, c } = mk();
+  const it = enqueue(item("k1"), o).item;
+  const a = claim({ kind: "evaluate", session: "A" }, o);
+  c.t += LEASE_MS + 1;
+  const b = claim({ kind: "evaluate", session: "B" }, o);
+  assert.equal(b.id, it.id);
+  assert.equal(b.claims, 2);
+  assert.notEqual(b.token, a.token);
+  const e = thrown(() => ack(it.id, { session: "A", token: a.token }, o));
+  assert.ok(e instanceof WorkError);
+  assert.equal(e.code, "WORK_LEASE_EXPIRED");
+  assert.match(e.next, /propagate work list --kind evaluate/);
+  assert.match(e.next, /before redoing any side effect/);
+  assert.equal(itemRows(dir)[0].state, "claimed");
+  assert.equal(ack(it.id, { session: "B", token: b.token }, o).state, "acked");
+});
+
+test("queue P3: an expired lease nobody re-claimed still accepts its own token, for ack and for a refusal", () => {
+  const { o, c } = mk();
+  const i1 = enqueue(item("k1"), o).item;
+  const a1 = claim({ kind: "evaluate", session: "A" }, o);
+  c.t += LEASE_MS + 10;
+  assert.equal(ack(i1.id, { session: "A", token: a1.token }, o).state, "acked");
+  c.t += 5;
+  const i2 = enqueue(item("k2"), o).item;
+  const a2 = claim({ kind: "evaluate", session: "A" }, o);
+  c.t += LEASE_MS + 10;
+  const r = release(i2.id, { session: "A", token: a2.token, refusal: true, reason: "not a fit" }, o);
+  assert.equal(r.refusals, 1);
+  assert.equal(r.state, "pending");
+});
+
+test("queue R11: two lanes sharing one session id are fenced by token", () => {
+  const { o, c } = mk();
+  const it = enqueue(item("k1"), o).item;
+  const lane1 = claim({ kind: "evaluate", session: "S" }, o);
+  c.t += LEASE_MS + 1;
+  const lane2 = claim({ kind: "evaluate", session: "S" }, o);
+  assert.equal(lane2.claims, 2);
+  const e = thrown(() => ack(it.id, { session: "S", token: lane1.token }, o));
+  assert.equal(e.code, "WORK_LEASE_EXPIRED");
+  assert.equal(ack(it.id, { session: "S", token: lane2.token }, o).state, "acked");
+});
+
+test("queue: ack by the wrong session is WORK_NOT_CLAIMANT; an unknown id is WORK_NOT_FOUND", () => {
+  const { o } = mk();
+  const it = enqueue(item("k1"), o).item;
+  const a = claim({ kind: "evaluate", session: "A" }, o);
+  const e = thrown(() => ack(it.id, { session: "B", token: "made-up" }, o));
+  assert.equal(e.code, "WORK_NOT_CLAIMANT");
+  const e2 = thrown(() => ack(it.id, { session: "B", token: a.token }, o));
+  assert.equal(e2.code, "WORK_NOT_CLAIMANT");
+  const e3 = thrown(() => ack("w_nope", { session: "A", token: a.token }, o));
+  assert.equal(e3.code, "WORK_NOT_FOUND");
+  const e4 = thrown(() => ack(it.id, { session: "A", token: "wrong" }, o));
+  assert.equal(e4.code, "WORK_NOT_CLAIMANT");
+});
+
+test("queue R18: a double ack with the same token is idempotent (already:true) and writes no second event", () => {
+  const { dir, o } = mk();
+  const it = enqueue(item("k1"), o).item;
+  const a = claim({ kind: "evaluate", session: "A" }, o);
+  const first = ack(it.id, { session: "A", token: a.token }, o);
+  assert.equal(first.already, undefined);
+  const again = ack(it.id, { session: "A", token: a.token }, o);
+  assert.equal(again.state, "acked");
+  assert.equal(again.already, true);
+  assert.equal(events(dir).filter((e) => e.op === "ack").length, 1);
+  const other = thrown(() => ack(it.id, { session: "A", token: "another" }, o));
+  assert.equal(other.code, "WORK_NOT_CLAIMANT");
+});
+
+test("queue R12: ack or release of an item past its ttl is WORK_ITEM_EXPIRED (issue closed, nothing to do)", () => {
+  const { o, c } = mk();
+  const it = enqueue(item("k1", { ttlMs: 1000 }), o).item;
+  const a = claim({ kind: "evaluate", session: "A" }, o);
+  c.t += 2000;
+  const e = thrown(() => ack(it.id, { session: "A", token: a.token }, o));
+  assert.equal(e.code, "WORK_ITEM_EXPIRED");
+  assert.match(e.next, /nothing to do/);
+  assert.equal(thrown(() => release(it.id, { session: "A", token: a.token }, o)).code, "WORK_ITEM_EXPIRED");
+  // and an item the sync expired explicitly
+  c.t = 1_000_000;
+  const it2 = enqueue(item("k2"), o).item;
+  const a2 = claim({ kind: "evaluate", session: "A" }, o);
+  expire(it2.id, { reason: "issue closed" }, o);
+  assert.equal(thrown(() => ack(it2.id, { session: "A", token: a2.token }, o)).code, "WORK_ITEM_EXPIRED");
+});
+
+test("queue: two refusals park the item, claim skips it, unpark makes it claimable again", () => {
+  const { o } = mk();
+  const it = enqueue(item("k1"), o).item;
+  let g = claim({ kind: "evaluate", session: "A" }, o);
+  let r = release(it.id, { session: "A", token: g.token, refusal: true, reason: "no" }, o);
+  assert.deepEqual([r.state, r.refusals, r.session, r.token, r.lease_until], ["pending", 1, null, null, null]);
+  g = claim({ kind: "evaluate", session: "B" }, o);
+  r = release(it.id, { session: "B", token: g.token, refusal: true }, o);
+  assert.deepEqual([r.state, r.refusals], ["parked", PARK_AFTER]);
+  assert.equal(claim({ kind: "evaluate", session: "C" }, o), null);
+  const u = unpark(it.id, o);
+  assert.equal(u.state, "pending");
+  assert.equal(claim({ kind: "evaluate", session: "C" }, o).id, it.id);
+});
+
+test("queue: a non-refusal release returns the item to pending with refusals unchanged", () => {
+  const { o } = mk();
+  const it = enqueue(item("k1"), o).item;
+  const g = claim({ kind: "evaluate", session: "A" }, o);
+  const r = release(it.id, { session: "A", token: g.token }, o);
+  assert.deepEqual([r.state, r.refusals], ["pending", 0]);
+  assert.equal(thrown(() => release(it.id, { session: "A", token: g.token }, o)).code, "WORK_LEASE_EXPIRED");
+});
+
+test("queue: every transition writes exactly one work_events row with its op", () => {
+  const { dir, o, c } = mk();
+  const it = enqueue(item("k1"), o).item;
+  enqueue(item("k1"), o); // a conflict is not a transition
+  const g1 = claim({ kind: "evaluate", session: "A" }, o);
+  release(it.id, { session: "A", token: g1.token, refusal: true, reason: "r1" }, o);
+  const g2 = claim({ kind: "evaluate", session: "B" }, o);
+  release(it.id, { session: "B", token: g2.token, refusal: true, reason: "r2" }, o);
+  unpark(it.id, o);
+  const g3 = claim({ kind: "evaluate", session: "C" }, o);
+  ack(it.id, { session: "C", token: g3.token }, o);
+  const it2 = enqueue(item("k2"), o).item;
+  expire(it2.id, { reason: "issue closed" }, o);
+  assert.deepEqual(
+    events(dir).map((e) => [e.id === it.id ? "i1" : "i2", e.op, e.session]),
+    [["i1", "enqueue", null], ["i1", "claim", "A"], ["i1", "release", "A"], ["i1", "claim", "B"], ["i1", "release", "B"],
+      ["i1", "unpark", null], ["i1", "claim", "C"], ["i1", "ack", "C"], ["i2", "enqueue", null], ["i2", "expire", null]],
+  );
+  assert.equal(JSON.parse(events(dir).find((e) => e.op === "expire").detail).reason, "issue closed");
+  assert.equal(JSON.parse(events(dir).filter((e) => e.op === "release")[1].detail).parked, true);
+  assert.ok(c.t > 0);
+});
+
+test("queue: a null session and a null scope round-trip (every optional is bound as null, never undefined)", () => {
+  const { dir, o } = mk();
+  const it = enqueue({ kind: "evaluate", dedupe_key: "k1", payload: undefined, scope: undefined, ttlMs: undefined }, o).item;
+  assert.equal(it.scope, null);
+  assert.equal(it.payload, "{}");
+  const g = claim({ kind: "evaluate", session: undefined }, o);
+  assert.equal(g.session, null);
+  assert.equal(events(dir).find((e) => e.op === "claim").session, null);
+  const a = ack(it.id, { session: null, token: g.token }, o);
+  assert.equal(a.state, "acked");
+  assert.equal(a.session, null);
+  // flags bind as integers: a refusal given as a boolean and as a truthy non-boolean both work
+  const i2 = enqueue(item("k2"), o).item;
+  const g2 = claim({ kind: "evaluate", session: "A" }, o);
+  assert.equal(release(i2.id, { session: "A", token: g2.token, refusal: true, reason: undefined }, o).refusals, 1);
+});
+
+test("queue: list reports effective_state, pending for an expired lease and expired past the ttl; plain objects", () => {
+  const { dir, o, c } = mk();
+  const a = enqueue(item("k-a"), o).item;
+  c.t += 1;
+  const b = enqueue(item("k-b", { ttlMs: LEASE_MS * 2 }), o).item;
+  c.t += 1;
+  enqueue(item("k-c", { kind: "other" }), o);
+  claim({ kind: "evaluate", session: "A" }, o);
+  claim({ kind: "evaluate", session: "A" }, o);
+  const eff = () => Object.fromEntries(list({ kind: "evaluate" }, o).map((r) => [r.id, r.effective_state]));
+  assert.deepEqual(eff(), { [a.id]: "claimed", [b.id]: "claimed" });
+  c.t += LEASE_MS + 1;
+  assert.deepEqual(eff(), { [a.id]: "pending", [b.id]: "pending" });
+  c.t += LEASE_MS; // past b's ttl
+  assert.deepEqual(eff(), { [a.id]: "pending", [b.id]: "expired" });
+  assert.deepEqual(list({ kind: "evaluate", state: "expired" }, o).map((r) => r.id), [b.id]);
+  assert.deepEqual(list({ state: "pending" }, o).map((r) => r.id).sort(), [a.id, list({ kind: "other" }, o)[0].id].sort());
+  const r0 = list({ kind: "evaluate" }, o)[0];
+  assert.equal(Object.getPrototypeOf(r0), Object.prototype);
+  // a read-only handle (R7)
+  const ro = openDbReadOnly(dir);
+  assert.ok(ro.db);
+  try { assert.equal(list({ kind: "evaluate" }, { db: ro.db, now: c.now }).length, 2); } finally { ro.db.close(); }
+});
+
+test("queue R8: the *InTx forms run inside the caller's transaction and open none; a rollback undoes row and event", () => {
+  const dir = tmp();
+  const c = clock();
+  const { db } = openDb(dir);
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    const { item: it, created } = enqueueInTx(db, item("k1"), { now: c.now });
+    assert.equal(created, true);
+    const g = claimInTx(db, { kind: "evaluate", session: "A" }, { now: c.now });
+    assert.equal(g.id, it.id);
+    assert.equal(ackInTx(db, it.id, { session: "A", token: g.token }, { now: c.now }).state, "acked");
+    const it2 = enqueueInTx(db, item("k2"), { now: c.now }).item;
+    const g2 = claimInTx(db, { kind: "evaluate", session: "A" }, { now: c.now });
+    assert.equal(releaseInTx(db, it2.id, { session: "A", token: g2.token, refusal: true }, { now: c.now }).refusals, 1);
+    assert.equal(expireInTx(db, it2.id, { reason: "x" }, { now: c.now }).state, "expired");
+    const it3 = enqueueInTx(db, item("k3"), { now: c.now }).item;
+    claimInTx(db, { kind: "evaluate", session: "A" }, { now: c.now });
+    assert.ok(it3);
+    assert.equal(rows(db, "SELECT * FROM work_events").length > 0, true);
+    db.exec("ROLLBACK");
+    assert.equal(rows(db, "SELECT * FROM work_items").length, 0);
+    assert.equal(rows(db, "SELECT * FROM work_events").length, 0);
+    // unparkInTx on a parked item
+    db.exec("BEGIN IMMEDIATE");
+    const p = enqueueInTx(db, item("kp"), { now: c.now }).item;
+    for (const s of ["A", "B"]) {
+      const g = claimInTx(db, { kind: "evaluate", session: s }, { now: c.now });
+      releaseInTx(db, p.id, { session: s, token: g.token, refusal: true }, { now: c.now });
+    }
+    assert.equal(unparkInTx(db, p.id, { now: c.now }).state, "pending");
+    db.exec("COMMIT");
+  } finally { db.close(); }
+});
+
+test("queue: unpark of a missing id is WORK_NOT_FOUND, of a non-parked item WORK_USAGE; expire of an expired item is a no-op", () => {
+  const { dir, o } = mk();
+  assert.equal(thrown(() => unpark("w_nope", o)).code, "WORK_NOT_FOUND");
+  assert.equal(thrown(() => expire("w_nope", { reason: "x" }, o)).code, "WORK_NOT_FOUND");
+  const it = enqueue(item("k1"), o).item;
+  assert.equal(thrown(() => unpark(it.id, o)).code, "WORK_USAGE");
+  expire(it.id, { reason: "a" }, o);
+  const again = expire(it.id, { reason: "b" }, o);
+  assert.equal(again.state, "expired");
+  assert.equal(events(dir).filter((e) => e.op === "expire").length, 1);
+});
+
+test("R17 guard: no work test file uses the shared state dir (floor: files scanned)", () => {
+  const unitDir = path.join(ROOT, "tests", "unit");
+  const files = fs.readdirSync(unitDir).filter((f) => /^work.*\.test\.mjs$/.test(f));
+  const FLOOR = 2; // raise as work-sync and work-cli land (the plan's floor of 4 holds once Task 4 is in)
+  assert.ok(files.length >= FLOOR, `only ${files.length} work test files found, the scan has gone blind`);
+  const shared = ["propagate", "test", "state"].join("-"); // built, so this guard does not match itself
+  for (const f of files) {
+    assert.ok(!fs.readFileSync(path.join(unitDir, f), "utf8").includes(shared), `${f} uses the shared state dir`);
+  }
+});
