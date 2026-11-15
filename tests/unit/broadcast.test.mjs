@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { broadcastCmd } from "../../cli/broadcast.mjs";
+import { activeGoalsOf, broadcastCmd } from "../../cli/broadcast.mjs";
 import { applyBroadcast, planBroadcast } from "../../lib/broadcast/new.mjs";
 import { readStatus } from "../../lib/broadcast/status.mjs";
 import { defaultModel, groupItemFields, keyComment, keyOfBody } from "../../lib/broadcast/model.mjs";
@@ -452,7 +452,7 @@ test("goal: a --to child with no evidence gets Goal unset, in the dry run, the b
   const sink = io();
   assert.equal(await broadcastCmd(["new", "--title", "T", "--goal", "G3", "--to", "o/a", "--body-file", toBody()], { io: sink, gh: gh.gh, hub: HUB, stateDirPath: state(), activeGoals: () => null }), 0);
   const text = sink.out.join("\n");
-  assert.match(text, /^    Goal: not set$/m);
+  assert.match(text, /^    Goal: not set \(no goals found\)$/m);
   assert.ok(!/Goal=/.test(text), "no Goal= board field in the plan");
   assert.ok(!text.includes("goal null"), "the body never says (goal null)");
   const apply = io();
@@ -535,4 +535,53 @@ test("goal: the single-active-goal lookup reads <workspace>/propagation/state/<p
   const plan = JSON.parse(sink.out.join("\n"));
   assert.equal(plan.children.find((c) => c.repo === "o/web").goal, "G2", "the project's file wins, found under propagation/state, not on an ancestor");
   assert.equal(plan.children.find((c) => c.repo === "o/api").goal, null, "no project file, and the workspace file has two active goals: Goal unset");
+});
+
+/** A workspace `Acme`, its state dir, and a sessions cache naming the checkouts. */
+function layout(checkouts) {
+  const root = mkdtempSync(path.join(os.tmpdir(), "bc-lay-"));
+  const dir = state();
+  mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  writeFileSync(path.join(dir, "sessions", "checkouts.json"), JSON.stringify({ checkouts: checkouts.map(([p, repo]) => ({ path: path.join(root, p), repo })) }));
+  const put = (rel, text) => { mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); writeFileSync(path.join(root, rel), text); };
+  return { root, dir, put };
+}
+const GOAL = (id) => `## ${id} · Goal\n\n**Active since 2026-11-13 · appetite 4 weeks**\n\n**Done when:** x.\n\n`;
+const sidecar = (project, remote, repoRoot) => `schema_version: 1\nproject: ${project}\nrepo_root: ${repoRoot}\nremote: https://github.com/${remote}.git\n`;
+
+test("goal lookup: a checkout folder and a state dir with DIFFERENT names are joined by the state dir's .sidecar.yml", () => {
+  const L = layout([["Acme/web-app", "o/web-app"]]);
+  L.put("Acme/web-app/.git/HEAD", "x");
+  L.put("Acme/propagation/state/webapp/.sidecar.yml", sidecar("webapp", "o/web-app", "web-app"));
+  L.put("Acme/propagation/state/webapp/GOALS.md", `# W\n\n${GOAL("G2")}`);
+  assert.deepEqual(activeGoalsOf("o/web-app", { stateDirPath: L.dir, hubRoot: null }), { ids: ["G2"] });
+  // a decoy whose FOLDER name equals the checkout's but whose sidecar names another repo must not win
+  L.put("Acme/propagation/state/web-app/.sidecar.yml", sidecar("web-app", "o/other", "other"));
+  L.put("Acme/propagation/state/web-app/GOALS.md", `# W\n\n${GOAL("G7")}`);
+  assert.deepEqual(activeGoalsOf("o/web-app", { stateDirPath: L.dir, hubRoot: null }), { ids: ["G2"] });
+});
+
+test("goal lookup: a repo that is its own workspace (its own state/workspace names it) still finds GOALS.md in the PARENT workspace's state/<project>/", () => {
+  const L = layout([["Acme/vault", "o/vault"]]);
+  L.put("Acme/vault/.propagates.yml", "workspace: true\n");
+  L.put("Acme/vault/propagation/state/workspace/.sidecar.yml", sidecar("workspace", "o/vault", "."));
+  L.put("Acme/propagation/state/vault/.sidecar.yml", sidecar("vault", "o/vault", "vault"));
+  L.put("Acme/propagation/state/vault/GOALS.md", `# W\n\n${GOAL("G4")}`);
+  assert.deepEqual(activeGoalsOf("o/vault", { stateDirPath: L.dir, hubRoot: null }), { ids: ["G4"] });
+});
+
+test("goal lookup: no checkout, no state dir, no file and an unreadable file are FOUR different answers; the dry run says which", async () => {
+  const L = layout([["Acme/a", "o/a"], ["Acme/b", "o/b"], ["Acme/c", "o/c"]]);
+  L.put("Acme/propagation/state/b/.sidecar.yml", sidecar("b", "o/b", "b"));
+  L.put("Acme/propagation/state/c/.sidecar.yml", sidecar("c", "o/c", "c"));
+  L.put("Acme/propagation/state/c/GOALS.md", "not a goals file at all\n");
+  const why = (repo) => activeGoalsOf(repo, { stateDirPath: L.dir, hubRoot: null });
+  assert.match(why("o/zzz").why, /no checkout in the sessions cache/);
+  assert.match(why("o/a").why, /no propagation\/state directory holds o\/a/);
+  assert.match(why("o/b").why, /no GOALS\.md in /);
+  assert.match(why("o/c").why, /GOALS\.md unreadable: .*format not recognised/);
+  const gh = fakeGithub({ repos: repoSet(HUB, "o/c") });
+  const sink = io();
+  assert.equal(await broadcastCmd(["new", "--title", "T", "--goal", "G3", "--to", "o/c", "--body-file", toBody()], { io: sink, gh: gh.gh, hub: HUB, stateDirPath: L.dir }), 0, sink.err.join("\n"));
+  assert.match(sink.out.join("\n"), /^    Goal: not set \(GOALS\.md unreadable: .*format not recognised/m);
 });

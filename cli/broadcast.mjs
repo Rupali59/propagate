@@ -13,7 +13,7 @@
  * parent. A failed refresh leaves the old file and is reported on stderr, never as the command's exit code.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { HUB_ROOT } from "../lib/core/config.mjs";
@@ -50,52 +50,88 @@ export function hubOwnerOf(root = HUB_ROOT) {
   return hubRepoOf(root)?.split("/")[0] ?? null;
 }
 
-const WORKSPACE_MARKER = /^workspace:\s*true\s*(#.*)?$/m;
+const sidecarField = (text, key) => new RegExp(`^${key}:\\s*["']?([^\\s"'#]+)`, "m").exec(text)?.[1] ?? null;
+const remoteRepo = (remote) => /github\.com[/:]([^/\s]+\/[^/\s]+?)(?:\.git)?$/i.exec(String(remote ?? ""))?.[1]?.toLowerCase() ?? null;
 
-/** The nearest ancestor of `p` (inclusive) whose .propagates.yml says `workspace: true`: the marker the sessions code reads. */
-function workspaceRootOf(p) {
-  for (let d = p; ; d = path.dirname(d)) {
-    try {
-      if (WORKSPACE_MARKER.test(readFileSync(path.join(d, ".propagates.yml"), "utf8"))) return d;
-    } catch {
-      // no marker here
-    }
-    if (d === path.dirname(d)) return null;
+/**
+ * The state directory of `repo`'s project. A state dir is named for its PROJECT, which is not always the checkout's
+ * folder (`SSJK-astro-darpan` is state `astro-darpan`), so the join is the `.sidecar.yml` each state dir carries:
+ * its `remote` against the repo, then its `repo_root` against the checkout's folder. State roots are the
+ * `propagation/state` of the checkout itself (a workspace repo) and of every ancestor (a vault that is its own workspace has none of its own), then the hub.
+ * Every root that holds a match is returned, nearest first: a vault that is its own workspace has a `state/workspace` naming
+ * its own repo, while its GOALS.md lives in the parent workspace's `state/<project>/`.
+ * @returns {{stateRoot:string, stateDir:string, via:string}[]}
+ */
+function stateDirOfRepo(repo, checkoutPath, hubRoot) {
+  const roots = [];
+  for (let d = checkoutPath; ; d = path.dirname(d)) {
+    roots.push(path.join(d, "propagation", "state"));
+    if (d === path.dirname(d)) break;
   }
+  if (hubRoot) roots.push(path.join(hubRoot, "propagation", "state"));
+  const folder = path.basename(checkoutPath);
+  const out = [];
+  for (const stateRoot of roots) {
+    let names;
+    try {
+      names = readdirSync(stateRoot, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+    } catch {
+      continue;
+    }
+    const side = names.map((n) => {
+      try {
+        const t = readFileSync(path.join(stateRoot, n, ".sidecar.yml"), "utf8");
+        return { n, remote: remoteRepo(sidecarField(t, "remote")), root: sidecarField(t, "repo_root") };
+      } catch {
+        return { n, remote: null, root: null };
+      }
+    });
+    const hit = side.find((x) => x.remote === repo.toLowerCase()) ?? side.find((x) => !x.remote && x.root === folder);
+    if (hit) out.push({ stateRoot, stateDir: path.join(stateRoot, hit.n), via: "sidecar" });
+    else {
+      const byName = names.find((n) => n === folder);
+      if (byName) out.push({ stateRoot, stateDir: path.join(stateRoot, byName), via: "folder name" });
+    }
+  }
+  return out;
 }
 
 /**
- * The active goals of the project holding `repo`'s checkout. Every real GOALS.md lives at
- * `<workspace>/propagation/state/<project>/GOALS.md` or `.../state/workspace/GOALS.md`, never on an ancestor of the
- * checkout, so this resolves the workspace root and project (first path part under it) the way sessions does, and tries
- * the project's file, then the workspace's, then the project's under the hub. null when none exists or it cannot be read.
+ * The active goals of the project holding `repo`'s checkout, WITH the reason when there are none to give.
+ * `{ids: string[]}` (possibly empty: the file was read and no goal is active) or `{ids: null, why}`: no checkout, no
+ * state dir, no GOALS.md, or a GOALS.md that is there and unreadable are four different facts (rule:discernment-checks §2).
+ * File order: the project's GOALS.md, then `state/workspace/GOALS.md` beside it.
  */
-export function defaultActiveGoals(repo, { stateDirPath = stateDir(), hubRoot = HUB_ROOT } = {}) {
+export function activeGoalsOf(repo, { stateDirPath = stateDir(), hubRoot = HUB_ROOT } = {}) {
   const hit = readCheckouts(stateDirPath)?.checkouts.find((c) => c.repo && c.repo.toLowerCase() === repo.toLowerCase());
-  if (!hit) return null;
-  const root = workspaceRootOf(hit.path);
-  if (!root) return null;
-  const rel = path.relative(root, hit.path);
-  const project = rel ? rel.split(path.sep)[0] : null;
-  const candidates = [];
-  if (project) candidates.push(path.join(root, "propagation", "state", project, "GOALS.md"));
-  candidates.push(path.join(root, "propagation", "state", "workspace", "GOALS.md"));
-  if (project && hubRoot) candidates.push(path.join(hubRoot, "propagation", "state", project, "GOALS.md"));
-  const f = candidates.find((c) => existsSync(c));
-  if (!f) return null;
+  if (!hit) return { ids: null, why: `${repo} has no checkout in the sessions cache` };
+  const st = stateDirOfRepo(repo, hit.path, hubRoot);
+  if (!st.length) return { ids: null, why: `no propagation/state directory holds ${repo}'s project` };
+  const files = [...new Set([...st.map((x) => path.join(x.stateDir, "GOALS.md")), ...st.map((x) => path.join(x.stateRoot, "workspace", "GOALS.md"))])];
+  const f = files.find((x) => existsSync(x));
+  if (!f) return { ids: null, why: `no GOALS.md in ${files.join(" or ")}` };
   const parsed = parseGoalsFile(f);
-  return parsed.unread ? null : parsed.entries.filter((e) => e.active).map(goalId);
+  if (parsed.unread) return { ids: null, why: `GOALS.md unreadable: ${parsed.reason} (${f})` };
+  return { ids: parsed.entries.filter((e) => e.active).map(goalId) };
 }
 
-/** The child's goal when its items carry no evidence: the workspace's single active goal, else null (Goal unset). */
+/** ids or null; `activeGoalsOf` says why. */
+export function defaultActiveGoals(repo, opts) {
+  return activeGoalsOf(repo, opts).ids;
+}
+
+/** The child's goal when its items carry no evidence: `{goal, why}`. The workspace's single active goal, else null with the reason. */
 function singleActiveGoal(repo, inject) {
-  let ids;
+  let r;
   try {
-    ids = (inject.activeGoals ?? ((r) => defaultActiveGoals(r, { stateDirPath: inject.stateDirPath ?? stateDir() })))(repo);
-  } catch {
-    ids = null;
+    r = inject.activeGoals ? { ids: inject.activeGoals(repo) } : activeGoalsOf(repo, { stateDirPath: inject.stateDirPath ?? stateDir() });
+  } catch (e) {
+    r = { ids: null, why: `lookup failed: ${e.message}` };
   }
-  return Array.isArray(ids) && ids.length === 1 && /^G\d+$/.test(ids[0]) ? ids[0] : null;
+  const ids = r.ids;
+  if (Array.isArray(ids) && ids.length === 1 && /^G\d+$/.test(ids[0])) return { goal: ids[0], why: null };
+  const why = r.why ?? (Array.isArray(ids) ? (ids.length ? `${ids.length} active goals in its GOALS.md, none chosen` : "no active goal in its GOALS.md") : "no goals found");
+  return { goal: null, why };
 }
 
 /** Run `goals check --json` and return its parsed output. Injectable. */
@@ -185,8 +221,10 @@ async function newCmd(rest, inject, io) {
       }
     }
     children = [...groups].map(([repo, items]) => {
-      const g = childGoal(repo, items, snap, goal) ?? singleActiveGoal(repo, inject);
-      return { repo, goal: g, title: childTitle(title, repo), body: groomingBody({ parentTitle: title, goal: g, repo, items }) };
+      const ev = childGoal(repo, items, snap, goal);
+      const sg = ev ? { goal: ev, why: null } : singleActiveGoal(repo, inject);
+      const g = sg.goal;
+      return { repo, goalWhy: sg.why, goal: g, title: childTitle(title, repo), body: groomingBody({ parentTitle: title, goal: g, repo, items }) };
     });
   } else {
     const repos = to.split(",").map((r) => r.trim()).filter(Boolean);
@@ -198,7 +236,7 @@ async function newCmd(rest, inject, io) {
     } catch (e) {
       return fail(`--body-file unreadable: ${e.message}`);
     }
-    children = [...new Set(repos)].map((repo) => ({ repo, goal: singleActiveGoal(repo, inject), title: childTitle(title, repo), body }));
+    children = [...new Set(repos)].map((repo) => { const sg = singleActiveGoal(repo, inject); return { repo, goal: sg.goal, goalWhy: sg.why, title: childTitle(title, repo), body }; });
   }
 
   const plan = planBroadcast({ title, goal, hub, children, stateDirPath: inject.stateDirPath ?? stateDir(), gh: inject.gh });
@@ -238,7 +276,7 @@ function renderPlan(plan, io) {
   for (const l of p.body.split("\n")) io.log(`    ${l}`);
   for (const c of plan.children) {
     io.log(`\nchild in ${c.repo}: ${c.title}  ${c.existing ? `REUSE #${c.existing.number}` : "create"}${c.held ? `  HELD ${c.held}` : ""}`);
-    io.log(`    Goal: ${c.goal ?? "not set"}`);
+    io.log(`    Goal: ${c.goal ?? `not set${c.goalWhy ? ` (${c.goalWhy})` : ""}`}`);
     io.log(`    board fields: Priority=P1 Model=${c.model}${c.goal ? ` Goal=${c.goal}` : ""}  (only if the repo has exactly one open board)`);
     for (const l of c.body.split("\n")) io.log(`    ${l}`);
   }
