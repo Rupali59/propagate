@@ -648,10 +648,9 @@ test("queue: unpark of a missing id is WORK_NOT_FOUND, of a non-parked item WORK
 test("R17 guard: no work test file uses the shared state dir (floor: files scanned)", () => {
   const unitDir = path.join(ROOT, "tests", "unit");
   const files = fs.readdirSync(unitDir).filter((f) => /^work(-[\w-]+)?\.test\.mjs$/.test(f));
-  // The real number of work test files, named so a stray match (workspace-resolve, worktrees) cannot satisfy it. Task 4 adds
-  // work-cli and raises this to 4.
-  const EXPECTED = ["work-claim-race.test.mjs", "work-sync.test.mjs", "work.test.mjs"];
-  assert.ok(files.length >= 3, `only ${files.length} work test files found, the scan has gone blind`);
+  // The real number of work test files, named so a stray match (workspace-resolve, worktrees) cannot satisfy it.
+  const EXPECTED = ["work-claim-race.test.mjs", "work-cli.test.mjs", "work-sync.test.mjs", "work.test.mjs"];
+  assert.ok(files.length >= 4, `only ${files.length} work test files found, the scan has gone blind`);
   assert.deepEqual([...files].sort(), EXPECTED, "the work test files are not the expected set: update EXPECTED with the new file");
   const shared = ["propagate", "test", "state"].join("-"); // built, so this guard does not match itself
   for (const f of files) {

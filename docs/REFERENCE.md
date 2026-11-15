@@ -690,6 +690,85 @@ The same hook adds one `Broadcast:` line for the open broadcast items in the rep
 - **`broadcast status --json` changed shape:** each child carries `title`, `number` and `shown`; the header counts come from the children's states; `missing` is gone (the phase 1 body comparison printed false lines for a scrubbed public parent).
 - **Goal.** A `--to` child, and a `--from goals-check` child with no item evidence, no longer take the hub's goal: Goal is the workspace's single active goal, else unset (`Goal: not set` in the dry run; no board write).
 
+## `propagate work`: the work event queue (propagate#150)
+
+A local queue of work for sessions to claim, one item per labelled GitHub issue. The queue is a **view over GitHub**: `work sync` reads the open issues that carry a kind's label and makes the queue match; nothing in `work` ever writes to GitHub. The first kind is `evaluate` (what a session evaluates and why: the evaluator design, `propagation/docs/propagate/plans/2026-11-15-evaluator.md`, which this section does not restate).
+
+```
+propagate work list [--kind k] [--state s] [--json]
+propagate work sync --kind k [--hub owner/repo] [--json]
+propagate work claim --kind k [--session id] [--json]
+propagate work ack <id> --token t [--session id] [--json]
+propagate work release <id> --token t [--session id] [--refusal] [--reason r] [--json]
+propagate work unpark <id> [--json]
+propagate work prune [--older-than <days>] [--apply] [--json]
+```
+
+**Where it lives.** One SQLite file, `$PROPAGATE_STATE_DIR/work/queue.db` (default `~/.propagate/work/queue.db`), in WAL mode, with a 5 s busy timeout. **`queue.db`, `queue.db-wal` and `queue.db-shm` are state, not cache.** A cleaner that removes "cache entries older than N days" must exclude the whole state directory; deleting the file loses every acked and parked row, and the next `work sync` rebuilds only the open issues, as `pending`. The store lives on a local disk: `openDb` refuses a synced folder or a network mount (`WORK_STORE_UNSAFE`) and warns when its probe cannot run.
+
+**One machine per state dir.** SQLite locks do not work across machines, and two machines each syncing and claiming would double-claim. Share the queue by sharing GitHub (each machine syncs its own), never the file.
+
+### States and fields
+
+`pending` -> `claimed` (session, token, `lease_until`) -> `acked`, or `expired` (the issue closed, its URL changed, or its ttl passed), or `parked`.
+
+- **Item:** `id`, `kind`, `scope` (the repo), `dedupe_key`, `payload` (JSON; for `evaluate`: `issue_repo`, `issue_number`, `url`, `canonical_url`), `created`, `expires_at`, `state`, `session`, `lease_until`, `claims` (a receive count), `refusals`. Times are epoch milliseconds in the database and ISO in the output.
+- **Lease:** 30 minutes. A claimed item whose lease ran out is claimable again, and `list` shows it as `pending (lease expired)`. Expiry is the only release for a dead run.
+- **Token (the fence):** every claim mints a random `token`, printed by `claim` and carried by `claim --json`. `ack` and `release` must present it, and they are fenced by session **and** token, never by the clock: lanes of one session share a session id, so the session alone cannot tell two claims apart. A lease that ran out but was not re-claimed still accepts its own token. After a re-claim, the old token gets `WORK_LEASE_EXPIRED`, and its `next` says to run `propagate work list --kind <k>` before redoing any side effect. **`list` never prints a token**, in text or `--json`: a stale lane must not be able to copy the current claimant's.
+- **Park rule:** the 2nd `release --refusal` parks the item (`PARK_AFTER = 2`); a parked item is never claimed. It leaves `parked` by `work unpark <id>`, or when `sync` sees the `evaluate:parked` label on the issue go away after it had been seen there.
+- **Dedupe rule:** the key is `<kind>:<canonical_url>`, held by a partial unique index; only `expired` frees a key. `acked` keeps it held, so a re-sync of a still-open issue adds nothing. A URL is canonicalised before it becomes a key (`lib/work/canonical.mjs`): the scheme, `www.`, query, fragment and trailing slash are dropped, a closing sentence mark or markdown `)` is not part of it, and a `github.com` URL collapses to `github.com/<owner>/<repo>` (lowercased, no `.git`, no deeper path), so a repo and its `tree/main/docs` page are one thing; any other host keeps its path's case. The URL is the first one in the issue body; **when the body has none, a URL in the title is used.** An issue with neither is listed under `unparsed` by `sync` and never queued.
+- **At-least-once, not exactly-once.** A run can finish its side effect and then die or outlive its lease before `ack`; a second session then redoes it. **Every consumer of a kind must be idempotent, with its effect keyed by the item's `dedupe_key`** (each `KINDS` entry declares `idempotent_by`).
+
+### Subcommands and exit codes
+
+Exit 0 = ok; 1 = refused; 2 = could not run (usage, a store that cannot be read, GitHub). "Looked at nothing" is never a silent 0: it is stated.
+
+| Command | Does | Notes |
+|---|---|---|
+| `list` | the items, with `effective_state` | an empty queue prints `0 work items`. On a store created by this call it also prints `store created now: acked/parked history before this point is not known` (`--json`: `created_now: true`). Reads without waiting (WAL), so it answers while a claim holds the write lock |
+| `sync --kind k` | enqueue new items, expire items whose issue closed or whose URL changed, unpark | `--hub` defaults to the hub root's `origin`. Two `gh` calls (`label list`, `issue list`, limit 1000), then one transaction. A missing label reads `label kind:evaluate does not exist on <repo>: looked at nothing` (exit 0, `label_missing: true`). A result at the limit is `WORK_SYNC_TRUNCATED`. A fetch older than the stored `sync_marks` row is not applied (`stale: true`) |
+| `claim --kind k` | take the oldest pending item for this session | session = `--session`, else `CLAUDE_CODE_SESSION_ID`; neither is `WORK_USAGE`. An empty queue prints `nothing pending for <k>` and exits 0 |
+| `ack <id> --token t` | finish it | a repeated ack with the same token is `already: true`, exit 0 |
+| `release <id> --token t` | give it back; `--refusal` counts toward parking | `--reason` is recorded in the event |
+| `unpark <id>` | parked -> pending, refusals reset | any other state is `WORK_USAGE` |
+| `prune` | delete finished history | below |
+
+`--json` failures are `{ok:false, code, what, next}`; text failures are `<CODE>: <what>. Next: <command>` on stderr. A raw `SQLITE_BUSY` (a lost lock at BEGIN or COMMIT) is always `WORK_STORE_UNREADABLE`, never surfaced raw. Warnings from opening the store (for example a safety probe that could not run) go to stderr and into `--json` `warnings`.
+
+### `work prune`
+
+`work_events` is append-only **except** `work prune --apply`. It deletes `acked` and `expired` items, and their events, whose **last event** is older than `--older-than` days (default 180; the item's `created` is not its age). It never touches `pending`, `claimed` or `parked` items, of any age. Without `--apply` it is a dry run that writes nothing; both forms print and `--json`-report the counts (`items`, `events`). Two consequences to know before applying:
+
+- **A pruned `acked` item frees its dedupe key.** If its issue is still open, the next `sync` queues it again. Close the issue first.
+- **A stale token after a prune.** Prune deletes the events that record which token a session held, so a late `ack` with an old token on a pruned item reads `WORK_NOT_FOUND`, and on a re-claimed item may read `WORK_NOT_CLAIMANT` where it would have read `WORK_LEASE_EXPIRED`.
+
+### Known limits (stated, not built)
+
+- **A reopened issue after ack is not re-queued.** The acked item still holds the dedupe key, by design. To redo the work, `work prune` the acked item (once its age allows), or file a new issue.
+- **A backup restore without `queue.db-wal` loses rows silently.** In WAL mode the recent writes live in the `-wal` file until a checkpoint; restoring `queue.db` alone returns an older, consistent-looking database. No cheap detector exists. Back up the three files together, or none.
+- **The store is recreated empty if the file is lost** (the `created_now` line is the only sign).
+
+### The `evaluate` kind
+
+Reads open issues labelled `kind:evaluate` on the hub repo; an issue also labelled `evaluate:parked` is skipped and marks a parked item as seen. An item expires after 30 days. Its claim pattern follows goqite and sqliteq (one `UPDATE ... WHERE id = (SELECT ...) RETURNING *` statement, a receive count, a visibility timeout); the database is Node's built-in `node:sqlite` (Node 22.13 or later), with no new dependency.
+
+### Error codes
+
+| Code | Exit | Meaning |
+|---|---|---|
+| `WORK_USAGE` | 2 | wrong arguments, an unknown kind, or no session id |
+| `WORK_STORE_UNREADABLE` | 2 | the database cannot be opened, read or locked in time |
+| `WORK_STORE_UNSAFE` | 2 | the state dir is on a synced folder or a network mount |
+| `WORK_STORE_TOO_NEW` | 2 | the file's schema is newer than this propagate |
+| `WORK_NODE_TOO_OLD` | 2 | `node:sqlite` is unavailable (Node older than 22.13) |
+| `WORK_SYNC_TRUNCATED` | 2 | the issue list hit its 1000 limit, so nothing was expired |
+| `WORK_GITHUB_FAILED` | 2 | a `gh` call failed or printed something other than a list |
+| `WORK_HUB_UNKNOWN` | 2 | no hub repo could be derived; pass `--hub owner/repo` |
+| `WORK_NOT_FOUND` | 1 | no item with that id |
+| `WORK_NOT_CLAIMANT` | 1 | this session and token do not hold a claim on the item |
+| `WORK_LEASE_EXPIRED` | 1 | the claim was lost (the lease ran out and the item was claimed again) |
+| `WORK_ITEM_EXPIRED` | 1 | the item expired: its issue closed, its URL changed or its ttl passed; nothing to do |
+
 ## `propagate day`: day open and day close (propagate#240)
 
 `propagate day open [--json]` is read-only.
