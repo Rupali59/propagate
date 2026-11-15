@@ -26,21 +26,47 @@
  */
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { COMMANDS } from "../lib/core/commands.mjs";
 
 export const TIMEOUT_MS = 120000;
 
 const START = String.raw`^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*`; // optional VAR=x prefixes
+const PROPAGATE = String.raw`(?:propagate|node\s+\S*cli\.mjs)\s+`;
+const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /**
- * The heavy commands, matched per segment of the command with quoted text removed. `example` is a command that must
- * match, so a test can iterate the list and assert the floor.
+ * DERIVED: every COMMANDS entry marked `network: true` (it reaches GitHub, so it takes minutes). A new network command
+ * is covered by marking it in lib/core/commands.mjs; nothing here is edited (propagate#224, rule:derive-dont-curate).
+ * `offline` flags (backlog --offline) exempt a call. The test asserts a floor and that every module calling gh is marked.
  */
-export const HEAVY = Object.freeze([
+export const NETWORK = Object.freeze(
+  Object.entries(COMMANDS)
+    .filter(([, c]) => c.network === true)
+    .map(([name, c]) => {
+      const off = (c.offline ?? []).map(escapeRe);
+      const guard = off.length ? String.raw`(?!.*(?:${off.join("|")})(?:\s|$))` : "";
+      const words = name.split(" ").map(escapeRe).join(String.raw`\s+`);
+      return {
+        label: `${name} (reaches GitHub)`,
+        re: new RegExp(START + PROPAGATE + words + String.raw`(?=\s|$)` + guard),
+        example: `propagate ${name}`,
+      };
+    }),
+);
+
+/**
+ * The EXPLICIT EXCEPTIONS: heavy commands that are not a network `propagate` subcommand, so COMMANDS cannot express
+ * them. `example` is a command that must match, so a test can iterate the list and assert the floor.
+ */
+const EXCEPTIONS = [
   { label: "npm test", re: new RegExp(START + String.raw`npm\s+(?:run\s+)?test(?:\s|$)`), example: "npm test" },
   { label: "npm run test:record", re: new RegExp(START + String.raw`npm\s+run\s+test:record\b`), example: "npm run test:record" },
-  { label: "release --check", re: new RegExp(START + String.raw`(?:propagate|node\s+\S*cli\.mjs)\s+release\b.*--check\b`), example: "node cli.mjs release --check" },
-  { label: "doctor (without --quick)", re: new RegExp(START + String.raw`(?:propagate|node\s+\S*cli\.mjs)\s+doctor\b(?!.*--quick)`), example: "propagate doctor" },
+  { label: "release --check", re: new RegExp(START + PROPAGATE + String.raw`release\b.*--check\b`), example: "node cli.mjs release --check" },
+  { label: "doctor (without --quick)", re: new RegExp(START + PROPAGATE + String.raw`doctor\b(?!.*--quick)`), example: "propagate doctor" },
   { label: "make-public --check", re: new RegExp(START + String.raw`.*\bmake-public\b.*--check\b`), example: "node cli.mjs make-public repo --check" },
-]);
+];
+
+export const HEAVY = Object.freeze([...EXCEPTIONS, ...NETWORK]);
 
 const stripQuotes = (s) => s.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, " ");
 
