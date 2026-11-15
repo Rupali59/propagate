@@ -675,6 +675,21 @@ Session: <project> (<workspace>) · repos: a, b · goal G<n> · item owner/repo#
 - Any error appends one line to `$STATE/sessions/errors.log`, and the hook exits 0 silently.
 - Plugin hook registrations: 12. It applies after `/reload-plugins`, and does not run under `--bare` or in cloud sessions.
 
+### Broadcast delivery (propagate#267 phase 2)
+
+The same hook adds one `Broadcast:` line for the open broadcast items in the repos a session works in. It reads a local index, so there is no network call and no second hook.
+
+- **The index.** `$STATE/broadcast/index.json` holds the OPEN children of every open broadcast, from ONE GraphQL search (`is:open label:broadcast user:<owner>`, the owner derived from the hub's origin) that covers every hub. Only that full read replaces the file: `propagate broadcast status` with no number, and `propagate day open` (through its own fetcher, counted in the GraphQL-calls line). `broadcast status <n>` and `broadcast new --apply` only MERGE their own parent and never shrink the rest. A failed search writes nothing and says so. More than 50 broadcasts, or more than 100 sub-issues in one, sets `truncated: true`.
+- **The line.** Grouped by parent: `Broadcast: hub#7 "<title, 60 characters>" → 2 here: web#11, api#12 · propagate broadcast status`. Repo names match case-insensitively; a worktree reads as its main checkout. An index older than 24 hours adds `may be stale (Nd)`; older than 7 days the items are dropped and only `stale` plus the pointer is shown.
+- **The hub session** gets a summary (`Broadcast: N open across M repos`) and records no shown rows.
+- **Cut order inside the 2,000-character cap:** the broadcast items, then the whole broadcast line, then repos, then guidance files. Each line ends with its own pointer.
+- **A broadcast failure is isolated.** A corrupt index drops only the broadcast line and logs one `sessions/errors.log` line; the session line still prints.
+- **The shown record.** `$STATE/broadcast/shown-YYYY-MM.jsonl` (UTC month of the row), one row per child the line COVERED (not only the ones listed): `{ts, session_id, source, repo, child, listed, attended, entrypoint}`, written in one append per injection. `attended` and `entrypoint` come from Claude Code's attended-session and entrypoint environment variables (hooks/session-guide.mjs names them) when set, so a lane or `-p` run can be told from a person. A full index write prunes the months with no open child left.
+- **Contexts, not sessions.** compact keeps the session id; clear and fork make a new one, so `status` counts contexts and says so: `shown 2d (3 contexts, 1 attended)`, or `not shown`. A child open more than 2 days and never shown prints `not shown (Nd): no session with the hook has started in a folder holding this repo`. "Shown" means the text was injected into a session; it does not mean read or acknowledged.
+- **Not relied on.** Cloud and `--bare` sessions run no hooks, so their children read `not shown`. There is no push to a running session and no acknowledgement state beyond shown.
+- **`broadcast status --json` changed shape:** each child carries `title`, `number` and `shown`; the header counts come from the children's states; `missing` is gone (the phase 1 body comparison printed false lines for a scrubbed public parent).
+- **Goal.** A `--to` child, and a `--from goals-check` child with no item evidence, no longer take the hub's goal: Goal is the workspace's single active goal, else unset (`Goal: not set` in the dry run; no board write).
+
 ## `propagate day`: day open and day close (propagate#240)
 
 `propagate day open [--json]` is read-only.
