@@ -21,7 +21,7 @@ import { loadContext } from "../lib/sessions/resolve.mjs";
 import { buildShow, renderShow, selectSession } from "../lib/sessions/show.mjs";
 import { buildView, renderView } from "../lib/sessions/view.mjs";
 
-const USAGE = "usage: propagate sessions [--json] | sessions show <id|name> [--json] | sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/repo#n) [--json] | sessions new (--from owner/repo#n | <folder> --goal G<n> --item owner/repo#n) [--name <n>] [--again] [--apply] [--json] | sessions stop <id|name> [--force] [--apply] [--json] | sessions rm <id|name> [--apply] [--json]";
+const USAGE = "usage: propagate sessions [--json] | sessions show <id|name> [--json] | sessions assoc <id> (--from owner/repo#n [--goal G<n>] | --goal G<n> --item owner/repo#n) [--json] | sessions new (--from owner/repo#n | <folder> --goal G<n> --item owner/repo#n) [--name <n>] [--again] [--apply] [--json] | sessions stop <id|name> [--force] [--apply] [--json] | sessions rm <id|name> [--apply] [--json]";
 const ITEM_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#\d+$/;
 const GOAL_RE = /^G\d+$/;
 const SNAPSHOT_STALE_MS = 24 * 60 * 60 * 1000;
@@ -99,7 +99,7 @@ async function showCmd(rest, inject, io) {
   const got = await readAll(inject);
   if (!got.ok) return emitFailure(got, asJson, io);
   const view = buildView(got.live, got.fold, got.ctx);
-  const pick = selectSession(p.pos[0], view);
+  const pick = selectSession(p.pos[0], view, "show");
   if (!pick.ok) return emitFailure(pick, asJson, io);
   const d = buildShow(pick, got.fold, got.ctx, { now: (inject.now ?? Date.now)() });
   if (asJson) io.log(JSON.stringify({ ok: true, ...d }, null, 2));
@@ -123,7 +123,7 @@ async function assocCmd(rest, inject, io) {
   if (p.error) return emitFailure(p.error, asJson, io);
   if (p.pos.length !== 1) return emitFailure(fail("SESSION_USAGE", "assoc takes exactly one <id>", USAGE), asJson, io);
   const { "--from": from, "--goal": goalFlag, "--item": itemFlag } = p.flags;
-  if (from && (goalFlag || itemFlag)) return emitFailure(fail("SESSION_USAGE", "--from is an alternative to --goal/--item, not a pair", USAGE), asJson, io);
+  if (from && itemFlag) return emitFailure(fail("SESSION_USAGE", "--from already names the item; --item is for the explicit form", USAGE), asJson, io);
   if (!from && !(goalFlag && itemFlag)) return emitFailure(fail("SESSION_USAGE", "name the work: --from owner/repo#n, or --goal G<n> with --item owner/repo#n", USAGE), asJson, io);
   const item = from ?? itemFlag;
   if (!ITEM_RE.test(item)) return emitFailure(fail("SESSION_USAGE", `"${item}" is not owner/repo#n`, USAGE), asJson, io);
@@ -131,12 +131,13 @@ async function assocCmd(rest, inject, io) {
 
   const warnings = [];
   let goal = goalFlag;
-  if (from) {
+  // `--from` derives the goal from the dispatch snapshot; an explicit --goal wins and skips the snapshot, as in `new`.
+  if (from && !goalFlag) {
     const snap = readSnapshot(inject);
     const entry = snap?.items?.[from];
     if (!entry || typeof entry.goal !== "string" || !GOAL_RE.test(entry.goal)) {
       const why = !snap ? "there is no dispatch snapshot" : !entry ? `${from} is not in the dispatch snapshot` : `${from} has no Goal in the dispatch snapshot`;
-      return emitFailure(fail("SESSION_GOAL_UNKNOWN", `${why}, so its goal cannot be derived`, `pass --goal G<n> --item ${from}, or run propagate day open`), asJson, io);
+      return emitFailure(fail("SESSION_GOAL_UNKNOWN", `${why}, so its goal cannot be derived`, `pass --goal G<n> (propagate sessions assoc <id> --from ${from} --goal G<n>), or run propagate day open`), asJson, io);
     }
     goal = entry.goal;
     const age = (inject.now ?? Date.now)() - Date.parse(snap.generatedAt);
@@ -146,7 +147,7 @@ async function assocCmd(rest, inject, io) {
   const got = await readAll(inject);
   if (!got.ok) return emitFailure(got, asJson, io);
   const view = buildView(got.live, got.fold, got.ctx);
-  const pick = selectSession(p.pos[0], view);
+  const pick = selectSession(p.pos[0], view, "assoc");
   if (!pick.ok) return emitFailure(pick, asJson, io);
   if (!pick.session) return emitFailure(fail("SESSION_NOT_FOUND", `"${p.pos[0]}" is an ended session; only a live session can be associated`, "propagate sessions"), asJson, io);
   const s = pick.session;
@@ -218,7 +219,7 @@ async function deleteCmd(verb, rest, inject, io) {
   const got = await readAll(inject);
   if (!got.ok) return emitFailure(got, asJson, io);
   const view = buildView(got.live, got.fold, got.ctx);
-  const pick = selectSession(p.pos[0], view);
+  const pick = selectSession(p.pos[0], view, verb);
   if (!pick.ok) return emitFailure(pick, asJson, io);
   if (!pick.session) return emitFailure(fail("SESSION_NOT_FOUND", `"${p.pos[0]}" is an ended session; there is nothing live to ${verb}`, "propagate sessions"), asJson, io);
   const o = { apply: p.flags["--apply"] === true, stateDirPath: inject.stateDirPath, now: inject.now, readLive: inject.readLive, env: inject.env, ...inject.deleteOpts };
