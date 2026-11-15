@@ -501,7 +501,7 @@ async function contradictSub(rest, json) {
   console.log(BOLD + "# claims contradict" + RESET + "  " + DIM + shortPath(abs) + RESET);
   console.log(
     "  " + status.factCount + " derived fact(s) · " + status.judged.length + " pair(s) judged · " +
-      status.unjudged.length + " awaiting judgment · " + status.unpaired.length + " claim(s) unpaired",
+      status.unjudged.length + " awaiting judgment · " + status.unpaired.length + (status.unpaired.length === 1 ? " claim" : " claims") + " unpaired",
   );
   if (status.unpaired.length > 0) {
     console.log(

@@ -48,7 +48,8 @@ function run(dir, session, startAt) {
   });
 }
 
-test("two processes claim 60 items 50 times each: 60 distinct ids, none twice, and the sessions interleave", async () => {
+/** One round: 60 items, two children released together. Returns the claimed ids and the session sequence in work_events. */
+async function round() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-race-"));
   const { db } = openDb(dir);
   db.exec("BEGIN IMMEDIATE");
@@ -60,16 +61,25 @@ test("two processes claim 60 items 50 times each: 60 distinct ids, none twice, a
 
   const startAt = Date.now() + 600;
   const [a, b] = await Promise.all([run(dir, "A", startAt), run(dir, "B", startAt)]);
-  const all = [...a, ...b];
-  const dupes = all.filter((id, i) => all.indexOf(id) !== i);
-  assert.deepEqual(dupes, [], `duplicate ids claimed by both sessions: ${dupes.join(", ")}`);
-  assert.equal(new Set(all).size, 60, `expected 60 distinct ids, got ${new Set(all).size} (${a.length} + ${b.length})`);
-
   const check = openDb(dir);
   try {
     const seq = check.db.prepare("SELECT session FROM work_events WHERE op = 'claim' ORDER BY seq").all().map((r) => r.session);
-    assert.equal(seq.length, 60);
-    const switches = seq.filter((s, i) => i > 0 && s !== seq[i - 1]).length;
-    assert.ok(switches >= 2, `the two sessions did not interleave (${switches} switches); the test is not racing`);
+    return { a, b, seq, switches: seq.filter((s, i) => i > 0 && s !== seq[i - 1]).length };
   } finally { check.db.close(); }
+}
+
+test("two processes claim 60 items 50 times each: 60 distinct ids, none twice, and the sessions interleave", async () => {
+  // Correctness is asserted on EVERY round. Interleaving is a property of the scheduler: under a loaded machine (the full
+  // suite) one child can be descheduled for its whole turn, so up to 3 rounds are allowed to produce an interleaved one.
+  let last;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    last = await round();
+    const all = [...last.a, ...last.b];
+    const dupes = all.filter((id, i) => all.indexOf(id) !== i);
+    assert.deepEqual(dupes, [], `duplicate ids claimed by both sessions: ${dupes.join(", ")}`);
+    assert.equal(new Set(all).size, 60, `expected 60 distinct ids, got ${new Set(all).size} (${last.a.length} + ${last.b.length})`);
+    assert.equal(last.seq.length, 60);
+    if (last.switches >= 2) return;
+  }
+  assert.fail(`the two sessions did not interleave in 3 rounds (${last.switches} switches); the test is not racing`);
 });
