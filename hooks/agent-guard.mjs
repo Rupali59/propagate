@@ -43,9 +43,12 @@ function segmentProblem(seg) {
   if (!cmd) return null;
   if (rest.includes("--apply")) return "`--apply` writes";
 
+  // awk and sort read, but each can also write or run a command from inside its arguments.
+  if (cmd === "awk" && /\bsystem\s*\(|>|\||\bgetline\b/.test(rest.join(" "))) return "`awk` with system(), a pipe, getline or an output redirection";
+  if (cmd === "sort" && rest.some((a) => a === "-o" || /^-[a-zA-Z]*o/.test(a) || a.startsWith("--output"))) return "`sort -o` writes a file";
   if (READ_CMDS.has(cmd)) return null;
   if (cmd === "sed") return rest.some((a) => /^-[a-zA-Z]*i/.test(a)) ? "`sed -i` edits a file" : null;
-  if (cmd === "find") return rest.some((a) => ["-delete", "-exec", "-execdir", "-ok", "-fprint"].includes(a)) ? "`find` with an action" : null;
+  if (cmd === "find") return rest.some((a) => ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"].includes(a)) ? "`find` with an action" : null;
 
   if (cmd === "git") {
     const args = [...rest];

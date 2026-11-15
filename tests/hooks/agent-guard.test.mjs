@@ -51,6 +51,14 @@ const WRITES = [
   "ls&rm x",
   "cat <(rm x)",
   "diff <(ls) >(rm x)",
+  // awk, sort and find can write or run a command from inside their own arguments (found 2026-11-15)
+  `awk 'BEGIN{system("rm x")}'`,
+  `awk '{print > "out"}' f`,
+  `awk '{print | "sh"}' f`,
+  "sort -o out f",
+  "sort --output=out f",
+  "find . -name x -fprintf out y",
+  "find . -fls out",
 ];
 
 test("every write command is denied for each read-only agent, in both name forms", () => {
@@ -83,6 +91,8 @@ const READS = [
   "rg --no-ignore -n pattern src </dev/null",
   "sed -n 1,20p file",
   "find . -name '*.md'",
+  "awk '{print $1}' f",
+  "sort -n f | uniq -c",
 ];
 
 test("read commands are allowed for a read-only agent (the guard does not block the agent's job)", () => {
