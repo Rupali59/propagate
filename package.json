@@ -9,7 +9,7 @@
     "propagate": "cli.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "scripts": {
     "test": "npm run test:propagate; A=$?; npm run test:curate-docs; B=$?; printf '\\n== suites: propagate exit=%s, curate-docs exit=%s\\n' \"$A\" \"$B\"; [ \"$A\" -eq 0 ] && [ \"$B\" -eq 0 ]",

@@ -123,7 +123,7 @@ variable does not exist.
 
 ## Requirements
 
-Node — see `engines` in `package.json`. `fs.globSync` is the binding constraint.
+Node — see `engines` in `package.json` (22.13 or later). `node:sqlite` (the work queue's store, experimental on the 22.x line) is the binding constraint; `fs.globSync` (22.0) is looser.
 
 ## Licence
 

@@ -54,7 +54,7 @@ export function listTestFiles(repo = REPO) {
  * `// @size small|medium|large` in the first 40 lines of a test file; default small.
  *
  * This header is a stand-in. Node's native test tags arrive in v26.2 and this repo's
- * floor is ">=22", so a comment is the only portable carrier today. When the floor
+ * floor is ">=22.13", so a comment is the only portable carrier today. When the floor
  * reaches 26.2, move these to `{ tags: [...] }` with --experimental-test-tag-filter
  * and delete this parser.
  */
