@@ -60,7 +60,7 @@ test("a member listed but absent is reported missing with its reason, not droppe
   try {
     const p = projOf(f.ws);
     assert.deepEqual(p.units.filter((u) => u.toolchain === "dart").map((u) => u.rel).sort(), ["proj", "proj/apps/app"]);
-    assert.deepEqual(p.missing, [{ rel: "proj/packages/ghost", reason: "workspace member not on disk" }]);
+    assert.deepEqual(p.unresolved, [{ rel: "proj/packages/ghost", reason: "workspace member not on disk" }]);
   } finally {
     f.cleanup();
   }
@@ -71,7 +71,7 @@ test("a lone pubspec.lock with no workspace: gives exactly one dart unit", () =>
   try {
     const p = projOf(f.ws);
     assert.equal(p.units.filter((u) => u.toolchain === "dart").length, 1);
-    assert.deepEqual(p.missing, []);
+    assert.deepEqual(p.unresolved, []);
   } finally {
     f.cleanup();
   }
@@ -84,5 +84,39 @@ test("regression: an npm project still gives its npm unit", () => {
     assert.deepEqual(units.map((u) => [u.rel, u.toolchain]), [["proj", "npm"]]);
   } finally {
     f.cleanup();
+  }
+});
+
+test("a member that is absolute or escapes the project root is unresolved, never walked", () => {
+  const f = fixture({
+    "pubspec.lock": "",
+    "pubspec.yaml": "name: r\nworkspace:\n  - ../outside/x\n  - /tmp\n  - apps/ok\n",
+    "apps/ok/pubspec.yaml": "name: ok\n",
+  });
+  try {
+    put(path.join(f.ws, "outside/x/pubspec.yaml"), "name: x\n");
+    const p = projOf(f.ws);
+    assert.deepEqual(p.units.map((u) => u.rel).sort(), ["proj", "proj/apps/ok"]);
+    assert.deepEqual(p.unresolved, [
+      { rel: "../outside/x", reason: "workspace member outside project root" },
+      { rel: "/tmp", reason: "workspace member path must be relative" },
+    ]);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a workspace: that is not a list, or a pubspec.yaml that does not parse, is unresolved with the detail", () => {
+  const a = fixture({ "pubspec.lock": "", "pubspec.yaml": "name: r\nworkspace: apps/app\n" });
+  const b = fixture({ "pubspec.lock": "", "pubspec.yaml": "name: [unclosed\nworkspace: {\n" });
+  try {
+    assert.deepEqual(projOf(a.ws).unresolved, [{ rel: "proj/pubspec.yaml", reason: "workspace: unreadable (not a list)" }]);
+    const u = projOf(b.ws).unresolved;
+    assert.equal(u.length, 1);
+    assert.equal(u[0].rel, "proj/pubspec.yaml");
+    assert.match(u[0].reason, /^workspace: unreadable \(unparseable: /);
+  } finally {
+    a.cleanup();
+    b.cleanup();
   }
 });

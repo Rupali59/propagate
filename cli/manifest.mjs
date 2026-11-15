@@ -143,6 +143,7 @@ export async function manifestCmd() {
       const sv = u.services?.length ? `  ${DIM}svc ${u.services.join(",")}${RESET}` : "";
       console.log(`  ${u.rel.padEnd(w)}  ${tool} ${DIM}${fw}${RESET} ${port} ${env}${an}${sv}${u.compose ? `  ${DIM}compose${RESET}` : ""}`);
     }
+    for (const x of p.unresolved ?? []) console.log(`  ${YELLOW}unresolved${RESET}: ${x.rel} (${x.reason})`);
   }
   if (result.workspaceCompose) {
     console.log(`  ${DIM}workspace docker-compose.yml present — local infra for the whole workspace${RESET}`);
