@@ -645,10 +645,15 @@ test("queue: unpark of a missing id is WORK_NOT_FOUND, of a non-parked item WORK
 test("R17 guard: no work test file uses the shared state dir (floor: files scanned)", () => {
   const unitDir = path.join(ROOT, "tests", "unit");
   const files = fs.readdirSync(unitDir).filter((f) => /^work.*\.test\.mjs$/.test(f));
-  const FLOOR = 2; // raise as work-sync and work-cli land (the plan's floor of 4 holds once Task 4 is in)
+  const FLOOR = 3; // work, work-claim-race and work-sync; raise it as work-cli lands (the plan's floor of 4 holds once Task 4 is in)
   assert.ok(files.length >= FLOOR, `only ${files.length} work test files found, the scan has gone blind`);
   const shared = ["propagate", "test", "state"].join("-"); // built, so this guard does not match itself
   for (const f of files) {
-    assert.ok(!fs.readFileSync(path.join(unitDir, f), "utf8").includes(shared), `${f} uses the shared state dir`);
+    const src = fs.readFileSync(path.join(unitDir, f), "utf8");
+    assert.ok(!src.includes(shared), `${f} uses the shared state dir`);
+    // a call with no dir falls back to the real state dir (no-argument openDb, list with no opts); comments are not calls
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const bare = [...code.matchAll(/\bopenDb\(\s*\)|(?<![.\w])list\(\s*(?:\{[^{}]*\})?\s*\)/g)].map((m) => m[0]);
+    assert.deepEqual(bare, [], `${f} calls openDb or list without a state dir`);
   }
 });
