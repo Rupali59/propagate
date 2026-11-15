@@ -5,7 +5,7 @@
  *
  * DEPENDENCY-FREE ON PURPOSE (node builtins only). `lib/sessions/resolve.mjs` imports `lib/core/config.mjs`, which runs
  * workspace discovery at module load, and `assoc.mjs` imports proper-lockfile: measured, importing resolve.mjs alone
- * adds about 0.2 s to a process whose bare start is about 0.14 s on this machine. The CEO review (S7) caps the hook,
+ * adds about 0.2 s to a process whose bare start is about 0.08 s on this machine (re-measured 2026-11-15, propagate#267 review 6). The CEO review (S7) caps the hook,
  * so it re-implements the three small reads it needs; tests/hooks/session-guide.test.mjs asserts parity with
  * `readCheckouts`, `fold` and `folderOf`, so the copies cannot drift unnoticed.
  *
@@ -13,6 +13,15 @@
  * `$STATE/sessions/assoc.jsonl`. It NEVER calls `claude`, `readLive`, the network, or git, except ONE
  * `git rev-parse --git-common-dir` when the cwd is inside `.claude/worktrees/`. Workspace and hub are found by reading
  * `.propagates.yml` markers on the ancestors of cwd and `hubRoot` (env or `$STATE/config.yml`), never by discovery.
+ *
+ * BROADCASTS (propagate#267 phase 2): it also reads `$STATE/broadcast/index.json` (the CLI writes it; the hook never builds
+ * it) and adds one `Broadcast:` line for the open broadcast children in the repos the session works in. `readIndexCopy`
+ * is pinned to lib/broadcast/index.mjs `readIndex` by a parity test. The broadcast read has its OWN try/catch: a failure
+ * there drops only the broadcast line and logs one errors.log line; the session line still prints.
+ *
+ * WHAT IT WRITES: one append per injection to `$STATE/broadcast/shown-YYYY-MM.jsonl` (UTC month of the row), one row per
+ * child the line COVERED, `{ts, session_id, source, repo, child, listed, attended, entrypoint}`. The hub session shows a
+ * summary and records no rows. Contexts, not sessions: compact keeps the session id, clear and fork make a new one.
  *
  * FAILS OPEN AND SILENT: any error appends one line to `$STATE/sessions/errors.log` and exits 0 with no output.
  * Output is one `additionalContext` block of at most 2,000 characters (the platform ignores over 10,000).
@@ -46,6 +55,61 @@ function readCache(dir) {
   const m = JSON.parse(readFileSync(path.join(dir, "sessions", "checkouts.json"), "utf8"));
   if (!Array.isArray(m?.checkouts)) throw new Error("checkouts.json has no checkouts array");
   return m;
+}
+
+/** null when absent; THROWS when unreadable or malformed. Same contract as lib/broadcast/index.mjs readIndex. */
+export function readIndexCopy(dir) {
+  let text;
+  try {
+    text = readFileSync(path.join(dir, "broadcast", "index.json"), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+  const m = JSON.parse(text);
+  if (!m || typeof m !== "object" || !m.parents || typeof m.parents !== "object" || typeof m.generatedAt !== "string") throw new Error("index.json has no parents object / generatedAt");
+  return m;
+}
+
+const DAY = 86400000;
+const PTR = " · propagate broadcast status";
+const short = (s) => String(s).split("/").pop();
+const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * What the session is told about broadcasts. `groups` are the parents with children in this session's repos (the hub
+ * session matches every child). Returns null when there is nothing to say. `levels[i]` is the line at cut level i:
+ * 0 lists items, 1 counts only, then no line at all.
+ */
+export function broadcastFor(folder, index, now = Date.now()) {
+  if (!index) return null;
+  const mine = new Set((folder.repos ?? []).map((r) => r.toLowerCase()));
+  const groups = [];
+  for (const [key, p] of Object.entries(index.parents)) {
+    const kids = (Array.isArray(p?.children) ? p.children : []).filter((c) => c && c.state !== "closed" && (folder.all || mine.has(String(c.repo).toLowerCase())));
+    if (kids.length) groups.push({ key, title: String(p.title ?? ""), kids });
+  }
+  if (!groups.length) return null;
+  const ageDays = Math.floor((now - Date.parse(index.generatedAt)) / DAY);
+  const stale = Number.isFinite(ageDays) && ageDays >= 7;
+  const warn = Number.isFinite(ageDays) && now - Date.parse(index.generatedAt) >= DAY ? ` may be stale (${ageDays}d)` : "";
+  const trunc = index.truncated ? " (index truncated)" : "";
+  if (stale) return { groups, coveredAt: () => [], levels: [`Broadcast: stale (${ageDays}d): items not shown${PTR}`] };
+  if (folder.all) {
+    const n = groups.reduce((a, g) => a + g.kids.length, 0);
+    const m = new Set(groups.flatMap((g) => g.kids.map((c) => String(c.repo).toLowerCase()))).size;
+    return { groups, coveredAt: () => [], levels: [`Broadcast: ${n} open across ${m} repos${warn}${trunc}${PTR}`] };
+  }
+  const label = (g) => `${short(g.key.split("#")[0])}#${g.key.split("#")[1]} "${clip(g.title, 60)}"`;
+  const items = (g) => {
+    const shownKids = g.kids.slice(0, 3).map((c) => `${short(c.repo)}#${c.number}`);
+    return shownKids.join(", ") + (g.kids.length > 3 ? `, +${g.kids.length - 3} more` : "");
+  };
+  const l0 = `Broadcast: ${groups.map((g) => `${label(g)} → ${g.kids.length} here: ${items(g)}`).join(" ; ")}${warn}${trunc}${PTR}`;
+  const l1 = `Broadcast: ${groups.map((g) => `${label(g)} → ${g.kids.length} here`).join(" ; ")}${warn}${trunc}${PTR}`;
+  // Every child the line COVERED gets a row, listed or only counted (so "+N more" is not later reported as never shown).
+  const coveredAt = (level) => groups.flatMap((g) => g.kids.map((c, i) => ({ repo: c.repo, child: `${c.repo}#${c.number}`, listed: level === 0 && i < 3 })));
+  return { groups, coveredAt, levels: [l0, l1] };
 }
 
 /** The latest `associate` per rowKey not followed by `forgotten`; then the newest one whose row carries this session id. */
@@ -161,7 +225,12 @@ export function guidance(folder) {
  * Build the block, at most CAP characters. Repos are dropped from the end first ("+N more"), then guidance files.
  * @returns {string|null}
  */
-export function buildBlock({ folder, assoc, sessionId, files }) {
+export function buildBlock(args) {
+  return compose(args).text;
+}
+
+/** buildBlock plus which broadcast cut level was used (0 items, 1 counts, -1 no line), so the shown rows match the text. */
+export function compose({ folder, assoc, sessionId, files, broadcast = null }) {
   const sid = String(sessionId).slice(0, 8);
   const head = folder.all ? "Session: hub (all repos)" : `Session: ${folder.project} (${folder.workspace})`;
   const tail = assoc
@@ -177,10 +246,16 @@ export function buildBlock({ folder, assoc, sessionId, files }) {
   };
   let n = repos.length;
   let fs = files;
+  // Cut order within the cap: broadcast items, then the whole broadcast line, then repos, then guidance files.
+  const levels = broadcast?.levels ?? [];
+  for (let bl = 0; bl < levels.length; bl++) {
+    const text = `${line(n, fs)}\n${levels[bl]}`;
+    if (text.length <= CAP) return { text, level: bl };
+  }
   let text = line(n, fs);
   while (text.length > CAP && n > 0) text = line(--n, fs);
   while (text.length > CAP && fs.length > 0) text = line(n, (fs = fs.slice(0, -1)));
-  return text.length > CAP ? text.slice(0, CAP) : text;
+  return { text: text.length > CAP ? text.slice(0, CAP) : text, level: -1 };
 }
 
 function logError(dir, err) {
@@ -208,7 +283,29 @@ export function run(payload, dir = stateDirOf()) {
   if (folder.unplaced) return null;
   const sessionId = String(payload?.session_id ?? "");
   const assoc = sessionId ? associationFor(dir, sessionId) : null;
-  return buildBlock({ folder, assoc, sessionId: sessionId || "<id>", files: guidance(folder) });
+  // The broadcast read has its OWN try/catch: a failure drops only the broadcast line (propagate#267 review 4).
+  let broadcast = null;
+  const now = Date.now();
+  try {
+    broadcast = broadcastFor(folder, readIndexCopy(dir), now);
+  } catch (e) {
+    logError(dir, `broadcast: ${e?.message ?? e}`);
+  }
+  const { text, level } = compose({ folder, assoc, sessionId: sessionId || "<id>", files: guidance(folder), broadcast });
+  if (broadcast && level >= 0) {
+    try {
+      const attended = process.env.CLAUDE_CODE_SESSION_ATTENDED;
+      const rows = broadcast.coveredAt(level).map((c) => JSON.stringify({ ts: new Date(now).toISOString(), session_id: sessionId, source: payload?.source ?? null, repo: c.repo, child: c.child, listed: c.listed, attended: attended === undefined ? null : attended === "1", entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT ?? null }));
+      if (rows.length) {
+        const f = path.join(dir, "broadcast", `shown-${new Date(now).toISOString().slice(0, 7)}.jsonl`);
+        mkdirSync(path.dirname(f), { recursive: true });
+        appendFileSync(f, rows.join("\n") + "\n");
+      }
+    } catch (e) {
+      logError(dir, `broadcast shown record: ${e?.message ?? e}`);
+    }
+  }
+  return text;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

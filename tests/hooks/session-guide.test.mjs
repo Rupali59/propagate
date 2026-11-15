@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -12,7 +12,8 @@ import path from "node:path";
 import { folderOf, readCheckouts } from "../../lib/sessions/resolve.mjs";
 import { guidanceFor } from "../../lib/sessions/show.mjs";
 import { fold } from "../../lib/sessions/assoc.mjs";
-import { placeOf, guidance, run as runHook } from "../../hooks/session-guide.mjs";
+import { placeOf, guidance, run as runHook, readIndexCopy, broadcastFor, compose, CAP } from "../../hooks/session-guide.mjs";
+import { readIndex, foldShown } from "../../lib/broadcast/index.mjs";
 
 const HOOK = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "hooks", "session-guide.mjs");
 
@@ -212,4 +213,199 @@ test("timing: the median of 10 process runs (the measured number is printed)", (
   // bare node start, interleaved: it is what the hook adds, and it does not move with machine load. Measured numbers
   // are printed above and go in the report.
   assert.ok(m - b < 300, `median ${m.toFixed(0)} ms vs bare node ${b.toFixed(0)} ms`);
+});
+
+// ── broadcasts (propagate#267 phase 2) ──────────────────────────────────────────────────────────────────────────────
+const HOURS = 3600000;
+const kid = (repo, number, state = "open") => ({ repo, number, title: `child ${number}`, state });
+/** Write `$STATE/broadcast/index.json`; `ageMs` back-dates generatedAt. Parents are literals, never built by lib/. */
+function writeIdx(f, parents, ageMs = 0, extra = {}) {
+  mkdirSync(path.join(f.state, "broadcast"), { recursive: true });
+  const t = new Date(Date.now() - ageMs).toISOString();
+  writeFileSync(path.join(f.state, "broadcast", "index.json"), JSON.stringify({ generatedAt: t, readStartedAt: t, truncated: false, parents, ...extra }));
+}
+const shownRows = (f) => {
+  const dir = path.join(f.state, "broadcast");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((n) => n.startsWith("shown-")).flatMap((n) => readFileSync(path.join(dir, n), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+};
+const RETRO = { "acme-org/hub#7": { title: "Retro and size calibration", children: [kid("acme-org/web", 11), kid("acme-org/svc-with-a-deliberately-long-repository-name-number-1", 12), kid("acme-org/elsewhere", 13)] } };
+const payload = (f, over = {}) => ({ session_id: "sess-dddd-4444", cwd: f.ws, source: "startup", ...over });
+
+test("a workspace root with two repos sees ONE grouped line, only its own children, and a row per covered child", () => {
+  const f = fixture(2);
+  writeIdx(f, RETRO);
+  const text = ctxOf(hook(f, payload(f), { CLAUDE_CODE_SESSION_ATTENDED: "1", CLAUDE_CODE_ENTRYPOINT: "cli" }));
+  const lines = text.split("\n").filter((l) => l.startsWith("Broadcast:"));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^Broadcast: hub#7 "Retro and size calibration" → 2 here: web#11, svc-with-a-deliberately-long-repository-name-number-1#12 · propagate broadcast status$/);
+  assert.ok(!text.includes("elsewhere#13"), "a repo this session does not work in is not listed");
+  const rows = shownRows(f);
+  assert.deepEqual(rows.map((r) => r.child).sort(), ["acme-org/svc-with-a-deliberately-long-repository-name-number-1#12", "acme-org/web#11"]);
+  assert.deepEqual({ sid: rows[0].session_id, src: rows[0].source, att: rows[0].attended, ep: rows[0].entrypoint, listed: rows[0].listed }, { sid: "sess-dddd-4444", src: "startup", att: true, ep: "cli", listed: true });
+});
+
+test("one repo sees only its own children", () => {
+  const f = fixture(2);
+  writeIdx(f, RETRO);
+  const text = ctxOf(hook(f, payload(f, { cwd: path.join(f.ws, "web") })));
+  assert.match(text, /→ 1 here: web#11 · propagate broadcast status/);
+  assert.ok(!text.includes("#12"));
+});
+
+test("repo case differs between the index and the checkout and still matches", () => {
+  const f = fixture(1);
+  writeIdx(f, { "Acme-Org/hub#7": { title: "T", children: [kid("ACME-ORG/WEB", 11)] } });
+  assert.match(ctxOf(hook(f, payload(f, { cwd: path.join(f.ws, "web") }))), /→ 1 here: WEB#11/);
+});
+
+test("a worktree sees its main checkout's broadcast children", () => {
+  const f = fixture(1);
+  writeIdx(f, RETRO);
+  const main = path.join(f.ws, "web");
+  const git = (...a) => spawnSync("git", ["-C", main, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  rmGitStub(main);
+  git("init", "-q", "-b", "main");
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "i");
+  const wt = path.join(main, ".claude", "worktrees", "agent-y");
+  assert.equal(git("worktree", "add", "-q", "-b", "wt-y", wt).status, 0);
+  assert.match(ctxOf(hook(f, payload(f, { cwd: wt }))), /→ 1 here: web#11/);
+});
+
+test("the hub session gets one summary line and records NO rows", () => {
+  const f = fixture(2);
+  writeIdx(f, RETRO);
+  const hubRoot = f.root;
+  const r = hook(f, payload(f, { cwd: hubRoot }), { PROPAGATE_HUB_ROOT: hubRoot });
+  const text = ctxOf(r);
+  assert.match(text, /\nBroadcast: 3 open across 3 repos · propagate broadcast status$/);
+  assert.deepEqual(shownRows(f), []);
+});
+
+test("no index: no broadcast line and no rows, but the session line still prints", () => {
+  const f = fixture(2);
+  const text = ctxOf(hook(f, payload(f)));
+  assert.match(text, /^Session: /);
+  assert.ok(!text.includes("Broadcast"));
+  assert.deepEqual(shownRows(f), []);
+  assert.ok(!existsSync(f.errLog), "an absent index is not an error");
+});
+
+test("a corrupt index drops only the broadcast line: the session line prints and ONE errors.log line is written", () => {
+  const f = fixture(2);
+  mkdirSync(path.join(f.state, "broadcast"), { recursive: true });
+  writeFileSync(path.join(f.state, "broadcast", "index.json"), "{not json");
+  const r = hook(f, payload(f));
+  assert.equal(r.status, 0);
+  const text = ctxOf(r);
+  assert.match(text, /^Session: Acme\b|^Session: \(workspace root\) \(Acme\)/);
+  assert.ok(!text.includes("Broadcast"));
+  const lines = readFileSync(f.errLog, "utf8").trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /broadcast/);
+});
+
+test("an index 25 hours old says may be stale; one 8 days old shows the pointer only and records no rows", () => {
+  const f = fixture(2);
+  writeIdx(f, RETRO, 25 * HOURS);
+  assert.match(ctxOf(hook(f, payload(f))), /→ 2 here: .* may be stale \(1d\) · propagate broadcast status$/);
+  const g = fixture(2);
+  writeIdx(g, RETRO, 8 * 24 * HOURS);
+  const text = ctxOf(hook(g, payload(g)));
+  assert.match(text, /\nBroadcast: stale \(8d\): items not shown · propagate broadcast status$/);
+  assert.ok(!text.includes("web#11"));
+  assert.deepEqual(shownRows(g), []);
+});
+
+test("the cap: 12 children are cut items first, then the whole line; the block stays within 2,000 characters and each pointer ends its line", () => {
+  const f = fixture(2);
+  const big = { "acme-org/hub#7": { title: "T".repeat(80), children: Array.from({ length: 12 }, (_, i) => kid("acme-org/web", 100 + i)) } };
+  writeIdx(f, big);
+  const text = ctxOf(hook(f, payload(f)));
+  assert.ok(text.length <= 2000);
+  const b = text.split("\n").find((l) => l.startsWith("Broadcast:"));
+  assert.match(b, /→ 12 here: web#100, web#101, web#102, \+9 more · propagate broadcast status$/);
+  // Items alone no longer fit: 30 repos fill the session line, so the broadcast items go first.
+  const g = fixture(30);
+  writeIdx(g, { "acme-org/hub#7": { title: "T".repeat(80), children: Array.from({ length: 12 }, (_, i) => kid("acme-org/web", 100 + i)) } });
+  const t2 = ctxOf(hook(g, payload(g, { cwd: g.ws, session_id: "sess-eeee-5555" })));
+  assert.ok(t2.length <= 2000, `block is ${t2.length}`);
+  const line = t2.split("\n");
+  assert.match(line[0], / \+\d+ more: propagate sessions show sess-eee$/, "the session line ends with its own pointer");
+  if (line[1]) assert.match(line[1], /^Broadcast: .* · propagate broadcast status$/, "and so does the broadcast line");
+});
+
+test("cut order, exact: items first (counts stay, level 1), then the whole line (level -1), THEN repos and guidance", () => {
+  const folder = { workspace: "Acme", project: "web", repos: ["acme-org/web"], workspaceRoot: "/tmp/acme", cwd: "/tmp/acme/web" };
+  const index = { generatedAt: new Date().toISOString(), truncated: false, parents: { "acme-org/hub#7": { title: "T", children: [kid("acme-org/web", 1), kid("acme-org/web", 2)] } } };
+  const bc = broadcastFor(folder, index);
+  const lvl0 = compose({ folder, assoc: null, sessionId: "s", files: [], broadcast: bc });
+  assert.equal(lvl0.level, 0);
+  assert.match(lvl0.text, /→ 2 here: web#1, web#2 ·/);
+  const room = (n) => ["/tmp/" + "g".repeat(n)];
+  // a guidance path that leaves room for the counts line but not the items
+  const itemsLen = bc.levels[0].length;
+  const countsLen = bc.levels[1].length;
+  const base = compose({ folder, assoc: null, sessionId: "s", files: [], broadcast: null }).text.length;
+  const pad = CAP - base - (itemsLen + countsLen) / 2 - ". Read first: .".length;
+  const lvl1 = compose({ folder, assoc: null, sessionId: "s", files: room(Math.floor(pad)), broadcast: bc });
+  assert.equal(lvl1.level, 1, `items cut first; text ${lvl1.text.length}`);
+  assert.ok(lvl1.text.length <= CAP && !/here: web#1/.test(lvl1.text));
+  assert.deepEqual(bc.coveredAt(1).map((c) => c.listed), [false, false]);
+  // room for neither: the broadcast line goes; the repos and the guidance are still whole
+  const lvlN = compose({ folder, assoc: null, sessionId: "s", files: room(CAP - base - 30), broadcast: bc });
+  assert.equal(lvlN.level, -1);
+  assert.match(lvlN.text, /repos: acme-org\/web/);
+  assert.ok(lvlN.text.includes("Read first: /tmp/ggg"), "guidance survives while the broadcast line is cut");
+  assert.ok(!lvlN.text.includes("Broadcast"));
+});
+
+test("startup then compact: 2 rows for the same session id, 1 context and 2 showings; clear with a new id is 2 contexts", () => {
+  const f = fixture(1);
+  writeIdx(f, { "acme-org/hub#7": { title: "T", children: [kid("acme-org/web", 11)] } });
+  const cwd = path.join(f.ws, "web");
+  hook(f, payload(f, { cwd, source: "startup" }));
+  hook(f, payload(f, { cwd, source: "compact" }));
+  let c = foldShown(f.state).byChild.get("acme-org/web#11");
+  assert.deepEqual({ s: c.showings, c: c.contexts }, { s: 2, c: 1 });
+  hook(f, payload(f, { cwd, source: "clear", session_id: "sess-ffff-6666" }));
+  c = foldShown(f.state).byChild.get("acme-org/web#11");
+  assert.deepEqual({ s: c.showings, c: c.contexts }, { s: 3, c: 2 });
+});
+
+test("a covered-but-unlisted child still gets a row, with listed:false", () => {
+  const f = fixture(1);
+  writeIdx(f, { "acme-org/hub#7": { title: "T", children: Array.from({ length: 5 }, (_, i) => kid("acme-org/web", 100 + i)) } });
+  hook(f, payload(f, { cwd: path.join(f.ws, "web") }));
+  const rows = shownRows(f);
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows.map((r) => r.listed), [true, true, true, false, false]);
+});
+
+test("shown rows go to the file of the row's UTC month, in ONE append, and a failed append does not lose the session line", () => {
+  const f = fixture(1);
+  writeIdx(f, { "acme-org/hub#7": { title: "T", children: [kid("acme-org/web", 11), kid("acme-org/web", 12)] } });
+  hook(f, payload(f, { cwd: path.join(f.ws, "web") }));
+  const month = new Date().toISOString().slice(0, 7);
+  assert.ok(existsSync(path.join(f.state, "broadcast", `shown-${month}.jsonl`)));
+  // a directory where the shown file should be: the append fails, the block still prints
+  const g = fixture(1);
+  writeIdx(g, { "acme-org/hub#7": { title: "T", children: [kid("acme-org/web", 11)] } });
+  mkdirSync(path.join(g.state, "broadcast", `shown-${month}.jsonl`));
+  const r = hook(g, payload(g, { cwd: path.join(g.ws, "web") }));
+  assert.match(ctxOf(r), /^Session: web/);
+  assert.match(readFileSync(g.errLog, "utf8"), /broadcast shown record/);
+});
+
+test("parity: the hook's readIndexCopy agrees with lib/broadcast/index.mjs readIndex (value, absent, and corrupt)", () => {
+  const f = fixture(1);
+  assert.equal(readIndexCopy(f.state), null);
+  assert.equal(readIndex(f.state), null);
+  writeIdx(f, RETRO);
+  assert.deepEqual(readIndexCopy(f.state), readIndex(f.state));
+  for (const bad of ["{not json", "{}", JSON.stringify({ generatedAt: "x" })]) {
+    writeFileSync(path.join(f.state, "broadcast", "index.json"), bad);
+    assert.throws(() => readIndex(f.state));
+    assert.throws(() => readIndexCopy(f.state));
+  }
 });
