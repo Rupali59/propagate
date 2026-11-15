@@ -251,11 +251,11 @@ test("a check that DID NOT RUN records that, never a count (#283)", async () => 
 });
 
 test("a census that scanned nothing renders as a blind scan, never clean (#283)", async () => {
-  await withFixture(async ({ home, roots }) => {
-    const { ctx } = runHook({ home, roots }); // root exists, holds no CLAUDE.md
-    assert.match(ctx, /RULES CHECK scanned nothing/, ctx.slice(-400));
-    assert.match(ctx, /blind scan/);
-  });
+  const { renderCensus } = await import("../../lib/rules/census-cache.mjs");
+  const rec = { status: "ran", at: new Date().toISOString(), census: { diagnostic: "no-files-scanned", missing: [], filesScanned: 0, failing: [], acceptedCount: 0, stale: [] } };
+  const out = renderCensus(rec);
+  assert.match(out, /RULES CHECK scanned nothing/);
+  assert.match(out, /blind scan/);
 });
 
 test("census age is always shown, and past 24 h it says it may be stale (injected clock)", async () => {
@@ -266,4 +266,16 @@ test("census age is always shown, and past 24 h it says it may be stale (injecte
   assert.match(renderCensus(rec, t(3)), /rules census from 3h ago\._/);
   assert.doesNotMatch(renderCensus(rec, t(3)), /stale/);
   assert.match(renderCensus(rec, t(30)), /from 30h ago — may be stale: run propagate rules check/);
+});
+
+test("no accepted-findings registry: the hook says the registry, not 'scanned nothing' (#283)", async () => {
+  await withFixture(async ({ home, roots }) => {
+    // The CLI also scans the global CLAUDE.md (the hook does not), so with one present the CLI's scan
+    // succeeds and reaches the registry check, which is the live case. Root empty, no registry set.
+    await writeFile(path.join(home, ".claude", "CLAUDE.md"), "# global\n");
+    // Empty root, empty state dir, no registry configured: `rules check` itself reports "did not run".
+    const { ctx } = runHook({ home, roots });
+    assert.match(ctx, /RULES CHECK did not run at .*accepted-findings registry is unavailable/, ctx.slice(-500));
+    assert.doesNotMatch(ctx, /scanned nothing/);
+  });
 });

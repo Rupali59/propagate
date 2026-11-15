@@ -1644,7 +1644,15 @@ async function rulesCmd() {
     const { computeCensus, writeCensus, writeDidNotRun, censusRan } = await import("./lib/rules/census-cache.mjs");
     try {
       const census = await computeCensus();
-      if (censusRan(census)) writeCensus(census);
+      // The CLI's own "did not run" verdict, recorded with the reason it prints. A registry problem
+      // leaves findings standing (#219), so it only voids a census that found nothing to stand on:
+      // otherwise the hook would blame "no CLAUDE.md" for what is a missing registry.
+      if (
+        (res.diagnostic === "registry-missing" || res.diagnostic === "registry-broken") &&
+        census.filesScanned === 0
+      ) {
+        writeDidNotRun(`the accepted-findings registry ${res.diagnostic === "registry-missing" ? "is unavailable" : "cannot be used"}: ${res.registry.problems.join("; ")}`);
+      } else if (censusRan(census)) writeCensus(census);
       else writeDidNotRun(`no rules found (${census.diagnostic})`);
     } catch (err) {
       writeDidNotRun(err?.message ?? err);
