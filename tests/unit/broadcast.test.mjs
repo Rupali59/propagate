@@ -18,6 +18,7 @@ import { broadcastCmd } from "../../cli/broadcast.mjs";
 import { applyBroadcast, planBroadcast } from "../../lib/broadcast/new.mjs";
 import { readStatus } from "../../lib/broadcast/status.mjs";
 import { defaultModel, groupItemFields, keyComment, keyOfBody } from "../../lib/broadcast/model.mjs";
+import { appendShown, readIndex } from "../../lib/broadcast/index.mjs";
 
 const FORBIDDEN_LITERAL = ["rupali", "b"].join(".");
 const HUB = "hubowner/hub";
@@ -129,6 +130,9 @@ const io = () => {
   return { out, err, log: (s) => out.push(String(s)), error: (s) => err.push(String(s)) };
 };
 const state = () => mkdtempSync(path.join(os.tmpdir(), "bc-state-"));
+/** status with no number refreshes the index through a fetcher; a stub, so no gh runs and nothing leaves the temp state. */
+const stubFetcher = () => ({ graphql: async () => ({ search: { issueCount: 0, nodes: [] } }), rateLimit: () => ({}) });
+const statusInject = (gh, extra = {}) => ({ io: extra.io, gh, stateDirPath: state(), fetcher: stubFetcher(), broadcastOwner: "o", ...extra });
 
 const violation = (subject, reason = "Ready item is missing Goal, Model") => ({ clause: "item-fields", subject, reason });
 const goalsCheck = (violations) => async () => ({ code: violations.length ? 1 : 0, stdout: JSON.stringify({ violations }), stderr: "" });
@@ -335,7 +339,7 @@ function statusWorld({ closeChildren = [], missingChild = false } = {}) {
 test("status: 2/5 closed, with one line per child and its age", async () => {
   const { gh } = statusWorld({ closeChildren: ["o/a", "o/b"] });
   const sink = io();
-  const code = await broadcastCmd(["status", "--hub", HUB], { io: sink, gh: gh.gh, now: NOW });
+  const code = await broadcastCmd(["status", "--hub", HUB], statusInject(gh.gh, { io: sink, now: NOW }));
   assert.equal(code, 0, sink.err.join("\n"));
   const text = sink.out.join("\n");
   assert.match(text, /^Groom: 2\/5 closed$/m);
@@ -343,27 +347,74 @@ test("status: 2/5 closed, with one line per child and its age", async () => {
   assert.match(text, /o\/c#\d+  open  status not read  4d/);
 });
 
-test("status: a missing child is named and NOT counted, and a closed one is counted", () => {
+test("status: the header is COUNTED from the children's states, never from sub_issues_summary; no false missing-child line", async () => {
   const { gh, parentNum } = statusWorld({ closeChildren: ["o/a"], missingChild: true });
-  const res = readStatus({ hub: HUB, number: parentNum, gh: gh.gh, now: NOW });
+  // A summary that disagrees with the children: the header must follow the children.
+  const real = gh.gh;
+  const lying = (args, o) => {
+    const r = real(args, o);
+    if (args[0] === "api" && /issues\/\d+$/.test(args[1] ?? "")) { const j = JSON.parse(r.stdout); j.sub_issues_summary = { total: 99, completed: 98, percent_completed: 99 }; return { ...r, stdout: JSON.stringify(j) }; }
+    return r;
+  };
+  const res = readStatus({ hub: HUB, number: parentNum, gh: lying, now: NOW });
   assert.equal(res.ok, true);
   const b = res.broadcasts[0];
   assert.equal(b.completed, 1, "only the closed child counts");
-  assert.equal(b.total, 4, "the missing child is not in the total");
-  assert.deepEqual(b.missing, ["o/e"]);
+  assert.equal(b.total, 4, "four children are linked");
   assert.equal(b.children.length, 4);
+  assert.ok(b.children.every((c) => typeof c.title === "string" && c.title.length), "each child carries its title");
+  assert.ok(!("missing" in b), "the body-vs-sub-issues comparison is dropped (the scrubbed public body made it print false lines)");
+  const sink = io();
+  await broadcastCmd(["status", String(parentNum), "--hub", HUB], statusInject(gh.gh, { io: sink, now: NOW }));
+  assert.ok(!sink.out.join("\n").includes("missing child"));
+});
+
+test("status: the shown column: not shown (Nd), and shown with contexts and attended; --json carries shown and the title", async () => {
+  const { gh } = statusWorld({});
+  const dir = state();
+  const a = gh.issues["o/a"][0];
+  const row = (sid, attended) => ({ ts: "2026-11-13T00:00:00.000Z", session_id: sid, source: "startup", repo: "o/a", child: `o/a#${a.number}`, listed: true, attended, entrypoint: "cli" });
+  appendShown(dir, [row("s1", true)]);
+  appendShown(dir, [row("s2", false)]);
+  const sink = io();
+  assert.equal(await broadcastCmd(["status", "--hub", HUB], statusInject(gh.gh, { io: sink, now: NOW, stateDirPath: dir, broadcastOwner: null })), 0);
+  const text = sink.out.join("\n");
+  assert.match(text, new RegExp(`o/a#${a.number}  open  status not read  4d  shown 1d \\(2 contexts, 1 attended\\)`));
+  assert.match(text, /o\/b#\d+  open  status not read  4d  not shown \(4d\): no session with the hook has started in a folder holding this repo/);
+  const js = io();
+  await broadcastCmd(["status", "--hub", HUB, "--json"], statusInject(gh.gh, { io: js, now: NOW, stateDirPath: dir, broadcastOwner: null }));
+  const kids = JSON.parse(js.out.join("\n")).broadcasts[0].children;
+  assert.deepEqual(kids.find((c) => c.repo === "o/a").shown, { showings: 2, contexts: 2, attended: 1, lastTs: "2026-11-13T00:00:00.000Z" });
+  assert.equal(kids.find((c) => c.repo === "o/b").shown, null);
+  assert.equal(typeof kids[0].title, "string");
+});
+
+test("new --apply merges its parent into the index from the read-back; nothing else in it is touched", async () => {
+  const gh = fakeGithub({ repos: repoSet(HUB, "o/a", "o/b") });
+  const dir = state();
+  const other = { generatedAt: "2026-11-14T00:00:00.000Z", readStartedAt: "2026-11-14T00:00:00.000Z", truncated: false, parents: { "x/other#3": { title: "Other", children: [{ repo: "x/q", number: 1, title: "c", state: "open" }] } } };
+  const { writeIndex } = await import("../../lib/broadcast/index.mjs");
+  writeIndex(other, dir);
+  const bodyFile = path.join(state(), "body.md");
+  writeFileSync(bodyFile, "do it\n\nDone when: done");
+  const code = await broadcastCmd(["new", "--title", "T", "--goal", "G3", "--to", "o/a,o/b", "--body-file", bodyFile, "--apply"], { io: io(), gh: gh.gh, hub: HUB, stateDirPath: dir, activeGoals: () => null });
+  assert.equal(code, 0);
+  const idx = readIndex(dir);
+  assert.deepEqual(Object.keys(idx.parents).sort(), [`${HUB}#100`, "x/other#3"]);
+  assert.deepEqual(idx.parents[`${HUB}#100`].children.map((c) => c.repo).sort(), ["o/a", "o/b"]);
+  assert.deepEqual(idx.parents["x/other#3"], other.parents["x/other#3"]);
 });
 
 test("status: a gh failure is exit 2, never 0", async () => {
   const sink = io();
-  const code = await broadcastCmd(["status", "--hub", HUB], { io: sink, gh: fakeGithub({ repos: repoSet(HUB), failStatus: true }).gh });
+  const code = await broadcastCmd(["status", "--hub", HUB], statusInject(fakeGithub({ repos: repoSet(HUB), failStatus: true }).gh, { io: sink }));
   assert.equal(code, 2);
   assert.match(sink.err.join("\n"), /could not read GitHub/);
 });
 
 test("status with no broadcast reads as a result, not an error", async () => {
   const sink = io();
-  const code = await broadcastCmd(["status", "--hub", HUB], { io: sink, gh: fakeGithub({ repos: repoSet(HUB) }).gh });
+  const code = await broadcastCmd(["status", "--hub", HUB], statusInject(fakeGithub({ repos: repoSet(HUB) }).gh, { io: sink }));
   assert.equal(code, 0);
   assert.match(sink.out.join("\n"), /no open broadcast/);
 });
@@ -382,8 +433,50 @@ test("childGoal: each child serves the goal its items carry; --goal only as a fa
   // Literals: the snapshot shape day open writes.
   const snap = { "o/a#1": { goal: "G2" }, "o/a#2": { goal: "G2" }, "o/a#3": { goal: "G1" }, "o/b#9": { goal: "Parked" }, "o/c#4": { goal: "G3" }, "o/c#5": { goal: "G1" } };
   assert.equal(childGoal("o/a", [{ n: 1 }, { n: 2 }, { n: 3 }], snap, "G1"), "G2", "the majority goal, not the --goal stamped on everything");
-  assert.equal(childGoal("o/b", [{ n: 9 }], snap, "G1"), "G1", "parked or goal-less items fall back to --goal");
-  assert.equal(childGoal("o/z", [{ n: 1 }], {}, "G1"), "G1", "no snapshot falls back");
+  assert.equal(childGoal("o/b", [{ n: 9 }], snap, "G1"), null, "parked or goal-less items: no evidence, so null, never the hub goal (review 3)");
+  assert.equal(childGoal("o/z", [{ n: 1 }], {}, "G1"), null, "no snapshot: null");
   assert.equal(childGoal("o/c", [{ n: 4 }, { n: 5 }], snap, "G1"), "G1", "a tie that includes the fallback keeps it");
   assert.equal(childGoal("o/c", [{ n: 4 }, { n: 5 }], snap, "G9"), "G1", "a tie without it is decided by the lowest id, never by map order");
+});
+
+// ── the goal fallback (review 3, 20) ───────────────────────────────────────
+
+const toBody = () => {
+  const f = path.join(state(), "body.md");
+  writeFileSync(f, "do the thing\n\nDone when: it is done");
+  return f;
+};
+
+test("goal: a --to child with no evidence gets Goal unset, in the dry run, the body and the board write", async () => {
+  const gh = fakeGithub({ repos: repoSet(HUB, "o/a") });
+  const sink = io();
+  assert.equal(await broadcastCmd(["new", "--title", "T", "--goal", "G3", "--to", "o/a", "--body-file", toBody()], { io: sink, gh: gh.gh, hub: HUB, stateDirPath: state(), activeGoals: () => null }), 0);
+  const text = sink.out.join("\n");
+  assert.match(text, /^    Goal: not set$/m);
+  assert.ok(!/Goal=/.test(text), "no Goal= board field in the plan");
+  assert.ok(!text.includes("goal null"), "the body never says (goal null)");
+  const apply = io();
+  assert.equal(await broadcastCmd(["new", "--title", "T", "--goal", "G3", "--to", "o/a", "--body-file", toBody(), "--apply"], { io: apply, gh: gh.gh, hub: HUB, stateDirPath: state(), activeGoals: () => null }), 0, apply.err.join("\n"));
+  const edits = gh.calls.filter((c) => c[0] === "project" && c[1] === "item-edit").map((c) => c[c.indexOf("--field-id") + 1]);
+  assert.deepEqual(edits, ["F-pri", "F-mod"], "a stub records no Goal write");
+});
+
+test("goal: a child workspace with exactly one active goal gets that goal; two active goals leave it unset", async () => {
+  const gh = fakeGithub({ repos: repoSet(HUB, "o/a", "o/b") });
+  const sink = io();
+  const activeGoals = (repo) => (repo === "o/a" ? ["G2"] : ["G1", "G2"]);
+  assert.equal(await broadcastCmd(["new", "--title", "T", "--goal", "G3", "--to", "o/a,o/b", "--body-file", toBody(), "--json"], { io: sink, gh: gh.gh, hub: HUB, stateDirPath: state(), activeGoals }), 0);
+  const plan = JSON.parse(sink.out.join("\n"));
+  assert.equal(plan.children.find((c) => c.repo === "o/a").goal, "G2");
+  assert.equal(plan.children.find((c) => c.repo === "o/b").goal, null);
+});
+
+test("goal: --from goals-check with no item evidence no longer takes the hub goal", async () => {
+  const gh = fakeGithub({ repos: repoSet(HUB, "o/a") });
+  const sink = io();
+  assert.equal(await broadcastCmd(["new", "--title", "T", "--goal", "G3", "--from", "goals-check", "--json"], { io: sink, gh: gh.gh, hub: HUB, stateDirPath: state(), snapshotItems: {}, activeGoals: () => null, goalsCheck: goalsCheck([violation("o/a#1")]) }), 0);
+  const plan = JSON.parse(sink.out.join("\n"));
+  assert.equal(plan.children[0].goal, null);
+  assert.match(plan.children[0].body, /^Part of the broadcast "T"\./, "the grooming body names no goal when none is set");
+  assert.ok(!plan.children[0].body.includes("goal null"));
 });

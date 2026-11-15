@@ -734,7 +734,7 @@ test("open sessions: a reader failure prints the code line once and every goal's
 test("dayCmd open: the sessions reader is injected, called once, and never moves the exit code (ok, empty, failing, throwing)", async () => {
   const run = async (sessions) => {
     const o = out();
-    const code = await dayCmd(["open"], { goalFiles: GOALS, out: o.fn, now: NOW, fetcher: fetcher(goalStore()), samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions });
+    const code = await dayCmd(["open"], { goalFiles: GOALS, out: o.fn, now: NOW, fetcher: fetcher(goalStore()), samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions, broadcastOwner: null });
     return { code, text: o.lines.join("\n") };
   };
   const real = process.env.PROPAGATE_CLAUDE_BIN;
@@ -754,7 +754,7 @@ test("dayCmd open: the sessions reader is injected, called once, and never moves
     }
     assert.match((await run(() => { throw new Error("kaboom"); })).text, /sessions: could not read \(SESSION_READER_FAILED: kaboom\)/);
     const j = out();
-    await dayCmd(["open", "--json"], { goalFiles: GOALS, out: j.fn, now: NOW, fetcher: fetcher(goalStore()), samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions: () => G1_SESSIONS(liveSession()) });
+    await dayCmd(["open", "--json"], { goalFiles: GOALS, out: j.fn, now: NOW, fetcher: fetcher(goalStore()), samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions: () => G1_SESSIONS(liveSession()), broadcastOwner: null });
     assert.deepEqual(Object.keys(JSON.parse(j.lines.join("\n")).goalBlocks[0].sessions), ["live", "uncovered"]);
   } finally {
     if (real === undefined) delete process.env.PROPAGATE_CLAUDE_BIN;
@@ -895,4 +895,50 @@ test("every GraphQL query this module builds defines exactly the fragments it sp
   }
   assert.equal(pages, GROUPS.length);
   assert.ok(GROUPS.length >= 6, "the group list went blind");
+});
+
+// ── propagate#267: day open refreshes the broadcast index through the SAME fetcher, counted ─────────────────────────
+
+test("dayCmd open: ONE extra graphql search writes the broadcast index and is counted in the GraphQL-calls line", async () => {
+  const { mkdtempSync, existsSync, readFileSync } = await import("node:fs");
+  const dir = mkdtempSync(path.join((await import("node:os")).tmpdir(), "day-bidx-"));
+  const mk = () => {
+    const f = fetcher(goalStore());
+    const inner = f.graphql;
+    f.searches = 0;
+    f.graphql = async (q) => {
+      if (q.includes("search(type:ISSUE")) {
+        f.searches++;
+        f.graphqlCalls--; // the fake counts every call; keep its count to the board reads only
+        return { search: { issueCount: 1, nodes: [{ number: 7, title: "Retro", repository: { nameWithOwner: "acme/hub" }, subIssues: { totalCount: 1, nodes: [{ number: 11, title: "c", state: "OPEN", repository: { nameWithOwner: "acme/alpha" } }] } }] } };
+      }
+      return inner(q);
+    };
+    return f;
+  };
+  const run = async (inject) => {
+    const o = out();
+    const code = await dayCmd(["open"], { goalFiles: GOALS, out: o.fn, now: NOW, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions: () => ({ ok: true, view: { sessions: [] } }), ...inject });
+    return { code, text: o.lines.join("\n") };
+  };
+  const skipped = mk();
+  const base = await run({ fetcher: skipped, broadcastOwner: null });
+  assert.equal(skipped.searches, 0, "broadcastOwner: null skips the search");
+  const f = mk();
+  const r = await run({ fetcher: f, broadcastOwner: "acme", stateDirPath: dir });
+  assert.equal(f.searches, 1, "one search");
+  assert.equal(r.code, base.code, "the exit code does not move");
+  const calls = (t) => Number(/GraphQL calls made by this command: (\d+)/.exec(t)[1]);
+  assert.equal(calls(r.text), calls(base.text) + 1, "the search is counted in the GraphQL-calls line");
+  assert.ok(existsSync(path.join(dir, "broadcast", "index.json")));
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(path.join(dir, "broadcast", "index.json"), "utf8")).parents), ["acme/hub#7"]);
+  // a failing search is a note, never an exit code, and the old index stays
+  const bad = mk();
+  const g = bad.graphql;
+  bad.graphql = async (q) => { if (q.includes("search(type:ISSUE")) throw new Error("HTTP 502"); return g(q); };
+  const before = readFileSync(path.join(dir, "broadcast", "index.json"), "utf8");
+  const rb = await run({ fetcher: bad, broadcastOwner: "acme", stateDirPath: dir });
+  assert.equal(rb.code, base.code);
+  assert.match(rb.text, /note: broadcast index search failed: HTTP 502; the local broadcast index is unchanged/);
+  assert.equal(readFileSync(path.join(dir, "broadcast", "index.json"), "utf8"), before);
 });

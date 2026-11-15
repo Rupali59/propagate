@@ -1,7 +1,9 @@
 /**
  * day.mjs — `propagate day open [--json]` and `propagate day close [--apply] [--json]` (propagate#240).
  *
- * open is read-only. close is a dry-run unless --apply, which writes only promotions and closure fixes.
+ * open is read-only on GitHub; its local writes are the dispatch snapshot and, through ONE `fetcher.graphql` search, the
+ * broadcast index (propagate#267: the open children the SessionStart hook shows; counted in the GraphQL-calls line,
+ * and a failed refresh is a note that leaves the old index). close is a dry-run unless --apply, which writes only promotions and closure fixes.
  * The usage-widget and GitHub plumbing is cli/sprint.mjs's (loadWidget, ghFetcher); nothing is re-implemented.
  * Exit: open 0 enough, 1 short or over, 2 cannot judge; close 0 proposed/applied, 1 read-back mismatch, 2 could not compute.
  */
@@ -15,6 +17,9 @@ import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose } from "../l
 import { parseGoalsFile } from "../lib/report/goals.mjs";
 import { discoverBacklogFiles } from "../lib/report/backlog.mjs";
 import { ghFetcher, loadWidget } from "./sprint.mjs";
+import { hubOwnerOf } from "./broadcast.mjs";
+import { refreshIndex, writeIndex } from "../lib/broadcast/index.mjs";
+import { stateDir } from "../lib/core/paths.mjs";
 import { fold } from "../lib/sessions/assoc.mjs";
 import { fail } from "../lib/sessions/errors.mjs";
 import { readLive } from "../lib/sessions/live.mjs";
@@ -29,6 +34,21 @@ export function readSessions(now) {
     return { ok: true, view: buildView(live, fold(), loadContext()) };
   } catch (e) {
     return fail("SESSION_ASSOC_UNREADABLE", `could not read the session associations (${e.message})`, "run propagate sessions");
+  }
+}
+
+/** One search through the same fetcher; counted. `inject.broadcastOwner === null` skips it. Never moves the exit code. */
+async function refreshBroadcastIndex(r, { fetcher, now, inject }) {
+  const owner = inject.broadcastOwner === undefined ? hubOwnerOf() : inject.broadcastOwner;
+  if (!owner) return;
+  r.graphqlCalls++;
+  const res = await refreshIndex({ fetcher, owner, now });
+  if (!res.ok) return void r.notes.push(`${res.error}; the local broadcast index is unchanged`);
+  try {
+    writeIndex(res.index, inject.stateDirPath ?? stateDir(), { prune: true });
+    if (res.index.truncated) r.notes.push("broadcast index truncated: more than 50 broadcasts or 100 sub-issues in one");
+  } catch (e) {
+    r.notes.push(`broadcast index not written (${e.message})`);
   }
 }
 
@@ -88,6 +108,7 @@ export async function dayCmd(args, inject = {}) {
       sessions = { ok: false, code: "SESSION_READER_FAILED", what: e.message };
     }
     const r = await buildDayOpen({ sessions, sampleRows: rows, now, widget, widgetMissing, fetcher, goalFiles, laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows });
+    if (r.exit !== 2) await refreshBroadcastIndex(r, { fetcher, now, inject });
     if (json) out(JSON.stringify(r, null, 2));
     else for (const line of renderDayOpen(r)) out(line);
     return r.exit;
