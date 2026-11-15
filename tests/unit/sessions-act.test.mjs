@@ -594,3 +594,13 @@ test("runClaude refuses the real claude under the test runner when PROPAGATE_CLA
     else process.env.PROPAGATE_CLAUDE_BIN = saved;
   }
 });
+
+test("stop and rm: an ambiguous name repeats the command that was run, with pid:<n> (#277)", async () => {
+  for (const verb of ["stop", "rm"]) {
+    const stub = makeStub(fresh(), { agents: [BG({ id: "bbbb1111", name: "dup", pid: 7001 }), BG({ id: "cccc2222", name: "dup", pid: 7002, sessionId: "22222222-aaaa-4aaa-8aaa-222222222222" })] });
+    const t = await run([verb, "dup", "--json"], { state: fresh(), stub });
+    assert.equal(t.json.code, "SESSION_AMBIGUOUS");
+    assert.match(t.json.next, new RegExp(`^propagate sessions ${verb} pid:700[12]`), t.json.next);
+    assert.deepEqual(stub.acts(), [], "nothing acted");
+  }
+});

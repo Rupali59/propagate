@@ -5,23 +5,83 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 
-import { decide, HEAVY } from "../../hooks/background-guard.mjs";
+import { decide, HEAVY, networkPatterns } from "../../hooks/background-guard.mjs";
+import { COMMANDS } from "../../lib/core/commands.mjs";
 
 const HOOK = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "hooks", "background-guard.mjs");
 const main = (command, extra = {}) => ({ tool_name: "Bash", tool_input: { command, ...extra } });
 const sub = (command, extra = {}) => ({ tool_name: "Bash", agent_id: "agent-abc123", agent_type: "general-purpose", tool_input: { command, ...extra } });
 
-test("the heavy list has a floor, and every entry matches its own example (a blind list denies nothing)", () => {
+test("the heavy list has a floor, and every entry matches its own example (a blind list denies nothing)", async () => {
   assert.ok(HEAVY.length >= 5, `only ${HEAVY.length} heavy entries: the list has gone empty, it has not found nothing`);
   for (const h of HEAVY) {
     assert.ok(h.label && h.example, `entry ${JSON.stringify(h.label)} lacks a label or example`);
-    const d = decide(main(h.example));
+    const d = await decide(main(h.example));
     assert.equal(d.deny, true, `heavy entry "${h.label}" does not deny its own example "${h.example}"`);
     assert.match(d.reason, /run_in_background: true/);
-    assert.equal(decide(main(h.example, { run_in_background: true })).deny, false, `"${h.label}" must pass when backgrounded`);
-    assert.equal(decide(sub(h.example, { timeout: 600000 })).deny, false, `"${h.label}" must pass in a subagent foreground (rule 4)`);
+    assert.equal((await decide(main(h.example, { run_in_background: true }))).deny, false, `"${h.label}" must pass when backgrounded`);
+    assert.equal((await decide(sub(h.example, { timeout: 600000 }))).deny, false, `"${h.label}" must pass in a subagent foreground (rule 4)`);
   }
+});
+
+// ── the network commands are DERIVED from COMMANDS, never listed here (propagate#224, rule:derive-dont-curate) ──
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+test("the derivation has a floor, and every network command is denied in the foreground, in both spellings", async () => {
+  const NETWORK = await networkPatterns();
+  assert.ok(NETWORK.length >= 5, `only ${NETWORK.length} network commands are marked in lib/core/commands.mjs: the derivation has gone blind, it has not found nothing`);
+  for (const [name, c] of Object.entries(COMMANDS).filter(([, c]) => c.network === true)) {
+    for (const spelling of [`propagate ${name}`, `node /x/propagate/cli.mjs ${name} --json`, `FOO=1 propagate ${name}`]) {
+      const d = await decide(main(spelling));
+      assert.equal(d.deny, true, `network command "${name}" is not denied in the foreground: ${spelling}`);
+      assert.equal((await decide(main(spelling, { run_in_background: true }))).deny, false, `"${spelling}" must pass backgrounded`);
+      assert.equal((await decide(sub(spelling, { timeout: 600000 }))).deny, false, `"${spelling}" must pass in a subagent foreground`);
+    }
+    assert.equal((await decide(main(`git commit -m "propagate ${name}"`))).deny, false, `a quoted mention of "${name}" must not count`);
+    for (const f of c.offline ?? []) assert.equal((await decide(main(`propagate ${name} ${f}`))).deny, false, `"${name} ${f}" skips GitHub and must pass`);
+  }
+  assert.equal((await decide(main("propagate goals check-done"))).deny, false, "goals check-done is not goals check");
+});
+
+test("a command that cannot name propagate never loads COMMANDS (the hook runs on every Bash call)", async () => {
+  let loads = 0;
+  const load = async () => { loads++; return COMMANDS; };
+  for (const c of ["git status", "npm run lint", "ls -la", "npm test", "node --test tests/x.test.mjs"]) await decide(main(c), load);
+  assert.equal(loads, 0, "COMMANDS was loaded for a command that names neither propagate nor cli.mjs");
+  assert.equal((await decide(main("propagate broadcast new"), load)).deny, true);
+  assert.equal(loads, 1, "a propagate command must load COMMANDS exactly once (the counter proves the test can see a load)");
+});
+
+// A module that calls GitHub, whose command is not marked, is the broadcast case. The scan is: for each cli/<word>.mjs,
+// its own text plus the relative modules it imports one level deep; a hit means <word> must have a network entry.
+const GH_CALL = /\bghFetcher\b|\bmakeGh\b|\bdefaultGh\b|\brefreshTrackers\b|broadcast\/gh\.mjs|spawnSync\(\s*gh\b|\bgraphql\b/;
+// Exempt, with the reason: `ui` is a long-lived server whose gh refresh is a click-driven side path, never a foreground run.
+const NOT_A_RUN = new Map([["ui", "a server, started once and left running"]]);
+const reachesGh = (file) => {
+  const text = readFileSync(file, "utf8");
+  if (GH_CALL.test(text)) return true;
+  for (const m of text.matchAll(/from\s+["'](\.[^"']+\.mjs)["']/g)) {
+    const dep = path.resolve(path.dirname(file), m[1]);
+    if (existsSync(dep) && GH_CALL.test(readFileSync(dep, "utf8"))) return true;
+  }
+  return false;
+};
+
+test("a cli module that reaches GitHub has its command marked network (mutation: unmark broadcast new and this goes red)", () => {
+  const files = readdirSync(path.join(ROOT, "cli")).filter((f) => f.endsWith(".mjs"));
+  const hits = files.filter((f) => reachesGh(path.join(ROOT, "cli", f)));
+  assert.ok(hits.length >= 4, `only ${hits.length} of ${files.length} cli modules were found to reach GitHub: the scan has gone blind`);
+  for (const f of hits) {
+    const word = f.replace(/\.mjs$/, "");
+    if (NOT_A_RUN.has(word)) continue;
+    const entries = Object.entries(COMMANDS).filter(([n]) => n.split(" ")[0] === word);
+    assert.ok(entries.length, `cli/${f} reaches GitHub but no COMMANDS entry starts with "${word}"`);
+    assert.ok(entries.some(([, c]) => c.network === true), `cli/${f} reaches GitHub but none of ${entries.map(([n]) => `"${n}"`).join(", ")} is marked network: true in lib/core/commands.mjs`);
+  }
+  // `broadcast` is the case that shipped the defect: its two subcommands must each be marked, not just one.
+  for (const n of ["broadcast new", "broadcast status"]) assert.equal(COMMANDS[n]?.network, true, `"${n}" must be marked network: true`);
 });
 
 const DENY = [
@@ -64,14 +124,14 @@ const ALLOW = [
 ];
 
 for (const [input, why] of DENY) {
-  test(`denies: ${input.agent_id ? "[subagent] " : ""}${input.tool_input.command} ${JSON.stringify({ ...input.tool_input, command: undefined })}`, () => {
-    const d = decide(input);
+  test(`denies: ${input.agent_id ? "[subagent] " : ""}${input.tool_input.command} ${JSON.stringify({ ...input.tool_input, command: undefined })}`, async () => {
+    const d = await decide(input);
     assert.equal(d.deny, true, "expected a deny");
     assert.match(d.reason, why);
   });
 }
 for (const [input, why] of ALLOW) {
-  test(`allows: ${why}`, () => assert.deepEqual(decide(input), { deny: false }));
+  test(`allows: ${why}`, async () => assert.deepEqual(await decide(input), { deny: false }));
 }
 
 const run = (stdin) => spawnSync(process.execPath, [HOOK], { input: stdin, encoding: "utf8" });

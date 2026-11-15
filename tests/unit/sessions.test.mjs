@@ -342,7 +342,7 @@ test("assoc --from with a null goal refuses SESSION_GOAL_UNKNOWN and writes noth
   const state = fresh();
   const t = await run(["assoc", "pid:101", "--from", "o/repo-a#9"], { state, snapshot: SNAP(null) });
   assert.equal(t.code, 1);
-  assert.match(t.err[0], /^SESSION_GOAL_UNKNOWN: .* Next: pass --goal G<n> --item o\/repo-a#9, or run propagate day open$/);
+  assert.match(t.err[0], /^SESSION_GOAL_UNKNOWN: .* Next: pass --goal G<n> \(propagate sessions assoc <id> --from o\/repo-a#9 --goal G<n>\), or run propagate day open$/);
   assert.equal(fold(state).byKey.size, 0, "no association was written");
 });
 
@@ -383,8 +383,34 @@ test("assoc --goal --item takes no snapshot; --from with --goal is a usage error
   assert.equal((await run(["assoc", "pid:101", "--goal", "G3", "--item", "o/b#2"], { state, snapshot: null })).code, 0);
   assert.equal(fold(state).byKey.get(`interactive:${SHARED}:101`).assoc.item, "o/b#2", "latest association wins");
   assert.equal(fold(state).byKey.get(`interactive:${SHARED}:101`).history.length, 2, "both stay in history");
-  const both = await run(["assoc", "pid:101", "--from", "o/a#1", "--goal", "G1", "--json"], { state });
-  assert.equal(both.json.code, "SESSION_USAGE");
+  const both = await run(["assoc", "pid:101", "--from", "o/a#1", "--item", "o/a#1", "--json"], { state });
+  assert.equal(both.json.code, "SESSION_USAGE", "--from with --item stays refused");
+});
+
+test("assoc --from --goal: the explicit goal wins and no snapshot entry is needed (#277)", async () => {
+  const state = fresh();
+  const t = await run(["assoc", "pid:101", "--from", "o/nosnap#5", "--goal", "G2", "--json"], { state, snapshot: null });
+  assert.equal(t.code, 0, JSON.stringify(t.json));
+  const a = fold(state).byKey.get(`interactive:${SHARED}:101`).assoc;
+  assert.equal(a.goal, "G2");
+  assert.equal(a.item, "o/nosnap#5");
+  // the snapshot's own goal does not override an explicit one
+  const s2 = await run(["assoc", "pid:102", "--from", "o/repo-a#9", "--goal", "G7", "--json"], { state, snapshot: SNAP("G3") });
+  assert.equal(s2.code, 0);
+  assert.equal(s2.json.associated.goal, "G7");
+});
+
+test("assoc --from with no derivable goal names --from X --goal G<n> in its next (#277)", async () => {
+  const t = await run(["assoc", "pid:101", "--from", "o/repo-a#9"], { snapshot: SNAP(null) });
+  assert.match(t.err[0], /Next: pass --goal G<n> \(propagate sessions assoc <id> --from o\/repo-a#9 --goal G<n>\)/);
+});
+
+test("assoc: an ambiguous <id> names `assoc`, not `show`, in its next (#277)", async () => {
+  const t = await run(["assoc", SHARED, "--goal", "G3", "--item", "o/a#1", "--json"]);
+  assert.equal(t.json.code, "SESSION_AMBIGUOUS");
+  assert.match(t.json.next, /^propagate sessions assoc aaaaaaaa {2}\(or pid:101\)$/);
+  const dup = await run(["assoc", "same-name", "--goal", "G3", "--item", "o/a#1"]);
+  assert.match(dup.err[0], /Next: propagate sessions assoc pid:103/);
 });
 
 test("usage errors are SESSION_USAGE, exit 2, with a next command", async () => {

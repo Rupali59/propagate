@@ -610,7 +610,7 @@ Which Claude Code sessions are live, in which folder, on which goal and item. Li
 ```
 propagate sessions [--json]
 propagate sessions show <id|name> [--json]
-propagate sessions assoc <id> (--from owner/repo#n | --goal G<n> --item owner/repo#n) [--json]
+propagate sessions assoc <id> (--from owner/repo#n [--goal G<n>] | --goal G<n> --item owner/repo#n) [--json]
 propagate sessions new (--from owner/repo#n | <folder> --goal G<n> --item owner/repo#n) [--name <n>] [--again] [--apply] [--json]
 propagate sessions stop <id|name> [--force] [--apply] [--json]
 propagate sessions rm <id|name> [--apply] [--json]
