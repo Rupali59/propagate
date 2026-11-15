@@ -5876,6 +5876,9 @@ if (_invokedDirectly) {
   } else if (mode === "goals") {
     const { goalsCmd } = await import("./cli/goals.mjs");
     process.exitCode = await goalsCmd(process.argv.slice(3));
+  } else if (mode === "standards") {
+    const { standardsCmd } = await import("./cli/standards.mjs");
+    process.exitCode = await standardsCmd(process.argv.slice(3));
   } else if (mode === "services") {
     const { servicesCmd } = await import("./cli/services.mjs");
     process.exitCode = await servicesCmd(process.argv.slice(3));
