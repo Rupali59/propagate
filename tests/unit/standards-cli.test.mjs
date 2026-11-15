@@ -112,3 +112,46 @@ test("standards versions with no cache says so, exit 0", async () => {
   assert.equal(r.code, 0);
   assert.equal(JSON.parse(r.out).versions, null);
 });
+
+test("F3: --project naming nothing is exit 2 STANDARDS_UNKNOWN_PROJECT", async () => {
+  const h = hub();
+  const r = await run(["--json", "--project", "nope"], { integrations: h.integrations, units: h.units });
+  assert.equal(r.code, 2);
+  assert.equal(JSON.parse(r.out).code, "STANDARDS_UNKNOWN_PROJECT");
+});
+
+test("F4: JSON and text both state how many sidecars were read", async () => {
+  const h = hub();
+  const sidecars = [{ workspace: "acme-ws", project: "p0", file: "/x/.sidecar.yml", error: "unreadable sidecar: boom" }];
+  const j = JSON.parse((await run(["--json"], { integrations: h.integrations, units: h.units, sidecars })).out);
+  assert.equal(j.sidecars_scanned, 1);
+  assert.equal(j.sidecars_unreadable[0].reason, "unreadable sidecar: boom");
+  const t = await run([], { integrations: h.integrations, units: h.units, sidecars });
+  assert.match(t.out, /1 sidecar\(s\) read, 1 unreadable/);
+  assert.match(t.out, /unreadable sidecar \/x\/\.sidecar\.yml: unreadable sidecar: boom/);
+});
+
+test("F5: --refresh with no probes is exit 2 STANDARDS_NO_PROBES and leaves versions.json untouched", async () => {
+  const h = hub();
+  writeFileSync(path.join(h.dir, "standards.yml"), "schema_version: 1\nstandards:\n  acme-tool:\n    kind: tool\n    page: tool/acme-tool.md\n    detect: {files: [acme.yaml]}\n");
+  const stateDirPath = tmp();
+  mkdirSync(path.join(stateDirPath, "standards"));
+  const file = path.join(stateDirPath, "standards", "versions.json");
+  const good = JSON.stringify({ at: "t", tools: { "acme-tool": { version: "1.0.0", at: "t" } } });
+  writeFileSync(file, good);
+  const r = await run(["versions", "--refresh", "--json"], { integrations: h.integrations, stateDirPath, run: () => "Acme 9.9.9" });
+  assert.equal(r.code, 2);
+  assert.equal(JSON.parse(r.out).code, "STANDARDS_NO_PROBES");
+  assert.equal(readFileSync(file, "utf8"), good);
+});
+
+test("F14: an unreadable services.yml is a reported problem for a standard that reuses a service", async () => {
+  const h = hub();
+  writeFileSync(path.join(h.dir, "standards.yml"), "schema_version: 1\nstandards:\n  acme-tool:\n    kind: tool\n    page: tool/acme-tool.md\n    service: ghost\n");
+  const svc = path.join(h.dir, "services.yml");
+  writeFileSync(svc, "schema_version: 1\nservices: [unclosed");
+  const r = await run(["--json"], { integrations: { ...h.integrations, servicesFile: svc }, units: h.units });
+  const j = JSON.parse(r.out);
+  assert.equal(r.code, 1);
+  assert.ok(j.problems.some((p) => /services\.yml could not be read/.test(p)));
+});

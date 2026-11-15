@@ -58,7 +58,7 @@ function readSidecars(workspaces) {
       if (!existsSync(file)) continue;
       const { sidecar, error } = readSidecar(file);
       const wsName = ws.name ?? path.basename(ws.root);
-      if (error) out.push({ workspace: wsName, project: name, file, standards: "unreadable sidecar: " + error });
+      if (error) out.push({ workspace: wsName, project: name, file, error: `unreadable sidecar: ${error}` });
       else out.push({ workspace: wsName, project: sidecar?.project ?? name, file, standards: sidecar?.standards });
     }
   }
@@ -103,6 +103,7 @@ export async function standardsCmd(argv = [], inject = {}) {
   if (loaded.standards.some((s) => s.service && !s.detect) && integrations.servicesFile) {
     const sv = loadServices(integrations.servicesFile);
     if (sv.ok) serviceDetects = Object.fromEntries(sv.services.map((s) => [s.id, s.detect]));
+    else loaded.problems.push(`services.yml could not be read, so standards that reuse a service's detect read nothing: ${sv.reason}`);
   }
   const report = buildStandardsReport({
     standards: loaded.standards,
@@ -116,16 +117,21 @@ export async function standardsCmd(argv = [], inject = {}) {
     serviceDetects,
     problems: loaded.problems,
   });
+  if (report.unknownProject) return emitFailure(fail("STANDARDS_UNKNOWN_PROJECT", `no project named ${JSON.stringify(report.unknownProject)} among the scanned units or sidecars (known: ${report.known.join(", ")})`, "propagate standards"), asJson, io);
   if (!report.ok) return emitFailure(fail("STANDARDS_BLIND", report.blind, "check PROPAGATE_WORKSPACES and the workspace roots, then re-run"), asJson, io);
   const code = report.problems.length ? 1 : 0;
   if (asJson) {
     io.log(JSON.stringify(report, null, 2));
     return code;
   }
-  io.log(`# standards  (offline; ${report.units_scanned} unit(s) scanned, floor ${report.floor})`);
+  io.log(`# standards  (offline; ${report.units_scanned} unit(s) scanned, floor ${report.floor}; ${report.sidecars_scanned} sidecar(s) read, ${report.sidecars_unreadable.length} unreadable)`);
+  for (const u of report.sidecars_unreadable) io.log(`  unreadable sidecar ${u.file}: ${u.reason}`);
   for (const s of report.standards) {
     const c = s.counts;
-    io.log(`\n${s.id}  ${s.kind}  ${s.detected.length} detected, ${s.adopted.length} adopted  version in use: ${s.versionInUse ?? "unknown"}${s.versionSource ? ` (${s.versionSource})` : ""}`);
+    io.log(`\n${s.id}  ${s.kind}  ${s.detected.length} detected, ${s.adopted.length} adopted  version source: ${s.versionSource ?? "none"}`);
+    const pc = s.projectCounts;
+    io.log(`  projects: ${pc.verified} verified, ${pc["re-verify"]} re-verify, ${pc.unverifiable} unverifiable, ${pc.unchecked} unchecked`);
+    for (const pr of s.projects) for (const x of pr.units) io.log(`    ${pr.workspace}/${x.unit}  ${x.version ?? "unknown"}  (${x.source ?? "no version source"})`);
     io.log(`  rows: ${c.verified} verified, ${c["re-verify"]} re-verify, ${c.unverifiable} unverifiable, ${c.unchecked} unchecked`);
     for (const r of s.rows) io.log(`  ${r.id}  ${r.status}${r.reason ? `  (${r.reason})` : ""}`);
   }
@@ -147,6 +153,7 @@ async function versionsCmd(rest, inject, io, asJson) {
     if (!loaded.ok) return emitFailure(loaded, asJson, io);
     const probes = {};
     for (const s of loaded.standards) if (s.probe && typeof s.probe === "object") probes[s.page?.versionProbe ?? s.id] = s.probe;
+    if (Object.keys(probes).length === 0) return emitFailure(fail("STANDARDS_NO_PROBES", "no registry entry declares a probe, so there is nothing to refresh and the cache is left as it was", "add `probe: {cmd, args, parse}` to a standard in standards.yml"), asJson, io);
     versions = refreshVersions({ probes, run: inject.run });
     writeVersions(dir, versions);
   }

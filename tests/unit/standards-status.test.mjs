@@ -59,7 +59,7 @@ test("a newer machine version from the cache makes the row re-verify", () => {
   const versions = { at: "2026-11-15T00:00:00Z", tools: { "acme-tool": { version: "1.3.0", at: "2026-11-15T00:00:00Z" } } };
   const r = buildStandardsReport({ standards: [std([row(1)])], units: fakeUnits(12, 1), sidecars: [], versions, now: 0 });
   assert.equal(r.standards[0].rows[0].status, "re-verify");
-  assert.equal(r.standards[0].versionSource, "machine");
+  assert.equal(r.standards[0].versionSource, "probe");
 });
 
 test("a project lockfile version wins over the machine version", () => {
@@ -135,4 +135,59 @@ kind: tool
   assert.ok(l.problems.some((p) => /other-001/.test(p) && /acme-tool-<nnn>/.test(p)));
   assert.ok(l.problems.some((p) => /Checked/.test(p) && /YYYY-MM-DD/.test(p)));
   assert.ok(l.problems.some((p) => /broken/.test(p)));
+});
+
+// ── fix round 1 ──────────────────────────────────────────────────────────────
+
+test("F1: a global standard detects only units with code, not none or unknown toolchains", () => {
+  const units = fakeUnits(12, 0).map((u, i) => ({ ...u, toolchain: i < 8 ? "npm" : i < 10 ? "none" : "unknown" }));
+  const g = { id: "acme-glob", kind: "global", detect: null, page: { rows: [] } };
+  const r = buildStandardsReport({ standards: [g], units, sidecars: [], versions: null, now: 0 });
+  assert.equal(r.standards[0].detected.length, 8);
+});
+
+test("F2: version in use is per unit, order-independent, with each source named", () => {
+  const units = fakeUnits(12, 2);
+  const lock = (u, v) => writeFileSync(path.join(u.abs, "pubspec.lock"), `sdks:\n  acme-tool: ">=${v}"\n`);
+  lock(units[0], "1.9.0"); // newer than the row's 1.2.0
+  lock(units[1], "1.1.0");
+  const s = std([row(1)]);
+  const a = buildStandardsReport({ standards: [s], units, sidecars: [], versions: null, now: 0 });
+  const b = buildStandardsReport({ standards: [s], units: [...units].reverse(), sidecars: [], versions: null, now: 0 });
+  assert.deepEqual(a.standards[0], b.standards[0], "unit order must not change the result");
+  const sd = a.standards[0];
+  assert.equal(sd.projects.find((p) => p.project === "p0").rows[0].status, "re-verify");
+  assert.equal(sd.projects.find((p) => p.project === "p1").rows[0].status, "verified");
+  assert.equal(sd.rows[0].status, "re-verify", "standard level shows the worst");
+  assert.equal(sd.projectCounts["re-verify"], 1);
+  assert.equal(sd.projectCounts.verified, 1);
+  assert.match(sd.projects[0].units[0].source, /^lockfile: .*pubspec\.lock$/);
+});
+
+test("F2: a unit with no lockfile falls back to the machine probe and names it", () => {
+  const versions = { at: "t", tools: { "acme-tool": { version: "1.2.5", at: "t" } } };
+  const r = buildStandardsReport({ standards: [std([row(1)])], units: fakeUnits(12, 1), sidecars: [], versions, now: 0 });
+  assert.equal(r.standards[0].projects[0].units[0].source, "probe: acme-tool");
+});
+
+test("F3: a project naming nothing is reported unknown, not zero", () => {
+  const r = buildStandardsReport({ standards: [std([row(1)])], units: fakeUnits(12, 1), sidecars: [], versions: null, now: 0, project: "nope" });
+  assert.equal(r.ok, false);
+  assert.equal(r.unknownProject, "nope");
+});
+
+test("F4: the report counts the sidecars it read and lists unreadable ones with the reason", () => {
+  const sidecars = [{ workspace: "w", project: "p0", file: "/a/.sidecar.yml" }, { workspace: "w", project: "p1", file: "/b/.sidecar.yml", error: "unreadable sidecar: bad yaml" }];
+  const r = buildStandardsReport({ standards: [std([row(1)])], units: fakeUnits(12, 1), sidecars, versions: null, now: 0 });
+  assert.equal(r.sidecars_scanned, 2);
+  assert.deepEqual(r.sidecars_unreadable, [{ file: "/b/.sidecar.yml", reason: "unreadable sidecar: bad yaml" }]);
+  assert.ok(r.problems.some((p) => p.includes("/b/.sidecar.yml") && p.includes("bad yaml")), "reason is verbatim, not 'must be a mapping'");
+  assert.ok(!r.problems.some((p) => /must be a mapping/.test(p)));
+});
+
+test("F14/F15: a service reference with no usable detect is a problem, never every-unit", () => {
+  const g = { id: "acme-glob", kind: "global", service: "ghost", detect: null, page: { rows: [] } };
+  const r = buildStandardsReport({ standards: [g], units: fakeUnits(12, 0).map((u) => ({ ...u, toolchain: "npm" })), sidecars: [], versions: null, now: 0, serviceDetects: null });
+  assert.equal(r.standards[0].detected.length, 0);
+  assert.ok(r.problems.some((p) => /acme-glob/.test(p) && /ghost/.test(p)));
 });
