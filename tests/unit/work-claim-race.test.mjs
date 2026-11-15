@@ -12,6 +12,9 @@ import { spawn } from "node:child_process";
 import { openDb } from "../../lib/work/db.mjs";
 import { enqueueInTx } from "../../lib/work/queue.mjs";
 
+// I4: any entry point that falls back to the real state dir fails loudly (ENOTDIR) instead of touching it.
+process.env.PROPAGATE_STATE_DIR = "/dev/null/work-tests-pass-a-dir";
+
 const QUEUE_URL = new URL("../../lib/work/queue.mjs", import.meta.url).href;
 const DB_URL = new URL("../../lib/work/db.mjs", import.meta.url).href;
 
@@ -37,14 +40,11 @@ const claimSpin = () => {
 // "plain" is production's path: the default busy timeout, no spin and no retry; a locked error must reach here.
 const claimOnce = () => claim({ kind: "evaluate", session }, { db });
 const fs = await import("node:fs");
-if (mode === "hold") {
-  // The parent takes a write lock only once both children have opened (their open migrates under a lock too), so the
-  // barrier is a file, not a time: a slow child start cannot make the hold land before its open.
-  fs.writeFileSync(dir + "/ready-" + session, "");
-  while (!fs.existsSync(dir + "/go")) { /* wait for the parent */ }
-} else {
-  while (Date.now() < Number(startAt)) { /* the shared barrier */ }
-}
+// Every mode uses a ready/go handshake, never a clock: a child that starts late under load must not miss the start. The
+// parent releases both only once both have opened (their open migrates under a lock too), and in "hold" mode it takes
+// its write lock first.
+fs.writeFileSync(dir + "/ready-" + session, "");
+while (!fs.existsSync(dir + "/go")) { /* wait for the parent */ }
 const ids = [];
 for (let i = 0; i < 50; i++) {
   const it = SPIN ? claimSpin() : claimOnce();
@@ -74,19 +74,18 @@ async function round(mode = "spin", hold) {
   }
   db.exec("COMMIT");
   db.close();
-  const startAt = Date.now() + 600;
-  // A leaked lock: held from the moment both children are ready until they give up.
+  const startAt = 0; // unused by the children: the barrier is the ready/go handshake below
   const holder = hold ? openDb(dir).db : null;
-  const lock = async () => {
+  const release = async () => {
     const until = Date.now() + 30_000;
     while (!(fs.existsSync(path.join(dir, "ready-A")) && fs.existsSync(path.join(dir, "ready-B")))) {
       if (Date.now() > until) throw new Error("children never became ready");
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 5));
     }
-    holder.exec("BEGIN IMMEDIATE");
+    if (holder) holder.exec("BEGIN IMMEDIATE"); // a leaked lock: held from the moment both children are ready until they give up
     fs.writeFileSync(path.join(dir, "go"), "");
   };
-  const locked = holder ? lock() : null;
+  const locked = release();
   const [a, b] = await Promise.all([run(dir, "A", startAt, mode), run(dir, "B", startAt, mode)]).finally(() => holder?.close());
   await locked;
   const check = openDb(dir);

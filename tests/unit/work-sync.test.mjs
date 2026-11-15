@@ -12,7 +12,10 @@ import { spawnSync } from "node:child_process";
 import { canonicalUrl, firstUrl } from "../../lib/work/canonical.mjs";
 import { KINDS, syncKind } from "../../lib/work/sync.mjs";
 import { openDb } from "../../lib/work/db.mjs";
-import { enqueue, claim, ack, release, list, expire } from "../../lib/work/queue.mjs";
+import { enqueue, enqueueInTx, claim, ack, release, list, expire } from "../../lib/work/queue.mjs";
+
+// I4: any entry point that falls back to the real state dir fails loudly (ENOTDIR) instead of touching it.
+process.env.PROPAGATE_STATE_DIR = "/dev/null/work-tests-pass-a-dir";
 
 const DB_URL = new URL("../../lib/work/db.mjs", import.meta.url).href;
 const QUEUE_URL = new URL("../../lib/work/queue.mjs", import.meta.url).href;
@@ -67,6 +70,10 @@ test("canonicalUrl R20: markdown parens, owner-only github, gist not collapsed, 
   assert.equal(canonicalUrl("https://github.com/Acme"), "github.com/acme");
   assert.equal(canonicalUrl("https://gist.github.com/Acme/AbC123"), "gist.github.com/Acme/AbC123");
   assert.equal(canonicalUrl("https://www.Example.com/Page"), "example.com/Page");
+  // I2: a markdown link whose text is a URL, and a url that legitimately ends in a balanced paren
+  assert.equal(canonicalUrl("[https://github.com/Acme/Tool](https://github.com/Acme/Tool)"), "github.com/acme/tool");
+  assert.equal(canonicalUrl("see https://en.wikipedia.org/wiki/Foo_(bar) for it"), "en.wikipedia.org/wiki/Foo_(bar)");
+  assert.equal(canonicalUrl("(see https://en.wikipedia.org/wiki/Foo_(bar))"), "en.wikipedia.org/wiki/Foo_(bar)");
 });
 
 test("canonicalUrl C9a: non-github keeps the path case, drops query, fragment and trailing slash; two paths differ", () => {
@@ -207,6 +214,49 @@ test("sync R1: a parked item with no label stays parked; with the label seen and
   assert.equal(r.unparked, 1);
   assert.equal(items(dir)[0].state, "pending");
   assert.equal(items(dir)[0].parked_label_seen, 0);
+});
+
+test("sync I3: a parked item past its ttl whose issue is open and unlabelled stays parked, refusals unchanged", () => {
+  const dir = tmp(), c = clock();
+  const o = { stateDirPath: dir, now: c.now };
+  const open = [issue(1, "https://a.example/x")];
+  sync(dir, makeStub({ issues: open }), c);
+  for (const s of ["A", "B"]) { const g = claim({ kind: "evaluate", session: s }, o); release(g.id, { session: s, token: g.token, refusal: true }, o); }
+  const before = items(dir)[0];
+  assert.equal(before.state, "parked");
+  c.t += 30 * DAY + 1;
+  const r = sync(dir, makeStub({ issues: open }), c);
+  assert.deepEqual([r.expired, r.enqueued], [0, 0]);
+  const after = items(dir);
+  assert.equal(after.length, 1);
+  assert.equal(after[0].state, "parked");
+  assert.equal(after[0].refusals, before.refusals);
+});
+
+test("default ids do not collide when many items are enqueued in one millisecond", () => {
+  const dir = tmp();
+  const { db } = openDb(dir);
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    for (let i = 0; i < 20000; i++) enqueueInTx(db, { kind: "evaluate", scope: REPO, dedupe_key: `evaluate:k${i}`, payload: {} }, { now: () => 5_000_000 });
+    db.exec("COMMIT");
+    assert.equal(db.prepare("SELECT COUNT(DISTINCT id) AS n FROM work_items").get().n, 20000);
+  } finally { db.close(); }
+});
+
+test("sync I1: a 999-issue re-sync is fast (the apply was quadratic and held the write lock for seconds)", () => {
+  const dir = tmp(), c = clock();
+  const many = Array.from({ length: 999 }, (_, i) => issue(i + 1, `https://bulk.example/${i}`));
+  const gh = makeStub({ issues: many });
+  assert.equal(sync(dir, gh, c).enqueued, 999);
+  c.t += 1000;
+  const t0 = Date.now();
+  const r = sync(dir, gh, c);
+  const ms = Date.now() - t0;
+  assert.equal(r.skipped, 999);
+  // Measured 147 ms after, 26,030 ms before. 1000 ms is a generous bound that still separates them under load: anything
+  // near busy_timeout (5000 ms) means claims would fail during the apply.
+  assert.ok(ms < 1000, `re-sync of 999 issues took ${ms} ms`);
 });
 
 test("sync: an issue carrying the parked label is skipped and never enqueued", () => {

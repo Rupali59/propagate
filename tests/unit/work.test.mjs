@@ -350,6 +350,9 @@ import {
   DEFAULT_TTL_MS,
 } from "../../lib/work/queue.mjs";
 
+// I4: any entry point that falls back to the real state dir fails loudly (ENOTDIR) instead of touching it.
+process.env.PROPAGATE_STATE_DIR = "/dev/null/work-tests-pass-a-dir";
+
 const clock = (t0 = 1_000_000) => { const c = { t: t0, now: () => c.t }; return c; };
 const mk = () => { const dir = tmp(); const c = clock(); return { dir, c, o: { stateDirPath: dir, now: c.now } }; };
 const item = (key, extra = {}) => ({ kind: "evaluate", scope: "acme/hub", dedupe_key: key, payload: { n: 1 }, ttlMs: 10 * LEASE_MS, ...extra });
@@ -383,7 +386,7 @@ test("queue: the default ttl and the default id shape", () => {
   const { o, c } = mk();
   const { item: it } = enqueue({ kind: "evaluate", dedupe_key: "k1" }, o);
   assert.equal(it.expires_at, c.t + DEFAULT_TTL_MS);
-  assert.match(it.id, /^w_[0-9a-z]+_[0-9a-f]{6}$/);
+  assert.match(it.id, /^w_[0-9a-z]+_[0-9a-f]{12}$/);
   assert.equal(it.scope, null);
   const x = enqueue({ kind: "evaluate", dedupe_key: "k2", newId: () => "w_fixed" }, o);
   assert.equal(x.item.id, "w_fixed");
@@ -644,16 +647,25 @@ test("queue: unpark of a missing id is WORK_NOT_FOUND, of a non-parked item WORK
 
 test("R17 guard: no work test file uses the shared state dir (floor: files scanned)", () => {
   const unitDir = path.join(ROOT, "tests", "unit");
-  const files = fs.readdirSync(unitDir).filter((f) => /^work.*\.test\.mjs$/.test(f));
-  const FLOOR = 3; // work, work-claim-race and work-sync; raise it as work-cli lands (the plan's floor of 4 holds once Task 4 is in)
-  assert.ok(files.length >= FLOOR, `only ${files.length} work test files found, the scan has gone blind`);
+  const files = fs.readdirSync(unitDir).filter((f) => /^work(-[\w-]+)?\.test\.mjs$/.test(f));
+  // The real number of work test files, named so a stray match (workspace-resolve, worktrees) cannot satisfy it. Task 4 adds
+  // work-cli and raises this to 4.
+  const EXPECTED = ["work-claim-race.test.mjs", "work-sync.test.mjs", "work.test.mjs"];
+  assert.ok(files.length >= 3, `only ${files.length} work test files found, the scan has gone blind`);
+  assert.deepEqual([...files].sort(), EXPECTED, "the work test files are not the expected set: update EXPECTED with the new file");
   const shared = ["propagate", "test", "state"].join("-"); // built, so this guard does not match itself
   for (const f of files) {
     const src = fs.readFileSync(path.join(unitDir, f), "utf8");
     assert.ok(!src.includes(shared), `${f} uses the shared state dir`);
+    assert.ok(src.includes('process.env.PROPAGATE_STATE_DIR = "/dev/null/'), `${f} does not set the unwritable state-dir sentinel`);
     // a call with no dir falls back to the real state dir (no-argument openDb, list with no opts); comments are not calls
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     const bare = [...code.matchAll(/\bopenDb\(\s*\)|(?<![.\w])list\(\s*(?:\{[^{}]*\})?\s*\)/g)].map((m) => m[0]);
     assert.deepEqual(bare, [], `${f} calls openDb or list without a state dir`);
   }
+});
+
+test("R17 runtime guard: with the sentinel state dir, an entry point that forgets its dir fails loudly", () => {
+  assert.match(process.env.PROPAGATE_STATE_DIR, /^\/dev\/null\//);
+  assert.throws(() => Reflect.apply(openDb, null, []),/ENOTDIR|not a directory|EACCES|ENOENT|WORK_/i);
 });
