@@ -26,7 +26,6 @@
  */
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { COMMANDS } from "../lib/core/commands.mjs";
 
 export const TIMEOUT_MS = 120000;
 
@@ -39,8 +38,8 @@ const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * is covered by marking it in lib/core/commands.mjs; nothing here is edited (propagate#224, rule:derive-dont-curate).
  * `offline` flags (backlog --offline) exempt a call. The test asserts a floor and that every module calling gh is marked.
  */
-export const NETWORK = Object.freeze(
-  Object.entries(COMMANDS)
+export const networkFrom = (commands) => Object.freeze(
+  Object.entries(commands)
     .filter(([, c]) => c.network === true)
     .map(([name, c]) => {
       const off = (c.offline ?? []).map(escapeRe);
@@ -55,6 +54,18 @@ export const NETWORK = Object.freeze(
 );
 
 /**
+ * LAZY: the hook runs on every Bash call and importing COMMANDS cost ~57 ms, so it is imported only when the command text
+ * could name a propagate command. `load` is injectable so a test can prove a plain command never triggers it.
+ */
+const NAMES_PROPAGATE = /\b(?:propagate|cli\.mjs)\b/;
+let cached;
+const defaultLoad = async () => (await import("../lib/core/commands.mjs")).COMMANDS;
+export async function networkPatterns(load = defaultLoad) {
+  if (load === defaultLoad) return (cached ??= networkFrom(await load()));
+  return networkFrom(await load());
+}
+
+/**
  * The EXPLICIT EXCEPTIONS: heavy commands that are not a network `propagate` subcommand, so COMMANDS cannot express
  * them. `example` is a command that must match, so a test can iterate the list and assert the floor.
  */
@@ -66,7 +77,8 @@ const EXCEPTIONS = [
   { label: "make-public --check", re: new RegExp(START + String.raw`.*\bmake-public\b.*--check\b`), example: "node cli.mjs make-public repo --check" },
 ];
 
-export const HEAVY = Object.freeze([...EXCEPTIONS, ...NETWORK]);
+/** The literal exceptions only; the derived network patterns come from `networkPatterns()`. */
+export const HEAVY = Object.freeze(EXCEPTIONS);
 
 const stripQuotes = (s) => s.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, " ");
 
@@ -80,13 +92,14 @@ function shellBackground(command) {
   return bare.includes("&") ? "&" : null;
 }
 
-const heavyMatch = (command) => {
+const heavyMatch = async (command, load) => {
   const segs = stripQuotes(command).split(/&&|\|\||;|\||\n/).map((s) => s.trim());
-  return HEAVY.find((h) => segs.some((s) => h.re.test(s)));
+  const hit = (list) => list.find((h) => segs.some((s) => h.re.test(s)));
+  return hit(HEAVY) ?? (NAMES_PROPAGATE.test(command) ? hit(await networkPatterns(load)) : undefined);
 };
 
 /** @returns {{deny: boolean, reason?: string}} */
-export function decide(input) {
+export async function decide(input, load = defaultLoad) {
   if (input?.tool_name !== "Bash") return { deny: false };
   const ti = input.tool_input ?? {};
   const command = String(ti.command ?? "");
@@ -101,7 +114,7 @@ export function decide(input) {
   if (!isSub && !bg) {
     const timeout = Number(ti.timeout);
     if (timeout >= TIMEOUT_MS) return { deny: true, reason: `a foreground timeout of ${timeout} ms (>= ${TIMEOUT_MS}) holds the turn: re-run with run_in_background: true (rule:background-long-runs)` };
-    const h = heavyMatch(command);
+    const h = await heavyMatch(command, load);
     if (h) return { deny: true, reason: `\`${h.label}\` takes minutes: re-run with run_in_background: true and keep working; the harness re-invokes you on exit (rule:background-long-runs)` };
   }
   return { deny: false };
@@ -110,7 +123,7 @@ export function decide(input) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const input = JSON.parse(readFileSync(0, "utf8") || "{}");
-    const d = decide(input);
+    const d = await decide(input);
     if (d.deny) {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
