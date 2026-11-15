@@ -737,14 +737,14 @@ Exit 0 = ok; 1 = refused; 2 = could not run (usage, a store that cannot be read,
 
 ### `work prune`
 
-`work_events` is append-only **except** `work prune --apply`. It deletes `acked` and `expired` items, and their events, whose **last event** is older than `--older-than` days (default 180; the item's `created` is not its age). It never touches `pending`, `claimed` or `parked` items, of any age. Without `--apply` it is a dry run that writes nothing; both forms print and `--json`-report the counts (`items`, `events`). Two consequences to know before applying:
+`work_events` is append-only **except** `work prune --apply`. It deletes the events of `acked` and `expired` items whose **last event** is older than `--older-than` days (default 180; the item's `created` is not its age). An `expired` item's row goes too; an `acked` row stays as a tombstone. It never touches `pending`, `claimed` or `parked` items, of any age. Without `--apply` it is a dry run that changes no row; both forms print and `--json`-report the counts (`items`, `events`). One consequence to know before applying:
 
-- **A pruned `acked` item frees its dedupe key.** If its issue is still open, the next `sync` queues it again. Close the issue first.
-- **A stale token after a prune.** Prune deletes the events that record which token a session held, so a late `ack` with an old token on a pruned item reads `WORK_NOT_FOUND`, and on a re-claimed item may read `WORK_NOT_CLAIMANT` where it would have read `WORK_LEASE_EXPIRED`.
+- **An acked row is never deleted** (R22 overrides C9b), so its dedupe key stays held and acked work is never re-queued, however old.
+- **A stale token after a prune.** Prune deletes the events that record which token a session held, so a late `ack` on an item whose row was removed (an expired one) reads `WORK_NOT_FOUND`. A late ack with the right token on a still-held acked row stays `already: true`.
 
 ### Known limits (stated, not built)
 
-- **A reopened issue after ack is not re-queued.** The acked item still holds the dedupe key, by design. To redo the work, `work prune` the acked item (once its age allows), or file a new issue.
+- **A reopened issue after ack is not re-queued.** The acked item still holds the dedupe key, by design, and prune never removes it. A requeue path is not built; to redo the work, file a new issue.
 - **A backup restore without `queue.db-wal` loses rows silently.** In WAL mode the recent writes live in the `-wal` file until a checkpoint; restoring `queue.db` alone returns an older, consistent-looking database. No cheap detector exists. Back up the three files together, or none.
 - **The store is recreated empty if the file is lost** (the `created_now` line is the only sign).
 

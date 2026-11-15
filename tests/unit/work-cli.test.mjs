@@ -296,16 +296,16 @@ test("prune: the dry run leaves every table byte-identical; --apply removes exac
   assert.deepEqual([...dry.json.ids].sort(), [ids.oldAcked, exp].sort());
   assert.equal(snapshot(dir), before, "a dry run must not change any table");
   const txt = await cli(["prune"], { stateDirPath: dir });
-  assert.match(txt.out, /^dry run: would remove 2 /);
+  assert.match(txt.out, /^dry run: would remove 1 expired items and \d+ events /);
   assert.equal(snapshot(dir), before);
 
   const real = await cli(["prune", "--apply", "--json"], { stateDirPath: dir });
   assert.equal(real.code, 0, real.err);
   assert.equal(real.json.dry_run, false);
-  assert.equal(real.json.items, 2);
+  assert.equal(real.json.items, 1, "only the expired row is deleted; the acked row is a tombstone (R22)");
   assert.ok(real.json.events >= 4, "the removed events are counted");
   const left = (await cli(["list", "--json"], { stateDirPath: dir })).json.items.map((i) => i.id).sort();
-  assert.deepEqual(left, [ids.longLived, ids.oldPending, ids.oldClaimed].sort());
+  assert.deepEqual(left, [ids.oldAcked, ids.longLived, ids.oldPending, ids.oldClaimed].sort(), "the old acked row stays as a tombstone");
   // the survivors keep their events
   const { db } = openDb(dir);
   try {
@@ -330,9 +330,71 @@ test("prune: an item created 200 days ago and acked yesterday survives a 180-day
 
 test("prune: a bad --older-than is exit 2 WORK_USAGE", async () => {
   const dir = tmp();
-  for (const v of ["abc", "-3"]) {
+  for (const v of ["abc", "-3", "", " "]) {
     const r = await cli(["prune", "--older-than", v, "--json"], { stateDirPath: dir });
     assert.equal(r.code, 2, v);
     assert.equal(r.json.code, "WORK_USAGE");
   }
+});
+
+test("prune keeps acked rows as tombstones (R22): a re-sync enqueues nothing and a late ack stays already:true", async () => {
+  const dir = tmp();
+  let clock = T0;
+  const inj = { stateDirPath: dir, gh: stub([issue(7, "see https://example.com/seven")]), now: () => clock };
+  assert.equal((await cli(["sync", "--kind", "evaluate", "--hub", "acme/hub", "--json"], inj)).json.enqueued, 1);
+  const c = await cli(["claim", "--kind", "evaluate", "--json"], inj);
+  const { id, token } = c.json.item;
+  assert.equal((await cli(["ack", id, "--token", token], inj)).code, 0);
+  clock = T0 + 200 * DAY;
+  const p = await cli(["prune", "--apply", "--json"], inj);
+  assert.equal(p.code, 0, p.err);
+  assert.equal(p.json.items, 0);
+  const s = await cli(["sync", "--kind", "evaluate", "--hub", "acme/hub", "--json"], inj);
+  assert.equal(s.json.enqueued, 0, "the dedupe key is still held");
+  const l = await cli(["list", "--json"], inj);
+  assert.deepEqual(l.json.items.map((i) => [i.id, i.state]), [[id, "acked"]]);
+  const late = await cli(["ack", id, "--token", token, "--json"], inj);
+  assert.equal(late.code, 0);
+  assert.equal(late.json.already, true);
+});
+
+test("a prune dry run leaves an existing store byte-identical on disk, including the file header (M1)", async () => {
+  const dir = tmp();
+  await seed(dir);
+  const file = path.join(dir, "work", "queue.db");
+  const bytes = () => fs.readFileSync(file);
+  const before = bytes();
+  const r = await cli(["prune", "--json"], { stateDirPath: dir });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(before.equals(bytes()), "queue.db changed under a dry run");
+});
+
+test("list: a too-new store is WORK_STORE_TOO_NEW; a 0-byte file is initialised like a missing one (M2)", async () => {
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, "work"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "work", "queue.db"), "");
+  const fresh = await cli(["list", "--json"], { stateDirPath: dir });
+  assert.equal(fresh.code, 0, fresh.err);
+  assert.equal(fresh.json.created_now, true);
+  const { db } = openDb(dir);
+  db.exec("PRAGMA user_version = 99");
+  db.close();
+  const newer = await cli(["list", "--json"], { stateDirPath: dir });
+  assert.equal(newer.code, 2);
+  assert.equal(newer.json.code, "WORK_STORE_TOO_NEW");
+  assert.ok(!/propagate work list/.test(newer.json.next), "next must not point at itself");
+});
+
+test("a non-busy SQLite error is WORK_STORE_UNREADABLE and does not tell the user to wait (M3)", async () => {
+  const dir = tmp();
+  await seed(dir);
+  const wrapped = (d, opts) => {
+    const o = openDb(d, opts);
+    const real = o.db;
+    return { ...o, db: { exec: (sql) => { if (sql.startsWith("BEGIN")) throw Object.assign(new Error("disk I/O error"), { code: "ERR_SQLITE_ERROR", errcode: 10 }); return real.exec(sql); }, prepare: (s) => real.prepare(s), close: () => real.close() } };
+  };
+  const r = await cli(["claim", "--kind", "evaluate", "--json"], { stateDirPath: dir, openDb: wrapped });
+  assert.equal(r.code, 2);
+  assert.equal(r.json.code, "WORK_STORE_UNREADABLE");
+  assert.ok(!/wait/i.test(r.json.next), "a corrupt-store error must not suggest waiting");
 });

@@ -58,11 +58,19 @@ function parse(sub, rest) {
 /** A lost lock is a raw node:sqlite error (SQLITE_BUSY from BEGIN or COMMIT): never surface it raw. */
 function typed(e) {
   if (e instanceof WorkError) return e;
-  if (e && (e.code === "ERR_SQLITE_ERROR" || /database is locked|SQLITE_BUSY|database table is locked/i.test(String(e.message)))) {
+  const busy = e && (e.errcode === 5 || e.errcode === 6 || /database is locked|SQLITE_BUSY|database table is locked/i.test(String(e.message)));
+  if (busy) {
     return new WorkError(
       "WORK_STORE_UNREADABLE",
-      `the queue database is locked or unreadable: ${e.message}`,
+      `the queue database is locked: ${e.message}`,
       "wait for the other propagate process to finish, then re-run; if it keeps failing, check for a stuck process holding queue.db",
+    );
+  }
+  if (e && e.code === "ERR_SQLITE_ERROR") {
+    return new WorkError(
+      "WORK_STORE_UNREADABLE",
+      `the queue database returned an error: ${e.message}`,
+      "check the file is an intact SQLite database (`file <state dir>/work/queue.db`), or set PROPAGATE_STATE_DIR elsewhere",
     );
   }
   return null;
@@ -128,8 +136,17 @@ async function run(sub, pos, flags, inject, io, asJson) {
       // WAL readers do not wait on a writer, so list still answers while a claim holds the lock.
       warnings = assertStoreSafe(stateDirPath);
       const ro = openDbReadOnly(stateDirPath);
-      if (!ro.db) fail("WORK_STORE_UNREADABLE", `cannot read the queue: ${ro.reason}`, "check the store with `propagate work list` after other propagate processes finish, or set PROPAGATE_STATE_DIR elsewhere");
-      handle = ro.db;
+      if (ro.db) handle = ro.db;
+      else if (ro.reason === "store too new") {
+        fail("WORK_STORE_TOO_NEW", `${dbPath(stateDirPath)} is a newer schema than this propagate understands`, "upgrade propagate, or point PROPAGATE_STATE_DIR at another directory");
+      } else if (ro.reason === "store not initialised") {
+        const o = open(stateDirPath, { busyMs: inject.busyMs }); // a v0 or 0-byte file: initialise it like a missing one
+        handle = o.db;
+        createdNow = o.created_now;
+        warnings = o.warnings;
+      } else {
+        fail("WORK_STORE_UNREADABLE", `cannot read the queue: ${ro.reason}`, "check the file is a SQLite database (`file <state dir>/work/queue.db`), or set PROPAGATE_STATE_DIR elsewhere");
+      }
     } else {
       const o = open(stateDirPath, { busyMs: inject.busyMs });
       handle = o.db;
@@ -195,11 +212,15 @@ async function run(sub, pos, flags, inject, io, asJson) {
         return out({ item: publicItem(item) }, [`unparked ${item.id}`], warnings);
       }
       case "prune": {
-        const days = flags["--older-than"] === undefined ? DEFAULT_PRUNE_DAYS : Number(flags["--older-than"]);
+        const raw = flags["--older-than"];
+        if (raw !== undefined && !/^\d+(\.\d+)?$/.test(raw)) {
+          fail("WORK_USAGE", `--older-than needs a number of days, got "${raw}"`, "propagate work prune --older-than 180");
+        }
+        const days = raw === undefined ? DEFAULT_PRUNE_DAYS : Number(raw);
         const r = prune(db, { olderThanDays: days, apply: flags["--apply"] === true }, { now });
         const text = r.dry_run
-          ? [`dry run: would remove ${r.items} acked/expired items and ${r.events} events older than ${days} days`, "re-run with --apply to delete them"]
-          : [`removed ${r.items} acked/expired items and ${r.events} events older than ${days} days`];
+          ? [`dry run: would remove ${r.items} expired items and ${r.events} events (of acked and expired items) older than ${days} days`, "re-run with --apply to delete them"]
+          : [`removed ${r.items} expired items and ${r.events} events (of acked and expired items) older than ${days} days`];
         return out(r, text, warnings);
       }
       default:
