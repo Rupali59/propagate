@@ -204,14 +204,14 @@ let drift = "";
 try {
   // READ, NEVER SCAN (#283). The inline scan cost 24-27 s per session start; `propagate rules check`
   // now writes the census this reads (lib/rules/census-cache.mjs). No cache is a one-line notice.
-  const { readCensus, formatDrift } = await import("../lib/rules/census-cache.mjs");
+  const { readCensus, renderCensus } = await import("../lib/rules/census-cache.mjs");
   const cached = readCensus();
   if (!cached) {
     drift =
       `\n\n⚠️  RULES CHECK not computed: no cached census. Run \`propagate rules check\` to write it; ` +
       `the restatement scan is no longer run at session start (#283). This is not "no drift".`;
   } else {
-    drift = formatDrift(cached.census);
+    drift = renderCensus(cached);
   }
 } catch (err) {
   drift = `\n\n⚠️  RULES CHECK did not run: ${err?.message ?? err}. Nothing was checked.`;

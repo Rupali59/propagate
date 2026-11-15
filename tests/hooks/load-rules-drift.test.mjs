@@ -232,3 +232,38 @@ test("hook latency: median over 10 real runs adds under 300 ms over bare node st
     assert.ok(added < 300, `hook adds ${added.toFixed(0)} ms over bare node (hook median ${median(hook).toFixed(0)}, bare ${median(bare).toFixed(0)})`);
   });
 });
+
+test("a check that DID NOT RUN records that, never a count (#283)", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "load-rules-home-"));
+  const roots = await mkdtemp(path.join(tmpdir(), "load-rules-roots-"));
+  try {
+    // A rule with an id but no fingerprint is inert: the hook counts the file, the scanner has no rules.
+    await mkdir(path.join(home, ".claude", "rules"), { recursive: true });
+    await writeFile(path.join(home, ".claude", "rules", "inert.md"), "---\nid: inert\nscope: global\nstatus: active\n---\n\nbody\n");
+    await writeFile(path.join(roots, "CLAUDE.md"), "# P\n");
+    const { ctx } = runHook({ home, roots });
+    assert.match(ctx, /RULES CHECK did not run at \d{4}-\d\d-\d\dT/, ctx.slice(-400));
+    assert.doesNotMatch(ctx, /rules census from/, "a run that did not happen must not carry a census age");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(roots, { recursive: true, force: true });
+  }
+});
+
+test("a census that scanned nothing renders as a blind scan, never clean (#283)", async () => {
+  await withFixture(async ({ home, roots }) => {
+    const { ctx } = runHook({ home, roots }); // root exists, holds no CLAUDE.md
+    assert.match(ctx, /RULES CHECK scanned nothing/, ctx.slice(-400));
+    assert.match(ctx, /blind scan/);
+  });
+});
+
+test("census age is always shown, and past 24 h it says it may be stale (injected clock)", async () => {
+  const { renderCensus } = await import("../../lib/rules/census-cache.mjs");
+  const at = "2026-11-15T00:00:00.000Z";
+  const rec = { status: "ran", at, census: { diagnostic: "ok", missing: [], filesScanned: 5, failing: [], acceptedCount: 0, stale: [] } };
+  const t = (h) => new Date(Date.parse(at) + h * 3600e3);
+  assert.match(renderCensus(rec, t(3)), /rules census from 3h ago\._/);
+  assert.doesNotMatch(renderCensus(rec, t(3)), /stale/);
+  assert.match(renderCensus(rec, t(30)), /from 30h ago — may be stale: run propagate rules check/);
+});
