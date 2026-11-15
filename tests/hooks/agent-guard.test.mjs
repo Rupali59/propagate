@@ -46,6 +46,11 @@ const WRITES = [
   "git log && git commit -m sneaky",
   "git log; rm -rf /",
   "cat $(touch x)",
+  // a lone `&` and process substitution both start a second command (found by the cleaner session, 2026-11-15)
+  "ls & rm x",
+  "ls&rm x",
+  "cat <(rm x)",
+  "diff <(ls) >(rm x)",
 ];
 
 test("every write command is denied for each read-only agent, in both name forms", () => {

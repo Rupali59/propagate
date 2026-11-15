@@ -9,7 +9,7 @@
  * the subagent" on every tool event.
  *
  * AN ALLOWLIST, FAILING CLOSED. For an agent in READ_ONLY, a Bash command is allowed only if every segment
- * (split on && || ; |) starts with a known read command, and no segment redirects into a file. Anything not
+ * (split on && || ; | & and newlines) starts with a known read command, and no segment redirects into a file. Anything not
  * recognised is denied with its reason. A denylist would let the first unanticipated writer through; this lets
  * the first unanticipated reader be denied, which costs one report line.
  *
@@ -89,7 +89,9 @@ export function decide(input) {
   if (/>/.test(redirect.replace(/'[^']*'|"[^"]*"/g, ""))) return { deny: true, reason: "a `>` redirection writes a file" };
   if (/\btee\b/.test(command)) return { deny: true, reason: "`tee` writes a file" };
   if (/\$\(|`/.test(command.replace(/'[^']*'/g, ""))) return { deny: true, reason: "command substitution cannot be checked" };
-  for (const seg of command.split(/&&|\|\||;|\||\n/)) {
+  if (/[<>]\(/.test(command.replace(/'[^']*'/g, ""))) return { deny: true, reason: "process substitution cannot be checked" };
+  // A lone `&` backgrounds one command and starts the next, so it separates segments too. `2>&1` is not one.
+  for (const seg of command.replace(/\d?>&\d/g, "").split(/&&|\|\||;|\||\n|&/)) {
     const p = segmentProblem(seg);
     if (p) return { deny: true, reason: p };
   }
