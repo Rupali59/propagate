@@ -54,7 +54,7 @@ function skillJoinTargets(src) {
 
 test("hooks/ contains the hooks the plugin ships", () => {
   const names = hookFiles().map((f) => path.basename(f)).sort();
-  assert.deepEqual(names, ["agent-guard.mjs", "agent-nudge.mjs", "dispatch-model.mjs", "doc-authority.mjs", "gotcha-guard.mjs", "load-rules.mjs", "plan-goal.mjs", "rule-guard.mjs", "session-guide.mjs", "subagent-cost.mjs"],
+  assert.deepEqual(names, ["agent-guard.mjs", "agent-nudge.mjs", "background-guard.mjs", "dispatch-model.mjs", "doc-authority.mjs", "gotcha-guard.mjs", "load-rules.mjs", "plan-goal.mjs", "rule-guard.mjs", "session-guide.mjs", "subagent-cost.mjs"],
     "a hook was added or removed without updating this assertion");
 });
 
@@ -100,7 +100,7 @@ test("doc-authority distinguishes ABSENT from BROKEN", () => {
  * silently stop guarding every shell command while the check still passed. That is the
  * doc-authority failure shape reproduced inside the verification written to catch it.
  */
-test("hooks.json declares exactly 12 registrations, and every command resolves", () => {
+test("hooks.json declares exactly 13 registrations, and every command resolves", () => {
   const manifest = JSON.parse(readFileSync(path.join(HOOKS, "hooks.json"), "utf8"));
   const seen = [];
   for (const [event, groups] of Object.entries(manifest.hooks)) {
@@ -111,8 +111,8 @@ test("hooks.json declares exactly 12 registrations, and every command resolves",
     }
   }
 
-  assert.equal(seen.length, 12,
-    `expected 12 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
+  assert.equal(seen.length, 13,
+    `expected 13 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
       `design (Edit|Write and Bash); collapsing it to one silently stops guarding Bash.`);
   // #272: session-guide is a SessionStart registration with NO matcher, so it fires on every source (compaction included).
   const guideReg = seen.find((s) => s.event === "SessionStart" && /session-guide\.mjs/.test(s.command));
@@ -128,6 +128,10 @@ test("hooks.json declares exactly 12 registrations, and every command resolves",
   for (const tool of ["Bash", "Write", "Edit", "NotebookEdit"]) {
     assert.ok(guard.matcher.split("|").includes(tool), `agent-guard matcher must include ${tool}`);
   }
+
+  // #224: rule:background-long-runs is enforced only by this registration.
+  assert.ok(seen.some((s) => s.event === "PreToolUse" && s.matcher === "Bash" && /background-guard\.mjs/.test(s.command)),
+    "PreToolUse on Bash must run hooks/background-guard.mjs (#224)");
 
   // rule-guard's matcher must cover subagent dispatch. This is the ONLY surface on which
   // rule:model-routing is observable — an omitted `model` is an absent key in a `Agent`

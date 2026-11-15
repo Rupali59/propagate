@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "TWELVE registrations, not ten hooks. gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
+    "THIRTEEN registrations, not ten hooks. gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
     "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
@@ -133,6 +133,20 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-guard.mjs\""
+          }
+        ]
+      },
+      {
+        "_comment": [
+          "background-guard, added 2026-11-15 (#224). rule:background-long-runs made mechanical: denies a foreground",
+          "Bash call from the MAIN session with timeout >= 120000 or a heavy command, a shell `&`/nohup from any",
+          "session, and run_in_background from a subagent. Main vs subagent is the payload's agent_id. Fails open."
+        ],
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/background-guard.mjs\""
           }
         ]
       }
