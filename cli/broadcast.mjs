@@ -50,28 +50,48 @@ export function hubOwnerOf(root = HUB_ROOT) {
   return hubRepoOf(root)?.split("/")[0] ?? null;
 }
 
-/**
- * The active goals of the workspace holding `repo`'s checkout: the nearest GOALS.md above the checkout, below the hub
- * root. null when none can be found or read (never an empty guess).
- */
-function defaultActiveGoals(repo) {
-  const cache = readCheckouts();
-  const hit = cache?.checkouts.find((c) => c.repo && c.repo.toLowerCase() === repo.toLowerCase());
-  if (!hit) return null;
-  for (let d = hit.path; d !== HUB_ROOT && d !== path.dirname(d); d = path.dirname(d)) {
-    const f = path.join(d, "GOALS.md");
-    if (!existsSync(f)) continue;
-    const parsed = parseGoalsFile(f);
-    return parsed.unread ? null : parsed.entries.filter((e) => e.active).map(goalId);
+const WORKSPACE_MARKER = /^workspace:\s*true\s*(#.*)?$/m;
+
+/** The nearest ancestor of `p` (inclusive) whose .propagates.yml says `workspace: true`: the marker the sessions code reads. */
+function workspaceRootOf(p) {
+  for (let d = p; ; d = path.dirname(d)) {
+    try {
+      if (WORKSPACE_MARKER.test(readFileSync(path.join(d, ".propagates.yml"), "utf8"))) return d;
+    } catch {
+      // no marker here
+    }
+    if (d === path.dirname(d)) return null;
   }
-  return null;
+}
+
+/**
+ * The active goals of the project holding `repo`'s checkout. Every real GOALS.md lives at
+ * `<workspace>/propagation/state/<project>/GOALS.md` or `.../state/workspace/GOALS.md`, never on an ancestor of the
+ * checkout, so this resolves the workspace root and project (first path part under it) the way sessions does, and tries
+ * the project's file, then the workspace's, then the project's under the hub. null when none exists or it cannot be read.
+ */
+export function defaultActiveGoals(repo, { stateDirPath = stateDir(), hubRoot = HUB_ROOT } = {}) {
+  const hit = readCheckouts(stateDirPath)?.checkouts.find((c) => c.repo && c.repo.toLowerCase() === repo.toLowerCase());
+  if (!hit) return null;
+  const root = workspaceRootOf(hit.path);
+  if (!root) return null;
+  const rel = path.relative(root, hit.path);
+  const project = rel ? rel.split(path.sep)[0] : null;
+  const candidates = [];
+  if (project) candidates.push(path.join(root, "propagation", "state", project, "GOALS.md"));
+  candidates.push(path.join(root, "propagation", "state", "workspace", "GOALS.md"));
+  if (project && hubRoot) candidates.push(path.join(hubRoot, "propagation", "state", project, "GOALS.md"));
+  const f = candidates.find((c) => existsSync(c));
+  if (!f) return null;
+  const parsed = parseGoalsFile(f);
+  return parsed.unread ? null : parsed.entries.filter((e) => e.active).map(goalId);
 }
 
 /** The child's goal when its items carry no evidence: the workspace's single active goal, else null (Goal unset). */
 function singleActiveGoal(repo, inject) {
   let ids;
   try {
-    ids = (inject.activeGoals ?? defaultActiveGoals)(repo);
+    ids = (inject.activeGoals ?? ((r) => defaultActiveGoals(r, { stateDirPath: inject.stateDirPath ?? stateDir() })))(repo);
   } catch {
     ids = null;
   }
@@ -204,7 +224,7 @@ function mergeAfterApply(plan, res, inject, io) {
   if (!res.parent || !res.subs) return;
   try {
     const dir = inject.stateDirPath ?? stateDir();
-    const children = res.subs.map((c) => ({ repo: /\/repos\/([^/]+\/[^/]+)$/.exec(String(c.repository_url ?? ""))?.[1], number: c.number, title: String(c.title ?? ""), state: c.state === "closed" ? "closed" : "open" })).filter((c) => c.repo);
+    const children = res.subs.map((c) => ({ repo: /\/repos\/([^/]+\/[^/]+)$/.exec(String(c.repository_url ?? ""))?.[1], number: c.number, title: String(c.title ?? ""), state: c.state === "closed" ? "closed" : "open", goal: plan.children.find((p) => p.repo.toLowerCase() === /\/repos\/([^/]+\/[^/]+)$/.exec(String(c.repository_url ?? ""))?.[1]?.toLowerCase())?.goal ?? null })).filter((c) => c.repo);
     writeIndex(mergeParent(readIndex(dir), `${plan.hub}#${res.parent.number}`, { title: plan.parent.title, children }, inject.now ?? Date.now()), dir);
   } catch (e) {
     io.error(`broadcast new: the local index was not updated: ${e.message}`);
@@ -268,15 +288,23 @@ async function statusCmd(rest, inject, io) {
   const dir = inject.stateDirPath ?? stateDir();
   await updateIndex({ number, hub, res, dir, inject, io, now });
   let shown = null;
+  let shownRead = true;
   try {
     shown = foldShown(dir).byChild;
   } catch (e) {
-    io.error(`broadcast status: the shown record could not be read (${e.message}); the shown column is omitted`);
+    shownRead = false;
+    io.error(`broadcast status: the shown record could not be read (${e.message}); the shown column says "not read"`);
+  }
+  let index = null;
+  try {
+    index = readIndex(dir);
+  } catch {
+    // an unreadable index only removes the cause wording
   }
   if (rest.includes("--json")) {
-    const withShown = { ...res, broadcasts: res.broadcasts.map((b) => ({ ...b, children: b.children.map((c) => ({ ...c, shown: shown ? (shownFact(shown, c)) : null })) })) };
+    const withShown = { ...res, shownRead, broadcasts: res.broadcasts.map((b) => ({ ...b, children: b.children.map((c) => ({ ...c, shown: shown ? shownFact(shown, c) : null })) })) };
     io.log(JSON.stringify(withShown, null, 2));
-  } else for (const l of renderStatus(res, hub, { shown, now })) io.log(l);
+  } else for (const l of renderStatus(res, hub, { shown, shownRead, index, now })) io.log(l);
   return 0;
 }
 
@@ -287,6 +315,8 @@ async function updateIndex({ number, hub, res, dir, inject, io, now }) {
   try {
     if (number !== null) {
       const b = res.broadcasts[0];
+      if (!b.open) return void io.error(`broadcast status: #${number} was not merged into the index: the issue is not open`);
+      if (!b.labelled) return void io.error(`broadcast status: #${number} was not merged into the index: it has no "broadcast" label, so it is not a broadcast`);
       writeIndex(mergeParent(readIndex(dir), `${hub}#${number}`, { title: b.title, children: b.children.filter((c) => c.state === "open") }, now), dir);
       return;
     }

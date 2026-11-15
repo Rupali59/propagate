@@ -409,3 +409,19 @@ test("parity: the hook's readIndexCopy agrees with lib/broadcast/index.mjs readI
     assert.throws(() => readIndexCopy(f.state));
   }
 });
+
+test("two parents differing only in case are ONE group and write ONE row per child", () => {
+  const f = fixture(1);
+  writeIdx(f, { "acme-org/hub#7": { title: "T", children: [kid("acme-org/web", 11)] }, "Acme-Org/Hub#7": { title: "T", children: [kid("Acme-Org/Web", 11)] } });
+  const text = ctxOf(hook(f, payload(f, { cwd: path.join(f.ws, "web") })));
+  assert.equal(text.split("\n").filter((l) => l.startsWith("Broadcast:")).length, 1);
+  assert.match(text, /→ 1 here: web#11 ·/);
+  assert.equal(shownRows(f).length, 1);
+});
+
+test("a child whose board has no Goal says `goal not set` in the line; an unknown goal says nothing", () => {
+  const f = fixture(1);
+  writeIdx(f, { "acme-org/hub#7": { title: "T", children: [{ ...kid("acme-org/web", 11), goal: null }, { ...kid("acme-org/web", 12), goal: "G3" }, kid("acme-org/web", 13)] } });
+  const b = ctxOf(hook(f, payload(f, { cwd: path.join(f.ws, "web") }))).split("\n").find((l) => l.startsWith("Broadcast:"));
+  assert.match(b, /web#11 \(goal not set\), web#12, web#13 ·/);
+});

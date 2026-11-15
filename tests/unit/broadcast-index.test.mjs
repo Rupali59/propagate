@@ -31,7 +31,7 @@ test("one stubbed GraphQL search over two hubs gives both parents, with ONE call
   const r = await refreshIndex({ fetcher: f, owner: "acme", now: NOW });
   assert.equal(r.ok, true);
   assert.equal(f.queries.length, 1, "one call, whatever the number of broadcasts");
-  assert.match(f.queries[0], /is:open label:broadcast user:acme/);
+  assert.match(f.queries[0], /is:issue is:open label:broadcast user:acme/, "is:issue, so pull requests do not eat first:50");
   assert.deepEqual(Object.keys(r.index.parents).sort(), ["acme/hub-a#7", "acme/hub-b#3"]);
   assert.deepEqual(r.index.parents["acme/hub-a#7"].children.map((c) => c.repo), ["acme/alpha", "acme/beta"], "the closed child is not in the index");
   assert.equal(r.index.truncated, false);
@@ -85,7 +85,7 @@ test("the CLI: status <n> and new --apply merge into the index; status with no n
   const gh = (args) => {
     const route = args.find((x) => x.startsWith("repos/")) ?? "";
     if (/\/issues\/7\/sub_issues/.test(route)) return { status: 0, stdout: JSON.stringify([{ id: 1, number: 11, title: "child 11", state: "open", created_at: "2026-11-10T00:00:00Z", repository_url: "https://api.github.com/repos/acme/alpha" }]), stderr: "" };
-    if (/\/issues\/7$/.test(route)) return { status: 0, stdout: JSON.stringify({ number: 7, title: "Retro", body: "", state: "open" }), stderr: "" };
+    if (/\/issues\/7$/.test(route)) return { status: 0, stdout: JSON.stringify({ number: 7, title: "Retro", body: "", state: "open", labels: [{ name: "broadcast" }] }), stderr: "" };
     return { status: 1, stdout: "", stderr: `unexpected ${args.join(" ")}` };
   };
   const never = { graphql: async () => { throw new Error("status <n> must not search"); }, rateLimit: () => ({}) };
@@ -144,4 +144,39 @@ test("appendShown writes all rows in one append and names the file from the row'
   assert.equal(appendShown(dir, []), null);
   assert.ok(!existsSync(path.join(path.dirname(indexPath(dir)), "shown-2027-01.jsonl")));
   mkdirSync(path.join(dir, "x"), { recursive: true });
+});
+
+test("mixed-case keys are one parent: acme/hub#7 then Acme/Hub#7 merges, never duplicates", () => {
+  const c = (n) => ({ repo: "acme/alpha", number: n, title: "c", state: "open" });
+  const a = mergeParent(null, "acme/hub#7", { title: "R", children: [c(1)] }, NOW);
+  const b = mergeParent(a, "Acme/Hub#7", { title: "R", children: [c(1), c(2)] }, NOW);
+  assert.deepEqual(Object.keys(b.parents), ["acme/hub#7"]);
+  assert.deepEqual(b.parents["acme/hub#7"].children.map((x) => x.number), [1, 2]);
+});
+
+test("goal rides the SAME single search: the board's Goal per child, null when none, kept across a merge that does not know it", async () => {
+  const withGoal = (n, name) => ({ ...sub("acme/alpha", n), projectItems: { nodes: name ? [{ fieldValueByName: { name } }, { fieldValueByName: null }] : [{ fieldValueByName: null }] } });
+  const f = fetcherOf(search([parent("acme/hub-a", 7, "Retro", [withGoal(11, "G3"), withGoal(12, null)])]));
+  const r = await refreshIndex({ fetcher: f, owner: "acme", now: NOW });
+  assert.equal(f.queries.length, 1);
+  assert.match(f.queries[0], /fieldValueByName\(name:"Goal"\)/, "the Goal field is asked in the one query");
+  assert.deepEqual(r.index.parents["acme/hub-a#7"].children.map((c) => c.goal), ["G3", null]);
+  // a REST-style merge (no goal in the read) keeps what the index knew
+  const merged = mergeParent(r.index, "acme/hub-a#7", { title: "Retro", children: [{ repo: "acme/alpha", number: 11, title: "c", state: "open" }, { repo: "acme/alpha", number: 12, title: "c", state: "open" }] }, NOW);
+  assert.deepEqual(merged.parents["acme/hub-a#7"].children.map((c) => c.goal), ["G3", null]);
+});
+
+test("status <n> merges only an open issue labelled broadcast; otherwise it says why and leaves the index alone", async () => {
+  for (const [issue, why] of [[{ state: "closed", labels: [{ name: "broadcast" }] }, /not open/], [{ state: "open", labels: [{ name: "bug" }] }, /no "broadcast" label/]]) {
+    const dir = tmp();
+    const io = { out: [], err: [], log() {}, error(m) { this.err.push(m); } };
+    const gh = (args) => {
+      const route = args.find((x) => x.startsWith("repos/")) ?? "";
+      if (/sub_issues/.test(route)) return { status: 0, stdout: JSON.stringify([{ id: 1, number: 11, title: "c", state: "open", created_at: "2026-11-10T00:00:00Z", repository_url: "https://api.github.com/repos/acme/alpha" }]), stderr: "" };
+      return { status: 0, stdout: JSON.stringify({ number: 7, title: "Not a broadcast", body: "", ...issue }), stderr: "" };
+    };
+    assert.equal(await broadcastCmd(["status", "7", "--hub", "acme/hub-a"], { io, gh, stateDirPath: dir, fetcher: { graphql: async () => { throw new Error("no"); } }, now: NOW }), 0);
+    assert.equal(readIndex(dir), null, "nothing merged");
+    assert.match(io.err.join("\n"), why);
+  }
 });

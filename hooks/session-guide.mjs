@@ -84,11 +84,15 @@ const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 export function broadcastFor(folder, index, now = Date.now()) {
   if (!index) return null;
   const mine = new Set((folder.repos ?? []).map((r) => r.toLowerCase()));
-  const groups = [];
+  const byKey = new Map(); // keys compared case-insensitively: one parent seen twice is one group
   for (const [key, p] of Object.entries(index.parents)) {
     const kids = (Array.isArray(p?.children) ? p.children : []).filter((c) => c && c.state !== "closed" && (folder.all || mine.has(String(c.repo).toLowerCase())));
-    if (kids.length) groups.push({ key, title: String(p.title ?? ""), kids });
+    if (!kids.length) continue;
+    const g = byKey.get(key.toLowerCase()) ?? { key, title: String(p.title ?? ""), kids: [] };
+    for (const c of kids) if (!g.kids.some((x) => `${x.repo}#${x.number}`.toLowerCase() === `${c.repo}#${c.number}`.toLowerCase())) g.kids.push(c);
+    byKey.set(key.toLowerCase(), g);
   }
+  const groups = [...byKey.values()];
   if (!groups.length) return null;
   const ageDays = Math.floor((now - Date.parse(index.generatedAt)) / DAY);
   const stale = Number.isFinite(ageDays) && ageDays >= 7;
@@ -102,13 +106,18 @@ export function broadcastFor(folder, index, now = Date.now()) {
   }
   const label = (g) => `${short(g.key.split("#")[0])}#${g.key.split("#")[1]} "${clip(g.title, 60)}"`;
   const items = (g) => {
-    const shownKids = g.kids.slice(0, 3).map((c) => `${short(c.repo)}#${c.number}`);
+    const shownKids = g.kids.slice(0, 3).map((c) => `${short(c.repo)}#${c.number}${c.goal === null ? " (goal not set)" : ""}`);
     return shownKids.join(", ") + (g.kids.length > 3 ? `, +${g.kids.length - 3} more` : "");
   };
   const l0 = `Broadcast: ${groups.map((g) => `${label(g)} → ${g.kids.length} here: ${items(g)}`).join(" ; ")}${warn}${trunc}${PTR}`;
-  const l1 = `Broadcast: ${groups.map((g) => `${label(g)} → ${g.kids.length} here`).join(" ; ")}${warn}${trunc}${PTR}`;
+  const noGoal = (g) => g.kids.filter((c) => c.goal === null).length;
+  const l1 = `Broadcast: ${groups.map((g) => `${label(g)} → ${g.kids.length} here${noGoal(g) ? `, ${noGoal(g)} goal not set` : ""}`).join(" ; ")}${warn}${trunc}${PTR}`;
   // Every child the line COVERED gets a row, listed or only counted (so "+N more" is not later reported as never shown).
-  const coveredAt = (level) => groups.flatMap((g) => g.kids.map((c, i) => ({ repo: c.repo, child: `${c.repo}#${c.number}`, listed: level === 0 && i < 3 })));
+  // One row per child even when two parents hold it (a double-write would double its showings).
+  const coveredAt = (level) => {
+    const seen = new Set();
+    return groups.flatMap((g) => g.kids.map((c, i) => ({ repo: c.repo, child: `${c.repo}#${c.number}`, listed: level === 0 && i < 3 }))).filter((r) => !seen.has(r.child.toLowerCase()) && seen.add(r.child.toLowerCase()));
+  };
   return { groups, coveredAt, levels: [l0, l1] };
 }
 

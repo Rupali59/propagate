@@ -10,7 +10,7 @@
 // @size small — pure, in-memory fake gh
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -380,7 +380,7 @@ test("status: the shown column: not shown (Nd), and shown with contexts and atte
   assert.equal(await broadcastCmd(["status", "--hub", HUB], statusInject(gh.gh, { io: sink, now: NOW, stateDirPath: dir, broadcastOwner: null })), 0);
   const text = sink.out.join("\n");
   assert.match(text, new RegExp(`o/a#${a.number}  open  status not read  4d  shown 1d \\(2 contexts, 1 attended\\)`));
-  assert.match(text, /o\/b#\d+  open  status not read  4d  not shown \(4d\): no session with the hook has started in a folder holding this repo/);
+  assert.match(text, /o\/b#\d+  open  status not read  4d  not shown \(4d\): there is no local index yet/);
   const js = io();
   await broadcastCmd(["status", "--hub", HUB, "--json"], statusInject(gh.gh, { io: js, now: NOW, stateDirPath: dir, broadcastOwner: null }));
   const kids = JSON.parse(js.out.join("\n")).broadcasts[0].children;
@@ -479,4 +479,60 @@ test("goal: --from goals-check with no item evidence no longer takes the hub goa
   assert.equal(plan.children[0].goal, null);
   assert.match(plan.children[0].body, /^Part of the broadcast "T"\./, "the grooming body names no goal when none is set");
   assert.ok(!plan.children[0].body.includes("goal null"));
+});
+
+test("status: an unreadable shown record is `shown: not read` and shownRead:false, never a false `not shown`", async () => {
+  const { gh } = statusWorld({});
+  const dir = state();
+  writeFileSync(path.join(dir, "broadcast"), "a file where the directory should be"); // readdir -> ENOTDIR, not ENOENT
+  const sink = io();
+  assert.equal(await broadcastCmd(["status", "--hub", HUB], statusInject(gh.gh, { io: sink, now: NOW, stateDirPath: dir, broadcastOwner: null })), 0);
+  const text = sink.out.join("\n");
+  assert.match(text, /o\/a#\d+  open  status not read  4d  shown: not read/);
+  assert.ok(!/not shown/.test(text), text);
+  const js = io();
+  await broadcastCmd(["status", "--hub", HUB, "--json"], statusInject(gh.gh, { io: js, now: NOW, stateDirPath: dir, broadcastOwner: null }));
+  assert.equal(JSON.parse(js.out.join("\n")).shownRead, false);
+});
+
+test("status: `not shown` names only a cause it can establish: child absent from the index, index 8d old, else neutral", async () => {
+  const { gh } = statusWorld({});
+  const a = gh.issues["o/a"][0];
+  const b = gh.issues["o/b"][0];
+  const dir = state();
+  const { writeIndex } = await import("../../lib/broadcast/index.mjs");
+  const stamp = (ms) => new Date(NOW - ms).toISOString();
+  const idx = (ageMs) => ({ generatedAt: stamp(ageMs), readStartedAt: stamp(ageMs), truncated: false, parents: { "hubowner/hub#100": { title: "Groom", children: [{ repo: "o/a", number: a.number, title: "c", state: "open", goal: null }] } } });
+  const run = async (ageMs) => {
+    writeIndex(idx(ageMs), dir);
+    const sink = io();
+    await broadcastCmd(["status", "--hub", HUB], statusInject(gh.gh, { io: sink, now: NOW, stateDirPath: dir, broadcastOwner: null }));
+    return sink.out.join("\n");
+  };
+  let text = await run(3600000);
+  assert.match(text, new RegExp(`o/a#${a.number}  open  status not read  4d  goal not set  not shown \\(4d\\): no showing recorded; hub sessions`), "in the index, fresh: neutral");
+  assert.match(text, new RegExp(`o/b#${b.number}  open .*not shown \\(4d\\): this child is not in the local index`), "absent from the index: said so");
+  text = await run(8 * 86400000);
+  assert.match(text, /o\/a#\d+ .*not shown \(4d\): the local index is 8d old/);
+});
+
+test("goal: the single-active-goal lookup reads <workspace>/propagation/state/<project>/GOALS.md (nothing injected, a real layout)", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "bc-ws-"));
+  const ws = path.join(root, "Acme");
+  const mk = (rel, text) => { mkdirSync(path.dirname(path.join(ws, rel)), { recursive: true }); writeFileSync(path.join(ws, rel), text); };
+  mk(".propagates.yml", "workspace: true\n");
+  mkdirSync(path.join(ws, "web", ".git"), { recursive: true });
+  mkdirSync(path.join(ws, "api", ".git"), { recursive: true });
+  const goal = (id) => `## ${id} · Goal\n\n**Active since 2026-11-13 · appetite 4 weeks**\n\n**Done when:** x.\n\n`;
+  mk("propagation/state/web/GOALS.md", `# W\n\n${goal("G2")}`);                 // the project's own file: one active goal
+  mk("propagation/state/workspace/GOALS.md", `# W\n\n${goal("G1")}${goal("G3")}`);  // the workspace's: two
+  const dir = state();
+  mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  writeFileSync(path.join(dir, "sessions", "checkouts.json"), JSON.stringify({ checkouts: [{ path: path.join(ws, "web"), repo: "o/web" }, { path: path.join(ws, "api"), repo: "o/api" }] }));
+  const gh = fakeGithub({ repos: repoSet(HUB, "o/web", "o/api") });
+  const sink = io();
+  assert.equal(await broadcastCmd(["new", "--title", "T", "--goal", "G9", "--to", "o/web,o/api", "--body-file", toBody(), "--json"], { io: sink, gh: gh.gh, hub: HUB, stateDirPath: dir }), 0, sink.err.join("\n"));
+  const plan = JSON.parse(sink.out.join("\n"));
+  assert.equal(plan.children.find((c) => c.repo === "o/web").goal, "G2", "the project's file wins, found under propagation/state, not on an ancestor");
+  assert.equal(plan.children.find((c) => c.repo === "o/api").goal, null, "no project file, and the workspace file has two active goals: Goal unset");
 });
