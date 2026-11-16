@@ -799,7 +799,9 @@ test("doctor's default view is shorter than --full, names every failure, and exi
     const labelOf = (l) => l.split("  ")[1] ?? l;
     const foldedFailLabels = foldedLines.filter((l) => /^\s{2}✗ /.test(l)).map(labelOf);
     for (const f of fullFails) assert.ok(foldedFailLabels.includes(labelOf(f)), `failure missing from folded view: ${f}`);
-    assert.match(foldedLines[0], /^showing folded view: \d+ lines of \d+ \(doctor --full for all\)$/);
+    // propagate#295: the verdict is printed FIRST, then the fold banner.
+    assert.match(foldedLines[0], /^doctor: (all green|\d+ problems? found)$/);
+    assert.match(foldedLines[1], /^showing folded view: \d+ lines of \d+ \(doctor --full for all\)$/);
     assert.notEqual(folded.status, 0);
     assert.equal(folded.status, full.status, "folded default and --full must exit identically");
   } finally {

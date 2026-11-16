@@ -12,8 +12,9 @@ import path from "node:path";
 import { folderOf, readCheckouts } from "../../lib/sessions/resolve.mjs";
 import { guidanceFor } from "../../lib/sessions/show.mjs";
 import { fold } from "../../lib/sessions/assoc.mjs";
-import { placeOf, guidance, run as runHook, readIndexCopy, broadcastFor, compose, CAP } from "../../hooks/session-guide.mjs";
+import { placeOf, guidance, run as runHook, readIndexCopy, broadcastFor, compose, CAP, readGlanceCopy, glanceLine, GLANCE_MAX } from "../../hooks/session-guide.mjs";
 import { readIndex, foldShown } from "../../lib/broadcast/index.mjs";
+import { readGlance, writeGlance, glancePath } from "../../lib/glance/store.mjs";
 
 const HOOK = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "hooks", "session-guide.mjs");
 
@@ -49,7 +50,14 @@ function hook(f, payload, extraEnv = {}) {
     env: { ...process.env, PROPAGATE_STATE_DIR: f.state, PROPAGATE_CLAUDE_BIN: f.stub, PROPAGATE_HUB_ROOT: "", ...extraEnv },
   });
 }
-const ctxOf = (r) => JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
+/** The glance line (propagate#295) is the LAST line of every block; ctxOf asserts it is there and returns the rest. */
+const GLANCE_RE = /^(glance[: ].*|Glance .*Run: propagate glance)$/;
+const rawCtx = (r) => JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
+const ctxOf = (r) => {
+  const lines = rawCtx(r).split("\n");
+  assert.match(lines.at(-1), GLANCE_RE, "the block ends with the glance line");
+  return lines.slice(0, -1).join("\n");
+};
 const assocLine = (sessionId, extra = {}) =>
   JSON.stringify({ ts: "2026-11-14T01:00:00Z", event: "associate", rowKey: `interactive:${sessionId}:1`, goal: "G3", item: "acme-org/web#42", row: { sessionId }, ...extra }) + "\n";
 
@@ -88,27 +96,27 @@ test("a forgotten association reads as unassociated", () => {
   assert.match(ctxOf(hook(f, { session_id: "s9", cwd: path.join(f.ws, "web") })), /unassociated/);
 });
 
-test("unplaced cwd: no output, exit 0, nothing logged", () => {
+test("unplaced cwd: only the glance line (ruling 2026-11-16, never silent), exit 0, nothing logged", () => {
   const f = fixture();
   const r = hook(f, { session_id: "s1", cwd: f.root });
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, "");
+  assert.equal(rawCtx(r), "glance: not computed yet; run propagate glance");
   assert.ok(!existsSync(f.errLog));
 });
 
-test("missing cache: no output, exit 0", () => {
+test("missing cache: only the glance line, exit 0", () => {
   const f = fixture();
   const r = hook({ ...f, state: path.join(f.root, "empty-state") }, { session_id: "s1", cwd: path.join(f.ws, "web") });
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, "");
+  assert.equal(rawCtx(r), "glance: not computed yet; run propagate glance");
 });
 
-test("corrupt cache: no output, exit 0, ONE errors.log line", () => {
+test("corrupt cache: only the glance line, exit 0, ONE errors.log line", () => {
   const f = fixture();
   writeFileSync(path.join(f.state, "sessions", "checkouts.json"), "{not json");
   const r = hook(f, { session_id: "s1", cwd: path.join(f.ws, "web") });
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, "");
+  assert.equal(rawCtx(r), "glance: not computed yet; run propagate glance");
   const lines = readFileSync(f.errLog, "utf8").trim().split("\n");
   assert.equal(lines.length, 1);
   assert.match(lines[0], /session-guide/);
@@ -120,20 +128,20 @@ test("corrupt assoc lines are skipped; the rest of the log still applies", () =>
   assert.match(ctxOf(hook(f, { session_id: "s1", cwd: path.join(f.ws, "web") })), /goal G3/);
 });
 
-test("an unreadable assoc log (a directory) fails open: no output, exit 0, one errors.log line", () => {
+test("an unreadable assoc log (a directory) fails open: only the glance line, exit 0, one errors.log line", () => {
   const f = fixture();
   mkdirSync(f.assocFile); // readFileSync -> EISDIR, which is not ENOENT
   const r = hook(f, { session_id: "s1", cwd: path.join(f.ws, "web") });
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, "");
+  assert.equal(rawCtx(r), "glance: not computed yet; run propagate glance");
   assert.equal(readFileSync(f.errLog, "utf8").trim().split("\n").length, 1);
 });
 
-test("garbage on stdin: exit 0, no output", () => {
+test("garbage on stdin: exit 0, only the glance line", () => {
   const f = fixture();
   const r = hook(f, "this is not json");
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, "");
+  assert.equal(rawCtx(r), "glance: not computed yet; run propagate glance");
 });
 
 test("a 30-repo workspace: the block is 2,000 characters or fewer and ends with the +N more pointer", () => {
@@ -424,4 +432,106 @@ test("a child whose board has no Goal says `goal not set` in the line; an unknow
   writeIdx(f, { "acme-org/hub#7": { title: "T", children: [{ ...kid("acme-org/web", 11), goal: null }, { ...kid("acme-org/web", 12), goal: "G3" }, kid("acme-org/web", 13)] } });
   const b = ctxOf(hook(f, payload(f, { cwd: path.join(f.ws, "web") }))).split("\n").find((l) => l.startsWith("Broadcast:"));
   assert.match(b, /web#11 \(goal not set\), web#12, web#13 ·/);
+});
+
+// ── propagate#295: the glance session line ─────────────────────────────────
+
+const G_NOW = Date.parse("2026-11-16T12:00:00Z");
+/** A glance.json written as a LITERAL (never through lib/glance compute): the hook reads files, not the compute. */
+const glanceFile = (over = {}) => ({
+  schema_version: 1, generatedAt: new Date(G_NOW - 10 * 60000).toISOString(), stale_after_s: 21600, verdict: "broken",
+  signals_checked: 9, needs_you_ids: ["doctor:a:b"], skipped: [],
+  items: [
+    { id: "doctor:a:b", signal: "doctor", kind: "heartbeat", verdict: "needs_you", flag: null, owner: "you", subject: "doctor", what: "token expires soon " + "and a long free-text tail ".repeat(8), line: "! Needs you doctor: token", why: "w because c; next: d", fix: { text: "f", command: null }, since: "2026-11-16T00:00:00Z", looked_at: 1, source: "doctor snapshot" },
+    { id: "edges:broken", signal: "edges", kind: "heartbeat", verdict: "broken", flag: null, owner: "you", subject: "edges", what: "3 broken of 40 reconciled", line: "x Broken edges: 3", why: "w because c; next: d", fix: { text: "f", command: null }, since: "2026-11-16T00:00:00Z", looked_at: 40, source: "reconcile rows", count: 3 },
+    { id: "hooks:errors", signal: "hooks", kind: "event log", verdict: "broken", flag: "unknown", owner: "propagate", subject: "hooks", what: "cannot read (EACCES)", line: "? Unknown hooks", why: "w because c; next: d", fix: { text: "f", command: null }, since: "2026-11-16T00:00:00Z", looked_at: 0, source: "hook error logs" },
+    { id: "job:j1", signal: "jobs", kind: "heartbeat", verdict: "broken", flag: null, owner: "you", subject: "job j1", what: "last exit code 1", line: "x Broken job j1", why: "w because c; next: d", fix: { text: "f", command: null }, since: "2026-11-16T00:00:00Z", looked_at: 1, source: "doctor snapshot" },
+    { id: "monitor", signal: "monitor", kind: "heartbeat", verdict: "working", flag: null, owner: "propagate", subject: "monitor", what: "ran 10:00", line: "ok Working", why: "w because c; next: d", fix: { text: "f", command: null }, since: "2026-11-16T00:00:00Z", looked_at: 1, source: "monitor log" },
+  ],
+  ...over,
+});
+
+test("T-S1 parity: the hook's readGlanceCopy agrees with lib/glance/store.mjs readGlance (value, absent, malformed, newer)", () => {
+  const f = fixture(1);
+  assert.equal(readGlanceCopy(f.state), null);
+  assert.equal(readGlance(f.state), null);
+  writeGlance(glanceFile(), f.state);
+  assert.deepEqual(readGlanceCopy(f.state), readGlance(f.state));
+  for (const bad of ["{not json", "{}", JSON.stringify({ schema_version: 1 }), JSON.stringify({ schema_version: 1, generatedAt: "x" })]) {
+    writeFileSync(glancePath(f.state), bad);
+    assert.throws(() => readGlance(f.state), undefined, bad);
+    assert.throws(() => readGlanceCopy(f.state), undefined, bad);
+  }
+  writeFileSync(glancePath(f.state), JSON.stringify(glanceFile({ schema_version: 2 })));
+  assert.throws(() => readGlance(f.state), /glance format newer than this reader/);
+  assert.throws(() => readGlanceCopy(f.state), /glance format newer than this reader/);
+});
+
+test("T-S4 the session line: at most 3 items plus the age, free text clipped, at most 140 characters, ending Run: propagate glance", () => {
+  const f = fixture(1);
+  writeGlance(glanceFile(), f.state);
+  const line = glanceLine(f.state, G_NOW);
+  assert.ok(line.length <= GLANCE_MAX && GLANCE_MAX === 140, `${line.length}: ${line}`);
+  assert.match(line, /Run: propagate glance$/);
+  assert.match(line, /^Glance as of \d\d:\d\d: /);
+  assert.equal((line.match(/(^|; |: )\[(NEEDS YOU|BROKEN|UNKNOWN)\] /g) ?? []).length, 3, line);
+  assert.match(line, /\+1 more/);
+  assert.doesNotMatch(line, /a long free-text tail a long free-text tail/, "free text is clipped");
+  assert.match(line, /^Glance as of \d\d:\d\d: \[NEEDS YOU\] doctor: 1 needs you; \[BROKEN\] jobs: /, "needs-you first, then user-impacting jobs");
+  assert.doesNotMatch(line, /\x1b/, "the session line is plain: read by Claude, not a terminal");
+});
+
+test("T-S3 the age is shown: past 1 h as Nh ago, past stale_after_s as stale; all clear names the signals", () => {
+  const f = fixture(1);
+  writeGlance(glanceFile({ generatedAt: new Date(G_NOW - 4 * 3600000).toISOString() }), f.state);
+  assert.match(glanceLine(f.state, G_NOW), /^Glance 4h ago: /);
+  writeGlance(glanceFile({ generatedAt: new Date(G_NOW - 7 * 3600000).toISOString() }), f.state);
+  assert.match(glanceLine(f.state, G_NOW), /^Glance 7h ago \(stale\): unknown, recompute\. Run: propagate glance$/);
+  writeGlance(glanceFile({ verdict: "working", needs_you_ids: [], items: [glanceFile().items[4]] }), f.state);
+  assert.match(glanceLine(f.state, G_NOW), /^Glance as of \d\d:\d\d: all clear, 9 signals checked\. Run: propagate glance$/);
+  writeFileSync(glancePath(f.state), "{torn");
+  assert.equal(glanceLine(f.state, G_NOW), "glance unavailable: run propagate glance");
+  writeFileSync(glancePath(f.state), JSON.stringify(glanceFile({ schema_version: 9 })));
+  assert.equal(glanceLine(f.state, G_NOW), "glance format newer than this reader; run propagate glance");
+});
+
+test("T-S2 the glance line is last to be cut: with long broadcast and file lists the block stays within CAP and keeps it", () => {
+  const f = fixture(1);
+  const folder = placeOf(path.join(f.ws, "web"), JSON.parse(readFileSync(path.join(f.state, "sessions", "checkouts.json"), "utf8")), f.state);
+  const g = "Glance as of 10:42: ! doctor: needs a person; x edges: 3 broken. Run: propagate glance";
+  // Guidance files that bring the session line to within 20 characters of CAP WITHOUT the glance: only a reserved
+  // glance room forces a cut; an unreserved one would overflow (the mutation this test exists for).
+  const files = [];
+  const one = (i) => path.join(f.ws, `deep/guidance/file-number-${String(i).padStart(3, "0")}/CLAUDE.md`);
+  // Bounded: compose cuts files to fit, so "the text got longer than X" alone could never end the loop.
+  for (let i = 0; i < 500; i++) {
+    const next = compose({ folder, assoc: null, sessionId: "s", files: [...files, one(i)], broadcast: null }).text;
+    if (next.length > CAP - 20 || !next.includes(one(i))) break;
+    files.push(one(i));
+  }
+  const bare = compose({ folder, assoc: null, sessionId: "s", files, broadcast: null }).text.length;
+  assert.ok(bare > CAP - g.length, `fixture too small (${bare}): the glance would fit without any cut`);
+  const bc = { groups: [], coveredAt: () => [], levels: ["Broadcast: " + "x".repeat(1900), "Broadcast: counts only"] };
+  for (const broadcast of [null, bc]) {
+    const { text } = compose({ folder, assoc: null, sessionId: "s", files, broadcast, glance: g });
+    assert.ok(text.length <= CAP, String(text.length));
+    assert.ok(text.endsWith("\n" + g), "the glance line survives every cut");
+  }
+});
+
+test("the hook prints the real glance line from a written glance.json, in a placed folder", () => {
+  const f = fixture(1);
+  const t = glanceFile({ generatedAt: new Date(Date.now() - 60000).toISOString() });
+  writeGlance(t, f.state);
+  const last = rawCtx(hook(f, { session_id: "s1", cwd: path.join(f.ws, "web") })).split("\n").at(-1);
+  assert.match(last, /^Glance as of \d\d:\d\d: \[NEEDS YOU\] doctor: .*Run: propagate glance$/);
+  const r = hook(f, { session_id: "s1", cwd: path.join(f.ws, "web") }, { FORCE_COLOR: "1" });
+  assert.doesNotMatch(r.stdout, /\x1b|\\u001b/, "the hook output never carries an escape byte, even with FORCE_COLOR");
+  assert.ok(existsSync(glancePath(f.state)));
+});
+
+test("parity: the hook's GLANCE_SOURCE_RANK equals lib/glance/render.mjs SOURCE_RANK", async () => {
+  const { SOURCE_RANK } = await import("../../lib/glance/render.mjs");
+  const { GLANCE_SOURCE_RANK } = await import("../../hooks/session-guide.mjs");
+  assert.deepEqual(GLANCE_SOURCE_RANK, SOURCE_RANK);
 });

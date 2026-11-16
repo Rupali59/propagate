@@ -23,7 +23,13 @@
  * child the line COVERED, `{ts, session_id, source, repo, child, listed, attended, entrypoint}`. The hub session shows a
  * summary and records no rows. Contexts, not sessions: compact keeps the session id, clear and fork make a new one.
  *
- * FAILS OPEN AND SILENT: any error appends one line to `$STATE/sessions/errors.log` and exits 0 with no output.
+ * THE GLANCE LINE (propagate#295): one line, at most 140 characters, from `$STATE/glance.json` (the CLI writes it; the
+ * hook never computes it): at most 3 items plus the glance's age, ending `Run: propagate glance`. It is the LAST line of
+ * the block and the last thing cut (its room is reserved before the cut order runs). It prints in unplaced folders and
+ * with no checkouts cache too, as the whole output (ruling 2026-11-16): never silent. `readGlanceCopy` is pinned to
+ * lib/glance/store.mjs `readGlance` by a parity test.
+ *
+ * FAILS OPEN: any error appends one line to `$STATE/sessions/errors.log` and exits 0, printing only the glance line.
  * Output is one `additionalContext` block of at most 2,000 characters (the platform ignores over 10,000).
  * Takes effect only after `/reload-plugins` or a new session.
  */
@@ -69,6 +75,99 @@ export function readIndexCopy(dir) {
   const m = JSON.parse(text);
   if (!m || typeof m !== "object" || !m.parents || typeof m.parents !== "object" || typeof m.generatedAt !== "string") throw new Error("index.json has no parents object / generatedAt");
   return m;
+}
+
+/**
+ * null when absent; THROWS when unreadable, malformed, or of a newer major. Same contract as lib/glance/store.mjs
+ * readGlance (parity-tested): change one, change both.
+ */
+export function readGlanceCopy(dir) {
+  let text;
+  try {
+    text = readFileSync(path.join(dir, "glance.json"), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+  const g = JSON.parse(text);
+  if (!g || typeof g !== "object" || typeof g.schema_version !== "number") throw new Error("glance.json has no schema_version");
+  if (g.schema_version > 1) throw new Error("glance format newer than this reader");
+  if (typeof g.generatedAt !== "string" || Number.isNaN(Date.parse(g.generatedAt)) || !Array.isArray(g.items)) throw new Error("glance.json has no generatedAt / items");
+  return g;
+}
+
+export const GLANCE_MAX = 140;
+const GLANCE_TAIL = ". Run: propagate glance";
+const hhmm = (ms) => {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+/** Copy of lib/glance/render.mjs SOURCE_RANK (parity-tested): user-impacting sources before doctor's internal checks. */
+export const GLANCE_SOURCE_RANK = Object.freeze(["jobs", "work", "broadcast", "hooks", "guard", "monitor", "edges", "metrics", "doctor"]);
+const COUNTED = { doctor: "checks", jobs: "jobs", work: "items" };
+const clipWords = (s, n) => {
+  s = String(s);
+  if (s.length <= n) return s;
+  const cut = s.slice(0, Math.max(n - 1, 0));
+  const sp = cut.lastIndexOf(" ");
+  return sp > 0 ? `${cut.slice(0, sp).replace(/[\s,;:(·-]+$/, "")}…` : "…";
+};
+
+/**
+ * The session's glance line. Never throws: every failure is a line that says what to run.
+ * ONE ITEM PER SOURCE (ruling 2026-11-16), as lib/glance/render.mjs groups the terminal view: needs-you sources first,
+ * then broken, each by GLANCE_SOURCE_RANK; at most 3 sources. PLAIN bracketed badges (`[BROKEN]`), never escape
+ * codes: this text is read by Claude, not shown in a terminal. Free text is cut at a word boundary.
+ */
+export function glanceLine(dir, now = Date.now()) {
+  let g;
+  try {
+    g = readGlanceCopy(dir);
+  } catch (e) {
+    return /newer than this reader/.test(e?.message ?? "") ? "glance format newer than this reader; run propagate glance" : "glance unavailable: run propagate glance";
+  }
+  if (!g) return "glance: not computed yet; run propagate glance";
+  if (g.verdict === "blind") return "glance: nothing to read yet; run propagate glance";
+  const ageMs = now - Date.parse(g.generatedAt);
+  const age = ageMs > 3600000 ? `Glance ${Math.round(ageMs / 3600000)}h ago` : `Glance as of ${hhmm(Date.parse(g.generatedAt))}`;
+  if (ageMs > (Number(g.stale_after_s) || 21600) * 1000) return `${age} (stale): unknown, recompute${GLANCE_TAIL}`;
+  const by = new Map();
+  for (const i of g.items) {
+    if (!i || typeof i !== "object" || i.verdict === "working") continue;
+    if (!by.has(i.signal)) by.set(i.signal, []);
+    by.get(i.signal).push(i);
+  }
+  const rank = (s) => (GLANCE_SOURCE_RANK.includes(s) ? GLANCE_SOURCE_RANK.indexOf(s) : GLANCE_SOURCE_RANK.length);
+  const groups = [...by].map(([signal, its]) => {
+    const needs = its.filter((i) => i.verdict === "needs_you").length;
+    const unknown = its.filter((i) => i.verdict === "broken" && i.flag === "unknown").length;
+    const broken = its.length - needs - unknown;
+    return { signal, its, needs, broken, unknown, state: needs ? "needs_you" : broken ? "broken" : "unknown" };
+  }).sort((a, b) => (a.state === "needs_you" ? 0 : 1) - (b.state === "needs_you" ? 0 : 1) || rank(a.signal) - rank(b.signal));
+  if (!groups.length) return `${age}: all clear, ${g.signals_checked ?? "?"} signals checked${GLANCE_TAIL}`;
+  const shown = groups.slice(0, 3);
+  const more = groups.length > 3 ? `; +${groups.length - 3} more` : "";
+  const head = `${age}: `;
+  const word = { needs_you: "[NEEDS YOU]", broken: "[BROKEN]", unknown: "[UNKNOWN]" };
+  const one = (gr) => {
+    const lead = `${word[gr.state]} ${gr.signal === "metrics" ? "doctor history" : gr.signal}: `;
+    let what;
+    // The badge already says UNKNOWN or NEEDS YOU, so a single item's own text follows it unprefixed.
+    const free = !COUNTED[gr.signal] && gr.its.length === 1;
+    if (free) what = String(gr.its[0].what ?? "");
+    else what = [gr.needs ? `${gr.needs} need${gr.needs === 1 ? "s" : ""} you` : "", gr.broken ? `${gr.broken} failing` : "", gr.unknown ? `${gr.unknown} unknown` : ""].filter(Boolean).join(", ");
+    return { lead, what, free };
+  };
+  const parts = shown.map(one);
+  const render = (ps) => `${head}${ps.map((p) => p.lead + p.what).join("; ")}${more}${GLANCE_TAIL}`;
+  if (render(parts).length <= GLANCE_MAX) return render(parts);
+  // Over the cap: clip only the free-text parts (a count is never cut), sharing what room is left between them.
+  const free = parts.filter((p) => p.free);
+  const fixed = render(parts.map((p) => (p.free ? { ...p, what: "" } : p))).length;
+  const each = Math.max(Math.floor((GLANCE_MAX - fixed) / Math.max(free.length, 1)), 2);
+  const out = render(parts.map((p) => (p.free ? { ...p, what: clipWords(p.what, each) } : p)));
+  return out.length <= GLANCE_MAX ? out : `${out.slice(0, GLANCE_MAX - GLANCE_TAIL.length - 1)}…${GLANCE_TAIL}`;
 }
 
 const DAY = 86400000;
@@ -239,7 +338,10 @@ export function buildBlock(args) {
 }
 
 /** buildBlock plus which broadcast cut level was used (0 items, 1 counts, -1 no line), so the shown rows match the text. */
-export function compose({ folder, assoc, sessionId, files, broadcast = null }) {
+export function compose({ folder, assoc, sessionId, files, broadcast = null, glance = null }) {
+  // The glance line is LAST to be cut: its room comes off the cap before any other cut is considered (propagate#295).
+  const cap = glance ? CAP - glance.length - 1 : CAP;
+  const withGlance = (r) => (glance ? { ...r, text: `${r.text}\n${glance}` } : r);
   const sid = String(sessionId).slice(0, 8);
   const head = folder.all ? "Session: hub (all repos)" : `Session: ${folder.project} (${folder.workspace})`;
   const tail = assoc
@@ -259,12 +361,12 @@ export function compose({ folder, assoc, sessionId, files, broadcast = null }) {
   const levels = broadcast?.levels ?? [];
   for (let bl = 0; bl < levels.length; bl++) {
     const text = `${line(n, fs)}\n${levels[bl]}`;
-    if (text.length <= CAP) return { text, level: bl };
+    if (text.length <= cap) return withGlance({ text, level: bl });
   }
   let text = line(n, fs);
-  while (text.length > CAP && n > 0) text = line(--n, fs);
-  while (text.length > CAP && fs.length > 0) text = line(n, (fs = fs.slice(0, -1)));
-  return { text: text.length > CAP ? text.slice(0, CAP) : text, level: -1 };
+  while (text.length > cap && n > 0) text = line(--n, fs);
+  while (text.length > cap && fs.length > 0) text = line(n, (fs = fs.slice(0, -1)));
+  return withGlance({ text: text.length > cap ? text.slice(0, cap) : text, level: -1 });
 }
 
 function logError(dir, err) {
@@ -279,17 +381,19 @@ function logError(dir, err) {
 
 /** @returns {string|null} the additionalContext text, or null for "inject nothing" */
 export function run(payload, dir = stateDirOf()) {
+  // The glance line prints in EVERY folder, placed or not, and with no checkouts cache (ruling 2026-11-16).
+  const glance = glanceLine(dir);
   let cache;
   try {
     cache = readCache(dir);
   } catch (e) {
-    if (e.code === "ENOENT") return null; // no cache: the CLI has not run yet, so there is nothing to say
+    if (e.code === "ENOENT") return glance; // no cache: the CLI has not run yet, so the glance is all there is to say
     throw e;
   }
   const cwd = payload?.cwd || process.env.CLAUDE_PROJECT_DIR;
-  if (!cwd) return null;
+  if (!cwd) return glance;
   const folder = placeOf(cwd, cache, dir);
-  if (folder.unplaced) return null;
+  if (folder.unplaced) return glance;
   const sessionId = String(payload?.session_id ?? "");
   const assoc = sessionId ? associationFor(dir, sessionId) : null;
   // The broadcast read has its OWN try/catch: a failure drops only the broadcast line (propagate#267 review 4).
@@ -300,7 +404,7 @@ export function run(payload, dir = stateDirOf()) {
   } catch (e) {
     logError(dir, `broadcast: ${e?.message ?? e}`);
   }
-  const { text, level } = compose({ folder, assoc, sessionId: sessionId || "<id>", files: guidance(folder), broadcast });
+  const { text, level } = compose({ folder, assoc, sessionId: sessionId || "<id>", files: guidance(folder), broadcast, glance });
   if (broadcast && level >= 0) {
     try {
       const attended = process.env.CLAUDE_CODE_SESSION_ATTENDED;
@@ -331,6 +435,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     if (text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } }));
   } catch (e) {
     logError(dir, e);
+    // Fail open, but never silent: the glance line alone, in its own try (glanceLine itself never throws).
+    try {
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: glanceLine(dir) } }));
+    } catch {
+      // nothing left to try
+    }
   }
   process.exit(0);
 }

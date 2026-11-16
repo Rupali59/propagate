@@ -199,7 +199,7 @@ import { freezeLedgerV1 } from "./lib/edges/freeze-ledger.mjs";
 // Colour constants live in the layer that prints — cli/ansi.mjs — so there
 // is ONE definition rather than a copy here and a copy per command module.
 import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./cli/ansi.mjs";
-import { actionSuffix } from "./lib/report/doctor/structure.mjs";
+import { actionSuffix, marksSuffix } from "./lib/report/doctor/structure.mjs";
 import { ACTION_KINDS } from "./lib/report/doctor/reporter.mjs";
 
 
@@ -218,7 +218,9 @@ export function renderDoctorEntries(entries) {
     // E5. An entry's optional action is appended to its line in the form
     // structure.mjs parses back (ACTION_MARK), so /api/health can offer it. Dim,
     // after the detail: a person reads "what to do" at the end of the row.
-    const act = e.action ? DIM + actionSuffix(e.action) + RESET : "";
+    // propagate#295: the glance marks (human, check_id) go BEFORE the action, which runs to the end of the line.
+    const marks = marksSuffix(e);
+    const act = (marks ? DIM + marks + RESET : "") + (e.action ? DIM + actionSuffix(e.action) + RESET : "");
     if (e.kind === "pass") {
       console.log(`  ${GREEN}\u2713${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}${act}`);
     } else if (e.kind === "fail") {
@@ -269,6 +271,22 @@ export function checkWithAction(label, ok, detail, action) {
     throw new Error(`doctor check ${JSON.stringify(label)}: action must be {kind: ${ACTION_KINDS.join("|")}, target: non-empty string}, got ${JSON.stringify(action)}`);
   }
   renderDoctorEntries([{ kind: ok ? "pass" : "fail", label, detail, action }]);
+}
+
+const stripAnsiText = (t) => String(t).replace(/\x1B\[[0-9;]*m/g, "");
+
+/**
+ * propagate#295: CLI `doctor` writes the glance from its IN-MEMORY result (the snapshot on disk is the previous run's).
+ * Edges are carried from the monitor's last glance. Never moves doctor's exit code; a failure is one stderr line.
+ */
+async function writeGlanceAfterDoctor(doctorJson) {
+  try {
+    const { runGlance } = await import("./lib/glance/compute.mjs");
+    const { envPaths } = await import("./cli/glance.mjs");
+    runGlance({ dir: CONFIG_ROOT_DIR || stateDir(), doctor: doctorJson, paths: envPaths() });
+  } catch (e) {
+    console.error(`${DIM}doctor: glance not written (${String(e?.message ?? e)})${RESET}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5160,6 +5178,7 @@ async function monitorCmd() {
   // "never worked" from "worked at 04:00 and has failed since".
   //
   // Skipped on --dry-run: a dry run that spends 37s and writes a file is not dry.
+  let freshDoctor = null; // the doctor JSON this run computed, handed to the glance below (null when doctor was skipped)
   if (!dryRun) {
     try {
       console.log(`${DIM}monitor: doctor: ${doctorNote}${RESET}`); // stdout: a status line, not an error (doctor reads a newer stderr log as a crash sign)
@@ -5183,11 +5202,30 @@ async function monitorCmd() {
           },
         });
         if (snap?.error) console.error(`${YELLOW}monitor: doctor snapshot failed:${RESET} ${snap.error}`);
-        else if (doctorFp?.ok) await writeFingerprint(SNAPSHOT_PATH, { fingerprint: doctorFp.fingerprint, snapshotGeneratedAt: snap.generatedAt });
+        else {
+          freshDoctor = snap;
+          if (doctorFp?.ok) await writeFingerprint(SNAPSHOT_PATH, { fingerprint: doctorFp.fingerprint, snapshotGeneratedAt: snap.generatedAt });
+        }
       }
     } catch (e) {
       // Even the writer failing must not end the monitor run.
       console.error(`${YELLOW}monitor: could not write doctor snapshot:${RESET} ${String(e?.message ?? e)}`);
+    }
+  }
+
+  // ── the glance (propagate#295) ───────────────────────────────────────────
+  //
+  // Computed from what this run ALREADY holds: the reconcile rows above and the doctor JSON just written (or, when
+  // doctor was skipped, the snapshot on disk). The glance never runs reconcile or doctor itself. Last, after every
+  // notification and the snapshot, and in its own try: a glance that throws must not move this run's outcome.
+  // Skipped on --dry-run, which writes nothing.
+  if (!dryRun) {
+    try {
+      const { runGlance } = await import("./lib/glance/compute.mjs");
+      const { envPaths } = await import("./cli/glance.mjs");
+      runGlance({ dir: CONFIG_ROOT_DIR || stateDir(), rows, doctor: freshDoctor, paths: envPaths() });
+    } catch (e) {
+      console.error(`${YELLOW}monitor: glance not written:${RESET} ${String(e?.message ?? e)}`);
     }
   }
 
@@ -5790,6 +5828,7 @@ if (_invokedDirectly) {
     // consumer renders the reason instead of an empty, calm-looking card.
     const payload = buildDoctorJson(captured, { problems, generatedAt: new Date().toISOString() });
     if (failed) payload.error = failed;
+    await writeGlanceAfterDoctor(payload);
     console.log(JSON.stringify(payload));
     process.exitCode = failed || problems > 0 ? 1 : 0;
   } else if (mode === "doctor" && process.argv.includes("--full")) {
@@ -5816,7 +5855,12 @@ if (_invokedDirectly) {
     } finally {
       console.log = realLog;
     }
+    // The verdict FIRST (propagate#295): doctor prints it last, after ~190 lines, so it is lifted to the top too.
+    const verdict = captured.findLast((l) => /doctor: (all green|\d+ problems? found)/.test(stripAnsiText(l)));
+    if (verdict) console.log(verdict);
     for (const l of foldDoctorLines(captured, { dim: DIM, yellow: YELLOW, reset: RESET })) console.log(l);
+    const { buildDoctorJson } = await import("./lib/report/doctor/structure.mjs");
+    await writeGlanceAfterDoctor(buildDoctorJson(captured, { problems, generatedAt: new Date().toISOString() }));
     process.exitCode = problems > 0 ? 1 : 0;
   } else if (mode === "rules") {
     await rulesCmd();
@@ -5894,6 +5938,9 @@ if (_invokedDirectly) {
   } else if (mode === "sprint") {
     const { sprintCmd } = await import("./cli/sprint.mjs");
     process.exitCode = await sprintCmd(process.argv.slice(3));
+  } else if (mode === "glance") {
+    const { glanceCmd } = await import("./cli/glance.mjs");
+    process.exitCode = await glanceCmd(process.argv.slice(3));
   } else if (mode === "day") {
     const { dayCmd } = await import("./cli/day.mjs");
     process.exitCode = await dayCmd(process.argv.slice(3));
