@@ -1,19 +1,19 @@
 {
  "header": {
-  "recordedAt": "2026-11-16T09:51:57.196Z",
-  "commit": "8c583cb921f1934fe89c9bcf103563e19a345c12",
+  "recordedAt": "2026-11-16T11:04:15.632Z",
+  "commit": "07ebaf2c0efbb6cc57e9d68db6131ae7c6acb490",
   "node": "v26.13.0",
-  "tests": 322,
-  "withStaticDeps": 256,
+  "tests": 323,
+  "withStaticDeps": 257,
   "withRecordedSpawnDeps": 119,
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2182,
-  "unresolvedStaticSpecifiers": 112,
+  "recordedProcesses": 2187,
+  "unresolvedStaticSpecifiers": 114,
   "suite": {
-   "pass": 4211,
-   "fail": 2
+   "pass": 4224,
+   "fail": 1
   }
  },
  "tests": {
@@ -1845,6 +1845,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
     "tests/unit/refs-findings.test.mjs",
@@ -10636,6 +10637,7 @@
     "scripts/costs-backfill.mjs",
     "scripts/make-public.mjs",
     "scripts/propagate-update-check",
+    "scripts/readme-commands.mjs",
     "scripts/release-publish.mjs",
     "scripts/release-tag-aliases.mjs",
     "scripts/test-gh-stub.sh",
@@ -10948,6 +10950,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
     "tests/unit/refs-findings.test.mjs",
@@ -11359,6 +11362,7 @@
     "scripts/costs-backfill.mjs",
     "scripts/make-public.mjs",
     "scripts/propagate-update-check",
+    "scripts/readme-commands.mjs",
     "scripts/release-publish.mjs",
     "scripts/release-tag-aliases.mjs",
     "scripts/test-gh-stub.sh",
@@ -11671,6 +11675,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
     "tests/unit/refs-findings.test.mjs",
@@ -12453,6 +12458,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
     "tests/unit/refs-findings.test.mjs",
@@ -16588,6 +16594,15 @@
    ],
    "size": "small"
   },
+  "tests/unit/readme-commands.test.mjs": {
+   "deps": [
+    "README.md",
+    "lib/core/commands.mjs",
+    "scripts/readme-commands.mjs",
+    "tests/unit/readme-commands.test.mjs"
+   ],
+   "size": "small"
+  },
   "tests/unit/ref-batching.test.mjs": {
    "deps": [
     "lib/core/git-env.mjs",
@@ -18588,6 +18603,7 @@
     "scripts/costs-backfill.mjs",
     "scripts/make-public.mjs",
     "scripts/propagate-update-check",
+    "scripts/readme-commands.mjs",
     "scripts/release-publish.mjs",
     "scripts/release-tag-aliases.mjs",
     "scripts/test-gh-stub.sh",
@@ -19150,6 +19166,7 @@
     "package.json",
     "scripts/check-curator.mjs",
     "scripts/check-review.mjs",
+    "scripts/readme-commands.mjs",
     "scripts/test-impact/affected.mjs",
     "scripts/test-impact/lib.mjs",
     "scripts/test-impact/map.mjs",
@@ -19464,6 +19481,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
     "tests/unit/refs-findings.test.mjs",
