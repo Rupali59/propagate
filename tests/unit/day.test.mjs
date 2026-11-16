@@ -942,3 +942,23 @@ test("dayCmd open: ONE extra graphql search writes the broadcast index and is co
   assert.match(rb.text, /note: broadcast index search failed: HTTP 502; the local broadcast index is unchanged/);
   assert.equal(readFileSync(path.join(dir, "broadcast", "index.json"), "utf8"), before);
 });
+
+// ── propagate#294: day open is where the CLI prunes the background-guard log (the hook never does) ─────────────────
+
+test("dayCmd open prunes guard-log months that ended more than 90 days ago, says so in a note, and keeps the rest", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readdirSync } = await import("node:fs");
+  const dir = mkdtempSync(path.join((await import("node:os")).tmpdir(), "day-guard-"));
+  mkdirSync(path.join(dir, "guard"));
+  for (const f of ["2026-07.jsonl", "2026-10.jsonl", "notes.txt"]) writeFileSync(path.join(dir, "guard", f), "{}\n");
+  const lines = [];
+  const code = await dayCmd(["open"], { goalFiles: GOALS, out: (s) => lines.push(s), now: NOW, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions: () => ({ ok: true, view: { sessions: [] } }), fetcher: fetcher(goalStore()), broadcastOwner: null, stateDirPath: dir });
+  assert.notEqual(code, undefined);
+  assert.deepEqual(readdirSync(path.join(dir, "guard")).sort(), ["2026-10.jsonl", "notes.txt"]);
+  assert.match(lines.join("\n"), /note: guard log: removed 1 month file\(s\) older than 90 days \(2026-07\.jsonl\)/);
+  // an install with no guard/ directory: nothing created, no note
+  const fresh = mkdtempSync(path.join((await import("node:os")).tmpdir(), "day-guard-"));
+  const l2 = [];
+  await dayCmd(["open"], { goalFiles: GOALS, out: (s) => l2.push(s), now: NOW, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions: () => ({ ok: true, view: { sessions: [] } }), fetcher: fetcher(goalStore()), broadcastOwner: null, stateDirPath: fresh });
+  assert.deepEqual(readdirSync(fresh), [], "a vN-1 state dir gains no guard/ from a prune");
+  assert.doesNotMatch(l2.join("\n"), /guard log/);
+});

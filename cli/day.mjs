@@ -3,7 +3,8 @@
  *
  * open is read-only on GitHub; its local writes are the dispatch snapshot and, through ONE `fetcher.graphql` search, the
  * broadcast index (propagate#267: the open children the SessionStart hook shows; counted in the GraphQL-calls line,
- * and a failed refresh is a note that leaves the old index). close is a dry-run unless --apply, which writes only promotions and closure fixes.
+ * and a failed refresh is a note that leaves the old index). open also prunes guard-log months older than 90 days
+ * (propagate#294; local, a note when it removes anything). close is a dry-run unless --apply, which writes only promotions and closure fixes.
  * The usage-widget and GitHub plumbing is cli/sprint.mjs's (loadWidget, ghFetcher); nothing is re-implemented.
  * Exit: open 0 enough, 1 short or over, 2 cannot judge; close 0 proposed/applied, 1 read-back mismatch, 2 could not compute.
  */
@@ -20,6 +21,7 @@ import { ghFetcher, loadWidget } from "./sprint.mjs";
 import { hubOwnerOf } from "./broadcast.mjs";
 import { refreshIndex, writeIndex } from "../lib/broadcast/index.mjs";
 import { stateDir } from "../lib/core/paths.mjs";
+import { pruneGuard } from "../lib/guard/log.mjs";
 import { fold } from "../lib/sessions/assoc.mjs";
 import { fail } from "../lib/sessions/errors.mjs";
 import { readLive } from "../lib/sessions/live.mjs";
@@ -49,6 +51,19 @@ async function refreshBroadcastIndex(r, { fetcher, now, inject }) {
     if (res.index.truncated) r.notes.push("broadcast index truncated: more than 50 broadcasts or 100 sub-issues in one");
   } catch (e) {
     r.notes.push(`broadcast index not written (${e.message})`);
+  }
+}
+
+/**
+ * The guard log's 90-day prune (propagate#294): the hook appends, the CLI prunes, here beside the broadcast prune.
+ * Local only, so it runs whatever the verdict; a removal or a failure is a note, never an exit code.
+ */
+function pruneGuardLog(r, { now, inject }) {
+  try {
+    const removed = pruneGuard(inject.stateDirPath ?? stateDir(), now);
+    if (removed.length) r.notes.push(`guard log: removed ${removed.length} month file(s) older than 90 days (${removed.join(", ")})`);
+  } catch (e) {
+    r.notes.push(`guard log not pruned (${e.message})`);
   }
 }
 
@@ -109,6 +124,7 @@ export async function dayCmd(args, inject = {}) {
     }
     const r = await buildDayOpen({ sessions, sampleRows: rows, now, widget, widgetMissing, fetcher, goalFiles, laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows });
     if (r.exit !== 2) await refreshBroadcastIndex(r, { fetcher, now, inject });
+    pruneGuardLog(r, { now, inject });
     if (json) out(JSON.stringify(r, null, 2));
     else for (const line of renderDayOpen(r)) out(line);
     return r.exit;

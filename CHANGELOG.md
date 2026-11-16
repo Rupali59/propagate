@@ -9,6 +9,7 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 ### Upgrading
 - **Node >= 22.13 is now required** (was 22.0). `propagate work` keeps its queue in Node's built-in `node:sqlite`, which is unflagged from 22.13.0. On the 22.x line that module is still marked experimental; propagate hides only its SQLite warning. Check with `node --version` before upgrading.
 - **`propagate work` creates `$PROPAGATE_STATE_DIR/work/queue.db`** (plus `-wal` and `-shm`) on first use. These files are state, not cache: never delete them as part of a cache clean.
+- **The background guard now logs its refusals** to `$PROPAGATE_STATE_DIR/guard/YYYY-MM.jsonl` (#294): one row per `deny` and per backgrounded call that matched a rule, holding a program name and a 16-hex hash, never command text. An install without a `guard/` directory works unchanged; it is created on the first logged event. `propagate day open` deletes month files older than 90 days. Nothing to migrate, and a downgrade leaves the directory harmlessly unread.
 
 ## [0.19.0] — 2026-11-10
 
