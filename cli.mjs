@@ -199,7 +199,7 @@ import { freezeLedgerV1 } from "./lib/edges/freeze-ledger.mjs";
 // Colour constants live in the layer that prints — cli/ansi.mjs — so there
 // is ONE definition rather than a copy here and a copy per command module.
 import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./cli/ansi.mjs";
-import { actionSuffix } from "./lib/report/doctor/structure.mjs";
+import { actionSuffix, marksSuffix } from "./lib/report/doctor/structure.mjs";
 import { ACTION_KINDS } from "./lib/report/doctor/reporter.mjs";
 
 
@@ -218,7 +218,9 @@ export function renderDoctorEntries(entries) {
     // E5. An entry's optional action is appended to its line in the form
     // structure.mjs parses back (ACTION_MARK), so /api/health can offer it. Dim,
     // after the detail: a person reads "what to do" at the end of the row.
-    const act = e.action ? DIM + actionSuffix(e.action) + RESET : "";
+    // propagate#295: the glance marks (human, check_id) go BEFORE the action, which runs to the end of the line.
+    const marks = marksSuffix(e);
+    const act = (marks ? DIM + marks + RESET : "") + (e.action ? DIM + actionSuffix(e.action) + RESET : "");
     if (e.kind === "pass") {
       console.log(`  ${GREEN}\u2713${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}${act}`);
     } else if (e.kind === "fail") {
@@ -269,6 +271,22 @@ export function checkWithAction(label, ok, detail, action) {
     throw new Error(`doctor check ${JSON.stringify(label)}: action must be {kind: ${ACTION_KINDS.join("|")}, target: non-empty string}, got ${JSON.stringify(action)}`);
   }
   renderDoctorEntries([{ kind: ok ? "pass" : "fail", label, detail, action }]);
+}
+
+const stripAnsiText = (t) => String(t).replace(/\x1B\[[0-9;]*m/g, "");
+
+/**
+ * propagate#295: CLI `doctor` writes the glance from its IN-MEMORY result (the snapshot on disk is the previous run's).
+ * Edges are carried from the monitor's last glance. Never moves doctor's exit code; a failure is one stderr line.
+ */
+async function writeGlanceAfterDoctor(doctorJson) {
+  try {
+    const { runGlance } = await import("./lib/glance/compute.mjs");
+    const { envPaths } = await import("./cli/glance.mjs");
+    runGlance({ dir: CONFIG_ROOT_DIR || stateDir(), doctor: doctorJson, paths: envPaths() });
+  } catch (e) {
+    console.error(`${DIM}doctor: glance not written (${String(e?.message ?? e)})${RESET}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1145,6 +1163,17 @@ async function doctor({ exitProcess = true } = {}) {
     const { checkScheduledJobs } = await import("./lib/report/doctor/scheduled-jobs.mjs");
     const reporter = new Reporter();
     checkScheduledJobs({ reporter, roots: SEARCH_ROOTS, ledgerPath: path.join(CONFIG_ROOT_DIR, "scheduled-jobs-runs.json") });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
+  // # Retirement candidates (#298): unadopted systems across every discovered SYSTEMS.md,
+  // from scanRetirement, the one candidate function the digest and the glance also read.
+  // Warn-only (SEVERITY in the module).
+  {
+    const { checkRetirement } = await import("./lib/report/doctor/retirement.mjs");
+    const reporter = new Reporter();
+    checkRetirement({ reporter, workspaces: WORKSPACES, skillDir: SKILL_DIR });
     renderDoctorEntries(reporter.drain());
     problems += reporter.problems;
   }
@@ -5038,9 +5067,24 @@ async function monitorCmd() {
     process.exit(1);
   }
 
-  const already = await mon.readNotified();
-  const { toNotify, suppressed, actionable } = mon.selectToNotify(rows, already);
+  // WHICH IDS NOTIFY (propagate#296). Additions only, keyed `edge:<edge_id>` / `backlog:<kind>:<path>`, with a 24 h
+  // re-entry hold and a silent first run, decided in lib/glance/notifications.mjs over $STATE/notify-state.json.
+  // notified.jsonl stays as the audit log of what was sent; it is no longer what suppresses a repeat.
+  const nst = await import("./lib/glance/notifications.mjs");
+  const { readAcks, ackApplies } = await import("./lib/glance/acks.mjs");
+  const { uiRoute } = await import("./lib/report/notify.mjs");
+  const noteDir = CONFIG_ROOT_DIR || stateDir();
+  const nowMs = Date.now();
+  let notifyRead = nst.readNotifyState(noteDir);
+  let acks = new Map();
+  try { acks = readAcks(noteDir); } catch { /* fail open: no acks means tell, never silence */ }
+  const ackedAt = (now) => (id, since) => ackApplies(acks.get(id), since, now);
+  const edgeIds = mon.selectToNotify(rows).actionable.map(mon.notifyKey);
+  const edgeDecision = nst.decideChannel({ read: notifyRead, channel: "edges", ids: edgeIds, now: nowMs, acked: ackedAt(nowMs) });
+  const { toNotify, suppressed, actionable } = mon.selectToNotify(rows, mon.heldIds(edgeIds, edgeDecision.notify));
   const { title, body } = mon.formatNotification(toNotify, { root: SEARCH_ROOTS[0] });
+  // One edge opens that edge in Judge; several open the Judge list. Built from the route vocabulary, never item text.
+  const edgeOpen = { route: toNotify.length === 1 ? uiRoute("edge", toNotify[0].edge_id) : uiRoute("judge") };
 
   // Backlog DEFECTS — registers nothing can parse, handovers nothing can close.
   // Never the open items: there are 500 and they are the normal state of a
@@ -5084,16 +5128,32 @@ async function monitorCmd() {
   } catch (e) {
     backlogErr = String(e && e.message);
   }
-  const defectPick = mon.selectDefectsToNotify(defects, already);
+  const defectIds = defects.map((d) => d.key);
+  // A backlog that could not be read has no ids, and recording that as "every defect left" would re-arm them all;
+  // so the channel is decided (and later written) only when the backlog was read.
+  const defectDecision = backlogErr ? null : nst.decideChannel({ read: notifyRead, channel: "backlog", ids: defectIds, now: nowMs, acked: ackedAt(nowMs) });
+  const defectPick = mon.selectDefectsToNotify(defects, defectDecision ? mon.heldIds(defectIds, defectDecision.notify) : new Set(defectIds));
 
   if (!dryRun && toNotify.length > 0) {
-    await notify(title, body, { group: "propagate-monitor" });
+    await notify(title, body, { group: "propagate-monitor", open: edgeOpen });
     await mon.recordNotified(toNotify, undefined, new Date(), monitorRunId);
   }
   if (!dryRun && defectPick.toNotify.length > 0) {
     const d = mon.formatDefectNotification(defectPick.toNotify, { root: SEARCH_ROOTS[0] });
-    await notify(d.title, d.body, { group: "propagate-monitor" });
+    await notify(d.title, d.body, { group: "propagate-monitor-backlog", open: { route: uiRoute("backlog") } });
     await mon.recordNotified(defectPick.toNotify, undefined, new Date(), monitorRunId);
+  }
+  // The edge and backlog records are written NOW, before doctor's tens of seconds, so a run killed during doctor has
+  // still remembered what it told. A write failure is a stderr line: the cost is one more notification next run.
+  if (!dryRun) {
+    try {
+      let next = nst.mergeChannel(notifyRead, "edges", edgeDecision.next);
+      if (defectDecision) next = nst.mergeChannel({ status: "ok", state: next }, "backlog", defectDecision.next);
+      nst.writeNotifyState(next, noteDir);
+      notifyRead = { status: "ok", state: next };
+    } catch (e) {
+      console.error(`${YELLOW}monitor: notify state not written:${RESET} ${String(e?.message ?? e)}`);
+    }
   }
   if (backlogErr) console.error(`${YELLOW}monitor: backlog check could not run:${RESET} ${backlogErr}`);
 
@@ -5160,6 +5220,7 @@ async function monitorCmd() {
   // "never worked" from "worked at 04:00 and has failed since".
   //
   // Skipped on --dry-run: a dry run that spends 37s and writes a file is not dry.
+  let freshDoctor = null; // the doctor JSON this run computed, handed to the glance below (null when doctor was skipped)
   if (!dryRun) {
     try {
       console.log(`${DIM}monitor: doctor: ${doctorNote}${RESET}`); // stdout: a status line, not an error (doctor reads a newer stderr log as a crash sign)
@@ -5183,13 +5244,49 @@ async function monitorCmd() {
           },
         });
         if (snap?.error) console.error(`${YELLOW}monitor: doctor snapshot failed:${RESET} ${snap.error}`);
-        else if (doctorFp?.ok) await writeFingerprint(SNAPSHOT_PATH, { fingerprint: doctorFp.fingerprint, snapshotGeneratedAt: snap.generatedAt });
+        else {
+          freshDoctor = snap;
+          if (doctorFp?.ok) await writeFingerprint(SNAPSHOT_PATH, { fingerprint: doctorFp.fingerprint, snapshotGeneratedAt: snap.generatedAt });
+        }
       }
     } catch (e) {
       // Even the writer failing must not end the monitor run.
       console.error(`${YELLOW}monitor: could not write doctor snapshot:${RESET} ${String(e?.message ?? e)}`);
     }
   }
+
+  // ── the glance (propagate#295) ───────────────────────────────────────────
+  //
+  // Computed from what this run ALREADY holds: the reconcile rows above and the doctor JSON just written (or, when
+  // doctor was skipped, the snapshot on disk). The glance never runs reconcile or doctor itself. Last, after every
+  // notification and the snapshot, and in its own try: a glance that throws must not move this run's outcome.
+  // Skipped on --dry-run, which writes nothing.
+  //
+  // THEN its notification (propagate#296): additions to the needs-you and broken set, after doctor (design §5: edges
+  // first, then glance additions), one grouped notification replacing the previous (-group), opening the item's
+  // route. In the same try as the glance: a glance that failed has nothing to compare, and must not notify.
+  let glanceNotified = 0;
+  if (!dryRun) {
+    try {
+      const { runGlance } = await import("./lib/glance/compute.mjs");
+      const { envPaths } = await import("./cli/glance.mjs");
+      const { glance } = runGlance({ dir: CONFIG_ROOT_DIR || stateDir(), rows, doctor: freshDoctor, paths: envPaths() });
+      const cands = nst.glanceCandidates(glance);
+      const byId = new Map(cands.map((i) => [i.id, i]));
+      const gNow = Date.now();
+      // The ack is judged against the ITEM's episode (its `since` in the glance), the same rule the view shows.
+      const gd = nst.decideChannel({ read: notifyRead, channel: "glance", ids: cands.map((i) => i.id), now: gNow, acked: (id) => ackApplies(acks.get(id), byId.get(id)?.since, gNow) });
+      if (gd.notify.length) {
+        const n = nst.formatGlanceNotification(gd.notify.map((id) => byId.get(id)));
+        await notify(n.title, n.body, { group: "propagate-glance", open: { route: uiRoute(n.route.kind, n.route.id) } });
+        glanceNotified = gd.notify.length;
+      }
+      nst.writeNotifyState(nst.mergeChannel(notifyRead, "glance", gd.next), noteDir);
+    } catch (e) {
+      console.error(`${YELLOW}monitor: glance not written or not notified:${RESET} ${String(e?.message ?? e)}`);
+    }
+  }
+  if (glanceNotified) console.log(`${DIM}monitor: glance: notified ${glanceNotified} new item(s)${RESET}`);
 
   if (json) {
     console.log(JSON.stringify({ generatedAt: new Date().toISOString(), dryRun, ...stats, would: toNotify.map((r) => ({ edge_id: r.edge_id, state: r.state, source: r.source.path, downstream: r.downstream.path })) }, null, 2));
@@ -5790,6 +5887,7 @@ if (_invokedDirectly) {
     // consumer renders the reason instead of an empty, calm-looking card.
     const payload = buildDoctorJson(captured, { problems, generatedAt: new Date().toISOString() });
     if (failed) payload.error = failed;
+    await writeGlanceAfterDoctor(payload);
     console.log(JSON.stringify(payload));
     process.exitCode = failed || problems > 0 ? 1 : 0;
   } else if (mode === "doctor" && process.argv.includes("--full")) {
@@ -5816,7 +5914,12 @@ if (_invokedDirectly) {
     } finally {
       console.log = realLog;
     }
+    // The verdict FIRST (propagate#295): doctor prints it last, after ~190 lines, so it is lifted to the top too.
+    const verdict = captured.findLast((l) => /doctor: (all green|\d+ problems? found)/.test(stripAnsiText(l)));
+    if (verdict) console.log(verdict);
     for (const l of foldDoctorLines(captured, { dim: DIM, yellow: YELLOW, reset: RESET })) console.log(l);
+    const { buildDoctorJson } = await import("./lib/report/doctor/structure.mjs");
+    await writeGlanceAfterDoctor(buildDoctorJson(captured, { problems, generatedAt: new Date().toISOString() }));
     process.exitCode = problems > 0 ? 1 : 0;
   } else if (mode === "rules") {
     await rulesCmd();
@@ -5894,6 +5997,9 @@ if (_invokedDirectly) {
   } else if (mode === "sprint") {
     const { sprintCmd } = await import("./cli/sprint.mjs");
     process.exitCode = await sprintCmd(process.argv.slice(3));
+  } else if (mode === "glance") {
+    const { glanceCmd } = await import("./cli/glance.mjs");
+    process.exitCode = await glanceCmd(process.argv.slice(3));
   } else if (mode === "day") {
     const { dayCmd } = await import("./cli/day.mjs");
     process.exitCode = await dayCmd(process.argv.slice(3));

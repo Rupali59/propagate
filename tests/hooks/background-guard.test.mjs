@@ -134,7 +134,8 @@ for (const [input, why] of ALLOW) {
   test(`allows: ${why}`, async () => assert.deepEqual(await decide(input), { deny: false }));
 }
 
-const run = (stdin) => spawnSync(process.execPath, [HOOK], { input: stdin, encoding: "utf8" });
+// Always a throwaway state dir: a deny now appends a guard-log row, which must never land in a real ~/.propagate.
+const run = (stdin) => spawnSync(process.execPath, [HOOK], { input: stdin, encoding: "utf8", env: { ...process.env, PROPAGATE_STATE_DIR: mkdtempSync(path.join(tmpdir(), "guard-run-")) } });
 
 test("real process: a denied payload prints the deny JSON and exits 0", () => {
   const r = run(JSON.stringify(main("npm test")));
@@ -164,4 +165,205 @@ test("real process: an unreadable payload fails open, silently", () => {
     assert.equal(r.status, 0, `exit for ${JSON.stringify(junk)}`);
     assert.equal(r.stdout, "");
   }
+});
+
+// ── propagate#294: the guard log. One row per deny and per allow-bg, never any command text ─────────────────────────
+import { mkdtempSync, writeFileSync, mkdirSync as mkdirSyncFs } from "node:fs";
+import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { respond, guardRow, programOf } from "../../hooks/background-guard.mjs";
+import { pruneGuard } from "../../lib/guard/log.mjs";
+
+const ROW_KEYS = ["command_hash", "event", "label", "program", "rule", "session", "timeout_ms", "ts"];
+const tmpState = () => mkdtempSync(path.join(tmpdir(), "guard-log-"));
+const runIn = (stateDir, stdin) => spawnSync(process.execPath, [HOOK], { input: stdin, encoding: "utf8", env: { ...process.env, PROPAGATE_STATE_DIR: stateDir } });
+const guardBytes = (stateDir) => {
+  const d = path.join(stateDir, "guard");
+  if (!existsSync(d)) return "";
+  return readdirSync(d).map((f) => readFileSync(path.join(d, f), "utf8")).join("");
+};
+const guardRows = (stateDir) => guardBytes(stateDir).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+const withSession = (input) => ({ session_id: "sess-0001", ...input });
+
+test("T-G1 a deny writes exactly one row with exactly the stated keys, and stdout is unchanged", () => {
+  const dir = tmpState();
+  const r = runIn(dir, JSON.stringify(withSession(main("npm test"))));
+  assert.equal(r.status, 0);
+  const plain = run(JSON.stringify(withSession(main("npm test"))));
+  assert.equal(r.stdout, plain.stdout, "the deny JSON on stdout must be byte-identical with or without a log");
+  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, "deny");
+  const rows = guardRows(dir);
+  assert.equal(rows.length, 1, "one deny, one row");
+  assert.deepEqual(Object.keys(rows[0]).sort(), ROW_KEYS);
+  assert.equal(rows[0].event, "deny");
+  assert.equal(rows[0].rule, "heavy");
+  assert.equal(rows[0].label, "npm test");
+  assert.equal(rows[0].program, "npm");
+  assert.equal(rows[0].session, "sess-0001");
+  assert.equal(rows[0].timeout_ms, null);
+  assert.match(rows[0].command_hash, /^[0-9a-f]{16}$/);
+  assert.equal(rows[0].command_hash, createHash("sha256").update("npm test").digest("hex").slice(0, 16));
+  const month = rows[0].ts.slice(0, 7);
+  assert.ok(existsSync(path.join(dir, "guard", `${month}.jsonl`)), "the row lands in the UTC month file of its ts");
+});
+
+test("T-G1 every deny rule names itself: timeout, heavy, shell-bg, sub-bg", () => {
+  const dir = tmpState();
+  for (const p of [main("sleep 5", { timeout: 500000 }), main("npm run build &"), sub("sleep 400", { run_in_background: true })]) runIn(dir, JSON.stringify(withSession(p)));
+  const rows = guardRows(dir);
+  assert.deepEqual(rows.map((r) => [r.event, r.rule]), [["deny", "timeout"], ["deny", "shell-bg"], ["deny", "sub-bg"]]);
+  assert.equal(rows[0].timeout_ms, 500000);
+  assert.equal(rows[1].label, "&");
+});
+
+test("T-G2 a backgrounded heavy call writes an allow-bg row; a plain command writes nothing", () => {
+  const dir = tmpState();
+  const bg = runIn(dir, JSON.stringify(withSession(main("npm test", { run_in_background: true }))));
+  assert.equal(bg.stdout, "", "a backgrounded call is still allowed silently");
+  const bgTimeout = runIn(dir, JSON.stringify(withSession(main("sleep 5", { run_in_background: true, timeout: 600000 }))));
+  assert.equal(bgTimeout.stdout, "");
+  for (const c of ["git status", "ls -la"]) runIn(dir, JSON.stringify(withSession(main(c))));
+  runIn(dir, JSON.stringify(withSession(main("ls -la", { run_in_background: true }))));
+  runIn(dir, JSON.stringify(withSession(sub("npm test", { timeout: 600000 }))));
+  const rows = guardRows(dir);
+  assert.deepEqual(rows.map((r) => [r.event, r.rule, r.label]), [["allow-bg", "heavy", "npm test"], ["allow-bg", "timeout", null]],
+    "only the two backgrounded calls that match a rule are logged; plain, plain-backgrounded and subagent-foreground calls write nothing");
+});
+
+test("T-G2 a backgrounded plain command never loads COMMANDS, and a backgrounded network command does", async () => {
+  let loads = 0;
+  const load = async () => { loads++; return COMMANDS; };
+  const rows = [];
+  const io = { load, write: () => {}, append: (row) => rows.push(row) };
+  for (const c of ["git status", "npm run lint", "npm test"]) await respond(withSession(main(c, { run_in_background: true })), io);
+  assert.equal(loads, 0, "COMMANDS was loaded for a backgrounded command that names neither propagate nor cli.mjs");
+  await respond(withSession(main("propagate broadcast new", { run_in_background: true })), io);
+  assert.equal(loads, 1);
+  assert.deepEqual(rows.map((r) => [r.event, r.label]), [["allow-bg", "npm test"], ["allow-bg", "broadcast new (reaches GitHub)"]]);
+});
+
+test("T-G3 secrets never reach disk: no NAME=value value, no header, no token", () => {
+  const dir = tmpState();
+  const cases = [
+    main("SECRET=hunter2 npm test"),
+    main("DOPPLER_TOKEN=s3cr3t npm test"),
+    main(`curl -H "Authorization: Bearer abc" https://example.invalid`, { timeout: 600000 }),
+    main(`curl -H 'Authorization: Bearer abc' x`, { timeout: 600000 }),
+    main("SECRET=hunter2 npm test", { run_in_background: true }),
+  ];
+  for (const p of cases) {
+    const r = runIn(dir, JSON.stringify(withSession(p)));
+    assert.equal(r.status, 0);
+  }
+  const rows = guardRows(dir);
+  assert.equal(rows.length, cases.length, "every case was logged, so the absence below is not an empty file");
+  const bytes = guardBytes(dir);
+  for (const s of ["hunter2", "s3cr3t", "Bearer", "abc", "Authorization", "SECRET", "DOPPLER_TOKEN", "example.invalid"]) {
+    assert.ok(!bytes.includes(s), `the guard log contains ${JSON.stringify(s)}`);
+  }
+  assert.deepEqual(rows.map((r) => r.program), ["npm", "npm", "curl", "curl", "npm"], "program is the bare program after VAR=value prefixes");
+});
+
+test("programOf: the first word after every NAME=value, kept only when it is a bare name", () => {
+  assert.equal(programOf("A=1 B=two npm test"), "npm");
+  assert.equal(programOf("  git status"), "git");
+  assert.equal(programOf("node ./cli.mjs doctor"), "node");
+  assert.equal(programOf("SECRET=hunter2"), null, "only assignments: no program, and never the value");
+  assert.equal(programOf(`"quoted thing" x`), null);
+  assert.equal(programOf("x".repeat(33)), null, "over 32 characters is not a bare name");
+  assert.equal(programOf(""), null);
+  assert.equal(programOf("/usr/local/bin/npm test"), "npm", "a path is reduced to its basename");
+  assert.equal(programOf("./scripts/run.sh"), "run.sh");
+});
+
+test("a command that starts with an absolute path logs only the basename: no home directory or username on disk", () => {
+  const dir = tmpState();
+  const r = runIn(dir, JSON.stringify(withSession(main("/home/someone/bin/tool run", { timeout: 600000 }))));
+  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, "deny");
+  const rows = guardRows(dir);
+  assert.equal(rows.length, 1, "the call was logged, so the absence below is not an empty file");
+  assert.equal(rows[0].program, "tool");
+  for (const s of ["someone", "/home"]) assert.ok(!guardBytes(dir).includes(s), `the guard log contains ${JSON.stringify(s)}`);
+});
+
+test("guardRow hashes the whitespace-normalised command and stores nothing else of it", () => {
+  const a = guardRow(main("npm   test\n"), { event: "deny", rule: "heavy", label: "npm test" }, new Date("2026-11-30T23:59:00Z"));
+  const b = guardRow(main("npm test"), { event: "deny", rule: "heavy", label: "npm test" }, new Date("2026-11-30T23:59:00Z"));
+  assert.equal(a.command_hash, b.command_hash);
+  assert.equal(a.ts, "2026-11-30T23:59:00.000Z");
+  assert.equal(a.session, null, "no session_id in the payload is null, not a guess");
+});
+
+test("T-G4 a failing append still yields the same deny, exit 0 (guard/ is a file, so the append throws)", () => {
+  const dir = tmpState();
+  writeFileSync(path.join(dir, "guard"), "not a directory");
+  const r = runIn(dir, JSON.stringify(withSession(main("npm test"))));
+  const plain = run(JSON.stringify(withSession(main("npm test"))));
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, plain.stdout, "a failed append changed the decision output");
+  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, "deny");
+  assert.equal(r.stderr, "");
+  assert.equal(readFileSync(path.join(dir, "guard"), "utf8"), "not a directory", "the blocking file is untouched");
+});
+
+test("T-G4 a failing append on an unwritable guard/ directory still yields the same deny", { skip: process.getuid?.() === 0 ? "root ignores directory modes" : false }, async () => {
+  const { chmodSync } = await import("node:fs");
+  const dir = tmpState();
+  mkdirSyncFs(path.join(dir, "guard"));
+  chmodSync(path.join(dir, "guard"), 0o500);
+  try {
+    const r = runIn(dir, JSON.stringify(withSession(main("npm test"))));
+    assert.equal(r.status, 0);
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, "deny");
+    assert.equal(readdirSync(path.join(dir, "guard")).length, 0, "the probe proves the append really failed");
+  } finally {
+    chmodSync(path.join(dir, "guard"), 0o700);
+  }
+});
+
+test("T-G4 the decision is written before the row is appended, and a throwing append is swallowed", async () => {
+  const order = [];
+  const io = { write: () => order.push("write"), append: () => { order.push("append"); throw new Error("disk full"); } };
+  const d = await respond(withSession(main("npm test")), io);
+  assert.equal(d.deny, true);
+  assert.deepEqual(order, ["write", "append"], "the deny must be on stdout before the log append is attempted");
+});
+
+test("T-G5 the month file is the UTC month of ts", async () => {
+  const dir = tmpState();
+  const io = { write: () => {}, stateDir: dir, now: () => new Date("2026-11-30T23:59:00Z") };
+  await respond(withSession(main("npm test")), io);
+  assert.deepEqual(readdirSync(path.join(dir, "guard")), ["2026-11.jsonl"]);
+});
+
+test("T-G6 prune removes only month files that ended more than 90 days ago", () => {
+  const dir = tmpState();
+  const g = path.join(dir, "guard");
+  mkdirSyncFs(g);
+  for (const f of ["2026-07.jsonl", "2026-08.jsonl", "2026-10.jsonl", "notes.txt", "2026-13.jsonl"]) writeFileSync(path.join(g, f), "{}\n");
+  const removed = pruneGuard(dir, Date.parse("2026-11-16T12:00:00Z"));
+  assert.deepEqual(removed, ["2026-07.jsonl"]);
+  assert.deepEqual(readdirSync(g).sort(), ["2026-08.jsonl", "2026-10.jsonl", "2026-13.jsonl", "notes.txt"]);
+});
+
+test("T-G6 prune with no guard/ directory removes nothing and creates nothing (an install from before #294)", () => {
+  const dir = tmpState();
+  assert.deepEqual(pruneGuard(dir, Date.now()), []);
+  assert.equal(existsSync(path.join(dir, "guard")), false);
+});
+
+test("T-G6 prune reads the same file names the hook writes", async () => {
+  const dir = tmpState();
+  await respond(withSession(main("npm test")), { write: () => {}, stateDir: dir, now: () => new Date("2026-01-15T00:00:00Z") });
+  assert.deepEqual(pruneGuard(dir, Date.parse("2026-11-16T00:00:00Z")), ["2026-01.jsonl"]);
+});
+
+test("T-G6/T-G7 the hook never prunes and imports only node builtins and lib/core/paths.mjs (plus the lazy COMMANDS)", () => {
+  const src = readFileSync(HOOK, "utf8");
+  for (const fn of ["readdirSync", "unlinkSync", "rmSync", "rmdirSync"]) assert.ok(!src.includes(fn), `the hook mentions ${fn}: pruning belongs to the CLI`);
+  const specs = [...src.matchAll(/^import\s[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+  assert.ok(specs.length >= 3, `only ${specs.length} imports found: the scan has gone blind`);
+  for (const s of specs) assert.ok(s.startsWith("node:") || s === "../lib/core/paths.mjs", `background-guard imports ${s}`);
+  const dynamic = [...src.matchAll(/import\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
+  assert.deepEqual(dynamic, ["../lib/core/commands.mjs"]);
 });

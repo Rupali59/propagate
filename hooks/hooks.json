@@ -86,7 +86,10 @@
           "plan-goal, added 2026-11-13 (#244 goal clause, G3), is the third registration in this group and",
           "also shares its matcher: it acts only on ExitPlanMode. It denies a plan that names no active",
           "goal (`Goal: G<n>`) and carries no `goal_reason:` line, and logs each approval to",
-          "$PROPAGATE_STATE_DIR/plans/approvals.jsonl for `goals check`. Blind reads allow, saying so."
+          "$PROPAGATE_STATE_DIR/plans/approvals.jsonl for `goals check`. Blind reads allow, saying so.",
+          "#297 adds the Surface gate to the same hook: `Surface:` plus `## Need` and `## References checked`",
+          "(escape `surface_reason:`), one combined denial, a grace date for a missing Surface line, and deny/warn",
+          "rows in $PROPAGATE_STATE_DIR/plan-gate/YYYY-MM.jsonl. It runs even when no active goal is readable."
         ],
         "matcher": "Agent|Task|ExitPlanMode",
         "hooks": [

@@ -59,8 +59,54 @@ import { streamPayload, readCursor, writeCursor } from "../lib/report/stream.mjs
 import { readSeen, addSeen, validateTriples } from "../lib/report/seen-edges.mjs";
 import { buildId } from "../lib/report/ui-build.mjs";
 import { stateDir } from "../lib/core/paths.mjs";
+import { readGlanceState } from "../lib/glance/store.mjs";
+import { readAcks, ackFor, setAcks, clearAcks, parseUntil, checkIds } from "../lib/glance/acks.mjs";
 
 export { buildId };
+
+/**
+ * GET /api/glance (propagate#296): glance.json as written, with each problem item's `ack` re-derived from the acks
+ * file NOW, so an ack given in this page shows on the next read rather than after the next monitor run. Read-only;
+ * never computes a glance (that is `propagate glance` and the monitor). An absent or unreadable file is a state the
+ * page names, never an empty list.
+ */
+export function glancePayload(dir = stateDir(), now = Date.now()) {
+  const gs = readGlanceState(dir, now);
+  if (gs.state !== "ok") return { ok: true, state: gs.state, reason: gs.reason ?? null, items: [] };
+  let acks = new Map();
+  try { acks = readAcks(dir); } catch { /* no acks: shown unacked, the fail-open direction */ }
+  const items = (gs.glance.items ?? []).map((it) => {
+    const { ack: _old, ...rest } = it;
+    const a = it.verdict !== "working" ? ackFor(acks, it.id, it.since, now) : null;
+    return a ? { ...rest, ack: a } : rest;
+  });
+  return { ok: true, state: "ok", ageMs: gs.ageMs, stale: gs.stale, generatedAt: gs.glance.generatedAt, verdict: gs.glance.verdict,
+    signals_checked: gs.glance.signals_checked, skipped: gs.glance.skipped ?? [], needs_you_ids: gs.glance.needs_you_ids ?? [], items };
+}
+
+/**
+ * POST /api/glance/ack body: {action: "ack"|"unack", ids: [...], until: null|"24h"|"7d"|<ISO>}. Validated whole
+ * before anything is written; the ids must be id-shaped (acks.mjs ID_RE), never paths.
+ * @returns {{code: number, body: object}}
+ */
+export function glanceAckWrite(body, dir = stateDir(), now = Date.now()) {
+  if (!body || typeof body !== "object") return { code: 400, body: { ok: false, error: "body must be a JSON object" } };
+  const { action, ids, until } = body;
+  if (action !== "ack" && action !== "unack") return { code: 400, body: { ok: false, error: "action must be ack or unack" } };
+  try { checkIds(ids); } catch (e) { return { code: 400, body: { ok: false, error: e.message } }; }
+  let untilMs = null;
+  if (until !== null && until !== undefined) {
+    if (action !== "ack") return { code: 400, body: { ok: false, error: "until applies to ack only" } };
+    try { untilMs = parseUntil(until, now); } catch (e) { return { code: 400, body: { ok: false, error: e.message } }; }
+  }
+  try {
+    const r = action === "ack" ? setAcks(dir, ids, { until: untilMs, now }) : clearAcks(dir, ids, { now });
+    const { file: _f, ...rest } = r;
+    return { code: 200, body: { ok: true, action, ...rest } };
+  } catch (e) {
+    return { code: 500, body: { ok: false, error: String(e?.message ?? e) } };
+  }
+}
 
 /**
  * THE TOKEN IS STABLE AND LIVES IN A FILE (2026-10-16, Part 7 option C).
@@ -1034,6 +1080,19 @@ export async function uiCmd(argv = [], io = console, overrides = {}) {
         } catch (err) {
           return send(500, { ok: false, error: String(err?.message ?? err) });
         }
+      }
+
+      // THE GLANCE (propagate#296): the list, and ack / snooze. Same guard (token, Host, Origin) as every /api route.
+      if (url.pathname === "/api/glance") {
+        try { return send(200, glancePayload(stateDir())); }
+        catch (err) { return send(500, { ok: false, error: String(err?.message ?? err) }); }
+      }
+      if (url.pathname === "/api/glance/ack" && req.method === "POST") {
+        let raw = "";
+        for await (const c of req) raw += c;
+        let body; try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: "malformed JSON body" }); }
+        const r = glanceAckWrite(body, stateDir());
+        return send(r.code, r.body);
       }
 
       // HEALTH — doctor's own sections, from the snapshot the monitor writes.
