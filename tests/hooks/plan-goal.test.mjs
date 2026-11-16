@@ -62,11 +62,11 @@ function sandbox({ goals = GOALS, now = ENFORCED } = {}) {
     gateFiles: () => (existsSync(gateDir) ? readdirSync(gateDir) : []),
     rows: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []),
     run(event, extraEnv = {}) {
-      const r = spawnSync("node", [HOOK], {
-        input: JSON.stringify(event),
-        encoding: "utf8",
-        env: { ...process.env, HOME: home, PROPAGATE_STATE_DIR: state, PROPAGATE_GOALS_FILES: goals === null ? path.join(root, "absent.md") : goalsFile, PROPAGATE_PLAN_GATE_NOW: now, ...extraEnv },
-      });
+      // The Surface gate is forced ON here (PROPAGATE_PLAN_SURFACE_GATE) so these tests do not depend on whether the
+      // machine running them declares a hub. The off-switch tests below pass `null` to remove a key from the env.
+      const env = { ...process.env, HOME: home, PROPAGATE_STATE_DIR: state, PROPAGATE_GOALS_FILES: goals === null ? path.join(root, "absent.md") : goalsFile, PROPAGATE_PLAN_GATE_NOW: now, PROPAGATE_PLAN_SURFACE_GATE: "on", ...extraEnv };
+      for (const k of Object.keys(env)) if (env[k] === null) delete env[k];
+      const r = spawnSync("node", [HOOK], { input: JSON.stringify(event), encoding: "utf8", env });
       assert.equal(r.status, 0, `the hook always exits 0: ${r.stderr}`);
       const out = r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null;
       return { raw: r.stdout, out, deny: out?.permissionDecision === "deny", reason: out?.permissionDecisionReason ?? "", ctx: out?.additionalContext ?? "" };
@@ -427,4 +427,96 @@ test("the pure decision is exported and takes an injected clock", async () => {
   const plan = "# P\n\nGoal: G2\n";
   assert.equal(decidePlan(plan, ["G2"], { now: Date.parse("2026-11-29T23:59:59Z") }).deny, undefined);
   assert.ok(decidePlan(plan, ["G2"], { now: Date.parse("2026-11-30T00:00:00Z") }).deny);
+});
+
+// ---- Fix 1: a gate its own template satisfies cannot fail. Placeholder values are refused. ----
+
+test("the exact pasted template is denied, naming which labels are unfilled", async () => {
+  const { decidePlan } = await import(HOOK);
+  const first = decidePlan("# P\n\nGoal: G2\n", ["G2"], { now: Date.parse(ENFORCED) });
+  const template = first.deny.split("Paste and fill in:\n\n")[1];
+  assert.ok(template && template.includes("## Need"), "the denial carries a template to paste");
+  const sb = sandbox();
+  const r = sb.run(exitPlan(`# Plan\n\nGoal: G2\n${template}\n`));
+  assert.equal(r.deny, true, "an unfilled template must not satisfy its own gate");
+  assert.match(r.reason, /## Need unfilled \(Question:, Decision:, Today:, Retire when:\)/);
+  assert.match(r.reason, /## References checked unfilled/);
+});
+
+test("placeholder values are refused: TODO, TBD, ?, -, <...>", () => {
+  const sb = sandbox();
+  const r = sb.run(
+    exitPlan(
+      "# Plan\n\nGoal: G2\nSurface: ui\n\n## Need\n\n- Question: TODO\n- Decision: tbd\n- Today: ?\n- Retire when: <later>\n\n## References checked\n\n- -\n- TBD\n",
+    ),
+  );
+  assert.equal(r.deny, true);
+  assert.match(r.reason, /## Need unfilled \(Question:, Decision:, Today:, Retire when:\)/);
+  assert.match(r.reason, /## References checked unfilled/);
+});
+
+test("a filled plan passes, including real text that contains angle brackets", () => {
+  const sb = sandbox();
+  const r = sb.run(
+    exitPlan(
+      "# Plan\n\nGoal: G2\nSurface: command\n\n## Need\n\n- Question: which `Goal: G<n>` lines are stale?\n- Decision: whether to re-plan.\n- Today: reading approvals.jsonl by hand.\n- Retire when: goals check reports it.\n\n## References checked\n\n- node:test: already the runner, it fits.\n",
+    ),
+  );
+  assert.equal(r.deny, false, r.reason);
+});
+
+// ---- Fix 2: the off switch. propagate is public; outside the owner's tree the Surface gate defaults OFF. ----
+
+const NON_CONFORMING = "# Plan\n\nGoal: G2\nSurface: ui\n";
+
+test("with the key off, a non-conforming plan passes silently", () => {
+  for (const off of ["off", "false", "0"]) {
+    const sb = sandbox();
+    const r = sb.run(exitPlan(NON_CONFORMING), { PROPAGATE_PLAN_SURFACE_GATE: off });
+    assert.equal(r.deny, false, `${off}: ${r.reason}`);
+    assert.doesNotMatch(r.ctx, /Surface/, "off means silent: no Surface note at all");
+    assert.equal(sb.gateRows().length, 0, "off logs nothing");
+  }
+});
+
+test("the key off in config.yml (hooks.planSurfaceGate) also turns it off", () => {
+  const sb = sandbox();
+  mkdirSync(sb.state, { recursive: true });
+  writeFileSync(path.join(sb.state, "config.yml"), "hooks:\n  planSurfaceGate: off\n");
+  const r = sb.run(exitPlan(NON_CONFORMING), { PROPAGATE_PLAN_SURFACE_GATE: null, PROPAGATE_HUB_ROOT: "/nonexistent-hub" });
+  assert.equal(r.deny, false, "the config key wins over the hub default");
+});
+
+test("with no hub and no approvals log, the gate defaults off", () => {
+  const sb = sandbox();
+  const r = sb.run(exitPlan(NON_CONFORMING), { PROPAGATE_PLAN_SURFACE_GATE: null, PROPAGATE_HUB_ROOT: null, PROPAGATE_SEARCH_ROOTS: null });
+  assert.equal(r.deny, false, r.reason);
+  assert.doesNotMatch(r.ctx, /Surface/);
+  assert.equal(sb.gateRows().length, 0);
+});
+
+test("a declared hub, or an existing approvals log, turns the default on", () => {
+  const hub = sandbox();
+  const r1 = hub.run(exitPlan(NON_CONFORMING), { PROPAGATE_PLAN_SURFACE_GATE: null, PROPAGATE_HUB_ROOT: "/some/hub" });
+  assert.equal(r1.deny, true, "a declared hub is the owner's tree");
+  const appr = sandbox();
+  mkdirSync(path.dirname(appr.log), { recursive: true });
+  writeFileSync(appr.log, "");
+  const r2 = appr.run(exitPlan(NON_CONFORMING), { PROPAGATE_PLAN_SURFACE_GATE: null, PROPAGATE_HUB_ROOT: null, PROPAGATE_SEARCH_ROOTS: null });
+  assert.equal(r2.deny, true, "an approvals log means plan-goal has run here before");
+});
+
+test("with the key on, it denies even without a hub", () => {
+  const sb = sandbox();
+  const r = sb.run(exitPlan(NON_CONFORMING), { PROPAGATE_PLAN_SURFACE_GATE: "on", PROPAGATE_HUB_ROOT: null, PROPAGATE_SEARCH_ROOTS: null });
+  assert.equal(r.deny, true);
+  assert.match(r.reason, /## Need/);
+});
+
+test("the off switch never disables the Goal check", () => {
+  const sb = sandbox();
+  const r = sb.run(exitPlan("# Plan\n\nno goal\n"), { PROPAGATE_PLAN_SURFACE_GATE: "off" });
+  assert.equal(r.deny, true);
+  assert.match(r.reason, /missing: Goal\./);
+  assert.doesNotMatch(r.reason, /Surface/);
 });

@@ -846,7 +846,9 @@ Surface: none              (or ui | widget | command | job | skill | notificatio
   ```
 
   The four labels count only inside `## Need`, which ends at the next heading of its level or higher, and each needs
-  text after the colon. `## References checked` needs at least one non-empty line. Anything inside a fenced code
+  real text after the colon. `## References checked` needs at least one entry of real text. **A placeholder is not
+  text:** a value that is empty, only `<...>` placeholders, punctuation (`?`, `-`), or `TODO`/`TBD` is refused as
+  `## Need unfilled (<labels>)` or `## References checked unfilled`, so the pasted template never passes as-is. Anything inside a fenced code
   block is ignored, so a quoted template never satisfies the gate.
 - **Override:** a line `surface_reason: <why>` allows the plan whatever its Surface, and is logged as
   `surface_reason` in the `approvals.jsonl` row (which also gains `surface`, the declared value or `null`).
@@ -861,6 +863,12 @@ Surface: none              (or ui | widget | command | job | skill | notificatio
   to `<state dir>/plan-gate/YYYY-MM.jsonl` (month of `ts`, UTC). No plan text is written. A failed write is named in
   the hook's output and never turns a deny into an allow.
 - **Test seam:** `PROPAGATE_PLAN_GATE_NOW` (an ISO date) replaces the clock for the grace decision and the log.
+- **Off switch:** `hooks.planSurfaceGate: on|off` in `config.yml`, overridden by `PROPAGATE_PLAN_SURFACE_GATE=on|off`
+  (also `true|false|yes|no|1|0`). **Unset, the gate is on only in the owner's tree** — a declared hub (`hubRoot` /
+  `PROPAGATE_HUB_ROOT`, the root goal discovery walks) or an existing `<state dir>/plans/approvals.jsonl` — and off
+  everywhere else, where it neither warns, denies nor logs. Off skips the Surface half only; the Goal check is
+  unchanged. Resolved by `planSurfaceGate()` in `lib/core/config.mjs`; if that cannot be read the hook says
+  `Surface not checked` and allows.
 
 ## The dispatch model check (propagate#265, #214 part 2)
 

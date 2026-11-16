@@ -34,6 +34,11 @@
  *
  * NEVER BLOCKS ON ITS OWN BUGS. An exception inside the hook allows. A missing section is not a bug: it blocks.
  *
+ * OFF SWITCH. `hooks.planSurfaceGate` in config.yml, or PROPAGATE_PLAN_SURFACE_GATE (lib/core/config.mjs
+ * planSurfaceGate). Unset, it is ON only in the owner's tree (a declared hub, or an approvals log already written) and
+ * OFF elsewhere, so a public install is never denied for a convention it did not adopt. Off skips Surface entirely;
+ * the Goal check is unaffected. Placeholder values (`<...>`, TODO, TBD, `?`, `-`) do not count as filled.
+ *
  * TEST SEAM (clock). PROPAGATE_PLAN_GATE_NOW (an ISO date) replaces Date.now() for the grace decision and the log.
  *
  * Acts only on ExitPlanMode; every other tool exits 0 with no output. Exit code is always 0.
@@ -110,6 +115,20 @@ function section(lines, title) {
   return null;
 }
 
+/**
+ * True when a value is not real text: empty, only `<...>` placeholders, punctuation, or a stock filler word. A gate
+ * its own template satisfies cannot fail (rule:discernment-checks §1), so the template's `<...>` values count as
+ * unfilled. Angle brackets inside real text (`Goal: G<n>`) are fine: something besides placeholders must remain.
+ */
+const FILLER = /^(?:todo|tbd|tbc|fixme|xxx|n\/?a|none yet|\.\.\.|…)$/i;
+export function isPlaceholder(value) {
+  const v = String(value ?? "").trim();
+  if (!v) return true;
+  if (FILLER.test(v.replace(/[.:!]+$/, "").trim())) return true;
+  const rest = v.replace(/<[^<>]*>/g, "");
+  return !/[\p{L}\p{N}]/u.test(rest);
+}
+
 /** A body line with its bullet and bold markers removed. */
 const bare = (line) => line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").replace(/\*\*|__/g, "").trim();
 
@@ -144,25 +163,33 @@ export function decideSurface(planText, { now = Date.now() } = {}) {
   const need = section(lines, "Need");
   if (!need) out.missing.push(NEED_MISSING);
   else {
-    const absent = NEED_LABELS.filter((label) => {
+    const absent = [];
+    const unfilled = [];
+    for (const label of NEED_LABELS) {
       const re = new RegExp(`^${label.replace(" ", "\\s+")}\\s*:\\s*(\\S.*)$`, "i");
-      return !need.some((l) => re.test(bare(l)));
-    });
+      const values = need.map((l) => re.exec(bare(l))?.[1]).filter((v) => v !== undefined);
+      if (!values.length) absent.push(label);
+      else if (values.every(isPlaceholder)) unfilled.push(label);
+    }
     if (absent.length) out.missing.push(`## Need (${absent.map((l) => `${l}:`).join(", ")})`);
+    if (unfilled.length) out.missing.push(`## Need unfilled (${unfilled.map((l) => `${l}:`).join(", ")})`);
   }
   const refs = section(lines, "References checked");
-  if (!refs || !refs.some((l) => bare(l).length > 0)) out.missing.push("## References checked");
+  const entries = (refs ?? []).map(bare).filter((l) => l.length > 0);
+  if (!entries.length) out.missing.push("## References checked");
+  else if (entries.every(isPlaceholder)) out.missing.push("## References checked unfilled");
   return out;
 }
 
 /**
- * Goal and Surface together. `activeIds` null means the goals could not be read (goal not checked, Surface still is).
+ * Goal and Surface together. `surfaceGate: false` (the install's off switch) skips Surface. `activeIds` null means the goals could not be read (goal not checked, Surface still is).
  * @returns {{deny?: string, warn?: string, missing: string[], goal, reason, surface, surfaceReason, goalChecked, log}}
  */
-export function decidePlan(planText, activeIds, { now = Date.now() } = {}) {
+export function decidePlan(planText, activeIds, { now = Date.now(), surfaceGate = true } = {}) {
   const goalChecked = Array.isArray(activeIds) && activeIds.length > 0;
   const g = goalChecked ? decide(planText, activeIds) : { goal: null, reason: null, log: false };
-  const s = decideSurface(planText, { now });
+  // The off switch (hooks.planSurfaceGate) skips the Surface half entirely: no warn, no deny, no log row.
+  const s = surfaceGate ? decideSurface(planText, { now }) : { surface: null, reason: null, missing: [], warnOnly: false };
   const out = { missing: [], goal: g.goal, reason: g.reason, surface: s.surface, surfaceReason: s.reason, goalChecked, log: g.log };
   if (g.deny) out.missing.push("Goal");
   const surfaceBlocks = s.missing.length > 0 && !s.warnOnly;
@@ -321,9 +348,18 @@ async function main() {
     } catch (e) {
       goalBlind = `goals unreadable (${e?.message ?? e})`;
     }
-    const d = decidePlan(text, goalBlind ? null : ids, { now });
+    // The off switch. Reading it is the hook's own I/O: if that fails, the Surface gate fails open and says so.
+    let surfaceGate = false;
+    let gateNote = null;
+    try {
+      surfaceGate = (await import("../lib/core/config.mjs")).planSurfaceGate().on;
+    } catch (e) {
+      gateNote = `Surface not checked: gate setting unreadable (${e?.message ?? e})`;
+    }
+    const d = decidePlan(text, goalBlind ? null : ids, { now, surfaceGate });
     const notes = [];
     if (goalBlind) notes.push(`plan goal not checked: ${goalBlind}`);
+    if (gateNote) notes.push(gateNote);
     if (d.deny) {
       const err = await logGate(now, session, "deny", d.missing);
       const tail = [...notes, ...(err ? [`plan-gate log not written: ${err}`] : [])];
@@ -342,7 +378,7 @@ async function main() {
       mkdirSync(dir, { recursive: true });
       const ts = new Date().toISOString();
       const row = d.goal ? { ts, plan: source, goal: d.goal } : { ts, plan: source, goal: null, reason: d.reason };
-      row.surface = d.surface;
+      if (surfaceGate) row.surface = d.surface;
       if (d.surfaceReason) row.surface_reason = d.surfaceReason;
       appendFileSync(path.join(dir, "approvals.jsonl"), JSON.stringify(row) + "\n");
       notes.unshift(d.goal ? `plan names active goal ${d.goal}` : `goal_reason override recorded (${d.reason})`);
