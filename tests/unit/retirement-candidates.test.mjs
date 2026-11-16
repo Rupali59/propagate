@@ -27,7 +27,10 @@ import {
   parseSystemsTable,
   adoptionCandidates,
   classifyAdoptionRows,
+  classifyRetirementRows,
+  RETIREMENT_MIN_DAYS,
   scanRetirement,
+  scanSystems,
   ADOPTION_TARGET_STATUSES,
 } from "../../lib/report/adoption.mjs";
 import { Reporter } from "../../lib/report/doctor/reporter.mjs";
@@ -132,7 +135,7 @@ test("scan: an unreadable SYSTEMS.md is reported with its path, and doctor says 
 // T-A2: plain `active` stays excluded
 // ─────────────────────────────────────────────────────────────────────────
 
-test("a plain `active` row with a blank adoption_date stays excluded", () => {
+test("the digest ask: a plain `active` row with a blank adoption_date stays excluded", () => {
   assert.deepEqual([...ADOPTION_TARGET_STATUSES], ["active-unadopted", "installed-never-invoked"]);
   const { rows } = parseSystems(sevenCol(row7({ id: "sys-plain", status: "active" }), row7({ id: "sys-target", status: "active-unadopted" })));
   assert.deepEqual(adoptionCandidates(rows).map((r) => r.id), ["sys-target"]);
@@ -240,33 +243,87 @@ test("no SYSTEMS.md anywhere prints the blind-scan line naming the workspaces sc
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// T-A6: one function feeds digest and doctor
+// T-A6: one scan, two rules (Rupali, 2026-11-16: "two rules")
+//   the digest's adoption ask: the narrow ADOPTION_TARGET_STATUSES, unchanged;
+//   doctor's retirement candidates: status starts `active`, adoption blank, and
+//   more than RETIREMENT_MIN_DAYS since the earliest date in last_verified.
 // ─────────────────────────────────────────────────────────────────────────
 
-test("digest and doctor return the same candidates, both from scanRetirement", () => {
+const NOW = Date.parse("2026-11-16T12:00:00Z");
+const daysBefore = (n) => new Date(NOW - n * 86400000).toISOString().slice(0, 10);
+
+// Shaped like a real long-running agent row: the status is prose that opens with
+// "active", emphasis included. Written as a literal, never through row7(), so the
+// status cell keeps its markup (rule:mutate-behind-the-fixture-builder).
+const WIDGET_SHAPED =
+  "| `sys-sampler` | agent | **active, and since 2026-09-14 it drives two things** — a sample and a slow path | art | " +
+  "echo ok | **2026-09-14** — three instruments agreed | **BLANK.** Not earned. |";
+
+test("a widget-shaped row (`active, and since …`, blank adoption) is a retirement candidate 30+ days on, and NOT a digest ask", () => {
+  const { rows, error } = parseSystems(sevenCol(WIDGET_SHAPED));
+  assert.equal(error, null);
+  const ret = classifyRetirementRows(rows, { now: NOW });
+  assert.deepEqual(ret.candidates.map((r) => r.id), ["sys-sampler"]);
+  assert.equal(ret.candidates[0].startDate, "2026-09-14");
+  assert.ok(ret.candidates[0].ageDays > RETIREMENT_MIN_DAYS);
+  assert.deepEqual(adoptionCandidates(rows), [], "the digest's narrow rule must not ask about it");
+});
+
+test("the retirement clock is the EARLIEST date in last_verified, not the leading one", () => {
+  const text = sevenCol("| `sys-two-dates` | k | active | a | p | 2026-11-14 (re-run); first verified 2026-08-03 | |");
+  const ret = classifyRetirementRows(parseSystems(text).rows, { now: NOW });
+  assert.deepEqual(ret.candidates.map((r) => [r.id, r.startDate]), [["sys-two-dates", "2026-08-03"]]);
+});
+
+test("a row verified 10 days ago is not a retirement candidate (and not unknown)", () => {
+  const ret = classifyRetirementRows(parseSystems(sevenCol(row7({ id: "sys-recent", status: "active", lastVerified: daysBefore(10) }))).rows, { now: NOW });
+  assert.deepEqual(ret.candidates, []);
+  assert.deepEqual(ret.unknown, []);
+});
+
+test("retired, dormant and proposed rows are excluded from retirement candidates", () => {
+  const text = sevenCol(
+    row7({ id: "sys-retired", status: "**retired 2026-08-14**" }),
+    row7({ id: "sys-dormant", status: "dormant" }),
+    row7({ id: "sys-proposed", status: "proposed — not installed" }),
+    row7({ id: "sys-live", status: "Active" }),
+  );
+  const ret = classifyRetirementRows(parseSystems(text).rows, { now: NOW });
+  assert.deepEqual(ret.candidates.map((r) => r.id), ["sys-live"]);
+});
+
+test("a retirement row with no parseable date is `unknown: no start date`, never a candidate", () => {
+  const ret = classifyRetirementRows(parseSystems(sevenCol(row7({ id: "sys-undated", status: "active", lastVerified: "n/a" }))).rows, { now: NOW });
+  assert.deepEqual(ret.candidates, []);
+  assert.deepEqual(ret.unknown.map((r) => r.id), ["sys-undated"]);
+});
+
+test("digest and doctor read ONE scan and apply their own rule to it", () => {
   const root = tmp();
   try {
     const a = path.join(root, "ws-alpha");
     const b = path.join(root, "ws-beta");
-    putSystems(a, sevenCol(row7({ id: "sys-alpha", lastVerified: "2026-08-03" }), row7({ id: "sys-plain", status: "active" })));
+    putSystems(a, sevenCol(row7({ id: "sys-alpha", lastVerified: "2026-08-03" }), row7({ id: "sys-plain", status: "active" }), WIDGET_SHAPED));
     putSystems(b, [HEADER_REORDERED, SEP_REORDERED, rowReordered({ id: "sys-beta", lastVerified: "2026-08-01" })].join("\n"));
     const opts = { workspaces: [{ name: "ws-alpha", root: a }, { name: "ws-beta", root: b }], skillDir: null };
-
-    const shared = scanRetirement(opts);
     const ids = (list) => list.map((c) => `${c.workspace}:${c.id}`).sort();
-    assert.deepEqual(ids(shared.candidates), ["ws-alpha:sys-alpha", "ws-beta:sys-beta"]);
+
+    const scan = scanSystems(opts);
+    assert.equal(scan.rows.length, 4);
 
     const digest = adoptionSnapshot(opts);
     assert.equal(digest.available, true);
-    assert.deepEqual(ids(digest.candidates), ids(shared.candidates));
+    assert.deepEqual(ids(digest.candidates), ids(adoptionCandidates(scan.rows)));
+    assert.deepEqual(ids(digest.candidates), ["ws-alpha:sys-alpha", "ws-beta:sys-beta"]);
     assert.equal(digest.ask.id, "sys-beta", "the digest's one ask is the oldest candidate across workspaces");
-    assert.equal(digest.ask.candidateCount, 2);
 
     const r = new Reporter();
-    const { scan } = checkRetirement({ reporter: r, ...opts });
-    assert.deepEqual(ids(scan.candidates), ids(shared.candidates));
+    const { scan: doctorScan } = checkRetirement({ reporter: r, ...opts, now: NOW });
+    const expected = ids(classifyRetirementRows(scan.rows, { now: NOW }).candidates);
+    assert.deepEqual(ids(doctorScan.candidates), expected);
+    assert.deepEqual(expected, ["ws-alpha:sys-alpha", "ws-alpha:sys-plain", "ws-alpha:sys-sampler", "ws-beta:sys-beta"]);
     const named = r.entries.filter((e) => e.kind === "warn" && e.label === "retirement candidate").map((e) => e.detail.split(" · ")[0]);
-    assert.deepEqual(named.sort(), ["sys-alpha", "sys-beta"]);
+    assert.deepEqual(named.sort(), ["sys-alpha", "sys-beta", "sys-plain", "sys-sampler"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
