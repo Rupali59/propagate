@@ -1167,6 +1167,17 @@ async function doctor({ exitProcess = true } = {}) {
     problems += reporter.problems;
   }
 
+  // # Retirement candidates (#298): unadopted systems across every discovered SYSTEMS.md,
+  // from scanRetirement, the one candidate function the digest and the glance also read.
+  // Warn-only (SEVERITY in the module).
+  {
+    const { checkRetirement } = await import("./lib/report/doctor/retirement.mjs");
+    const reporter = new Reporter();
+    checkRetirement({ reporter, workspaces: WORKSPACES, skillDir: SKILL_DIR });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
   console.log(`\n${BOLD}# Log tail${RESET}`);
   if (existsSync(WATCHER_LOG)) {
     const raw = await readFile(WATCHER_LOG, "utf8");

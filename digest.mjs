@@ -51,7 +51,7 @@ import { rebuildIndex, latestMtimeUnderDir } from "./lib/skills/index-db.mjs";
 import { scanSkills, probeTranscripts } from "./lib/skills/skills-scan.mjs";
 import { readMetricsRecords, evaluateExpectations } from "./lib/report/metrics.mjs";
 import { inventory as buildInventory } from "./lib/report/inventory.mjs";
-import { readSystemsTable, pickAdoptionAsk, formatAdoptionLines } from "./lib/report/adoption.mjs";
+import { scanSystems, blindScanLine, adoptionCandidates, pickAdoptionAsk, formatAdoptionLines } from "./lib/report/adoption.mjs";
 import { backlog as buildBacklog } from "./lib/report/backlog.mjs";
 import {
   rollup as buildRollup,
@@ -1105,11 +1105,22 @@ function inventorySnapshot(inv) {
  * as skills/lifecycle/inventory above: a bug here must never take down the
  * only reporting channel that currently works.
  */
-function adoptionSnapshot() {
-  const { rows, error } = readSystemsTable();
-  if (error) return { available: false, error };
-  const ask = pickAdoptionAsk(rows);
-  return { available: true, ask };
+export function adoptionSnapshot({ workspaces = WORKSPACES, skillDir = SKILL_DIR } = {}) {
+  // #298: one scan (scanSystems) shared with doctor's `# Retirement candidates`
+  // and the glance -- every discovered SYSTEMS.md, parsed by header name,
+  // worktree copies counted once. The ASK keeps its own narrow rule
+  // (adoptionCandidates); retirement is wider on purpose (two rules, 2026-11-16).
+  const scan = scanSystems({ workspaces, skillDir });
+  if (scan.sources.length === 0) {
+    const error =
+      scan.unreadable.length > 0
+        ? scan.unreadable.map((u) => u.error).join("; ")
+        : blindScanLine(scan);
+    return { available: false, error, candidates: [] };
+  }
+  const candidates = adoptionCandidates(scan.rows);
+  const ask = pickAdoptionAsk(candidates);
+  return { available: true, ask, candidates };
 }
 
 /**
