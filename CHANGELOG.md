@@ -9,6 +9,8 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 ### Upgrading
 - **Node >= 22.13 is now required** (was 22.0). `propagate work` keeps its queue in Node's built-in `node:sqlite`, which is unflagged from 22.13.0. On the 22.x line that module is still marked experimental; propagate hides only its SQLite warning. Check with `node --version` before upgrading.
 - **`propagate work` creates `$PROPAGATE_STATE_DIR/work/queue.db`** (plus `-wal` and `-shm`) on first use. These files are state, not cache: never delete them as part of a cache clean.
+- **Plans need a `Surface:` line from 2026-11-30.** The plan-goal hook now also requires `Surface: none` or `Surface: ui|widget|command|job|skill|notification|hook`, and a non-`none` plan needs `## Need` (`Question:`, `Decision:`, `Today:`, `Retire when:`) and `## References checked` sections. Until 2026-11-30 a plan with no `Surface:` line is allowed with a warning; after it, it is denied. A plan that declares a Surface without its sections is denied now. Override with a `surface_reason: <why>` line. Grammar: `docs/REFERENCE.md` "The plan grammar".
+- **The plan-goal hook writes `$PROPAGATE_STATE_DIR/plan-gate/YYYY-MM.jsonl`**, one `{ts, session, verdict, missing}` row per deny or warn (no plan text), and `plans/approvals.jsonl` rows gain `surface` and, when used, `surface_reason`. Older rows without them still read.
 
 ## [0.19.0] — 2026-11-10
 
