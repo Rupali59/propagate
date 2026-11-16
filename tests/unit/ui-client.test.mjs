@@ -213,12 +213,12 @@ test("first paint reads the inbox, then the three after-paint reads -- and nothi
 test("the rail shows live counts, and a count that is not loaded is BLANK not zero", async () => {
   const { app } = await mount();
   const labels = byClass(app, "div").map(textOf);
-  // OVERVIEW joined at the front on 2026-10-16, so every index below moved up by one: that is
-  // the rename this test was rewritten for, not a loosening.
-  assert.match(labels[1], /JUDGE\s*3/, "Judge reads worklist.toJudge");
-  assert.match(labels[2], /UNBLOCK\s*1/, "Unblock reads leverage.blocked");
-  // OVERVIEW, ACTIVITY and the Explore views have no count; they must not read as 0.
-  for (const i of [0, 4, 5, 6, 7]) assert.doesNotMatch(labels[i], /\d/, `${labels[i]} must not render a count it does not have`);
+  // OVERVIEW joined at the front on 2026-10-16, and GLANCE after it on 2026-11-16 (propagate#296), so every index
+  // below moved up by one each time: that is the insertion this test was rewritten for, not a loosening.
+  assert.match(labels[2], /JUDGE\s*3/, "Judge reads worklist.toJudge");
+  assert.match(labels[3], /UNBLOCK\s*1/, "Unblock reads leverage.blocked");
+  // OVERVIEW, GLANCE, ACTIVITY and the Explore views have no count; they must not read as 0.
+  for (const i of [0, 1, 5, 6, 7, 8]) assert.doesNotMatch(labels[i], /\d/, `${labels[i]} must not render a count it does not have`);
 });
 
 test("the Judge badge EQUALS the rendered To-judge rows, by the widget's own counter (plan test 8)", async () => {
@@ -226,7 +226,7 @@ test("the Judge badge EQUALS the rendered To-judge rows, by the widget's own cou
   // items, and the rows the page draws. The 46-versus-78 defect was these two
   // disagreeing in different units.
   const { app, ui } = await mount();
-  const badge = Number(textOf(byClass(app, "div")[1]).replace(/\D/g, ""));
+  const badge = Number(textOf(byClass(app, "div").find((d) => /JUDGE/.test(textOf(d)))).replace(/\D/g, ""));
   assert.equal(badge, INBOX.worklist.toJudge, "the rail did not read worklist.toJudge");
   assert.equal(rows(app).length, badge, "the badge says one number and the list draws another");
   // DIVERGED rows are NOT in To judge: they sit under their own chip with their own count.
@@ -730,7 +730,7 @@ test("every old hash lands on its new view, and an unknown hash lands on Judge (
 
 test("readHash parses ?edge= and an unknown hash falls back to judge", async () => {
   const m = await mount({ hash: "#/judge?edge=abc%20d" });
-  const none = { section: null, state: null, chip: null, focus: null, tick: { ids: [], rejected: false }, ws: null, age: null, source: null };  // tick joined 2026-10-17 (Phase 3): no parameter is no ids and not a rejection
+  const none = { section: null, state: null, chip: null, focus: null, tick: { ids: [], rejected: false }, ws: null, age: null, source: null, item: null, verdict: null };  // item and verdict joined 2026-11-16 (propagate#296, the glance route); tick joined 2026-10-17 (Phase 3): no parameter is no ids and not a rejection
   assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: "abc d", ...none });
   m.ctx.location.hash = "#/nonsense";
   assert.deepEqual(fromRealm(m.ui.readHash()), { view: "judge", edge: null, ...none });
@@ -3317,7 +3317,7 @@ test("Phase 4b: the hashes route to the pages, History sits beside Activity and 
   for (const v of ["backlog", "goals", "history"]) assert.equal(ui.parseHash("#/" + v).view, v);
   assert.equal(ui.parseHash("#/backlogs").view, "judge", "an unknown name still lands on Judge");
   const groups = fromRealm(ui.railGroups(ui.DIVISIONS)).map((g) => g.key + ":" + g.items.map((i) => i.key).join(","));
-  assert.deepEqual(groups, ["today:overview", "settle:judge,unblock", "machinery:health,claims,rules,caps,skills", "work:backlog,goals,registers,reminders", "history:activity,history,graph"]);
+  assert.deepEqual(groups, ["today:overview,glance", "settle:judge,unblock", "machinery:health,claims,rules,caps,skills", "work:backlog,goals,registers,reminders", "history:activity,history,graph"]);
 });
 
 test("Phase 4b: refresh on each new page bypasses the server's cache for that page and re-reads it", async () => {
