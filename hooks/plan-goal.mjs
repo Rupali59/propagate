@@ -67,13 +67,14 @@ const SURFACE_LINE = /^[ \t]*(?:[-*+][ \t]+)?\**[ \t]*surface[ \t]*\**[ \t]*:[ \
 const SURFACE_REASON_LINE = /^\s*surface_reason:[ \t]*(\S.*)$/im;
 /**
  * #301: words in a `Surface: none` plan that say it touches a surface anyway, each with the kind it suggests.
- * Matched case-insensitively on the whole plan text (fences included: a code sketch calling notify( counts). Warn only.
+ * Matched case-insensitively (except the COMMANDS identifier) on the whole plan text (fences included: a code sketch calling notify( counts). Warn only.
  */
 export const SURFACE_MARKERS = [
   { marker: "notify(", re: /notify\(/i, kind: "notification" },
   { marker: "hooks/", re: /hooks\//i, kind: "hook" },
-  { marker: "widget", re: /widget/i, kind: "widget" },
-  { marker: "COMMANDS", re: /\bCOMMANDS\b|lib\/core\/commands\.mjs/i, kind: "command" },
+  { marker: "widget", re: /\bwidgets?\b/i, kind: "widget" },
+  // Case-SENSITIVE on purpose: the identifier COMMANDS, never the prose word "commands", which nearly every plan has.
+  { marker: "COMMANDS", re: /\bCOMMANDS\b|lib\/core\/commands\.mjs/, kind: "command" },
   { marker: "launchd", re: /launchd|\.plist\b|LaunchAgents/i, kind: "job" },
 ];
 

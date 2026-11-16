@@ -585,3 +585,20 @@ test("#301: with the gate off, Surface: none naming notify( is silent", () => {
   assert.doesNotMatch(r.ctx, /Surface|notify/);
   assert.equal(sb.gateRows().length, 0);
 });
+
+test("#301: the prose word 'commands' is not the command-table marker; the COMMANDS identifier is", async () => {
+  const { decidePlan } = await import(HOOK);
+  const now = Date.parse("2026-12-15T12:00:00Z");
+  const prose = decidePlan("Goal: G2\nSurface: none\n\nrun these commands, then the Commands list\n", ["G2"], { now });
+  assert.equal(prose.surfaceMismatch, undefined, `prose "commands" must be silent: ${prose.surfaceMismatch}`);
+  const ident = decidePlan("Goal: G2\nSurface: none\n\nadd an entry to COMMANDS\n", ["G2"], { now });
+  assert.match(ident.surfaceMismatch ?? "", /COMMANDS \(suggests Surface: command\)/);
+});
+
+test("#301: a Surface: none plan saying 'run these commands' is silent end to end", () => {
+  const sb = sandbox();
+  const r = sb.run(exitPlan("# Plan\n\nGoal: G2\nSurface: none\n\nrun these commands\n"));
+  assert.equal(r.deny, false, r.reason);
+  assert.doesNotMatch(r.ctx, /suggests/);
+  assert.equal(sb.gateRows().length, 0);
+});
