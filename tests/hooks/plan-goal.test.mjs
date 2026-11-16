@@ -520,3 +520,68 @@ test("the off switch never disables the Goal check", () => {
   assert.match(r.reason, /missing: Goal\./);
   assert.doesNotMatch(r.reason, /Surface/);
 });
+
+// ---- #301: a plan that says Surface: none but names a surface marker WARNS (never denies). ----
+
+test("#301: Surface: none naming notify( warns, names the marker, suggests notification, and logs warn-surface-mismatch", () => {
+  const sb = sandbox();
+  const r = sb.run(exitPlan("# Plan\n\nGoal: G2\nSurface: none\n\nCall NOTIFY(user, msg) when done.\n"));
+  assert.equal(r.deny, false, r.reason);
+  assert.match(r.ctx, /Surface: none/);
+  assert.match(r.ctx, /notify\(/);
+  assert.match(r.ctx, /Surface: notification/);
+  const rows = sb.gateRows();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].verdict, "warn-surface-mismatch");
+  assert.deepEqual(Object.keys(rows[0]).sort(), ["missing", "session", "ts", "verdict"]);
+  assert.equal(sb.rows()[0].surface, "none", "the approval is still recorded");
+});
+
+test("#301: each marker suggests its matching Surface kind", async () => {
+  const { decidePlan } = await import(HOOK);
+  const cases = [
+    ["edit hooks/foo.mjs", "hooks/", "hook"],
+    ["tweak the Widget", "widget", "widget"],
+    ["add a row to COMMANDS", "COMMANDS", "command"],
+    ["edit lib/core/commands.mjs", "COMMANDS", "command"],
+    ["a launchd job", "launchd", "job"],
+    ["write com.x.plist", "launchd", "job"],
+    ["into ~/Library/LaunchAgents", "launchd", "job"],
+  ];
+  for (const [body, marker, kind] of cases) {
+    const d = decidePlan(`Goal: G2\nSurface: none\n\n${body}\n`, ["G2"], { now: Date.parse("2026-12-15T12:00:00Z") });
+    assert.equal(d.deny, undefined, body);
+    assert.ok(d.surfaceMismatch, `${body}: no mismatch warning`);
+    assert.ok(d.surfaceMismatch.includes(marker), `${body}: ${d.surfaceMismatch}`);
+    assert.ok(d.surfaceMismatch.includes(`Surface: ${kind}`), `${body}: ${d.surfaceMismatch}`);
+  }
+});
+
+test("#301: Surface: none with no markers is silent", () => {
+  const sb = sandbox();
+  const r = sb.run(exitPlan("# Plan\n\nGoal: G2\nSurface: none\n\nRefactor the parser only.\n"));
+  assert.equal(r.deny, false, r.reason);
+  assert.doesNotMatch(r.ctx, /mismatch|suggest/i);
+  assert.equal(sb.gateRows().length, 0);
+});
+
+test("#301: a declared Surface naming widget gets no mismatch warning", () => {
+  const sb = sandbox();
+  const plan = [
+    "# Plan", "", "Goal: G2", "Surface: ui", "", "Touch the widget.", "",
+    "## Need", "Question: is it up?", "Decision: restart or not", "Today: I open a terminal", "Retire when: never", "",
+    "## References checked", "- Ubersicht docs: fits", "",
+  ].join("\n");
+  const r = sb.run(exitPlan(plan));
+  assert.equal(r.deny, false, r.reason);
+  assert.doesNotMatch(r.ctx, /mismatch/i);
+  assert.equal(sb.gateRows().length, 0);
+});
+
+test("#301: with the gate off, Surface: none naming notify( is silent", () => {
+  const sb = sandbox();
+  const r = sb.run(exitPlan("# Plan\n\nGoal: G2\nSurface: none\n\nnotify(x)\n"), { PROPAGATE_PLAN_SURFACE_GATE: "off" });
+  assert.equal(r.deny, false, r.reason);
+  assert.doesNotMatch(r.ctx, /Surface|notify/);
+  assert.equal(sb.gateRows().length, 0);
+});
