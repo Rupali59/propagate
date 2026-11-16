@@ -450,6 +450,7 @@ them stays in `cli.mjs`.
 | Command | What it does |
 |---|---|
 | `status` | List open drift rows, scoped to the workspace at cwd by default. `--all` for every workspace, `--cross` for the cross-repo ledger, `--json` for machine-readable output. |
+| `glance [--json] [--no-write]` | **What is working, what is broken, what needs you** (#295), from files other commands already wrote; never runs reconcile, doctor or `gh`, so a standalone run takes well under a second. Prints the grammar `<icon> <subject>: <what> · <fix>` (at most 80 characters, needs-you first, at most 5 item lines then `+N more`, working as one line), `All clear · N signals checked · HH:MM`, or `glance: nothing to read yet`. Writes `<state dir>/glance.json` atomically and prunes guard-log months older than 90 days; `--no-write` writes and deletes nothing. `--json` prints exactly the `glance.json` object. **Exit 0** working, **1** broken or needs you (an unknown counts as broken), **2** nothing could be read, or a usage error. See "The glance" below. |
 | `doctor [--full] [--json] [--since <span\|date>]` | **Default view is folded (#107):** failures (`✗`), inconclusive (`?`) and unknown-kind (`?!`) lines are always printed verbatim; repeated `!` warnings with one label in a section become one `! <label> ×N  <first detail> (+N-1 more: doctor --full)` line; `✓`/`·` lines become one `· N ok · N info` count per section; the first line states `showing folded view: N lines of M`. The fold is applied to the rendered lines (the same capture `--json` uses), so it cannot omit a section, and the exit code is identical to `--full`. **`--full`** prints every line (the pre-#107 output); `--json` is unchanged. Lines doctor writes to stderr are not folded and may appear out of place. Not done: a severity threshold (warnings at or above a level shown individually), because the rendered lines do not carry the module's severity. Health check: launchd plist loaded (`launchctl list \| grep <label>`), heartbeat age (warn >1h during active periods, fail >1 day), all `.propagates.yml` sidecars pass schema validation, sidecar downstream paths resolve on disk (warn-only), `state.json` parseable with `.bak` present. **No longer asserts that an in-tree ledger parses** — retired 2026-09-24 (PR-009): it passed unconditionally for a file `ensureLedgerPair` creates empty and nothing appends to, so it reported success for having read nothing. The row count is now an `info`, and a genuine read failure is still a check. **`# Unrecorded work`** (#131, `lib/report/doctor/unrecorded.mjs`): per repo in the discovery census (`ownerCandidates`) plus repos nested under it, record files (STATE, DECISIONS, GOTCHAS, HANDOVERS, TODOS, TODO, ISSUES, `.propagates.yml`, `.sidecar.yml`, ledgers, markdown under `plans/` or `rules/`, matched by name or pattern) that are modified, staged or untracked with an mtime at least `PROPAGATE_UNRECORDED_DAYS` days old (default 7); files edited on today's local day are always excluded. Also local branches with commits on no remote: ahead of their upstream, upstream gone, or no upstream (printed as such, never as zero); a no-upstream branch whose commits are all on some remote is counted in the summary, not listed. Worktrees of one repo list shared branches once. Output names repo, branch, file and age. **Warn-only: it never votes on the exit code**, because uncommitted work is the normal state of a working day and #129 recorded an always-red doctor going unread; the issue's "makes doctor fail" is deliberately not followed. Zero repos scanned prints `scan is blind`, never a clean line. |
 | `init <dir> [--workspace\|--edges-only]` | Scaffold `.propagates.yml`. `--workspace` (default) writes `workspace: true` and verifies the directory becomes discoverable, exiting non-zero if not (N15). **No longer touches the plist** — that moved to `reload` (N14). |
 | `reload` | **Obsolete as of 2026-08-14** — its only purpose was regenerating the (now retired) watcher's plist and reloading it into launchd; `lib/core/plist.mjs` has never generated any other plist (grep confirms it — the digest plist is installed by a separate mechanism it never touches, see "Canonical state" above). Not removed from `cli.mjs` by this change (out of scope — no live launchd command was run to verify/enact this), but there is no remaining reason to run it. |
@@ -780,7 +781,7 @@ Reads open issues labelled `kind:evaluate` on the hub repo; an issue also labell
 - **Sessions per goal (propagate#272):** under every goal block, one `sessions: <project> · #<n> (<state>, <since>)` line per live session associated with that goal (`sessions: none` when there are none), then `no session: #a, #b` for that goal's Ready items no live associated session covers (omitted when every Ready item is covered). The sessions come from `claude agents --json` joined to `propagate sessions assoc` records, read once per run. If that read fails, one line `sessions: could not read (<CODE>: <what>)` follows the goal blocks. **The exit code is the same whether the reader succeeds, returns nothing or fails:** sessions are information beside the capacity verdict. `--json`: each `goalBlocks` entry carries `sessions: {live:[{project,item,state,since}], uncovered:["owner/repo#n"]}`, or `sessions: {error:{code,what}}`.
 - **Verdict:** `short by ~N points` (with the top promotable Backlog items), `enough` (budget ≤ supply ≤ 2× budget), or `over` (with what will not fit).
 - **Exit:** 0 enough; 1 short or over; 2 cannot judge (no good sample, no count basis, the rate limit too low, or the read went blind).
-- **Guard-log prune (propagate#294):** `day open` also deletes `<state dir>/guard/YYYY-MM.jsonl` files whose month ended more than 90 days ago (see "The background-guard log" below). It is local, runs whatever the verdict, and leaves any other file name alone. A removal is one `note: guard log: removed N month file(s) …` line; a failure is a `guard log not pruned (…)` note. Neither moves the exit code.
+- **The glance (propagate#295):** `day open` computes the glance after its broadcast refresh and writes `glance.json`, which also deletes `<state dir>/guard/YYYY-MM.jsonl` files whose month ended more than 90 days ago (the prune moved into the glance; see "The glance" and "The background-guard log" below). It is local, runs whatever the verdict, and leaves any other file name alone. A removal is one `note: guard log: removed N month file(s) …` line; a failure is a `glance not written (…)` note. Neither moves the exit code.
 
 `propagate day close [--apply] [--json]` is a dry run unless `--apply`. It proposes:
 - **(a) Promotions** from Backlog to Ready. An item qualifies when it is open, in Backlog, **is under an active goal**, has a Size and a stated "Done when", is not an Epic, and has no block / question / decision / waiting / needs- label. Each board is topped up to 3 Ready.
@@ -848,8 +849,69 @@ of the row's `ts`. The state dir is `$PROPAGATE_STATE_DIR`, default `~/.propagat
 - **Order and failure:** the deny JSON goes to stdout first. The append then runs in its own `try`, so a failed
   append (unwritable state dir, `guard` not a directory, full disk) never changes the decision. The hook still exits 0.
 - **One write per row.** `guard/` is created on the first logged event; an install without it works unchanged.
-- **Pruning belongs to the CLI, never the hook:** `lib/guard/log.mjs` `pruneGuard`, run by `propagate day open`, deletes
-  month files that ended more than 90 days ago.
+- **Pruning belongs to the CLI, never the hook:** `lib/guard/log.mjs` `pruneGuard`, run by every glance write
+  (`propagate glance`, the monitor, CLI `doctor`, `day open`; #295), deletes month files that ended more than 90 days ago.
+
+## The glance (propagate#295)
+
+One answer to *what is working, what is broken, what needs me*, as a terminal command (`propagate glance`), a file
+(`<state dir>/glance.json`) and the session-start line. Code: `lib/glance/` (`signals.mjs` the definitions,
+`verdict.mjs` the daily rule, `compute.mjs` the readers, `store.mjs` the file, `render.mjs` the line).
+
+**Where it is computed, always from inputs already held.** The monitor, after its doctor snapshot, from its own
+reconcile rows and doctor result; CLI `doctor` (default and `--json`), from its in-memory result; `day open`, after the
+broadcast refresh; and `propagate glance` itself. None of them lets the glance run reconcile, doctor or `gh`. Without
+reconcile rows the edges item is carried from the previous glance while that glance is under 6 h old, else unknown.
+A glance failure is one stderr line or note; it never moves the caller's exit code. CLI `doctor` also prints its
+verdict line first now.
+
+**Signals.** `kind` decides what unknown means: a *heartbeat* is unknown when its source is missing, unreadable or
+older than its threshold; an *event log*'s missing or empty file is 0 events, working, never unknown for being quiet.
+
+| Signal | kind | Source | Failure | Stale after |
+|---|---|---|---|---|
+| doctor | heartbeat | the caller's doctor JSON, else `doctor-snapshot.json` | a red check; with the `human` marker it is needs-you | 26 h |
+| metrics | heartbeat | `doctor.problems` in `metrics.jsonl` | today more than twice the 7-day median and at least 3 | 26 h |
+| monitor | heartbeat | `monitor.log` | the last run logged `error=` | 3 x 1800 s |
+| edges | heartbeat | the caller's reconcile rows, through `actionOf` (`lib/edges/states.mjs`) | `broken` (UNMATCHED, UNRESOLVABLE, NOT_PRESENT_ON_REF); judge, pick-a-side and blocked are working | 6 h (carried) |
+| hooks | event log | `sessions/errors.log`, `costs/errors.log` | an error-shaped line; `skipped:` and `row written without it` traces are not | — |
+| guard | event log | `guard/YYYY-MM.jsonl` | a `deny` with no `allow-bg` of the same session and `command_hash` within 10 minutes | — |
+| jobs | heartbeat | the doctor result's `# Scheduled jobs` section | a warned job (no live pid and a non-zero exit, or a daily job not run in 26 h); a running job's past exit is not a failure | with doctor |
+| broadcast | heartbeat | `broadcast/index.json` and the shown rows | needs-you: an open child not shown for more than 2 days | 7 days |
+| work | heartbeat | the work queue (`work/queue.db`) | needs-you: an item in `parked` | — |
+
+A signal whose source is not set up on the install (no broadcast index, no work store, no scheduled-jobs section, not
+macOS) is listed in `skipped` with its reason and not counted. One reader throwing makes that signal unknown with the
+reason; the rest still run.
+
+**Verdicts.** Per UTC data day (a day with no data is absent, never 0): fewer than 3 prior days is `learning`; broken is
+more than twice the median of up to 7 prior days and at least 3, or failures on each of the last 3 data days. Every item
+carries `owner` (`propagate` retries it, `you` must act); a propagate-owned item still broken after 6 monitor runs is
+promoted to needs-you. `since` is carried from the previous glance by id. Ids carry no numbers:
+`doctor:<section>:<check_id or label slug>`, `job:<label>`, `work:<id>`, `edges:broken`, `broadcast:unattended`.
+
+**Doctor markers.** A Reporter entry's `{human: true}` and `{check_id}` cross the text seam in-band, as one trailing
+`  ⚑ human id=<check_id>` marker placed before any `⇒` action, anchored at the end; `structure.mjs` parses it back.
+
+**The `glance.json` contract** (`schema_version: 1`):
+
+```
+{ schema_version: 1, generatedAt: "<ISO 8601 UTC>", stale_after_s: 21600,
+  verdict: "working|broken|needs_you|blind", signals_checked, needs_you_ids: [...], skipped: [{signal, reason}],
+  items: [{ id, signal, kind, verdict: "working|broken|needs_you", flag: null|"unknown"|"learning",
+            owner: "propagate|you", subject, what, line, why, fix: {text, command|null},
+            since, looked_at, source, ...signal extras (count, subjects, failures_today, carried) }] }
+```
+
+- Written atomically (`glance.json.<pid>.tmp`, then rename); last writer wins. `source` is a name, never a path.
+- Additive changes only within a major. A reader meeting a newer `schema_version` refuses: `glance format newer than
+  this reader`. An absent file reads as not computed, an unparsable one as unavailable; neither reads as clear.
+- The age is derived by each reader from `generatedAt`, never stored; past `stale_after_s` everything is unknown (stale).
+
+**The session line** (`hooks/session-guide.mjs`, through `readGlanceCopy`, parity-tested against `readGlance`): one line,
+at most 140 characters, at most 3 items plus the age (`as of HH:MM`, or `Nh ago` past 1 h), ending
+`Run: propagate glance`. Absent: `glance: not computed yet; run propagate glance`. It is the last line of the block and
+last to be cut, and it prints in unplaced folders, with no checkouts cache, and on the hook's fail-open path.
 
 ## Subagents (propagate#251)
 
