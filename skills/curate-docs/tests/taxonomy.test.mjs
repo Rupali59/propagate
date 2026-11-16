@@ -15,7 +15,11 @@ test("loads propagate's taxonomy and re-exports the surface we depend on", async
   // `propagate-skill/`, not `propagate/`. The trailing `-skill` broke the anchored match. The
   // intent is unchanged: assert it came from propagate (co-located, or a standalone
   // `propagate` checkout), never which subdirectory.
-  assert.match(t.source, /propagate(-skill)?\/lib\/(report\/)?doc-kind\.mjs$/, t.source);
+  // Derived from this file's location, not from the checkout's directory name: a worktree
+  // is named after its branch, so no path segment is assumed to read "propagate".
+  const selfDir = path.dirname(fileURLToPath(new URL("../lib/taxonomy.mjs", import.meta.url)));
+  const repoRoot = path.resolve(selfDir, "../../..");
+  assert.match(path.relative(repoRoot, t.source), /^lib\/(report\/)?doc-kind\.mjs$/, t.source);
   assert.equal(typeof t.kindOf, "function");
   assert.ok(Object.keys(t.KINDS).includes("plan"));
 });
