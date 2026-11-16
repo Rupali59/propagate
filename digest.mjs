@@ -51,7 +51,7 @@ import { rebuildIndex, latestMtimeUnderDir } from "./lib/skills/index-db.mjs";
 import { scanSkills, probeTranscripts } from "./lib/skills/skills-scan.mjs";
 import { readMetricsRecords, evaluateExpectations } from "./lib/report/metrics.mjs";
 import { inventory as buildInventory } from "./lib/report/inventory.mjs";
-import { readSystemsTable, pickAdoptionAsk, formatAdoptionLines } from "./lib/report/adoption.mjs";
+import { scanRetirement, blindScanLine, pickAdoptionAsk, formatAdoptionLines } from "./lib/report/adoption.mjs";
 import { backlog as buildBacklog } from "./lib/report/backlog.mjs";
 import {
   rollup as buildRollup,
@@ -1105,11 +1105,20 @@ function inventorySnapshot(inv) {
  * as skills/lifecycle/inventory above: a bug here must never take down the
  * only reporting channel that currently works.
  */
-function adoptionSnapshot() {
-  const { rows, error } = readSystemsTable();
-  if (error) return { available: false, error };
-  const ask = pickAdoptionAsk(rows);
-  return { available: true, ask };
+export function adoptionSnapshot({ workspaces = WORKSPACES, skillDir = SKILL_DIR } = {}) {
+  // #298: the candidates come from scanRetirement, the one function doctor's
+  // `# Retirement candidates` and the glance also read -- every discovered
+  // SYSTEMS.md, parsed by header name, worktree copies counted once.
+  const scan = scanRetirement({ workspaces, skillDir });
+  if (scan.sources.length === 0) {
+    const error =
+      scan.unreadable.length > 0
+        ? scan.unreadable.map((u) => u.error).join("; ")
+        : blindScanLine(scan);
+    return { available: false, error, candidates: [] };
+  }
+  const ask = pickAdoptionAsk(scan.candidates);
+  return { available: true, ask, candidates: scan.candidates };
 }
 
 /**

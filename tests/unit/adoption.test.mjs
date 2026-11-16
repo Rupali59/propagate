@@ -18,8 +18,11 @@ import {
   PINNED_FIRST_ID,
 } from "../../lib/report/adoption.mjs";
 
+// Header plus its `|---|` separator: since #298 a table is found by its header, and a
+// GFM table has no header without one.
 const HEADER =
-  "| id | kind | status | supersedes / superseded_by | artifacts | liveness_probe | last_verified | adoption_date | retirement_checklist_done |";
+  "| id | kind | status | supersedes / superseded_by | artifacts | liveness_probe | last_verified | adoption_date | retirement_checklist_done |\n" +
+  "|---|---|---|---|---|---|---|---|---|";
 
 function row({ id, status, artifacts = "art", probe = "echo ok", lastVerified = "2026-08-14", adoption = "— *not earned*", retirement = "n/a" }) {
   return `| \`${id}\` | kind | ${status} | — | ${artifacts} | ${probe} | ${lastVerified} | ${adoption} | ${retirement} |`;
