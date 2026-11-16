@@ -780,6 +780,7 @@ Reads open issues labelled `kind:evaluate` on the hub repo; an issue also labell
 - **Sessions per goal (propagate#272):** under every goal block, one `sessions: <project> · #<n> (<state>, <since>)` line per live session associated with that goal (`sessions: none` when there are none), then `no session: #a, #b` for that goal's Ready items no live associated session covers (omitted when every Ready item is covered). The sessions come from `claude agents --json` joined to `propagate sessions assoc` records, read once per run. If that read fails, one line `sessions: could not read (<CODE>: <what>)` follows the goal blocks. **The exit code is the same whether the reader succeeds, returns nothing or fails:** sessions are information beside the capacity verdict. `--json`: each `goalBlocks` entry carries `sessions: {live:[{project,item,state,since}], uncovered:["owner/repo#n"]}`, or `sessions: {error:{code,what}}`.
 - **Verdict:** `short by ~N points` (with the top promotable Backlog items), `enough` (budget ≤ supply ≤ 2× budget), or `over` (with what will not fit).
 - **Exit:** 0 enough; 1 short or over; 2 cannot judge (no good sample, no count basis, the rate limit too low, or the read went blind).
+- **Guard-log prune (propagate#294):** `day open` also deletes `<state dir>/guard/YYYY-MM.jsonl` files whose month ended more than 90 days ago (see "The background-guard log" below). It is local, runs whatever the verdict, and leaves any other file name alone. A removal is one `note: guard log: removed N month file(s) …` line; a failure is a `guard log not pruned (…)` note. Neither moves the exit code.
 
 `propagate day close [--apply] [--json]` is a dry run unless `--apply`. It proposes:
 - **(a) Promotions** from Backlog to Ready. An item qualifies when it is open, in Backlog, **is under an active goal**, has a Size and a stated "Done when", is not an Epic, and has no block / question / decision / waiting / needs- label. Each board is topped up to 3 Ready.
@@ -828,6 +829,25 @@ Reads open issues labelled `kind:evaluate` on the hub repo; an issue also labell
 - **Mismatch:** the item's Model (case-insensitive) against `tool_input.model`. An omitted model is a mismatch, because the subagent would inherit the parent's. Without a `model_reason: <text>` line at the start of a prompt line the dispatch is **denied**, naming the ref, both models and both fixes. With one it is allowed and a row `{ts, ref, expected, actual, reason, subagent_type}` is appended to `<state dir>/day/overrides.jsonl`. With several refs, any unreasoned mismatch denies the whole dispatch.
 - **The one write:** on an allow, an item in Backlog or Ready is set to In progress (one `updateProjectV2ItemFieldValue` through `gh api graphql`, 5 s timeout; `PROPAGATE_GH_BIN` overrides the binary). A deny writes nothing; In progress, In review and Done are never written. A failed write is reported in `additionalContext` and the dispatch is still allowed. After a success the snapshot's status is updated so a second dispatch does not write again.
 - **Fails open on its own bugs**, reporting the error in `additionalContext`. Exit code is always 0.
+
+## The background-guard log (propagate#294)
+
+`hooks/background-guard.mjs` (PreToolUse, Bash) appends one row per **`deny`** and per **`allow-bg`** (a backgrounded
+main-session call that rule 1 would have denied in the foreground) to `<state dir>/guard/YYYY-MM.jsonl`, the UTC month
+of the row's `ts`. The state dir is `$PROPAGATE_STATE_DIR`, default `~/.propagate`. A plain call writes nothing.
+- **Fields, exactly:** `{ts, session, event, rule, label, program, command_hash, timeout_ms}`.
+  - `session`: the payload's `session_id`, or `null`.
+  - `rule`: `timeout | heavy | shell-bg | sub-bg`.
+  - `label`: from the fixed HEAVY or network table, `&` or `nohup` for `shell-bg`, else `null`.
+  - `program`: the first word after every `NAME=value` prefix, kept only if it matches `^[\w./-]{1,32}$`, else `null`.
+  - `command_hash`: the first 16 hex characters of the sha256 of the whitespace-normalised command.
+  - `timeout_ms`: the call's `timeout`, or `null`.
+- **Never command text.** No command head, no cwd, no `NAME=value` value: `SECRET=x npm test` stores `program: "npm"` and a hash.
+- **Order and failure:** the deny JSON goes to stdout first. The append then runs in its own `try`, so a failed
+  append (unwritable state dir, `guard` not a directory, full disk) never changes the decision. The hook still exits 0.
+- **One write per row.** `guard/` is created on the first logged event; an install without it works unchanged.
+- **Pruning belongs to the CLI, never the hook:** `lib/guard/log.mjs` `pruneGuard`, run by `propagate day open`, deletes
+  month files that ended more than 90 days ago.
 
 ## Subagents (propagate#251)
 
