@@ -29,6 +29,9 @@
  *     Surface still checked). With no plan text it says `Surface not checked`.
  *   - Grace: before SURFACE_ENFORCE_FROM a plan with NO `Surface:` line is allowed with a warning naming the date.
  *     A Surface plan missing its sections is denied from day one.
+ *   - #301: a `Surface: none` plan whose text names a surface marker (SURFACE_MARKERS: notify(, hooks/, widget,
+ *     COMMANDS / lib/core/commands.mjs, launchd / .plist / LaunchAgents; any case) is WARNED, never denied, with the
+ *     marker and the Surface kind it suggests, and logged with verdict `warn-surface-mismatch`, missing = the markers.
  *   - Every deny and every warn appends `{ts, session, verdict, missing[]}` (no plan text) to
  *     `<stateDir>/plan-gate/YYYY-MM.jsonl`. A failed log write never turns a deny into an allow.
  *
@@ -62,6 +65,23 @@ export const SURFACE_ENFORCE_FROM = new Date(Date.parse(`${SURFACE_GRACE_START}T
 export const SURFACES = ["none", "ui", "widget", "command", "job", "skill", "notification", "hook"];
 const SURFACE_LINE = /^[ \t]*(?:[-*+][ \t]+)?\**[ \t]*surface[ \t]*\**[ \t]*:[ \t]*\**[ \t]*([A-Za-z]+)/im;
 const SURFACE_REASON_LINE = /^\s*surface_reason:[ \t]*(\S.*)$/im;
+/**
+ * #301: words in a `Surface: none` plan that say it touches a surface anyway, each with the kind it suggests.
+ * Matched case-insensitively (except the COMMANDS identifier) on the whole plan text (fences included: a code sketch calling notify( counts). Warn only.
+ */
+export const SURFACE_MARKERS = [
+  { marker: "notify(", re: /notify\(/i, kind: "notification" },
+  { marker: "hooks/", re: /hooks\//i, kind: "hook" },
+  { marker: "widget", re: /\bwidgets?\b/i, kind: "widget" },
+  // Case-SENSITIVE on purpose: the identifier COMMANDS, never the prose word "commands", which nearly every plan has.
+  { marker: "COMMANDS", re: /\bCOMMANDS\b|lib\/core\/commands\.mjs/, kind: "command" },
+  { marker: "launchd", re: /launchd|\.plist\b|LaunchAgents/i, kind: "job" },
+];
+
+/** The markers a plan names. @returns {{marker: string, kind: string}[]} */
+export function surfaceMarkers(planText) {
+  return SURFACE_MARKERS.filter((m) => m.re.test(planText)).map(({ marker, kind }) => ({ marker, kind }));
+}
 const NEED_LABELS = ["Question", "Decision", "Today", "Retire when"];
 const NEED_MISSING = "## Need (Question:, Decision:, Today:, Retire when:)";
 
@@ -159,7 +179,11 @@ export function decideSurface(planText, { now = Date.now() } = {}) {
     out.invalid = raw;
     return out;
   }
-  if (surface === "none") return out;
+  if (surface === "none") {
+    const found = surfaceMarkers(planText);
+    if (found.length) out.markers = found;
+    return out;
+  }
   const need = section(lines, "Need");
   if (!need) out.missing.push(NEED_MISSING);
   else {
@@ -183,7 +207,7 @@ export function decideSurface(planText, { now = Date.now() } = {}) {
 
 /**
  * Goal and Surface together. `surfaceGate: false` (the install's off switch) skips Surface. `activeIds` null means the goals could not be read (goal not checked, Surface still is).
- * @returns {{deny?: string, warn?: string, missing: string[], goal, reason, surface, surfaceReason, goalChecked, log}}
+ * @returns {{deny?: string, warn?: string, surfaceMismatch?: string, markers?: object[], missing: string[], goal, reason, surface, surfaceReason, goalChecked, log}}
  */
 export function decidePlan(planText, activeIds, { now = Date.now(), surfaceGate = true } = {}) {
   const goalChecked = Array.isArray(activeIds) && activeIds.length > 0;
@@ -213,6 +237,14 @@ export function decidePlan(planText, activeIds, { now = Date.now(), surfaceGate 
   if (s.warnOnly) {
     out.missing = ["Surface"];
     out.warn = `Surface not declared: allowed until ${SURFACE_ENFORCE_FROM}, denied from then. Add "Surface: none" or a Surface with its "## Need" and "## References checked" sections.`;
+  }
+  // #301: Surface: none, but the text names a surface. Warn, never deny.
+  if (s.markers?.length) {
+    out.markers = s.markers;
+    out.surfaceMismatch =
+      "plan says Surface: none but names " +
+      s.markers.map((m) => `${m.marker} (suggests Surface: ${m.kind})`).join(", ") +
+      "; if it adds something a person reads, declare that Surface with its sections";
   }
   return out;
 }
@@ -369,6 +401,10 @@ async function main() {
     if (d.warn) {
       const err = await logGate(now, session, "warn", d.missing);
       notes.push(d.warn + (err ? ` (plan-gate log not written: ${err})` : ""));
+    }
+    if (d.surfaceMismatch) {
+      const err = await logGate(now, session, "warn-surface-mismatch", d.markers.map((m) => m.marker));
+      notes.push(d.surfaceMismatch + (err ? ` (plan-gate log not written: ${err})` : ""));
     }
     if (d.surfaceReason) notes.push(`surface_reason override recorded (${d.surfaceReason})`);
     else if (d.surface) notes.push(`Surface: ${d.surface}`);

@@ -864,6 +864,7 @@ Surface: none              (or ui | widget | command | job | skill | notificatio
 - **Grace:** until `SURFACE_ENFORCE_FROM` (2026-11-30: `SURFACE_GRACE_START` 2026-11-16 plus `SURFACE_GRACE_DAYS` 14,
   constants in the hook), a plan with **no** `Surface:` line is allowed with a warning naming that date. A plan that
   declares a Surface but lacks its sections is denied from day one.
+- **`Surface: none` mismatch (#301):** a `Surface: none` plan whose text names a surface marker (any case: `notify(`, `hooks/`, `widget`/`widgets` as a word, `launchd`/`.plist`/`LaunchAgents`; case-sensitive: the identifier `COMMANDS` or `lib/core/commands.mjs`, never the prose word "commands") is **warned, never denied**, naming each marker and the kind it suggests (notification, hook, widget, command, job), and logged with verdict `warn-surface-mismatch` and `missing` = the markers.
 - **Denial log:** every deny and every warn appends one row `{ts, session, verdict: "deny"|"warn", missing: [...]}`
   to `<state dir>/plan-gate/YYYY-MM.jsonl` (month of `ts`, UTC). No plan text is written. A failed write is named in
   the hook's output and never turns a deny into an allow.
