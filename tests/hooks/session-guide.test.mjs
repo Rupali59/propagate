@@ -497,12 +497,25 @@ test("T-S3 the age is shown: past 1 h as Nh ago, past stale_after_s as stale; al
 test("T-S2 the glance line is last to be cut: with long broadcast and file lists the block stays within CAP and keeps it", () => {
   const f = fixture(1);
   const folder = placeOf(path.join(f.ws, "web"), JSON.parse(readFileSync(path.join(f.state, "sessions", "checkouts.json"), "utf8")), f.state);
-  const files = Array.from({ length: 80 }, (_, i) => path.join(f.ws, `deep/guidance/file-number-${i}/CLAUDE.md`));
-  const bc = { groups: [], coveredAt: () => [], levels: ["Broadcast: " + "x".repeat(1900), "Broadcast: counts only"] };
   const g = "Glance as of 10:42: ! doctor: needs a person; x edges: 3 broken. Run: propagate glance";
-  const { text } = compose({ folder, assoc: null, sessionId: "s", files, broadcast: bc, glance: g });
-  assert.ok(text.length <= CAP, String(text.length));
-  assert.ok(text.endsWith("\n" + g), "the glance line survives every cut");
+  // Guidance files that bring the session line to within 20 characters of CAP WITHOUT the glance: only a reserved
+  // glance room forces a cut; an unreserved one would overflow (the mutation this test exists for).
+  const files = [];
+  const one = (i) => path.join(f.ws, `deep/guidance/file-number-${String(i).padStart(3, "0")}/CLAUDE.md`);
+  // Bounded: compose cuts files to fit, so "the text got longer than X" alone could never end the loop.
+  for (let i = 0; i < 500; i++) {
+    const next = compose({ folder, assoc: null, sessionId: "s", files: [...files, one(i)], broadcast: null }).text;
+    if (next.length > CAP - 20 || !next.includes(one(i))) break;
+    files.push(one(i));
+  }
+  const bare = compose({ folder, assoc: null, sessionId: "s", files, broadcast: null }).text.length;
+  assert.ok(bare > CAP - g.length, `fixture too small (${bare}): the glance would fit without any cut`);
+  const bc = { groups: [], coveredAt: () => [], levels: ["Broadcast: " + "x".repeat(1900), "Broadcast: counts only"] };
+  for (const broadcast of [null, bc]) {
+    const { text } = compose({ folder, assoc: null, sessionId: "s", files, broadcast, glance: g });
+    assert.ok(text.length <= CAP, String(text.length));
+    assert.ok(text.endsWith("\n" + g), "the glance line survives every cut");
+  }
 });
 
 test("the hook prints the real glance line from a written glance.json, in a placed folder", () => {
