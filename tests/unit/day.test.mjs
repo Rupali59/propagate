@@ -943,7 +943,7 @@ test("dayCmd open: ONE extra graphql search writes the broadcast index and is co
   assert.equal(readFileSync(path.join(dir, "broadcast", "index.json"), "utf8"), before);
 });
 
-// ── propagate#294: day open is where the CLI prunes the background-guard log (the hook never does) ─────────────────
+// ── propagate#294/#295: day open prunes the background-guard log through the glance (the hook never prunes) ─────────
 
 test("dayCmd open prunes guard-log months that ended more than 90 days ago, says so in a note, and keeps the rest", async () => {
   const { mkdtempSync, mkdirSync, writeFileSync, readdirSync } = await import("node:fs");
@@ -959,6 +959,22 @@ test("dayCmd open prunes guard-log months that ended more than 90 days ago, says
   const fresh = mkdtempSync(path.join((await import("node:os")).tmpdir(), "day-guard-"));
   const l2 = [];
   await dayCmd(["open"], { goalFiles: GOALS, out: (s) => l2.push(s), now: NOW, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions: () => ({ ok: true, view: { sessions: [] } }), fetcher: fetcher(goalStore()), broadcastOwner: null, stateDirPath: fresh });
-  assert.deepEqual(readdirSync(fresh), [], "a vN-1 state dir gains no guard/ from a prune");
+  // propagate#295: day open now writes glance.json (that is the glance step's job); it still creates no guard/.
+  assert.deepEqual(readdirSync(fresh), ["glance.json"], "a vN-1 state dir gains no guard/ from a prune, only the glance");
   assert.doesNotMatch(l2.join("\n"), /guard log/);
+});
+
+// ── propagate#295 T-O1: a throwing glance inside day open moves neither its exit code nor its output, plus one note ──
+
+test("T-O1 dayCmd open: a glance that throws leaves the exit code and output unchanged, plus one note", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const args = () => ({ goalFiles: GOALS, now: NOW, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], sessions: () => ({ ok: true, view: { sessions: [] } }), fetcher: fetcher(goalStore()), broadcastOwner: null, stateDirPath: mkdtempSync(path.join(tmpdir(), "day-glance-")) });
+  const ok = [];
+  const okCode = await dayCmd(["open"], { ...args(), out: (s) => ok.push(s), runGlance: () => ({ pruned: [] }) });
+  const bad = [];
+  const badCode = await dayCmd(["open"], { ...args(), out: (s) => bad.push(s), runGlance: () => { throw new Error("synthetic glance failure"); } });
+  assert.equal(badCode, okCode);
+  const extra = bad.filter((l) => !ok.includes(l));
+  assert.equal(extra.length, 1, extra.join("\n"));
+  assert.match(extra[0], /glance not written \(synthetic glance failure\)/);
 });
