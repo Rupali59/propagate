@@ -186,6 +186,16 @@ sources:
           routing documents what `rules check` exits non-zero on — including that it
           fails when it scanned NOTHING. That promise is a property of this file.
         kind: code
+  lib/core/commands.mjs:
+    propagates_to:
+      - path: README.md
+        why: >-
+          The README's command list between its markers is generated from COMMANDS and pinned by
+          tests/unit/readme-commands.test.mjs, but its hand-written intro names each capability area
+          (the HELP_GROUPS titles) and no test can write prose. A new group or a renamed area leaves
+          the intro describing a product that has moved on, which is how the README came to omit
+          sessions, broadcasts and the sprint commands (#292).
+        kind: prose
   VERSION:
     propagates_to:
       - path: package.json
