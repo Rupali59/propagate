@@ -272,6 +272,18 @@ test("programOf: the first word after every NAME=value, kept only when it is a b
   assert.equal(programOf(`"quoted thing" x`), null);
   assert.equal(programOf("x".repeat(33)), null, "over 32 characters is not a bare name");
   assert.equal(programOf(""), null);
+  assert.equal(programOf("/usr/local/bin/npm test"), "npm", "a path is reduced to its basename");
+  assert.equal(programOf("./scripts/run.sh"), "run.sh");
+});
+
+test("a command that starts with an absolute path logs only the basename: no home directory or username on disk", () => {
+  const dir = tmpState();
+  const r = runIn(dir, JSON.stringify(withSession(main("/home/someone/bin/tool run", { timeout: 600000 }))));
+  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, "deny");
+  const rows = guardRows(dir);
+  assert.equal(rows.length, 1, "the call was logged, so the absence below is not an empty file");
+  assert.equal(rows[0].program, "tool");
+  for (const s of ["someone", "/home"]) assert.ok(!guardBytes(dir).includes(s), `the guard log contains ${JSON.stringify(s)}`);
 });
 
 test("guardRow hashes the whitespace-normalised command and stores nothing else of it", () => {

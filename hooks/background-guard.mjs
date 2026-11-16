@@ -151,11 +151,15 @@ export async function decide(input, load = defaultLoad) {
   return j.deny ? { deny: true, reason: j.reason } : { deny: false };
 }
 
-/** The bare program: the first word after every NAME=value token, kept only if it is a plain name. Never a value. */
+/**
+ * The bare program: the BASENAME of the first word after every NAME=value token, kept only if it is a plain name.
+ * Never a value, and never a path: `/home/<name>/bin/x` would carry a home directory and a username into the log.
+ */
 export function programOf(command) {
   const words = String(command ?? "").trim().split(/\s+/).filter(Boolean);
   const first = words.find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
-  return first && /^[\w./-]{1,32}$/.test(first) ? first : null;
+  const base = first?.slice(first.lastIndexOf("/") + 1);
+  return base && /^[\w.-]{1,32}$/.test(base) ? base : null;
 }
 
 /** One log row. The only derivatives of the command text are its program name and a truncated hash. */

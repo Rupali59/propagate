@@ -835,11 +835,13 @@ Reads open issues labelled `kind:evaluate` on the hub repo; an issue also labell
 `hooks/background-guard.mjs` (PreToolUse, Bash) appends one row per **`deny`** and per **`allow-bg`** (a backgrounded
 main-session call that rule 1 would have denied in the foreground) to `<state dir>/guard/YYYY-MM.jsonl`, the UTC month
 of the row's `ts`. The state dir is `$PROPAGATE_STATE_DIR`, default `~/.propagate`. A plain call writes nothing.
+- **`allow-bg` is main-session only.** A subagent's foreground heavy call (exempt by rule 4) writes no row.
 - **Fields, exactly:** `{ts, session, event, rule, label, program, command_hash, timeout_ms}`.
   - `session`: the payload's `session_id`, or `null`.
   - `rule`: `timeout | heavy | shell-bg | sub-bg`.
   - `label`: from the fixed HEAVY or network table, `&` or `nohup` for `shell-bg`, else `null`.
-  - `program`: the first word after every `NAME=value` prefix, kept only if it matches `^[\w./-]{1,32}$`, else `null`.
+  - `program`: the basename of the first word after every `NAME=value` prefix (`/usr/local/bin/npm` is `npm`, never a
+    path), kept only if it matches `^[\w.-]{1,32}$`, else `null`.
   - `command_hash`: the first 16 hex characters of the sha256 of the whitespace-normalised command.
   - `timeout_ms`: the call's `timeout`, or `null`.
 - **Never command text.** No command head, no cwd, no `NAME=value` value: `SECRET=x npm test` stores `program: "npm"` and a hash.
