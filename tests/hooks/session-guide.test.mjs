@@ -474,10 +474,11 @@ test("T-S4 the session line: at most 3 items plus the age, free text clipped, at
   assert.ok(line.length <= GLANCE_MAX && GLANCE_MAX === 140, `${line.length}: ${line}`);
   assert.match(line, /Run: propagate glance$/);
   assert.match(line, /^Glance as of \d\d:\d\d: /);
-  assert.equal((line.match(/(^|; |: )[!x?] /g) ?? []).length, 3, line);
+  assert.equal((line.match(/(^|; |: )\[(NEEDS YOU|BROKEN|UNKNOWN)\] /g) ?? []).length, 3, line);
   assert.match(line, /\+1 more/);
   assert.doesNotMatch(line, /a long free-text tail a long free-text tail/, "free text is clipped");
-  assert.match(line, /^Glance as of \d\d:\d\d: ! doctor: /, "needs-you first");
+  assert.match(line, /^Glance as of \d\d:\d\d: \[NEEDS YOU\] doctor: 1 needs you; \[BROKEN\] jobs: /, "needs-you first, then user-impacting jobs");
+  assert.doesNotMatch(line, /\x1b/, "the session line is plain: read by Claude, not a terminal");
 });
 
 test("T-S3 the age is shown: past 1 h as Nh ago, past stale_after_s as stale; all clear names the signals", () => {
@@ -523,6 +524,14 @@ test("the hook prints the real glance line from a written glance.json, in a plac
   const t = glanceFile({ generatedAt: new Date(Date.now() - 60000).toISOString() });
   writeGlance(t, f.state);
   const last = rawCtx(hook(f, { session_id: "s1", cwd: path.join(f.ws, "web") })).split("\n").at(-1);
-  assert.match(last, /^Glance as of \d\d:\d\d: ! doctor: .*Run: propagate glance$/);
+  assert.match(last, /^Glance as of \d\d:\d\d: \[NEEDS YOU\] doctor: .*Run: propagate glance$/);
+  const r = hook(f, { session_id: "s1", cwd: path.join(f.ws, "web") }, { FORCE_COLOR: "1" });
+  assert.doesNotMatch(r.stdout, /\x1b|\\u001b/, "the hook output never carries an escape byte, even with FORCE_COLOR");
   assert.ok(existsSync(glancePath(f.state)));
+});
+
+test("parity: the hook's GLANCE_SOURCE_RANK equals lib/glance/render.mjs SOURCE_RANK", async () => {
+  const { SOURCE_RANK } = await import("../../lib/glance/render.mjs");
+  const { GLANCE_SOURCE_RANK } = await import("../../hooks/session-guide.mjs");
+  assert.deepEqual(GLANCE_SOURCE_RANK, SOURCE_RANK);
 });

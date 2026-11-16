@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { dailyVerdict, utcDay, median } from "../../lib/glance/verdict.mjs";
 import { SIGNALS, fillFix } from "../../lib/glance/signals.mjs";
 import { computeGlance, runGlance, exitCodeOf } from "../../lib/glance/compute.mjs";
-import { renderLines, MAX_LINE } from "../../lib/glance/render.mjs";
+import { renderLines, MAX_LINE, shouldColor, sourceGroups } from "../../lib/glance/render.mjs";
 import { readGlance, writeGlance, glancePath, SCHEMA_VERSION, readGlanceState } from "../../lib/glance/store.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -302,7 +302,7 @@ test("T-V12 no bare numbers: every rendered line carries a verdict word, and eve
   const g = computeGlance({ dir, now: NOW, rows: rows(["UNMATCHED", "CLEAN"]), doctor: doctorJson({ sections: [{ name: "A", entries: [{ kind: "fail", label: "x 3 rows", detail: "" }] }] }) }).glance;
   const lines = renderLines(g, { now: NOW });
   assert.ok(lines.length >= 2);
-  const VERDICT = /\b(Needs you|Broken|Unknown|Working|learning|All clear|more)\b/;
+  const VERDICT = /\b(NEEDS YOU|BROKEN|UNKNOWN|LEARNING|OK|Needs you|Broken|Unknown|Working|learning|more)\b/;
   for (const l of lines) if (/\d/.test(l)) assert.match(l, VERDICT, `bare number: ${l}`);
   for (const it of g.items) {
     assert.ok(it.fix && it.fix.text, `${it.id} has no fix`);
@@ -324,19 +324,100 @@ test("line grammar: <icon> <subject>: <what> · <fix>, at most 80 characters, fr
   for (const l of renderLines(g, { now: NOW })) assert.ok(l.length <= MAX_LINE, l);
 });
 
-test("ordering and caps: needs-you first, then broken widest first; at most 5 lines then +N more; working is one line", () => {
+/** A doctor JSON with `fails` failing checks and `jobs` warned scheduled jobs, written as literals. */
+const doctorWith = ({ fails = 0, human = 0, jobs = 0 } = {}) => doctorJson({ sections: [
+  { name: "Checks", entries: [
+    ...Array.from({ length: fails }, (_, i) => ({ kind: "fail", label: ["rules can still load", "docs.supersedes == 0", "gotchas.untriaged <= 9", "decisions.with_tokens", "instructions.over == 0", "ledger rows readable"][i % 6] + ` ${i}`, detail: "" })),
+    ...Array.from({ length: human }, (_, i) => ({ kind: "fail", label: `token expires ${i}`, detail: "", human: true, check_id: `auth.t${i}` })),
+    { kind: "pass", label: "ok", detail: "" },
+  ] },
+  { name: "Scheduled jobs", entries: [
+    ...Array.from({ length: jobs }, (_, i) => ({ kind: "warn", label: "scheduled job needs attention", detail: `job.n${i}: last exit code 1 (state not running)`, check_id: `jobs.job.n${i}` })),
+    { kind: "info", label: "scheduled jobs", detail: `${jobs} job(s) run this tree's code` },
+  ] },
+] });
+
+test("ONE LINE PER SOURCE: 6 doctor fails and 3 job fails render as 2 lines, and jobs are visible however many doctor fails", () => {
+  const g = computeGlance({ dir: healthy(), now: NOW, rows: rows(["CLEAN"]), doctor: doctorWith({ fails: 6, jobs: 3 }) }).glance;
+  assert.equal(g.items.filter((i) => i.verdict === "broken").length, 9, "the items array keeps the per-item detail");
+  const lines = renderLines(g);
+  const problems = lines.filter((l) => /^\[(NEEDS YOU|BROKEN|UNKNOWN)\]/.test(l));
+  assert.equal(problems.length, 2, lines.join("\n"));
+  assert.match(problems[0], /^\[BROKEN\] +jobs: 3 jobs failing \(last exit code 1\) · /, "jobs (user-impacting) come before doctor");
+  assert.match(problems[1], /^\[BROKEN\] +doctor: 6 checks failing \(rules, docs[^)]*\) · propagate doctor --full$/);
+  // many doctor fails never push jobs off the 5-line cap
+  const many = computeGlance({ dir: healthy(), now: NOW, rows: rows(["CLEAN"]), doctor: doctorWith({ fails: 40, jobs: 3 }) }).glance;
+  assert.ok(renderLines(many).some((l) => /^\[BROKEN\] +jobs: /.test(l)), renderLines(many).join("\n"));
+});
+
+test("ordering and caps: needs-you sources first; the cap counts sources; working is one OK line", () => {
   const dir = healthy();
-  const entries = [];
-  for (let i = 0; i < 6; i++) entries.push({ kind: "fail", label: `check ${String.fromCharCode(97 + i)}`, detail: "" });
-  entries.push({ kind: "fail", label: "needs a person", detail: "", human: true, check_id: "p.q" });
-  const g = computeGlance({ dir, now: NOW, rows: rows(["UNMATCHED", "UNMATCHED", "UNMATCHED", "CLEAN"]), doctor: doctorJson({ sections: [{ name: "S", entries }] }) }).glance;
-  const lines = renderLines(g, { now: NOW });
-  assert.match(lines[0], /^! Needs you /);
-  assert.match(lines[1], /^x Broken edges: 3 broken/, "the widest broken item comes first");
-  const itemLines = lines.filter((l) => /^(! |x |\? )/.test(l));
-  assert.equal(itemLines.length, 5);
-  assert.ok(lines.some((l) => /^\+\d+ more\b/.test(l)), lines.join("\n"));
-  assert.equal(lines.filter((l) => /^ok Working/.test(l)).length, 1);
+  put(dir, "monitor.log", monitorLine(NOW - 60000, ' error="boom"'));
+  const g = computeGlance({ dir, now: NOW, rows: rows(["UNMATCHED", "UNMATCHED", "UNMATCHED", "CLEAN"]), doctor: doctorWith({ fails: 6, human: 1, jobs: 2 }) }).glance;
+  const lines = renderLines(g, { cap: 2 });
+  assert.match(lines[0], /^\[NEEDS YOU\] doctor: 1 check needs you, 6 failing/, lines.join("\n"));
+  assert.match(lines[1], /^\[BROKEN\] +jobs: /);
+  assert.match(lines[2], /^\+2 more sources: propagate glance --json$/, "monitor and edges are counted as sources, not items");
+  assert.equal(lines.filter((l) => /^\[OK\]/.test(l)).length, 1);
+  assert.deepEqual(sourceGroups(g.items).map((x) => x.signal), ["doctor", "jobs", "monitor", "edges"]);
+});
+
+test("the 80-character rule holds with no mid-word cut, in the source lines and the item lines", () => {
+  const words = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau";
+  const doc = doctorJson({ sections: [{ name: "S", entries: [
+    ...words.split(" ").map((w) => ({ kind: "fail", label: `${w}word.check ${words}`, detail: "" })),
+  ] }] });
+  const dir = healthy();
+  put(dir, "monitor.log", monitorLine(NOW - 60000, ` error=${JSON.stringify(words + " " + words)}`));
+  const g = computeGlance({ dir, now: NOW, rows: rows(["CLEAN"]), doctor: doc }).glance;
+  // Every word left before a "…" must be a WHOLE word of the source text: a cut word would be a fragment of one.
+  const vocab = new Set(g.items.flatMap((i) => `${i.what} ${i.subject} ${i.fix.text}`.split(/[^\w-]+/)).concat(words.split(" ")));
+  for (const l of [...renderLines(g), ...g.items.map((i) => i.line)]) {
+    assert.ok(l.length <= MAX_LINE, `${l.length}: ${l}`);
+    for (const m of l.matchAll(/([\w-]+)…/g)) assert.ok(vocab.has(m[1]), `mid-word cut "${m[0]}" in: ${l}`);
+  }
+  assert.ok(renderLines(g).some((l) => /…\) · /.test(l)), "subjects that do not fit are dropped and marked …");
+});
+
+test("badges: colour gives escape codes; NO_COLOR, --no-color and a non-TTY give plain [BROKEN] with no escape byte", () => {
+  const g = computeGlance({ dir: healthy(), now: NOW, rows: rows(["UNMATCHED", "CLEAN"]) }).glance;
+  const colored = renderLines(g, { color: true }).join("\n");
+  assert.match(colored, /\x1b\[/, "colour on: escape codes");
+  assert.match(colored, /\x1b\[41m/, "BROKEN is on red");
+  const plain = renderLines(g, { color: false }).join("\n");
+  assert.doesNotMatch(plain, /\x1b/);
+  assert.match(plain, /^\[BROKEN\] {4}edges: /m);
+  const tty = { isTTY: true };
+  assert.equal(shouldColor({ stream: tty, env: {} }), true);
+  assert.equal(shouldColor({ stream: tty, env: { NO_COLOR: "1" } }), false);
+  assert.equal(shouldColor({ stream: tty, env: {}, argv: ["--no-color"] }), false);
+  assert.equal(shouldColor({ stream: { isTTY: false }, env: {} }), false, "piped output is never coloured");
+  assert.equal(shouldColor({ stream: { isTTY: false }, env: { FORCE_COLOR: "1", NO_COLOR: "1" } }), false, "NO_COLOR wins over FORCE_COLOR");
+  for (const l of renderLines(g)) assert.ok(l.length <= MAX_LINE, l);
+});
+
+test("glanceCmd: NO_COLOR on a TTY prints [BROKEN] with no escape byte; piped CLI output has none", async () => {
+  const { glanceCmd } = await import("../../cli/glance.mjs");
+  const dir = healthy();
+  const out = [];
+  const saved = { tty: process.stdout.isTTY, nc: process.env.NO_COLOR };
+  try {
+    process.stdout.isTTY = true;
+    process.env.NO_COLOR = "1";
+    await glanceCmd(["--no-write"], { stateDirPath: dir, now: NOW, out: (s) => out.push(s), err: () => {} });
+  } finally {
+    process.stdout.isTTY = saved.tty;
+    if (saved.nc === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = saved.nc;
+  }
+  assert.doesNotMatch(out.join("\n"), /\x1b/);
+  assert.match(out.join("\n"), /^\[UNKNOWN\] +edges: /m);
+  const { spawnSync } = await import("node:child_process");
+  const env = { ...process.env, PROPAGATE_STATE_DIR: healthy() };
+  delete env.NO_COLOR;
+  delete env.FORCE_COLOR;
+  const r = spawnSync(process.execPath, [path.join(ROOT, "cli.mjs"), "glance", "--no-write"], { encoding: "utf8", env });
+  assert.ok(r.stdout.length > 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /\x1b/, "piped output carries no escape byte");
 });
 
 test("all clear is never silent: one line naming how many signals were checked and when", () => {
@@ -345,13 +426,13 @@ test("all clear is never silent: one line naming how many signals were checked a
   assert.equal(g.verdict, "working");
   const lines = renderLines(g, { now: NOW });
   assert.equal(lines.length, 1);
-  assert.match(lines[0], /^All clear · \d+ signals checked · \d\d:\d\d$/);
+  assert.match(lines[0], /^\[OK\] {8}all clear · \d+ signals checked · \d\d:\d\d$/);
 });
 
 test("a machine with no signal files prints one line, not N unknowns", () => {
   const g = computeGlance({ dir: fresh(), now: NOW }).glance;
   assert.equal(g.verdict, "blind");
-  assert.deepEqual(renderLines(g, { now: NOW }), ["glance: nothing to read yet"]);
+  assert.deepEqual(renderLines(g, { now: NOW }), ["[UNKNOWN]   glance: nothing to read yet"]);
 });
 
 test("since carries over from the previous glance; a propagate-owned item broken past 6 monitor runs is promoted to needs-you", () => {

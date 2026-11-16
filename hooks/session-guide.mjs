@@ -103,10 +103,22 @@ const hhmm = (ms) => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
+/** Copy of lib/glance/render.mjs SOURCE_RANK (parity-tested): user-impacting sources before doctor's internal checks. */
+export const GLANCE_SOURCE_RANK = Object.freeze(["jobs", "work", "broadcast", "hooks", "guard", "monitor", "edges", "metrics", "doctor"]);
+const COUNTED = { doctor: "checks", jobs: "jobs", work: "items" };
+const clipWords = (s, n) => {
+  s = String(s);
+  if (s.length <= n) return s;
+  const cut = s.slice(0, Math.max(n - 1, 0));
+  const sp = cut.lastIndexOf(" ");
+  return sp > 0 ? `${cut.slice(0, sp).replace(/[\s,;:(·-]+$/, "")}…` : "…";
+};
+
 /**
  * The session's glance line. Never throws: every failure is a line that says what to run.
- * Order and glyphs follow lib/glance/render.mjs: needs-you oldest first, then broken widest first; `!` needs you,
- * `x` broken, `?` unknown. Free text (`what`) is clipped; the line carries subjects and counts.
+ * ONE ITEM PER SOURCE (ruling 2026-11-16), as lib/glance/render.mjs groups the terminal view: needs-you sources first,
+ * then broken, each by GLANCE_SOURCE_RANK; at most 3 sources. PLAIN bracketed badges (`[BROKEN]`), never escape
+ * codes: this text is read by Claude, not shown in a terminal. Free text is cut at a word boundary.
  */
 export function glanceLine(dir, now = Date.now()) {
   let g;
@@ -120,23 +132,42 @@ export function glanceLine(dir, now = Date.now()) {
   const ageMs = now - Date.parse(g.generatedAt);
   const age = ageMs > 3600000 ? `Glance ${Math.round(ageMs / 3600000)}h ago` : `Glance as of ${hhmm(Date.parse(g.generatedAt))}`;
   if (ageMs > (Number(g.stale_after_s) || 21600) * 1000) return `${age} (stale): unknown, recompute${GLANCE_TAIL}`;
-  const since = (i) => Date.parse(i?.since ?? "") || 0;
-  const items = g.items.filter((i) => i && typeof i === "object");
-  const problems = [
-    ...items.filter((i) => i.verdict === "needs_you").sort((a, b) => since(a) - since(b)),
-    ...items.filter((i) => i.verdict === "broken").sort((a, b) => (b.count ?? 1) - (a.count ?? 1) || since(a) - since(b)),
-  ];
-  if (!problems.length) return `${age}: all clear, ${g.signals_checked ?? "?"} signals checked${GLANCE_TAIL}`;
-  const shown = problems.slice(0, 3);
-  const more = problems.length > 3 ? `; +${problems.length - 3} more` : "";
+  const by = new Map();
+  for (const i of g.items) {
+    if (!i || typeof i !== "object" || i.verdict === "working") continue;
+    if (!by.has(i.signal)) by.set(i.signal, []);
+    by.get(i.signal).push(i);
+  }
+  const rank = (s) => (GLANCE_SOURCE_RANK.includes(s) ? GLANCE_SOURCE_RANK.indexOf(s) : GLANCE_SOURCE_RANK.length);
+  const groups = [...by].map(([signal, its]) => {
+    const needs = its.filter((i) => i.verdict === "needs_you").length;
+    const unknown = its.filter((i) => i.verdict === "broken" && i.flag === "unknown").length;
+    const broken = its.length - needs - unknown;
+    return { signal, its, needs, broken, unknown, state: needs ? "needs_you" : broken ? "broken" : "unknown" };
+  }).sort((a, b) => (a.state === "needs_you" ? 0 : 1) - (b.state === "needs_you" ? 0 : 1) || rank(a.signal) - rank(b.signal));
+  if (!groups.length) return `${age}: all clear, ${g.signals_checked ?? "?"} signals checked${GLANCE_TAIL}`;
+  const shown = groups.slice(0, 3);
+  const more = groups.length > 3 ? `; +${groups.length - 3} more` : "";
   const head = `${age}: `;
-  const per = Math.floor((GLANCE_MAX - head.length - GLANCE_TAIL.length - more.length) / shown.length) - 2;
-  const glyph = (i) => (i.flag === "unknown" ? "?" : i.verdict === "needs_you" ? "!" : "x");
-  const one = (i) => {
-    const lead = `${glyph(i)} ${clip(String(i.subject ?? i.signal ?? "?"), 20)}: `;
-    return lead + clip(String(i.what ?? ""), Math.max(per - lead.length, 4));
+  const word = { needs_you: "[NEEDS YOU]", broken: "[BROKEN]", unknown: "[UNKNOWN]" };
+  const one = (gr) => {
+    const lead = `${word[gr.state]} ${gr.signal === "metrics" ? "doctor history" : gr.signal}: `;
+    let what;
+    // The badge already says UNKNOWN or NEEDS YOU, so a single item's own text follows it unprefixed.
+    const free = !COUNTED[gr.signal] && gr.its.length === 1;
+    if (free) what = String(gr.its[0].what ?? "");
+    else what = [gr.needs ? `${gr.needs} need${gr.needs === 1 ? "s" : ""} you` : "", gr.broken ? `${gr.broken} failing` : "", gr.unknown ? `${gr.unknown} unknown` : ""].filter(Boolean).join(", ");
+    return { lead, what, free };
   };
-  return clip(`${head}${shown.map(one).join("; ")}${more}`, GLANCE_MAX - GLANCE_TAIL.length) + GLANCE_TAIL;
+  const parts = shown.map(one);
+  const render = (ps) => `${head}${ps.map((p) => p.lead + p.what).join("; ")}${more}${GLANCE_TAIL}`;
+  if (render(parts).length <= GLANCE_MAX) return render(parts);
+  // Over the cap: clip only the free-text parts (a count is never cut), sharing what room is left between them.
+  const free = parts.filter((p) => p.free);
+  const fixed = render(parts.map((p) => (p.free ? { ...p, what: "" } : p))).length;
+  const each = Math.max(Math.floor((GLANCE_MAX - fixed) / Math.max(free.length, 1)), 2);
+  const out = render(parts.map((p) => (p.free ? { ...p, what: clipWords(p.what, each) } : p)));
+  return out.length <= GLANCE_MAX ? out : `${out.slice(0, GLANCE_MAX - GLANCE_TAIL.length - 1)}…${GLANCE_TAIL}`;
 }
 
 const DAY = 86400000;
