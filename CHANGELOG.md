@@ -18,6 +18,9 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 - **New `$PROPAGATE_STATE_DIR/glance-acks.json`** (#296), written by `propagate glance ack` / `unack` and the web view's acknowledge and snooze. Absent means no acks. glance.json items may carry an additive `ack: {at, until}` field.
 - **The digest notification's body is now the glance verdict line**, not the digest's timestamp heading (#296).
 - **`doctor` (default view) prints its verdict line first**, as well as last. **`# Scheduled jobs` no longer warns on a running job** (a live pid) whose last exit was non-zero, and a warned job's line carries `check_id jobs.<label>`.
+- **Plans need a `Surface:` line from 2026-11-30.** The plan-goal hook now also requires `Surface: none` or `Surface: ui|widget|command|job|skill|notification|hook`, and a non-`none` plan needs `## Need` (`Question:`, `Decision:`, `Today:`, `Retire when:`) and `## References checked` sections. Until 2026-11-30 a plan with no `Surface:` line is allowed with a warning; after it, it is denied. A plan that declares a Surface without its sections is denied now. Override with a `surface_reason: <why>` line. Grammar: `docs/REFERENCE.md` "The plan grammar". Placeholder values (`<...>`, `TODO`, `TBD`, `?`, `-`) do not count as filled.
+- **The Surface gate is off by default outside the owner's tree** (no declared hub and no `plans/approvals.jsonl`), so a fresh install is not denied. Turn it on or off with `hooks.planSurfaceGate: on|off` in `config.yml` or `PROPAGATE_PLAN_SURFACE_GATE`.
+- **The plan-goal hook writes `$PROPAGATE_STATE_DIR/plan-gate/YYYY-MM.jsonl`**, one `{ts, session, verdict, missing}` row per deny or warn (no plan text), and `plans/approvals.jsonl` rows gain `surface` and, when used, `surface_reason`. Older rows without them still read.
 
 ## [0.19.0] — 2026-11-10
 

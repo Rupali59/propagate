@@ -167,6 +167,9 @@ test("migration equality — all 36 pre-existing config.mjs exports are byte-ide
     const NEW = new Set([
       "PATHS", "PATHS_DIAGNOSTIC", "requirePath", "INTEGRATIONS_DIAGNOSTIC", "requireIntegration",
       "crossLedgerRoot",
+      // `planSurfaceGate` added 2026-11-16 (#297): the plan-goal Surface gate's off switch, a function so it reads
+      // the state dir's approvals log at call time.
+      "planSurfaceGate",
     ]);
     const actualKeys = new Set(Object.keys(after).filter((k) => k !== "searchRootsExplain()"));
     const unexpected = [...actualKeys].filter((k) => !PREEXISTING.has(k) && !NEW.has(k));

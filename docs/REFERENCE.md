@@ -819,8 +819,60 @@ Reads open issues labelled `kind:evaluate` on the hub repo; an issue also labell
 - **The rule:** the plan has a line `Goal: G<n>` (bold or plain, any case) naming an active goal → allowed, and one row
   `{ts, plan, goal}` goes to `<state dir>/plans/approvals.jsonl`. Otherwise **denied**, naming the active ids and both
   fixes, unless a `goal_reason: <why>` line is present: then it is allowed and logged with `goal: null`.
-- **Fails open on its own bugs**, saying so in `additionalContext`.
+- **Fails open on its own bugs**, saying so in `additionalContext`. A missing section is not a bug: it blocks.
 - **#244's own clause** (a UI plan must carry `design deps` output) is not built: it needs #243. It belongs in this hook.
+
+### The plan grammar: Surface, Need, References checked (#297)
+
+The same hook also requires every plan to declare what a person will read or click:
+
+```
+Goal: G<n>                 (or goal_reason: <why>)
+Surface: none              (or ui | widget | command | job | skill | notification | hook)
+```
+
+- **`Surface:`** is bold or plain, any case, optionally a list item (`**Surface:** widget`, `Surface: UI`). `none`
+  means the plan adds nothing a person reads. `command` covers a new command or changed output. Any other value is
+  refused, naming the allowed ones.
+- **When it is not `none`**, the plan needs both sections, at heading level `##` (or `###`):
+
+  ```
+  ## Need
+
+  - Question: <what the person asks that this answers>
+  - Decision: <what they decide from it>
+  - Today: <what they do now, without it>
+  - Retire when: <the signal that it is no longer needed>
+
+  ## References checked
+
+  - <library, standard or reference>: <why it did or did not fit>
+  ```
+
+  The four labels count only inside `## Need`, which ends at the next heading of its level or higher, and each needs
+  real text after the colon. `## References checked` needs at least one entry of real text. **A placeholder is not
+  text:** a value that is empty, only `<...>` placeholders, punctuation (`?`, `-`), or `TODO`/`TBD` is refused as
+  `## Need unfilled (<labels>)` or `## References checked unfilled`, so the pasted template never passes as-is. Anything inside a fenced code
+  block is ignored, so a quoted template never satisfies the gate.
+- **Override:** a line `surface_reason: <why>` allows the plan whatever its Surface, and is logged as
+  `surface_reason` in the `approvals.jsonl` row (which also gains `surface`, the declared value or `null`).
+- **One denial** covers Goal and Surface together. It starts `this plan is missing: <Goal, Surface, ## Need (...),
+  ## References checked>`, gives each fix, and carries the template above to paste.
+- **Every path with plan text runs it.** When no active goal can be read, the goal is "not checked" but the Surface
+  is still checked and can still deny. With no plan text at all, both are "not checked" and the plan is allowed.
+- **Grace:** until `SURFACE_ENFORCE_FROM` (2026-11-30: `SURFACE_GRACE_START` 2026-11-16 plus `SURFACE_GRACE_DAYS` 14,
+  constants in the hook), a plan with **no** `Surface:` line is allowed with a warning naming that date. A plan that
+  declares a Surface but lacks its sections is denied from day one.
+- **Denial log:** every deny and every warn appends one row `{ts, session, verdict: "deny"|"warn", missing: [...]}`
+  to `<state dir>/plan-gate/YYYY-MM.jsonl` (month of `ts`, UTC). No plan text is written. A failed write is named in
+  the hook's output and never turns a deny into an allow.
+- **Test seam:** `PROPAGATE_PLAN_GATE_NOW` (an ISO date) replaces the clock for the grace decision and the log.
+- **Off switch:** `hooks.planSurfaceGate: on|off` in `config.yml`, overridden by `PROPAGATE_PLAN_SURFACE_GATE=on|off`
+  (also `true|false|yes|no|1|0`). **Unset, the gate is on only in the owner's tree** — a declared hub (`hubRoot` /
+  `PROPAGATE_HUB_ROOT`, the root goal discovery walks) or an existing `<state dir>/plans/approvals.jsonl` — and off
+  everywhere else, where it neither warns, denies nor logs. Off skips the Surface half only; the Goal check is
+  unchanged. Resolved by `planSurfaceGate()` in `lib/core/config.mjs`; if that cannot be read the hook says
+  `Surface not checked` and allows.
 
 ## The dispatch model check (propagate#265, #214 part 2)
 
