@@ -179,10 +179,24 @@ test("an unparseable launchctl reply is stated, and a failed print on a schedule
 test("parseLaunchctlPrint reads the fields it uses and nulls the rest", () => {
   assert.deepEqual(parseLaunchctlPrint("\tstate = running\n\truns = 4\n\tlast exit code = (never exited)\n"), {
     state: "running",
+    pid: null, // propagate#295: read when present ("pid = N"), null otherwise
     runs: 4,
     exitCode: null,
     exitCodeRaw: "(never exited)",
     exitReason: null,
   });
   assert.equal(parseLaunchctlPrint("garbage").state, null);
+});
+
+// ── propagate#295: a live pid is not a failure, and each warned job carries a check_id ──────────────────────────
+
+test("a running job (live pid) with a past non-zero exit is not a problem; a stopped one with the same exit warns", { skip }, () => {
+  const running = run(fixture([{ label: "t.svc", logAgeH: 1 }], { launchctl: { "t.svc": "gui/501/t.svc = {\n\tstate = running\n\tpid = 4242\n\truns = 3\n\tlast exit code = 1\n}\n" } }));
+  assert.deepEqual(running.warns, [], JSON.stringify(running.reporter.entries));
+  assert.match(JSON.stringify(running.reporter.entries), /running \(pid 4242\), past exit 1 not a failure/);
+  const stopped = run(fixture([{ label: "t.svc", logAgeH: 1 }], { launchctl: { "t.svc": "gui/501/t.svc = {\n\tstate = not running\n\truns = 3\n\tlast exit code = 1\n}\n" } }));
+  assert.equal(stopped.warns.length, 1);
+  assert.equal(stopped.warns[0].check_id, "jobs.t.svc", "the warned job carries a stable check_id the glance keys on");
+  assert.equal(parseLaunchctlPrint("\tpid = 77\n").pid, 77);
+  assert.equal(parseLaunchctlPrint("\tstate = waiting\n").pid, null);
 });

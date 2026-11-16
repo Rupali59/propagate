@@ -199,7 +199,7 @@ import { freezeLedgerV1 } from "./lib/edges/freeze-ledger.mjs";
 // Colour constants live in the layer that prints — cli/ansi.mjs — so there
 // is ONE definition rather than a copy here and a copy per command module.
 import { RESET, DIM, RED, GREEN, YELLOW, BOLD } from "./cli/ansi.mjs";
-import { actionSuffix } from "./lib/report/doctor/structure.mjs";
+import { actionSuffix, marksSuffix } from "./lib/report/doctor/structure.mjs";
 import { ACTION_KINDS } from "./lib/report/doctor/reporter.mjs";
 
 
@@ -218,7 +218,9 @@ export function renderDoctorEntries(entries) {
     // E5. An entry's optional action is appended to its line in the form
     // structure.mjs parses back (ACTION_MARK), so /api/health can offer it. Dim,
     // after the detail: a person reads "what to do" at the end of the row.
-    const act = e.action ? DIM + actionSuffix(e.action) + RESET : "";
+    // propagate#295: the glance marks (human, check_id) go BEFORE the action, which runs to the end of the line.
+    const marks = marksSuffix(e);
+    const act = (marks ? DIM + marks + RESET : "") + (e.action ? DIM + actionSuffix(e.action) + RESET : "");
     if (e.kind === "pass") {
       console.log(`  ${GREEN}\u2713${RESET} ${e.label}${d ? "  " + DIM + d + RESET : ""}${act}`);
     } else if (e.kind === "fail") {
