@@ -5,8 +5,9 @@
  * the retired v1 watcher did. So the tests are about the absence of that
  * capability, not about notification cosmetics:
  *
- *   - it is idempotent: same bytes, same finding, silent second run
- *   - it re-notifies when bytes actually change (a real new finding)
+ *   - it is idempotent: same edge, same finding, silent second run, WHATEVER its bytes do
+ *     (propagate#296 re-keyed it from the content triple to `edge:<edge_id>`; these tests were rewritten, not
+ *     deleted, and the additions-only / 24 h hold rule is tested in tests/unit/glance-notify.test.mjs)
  *   - losing its memory costs exactly ONE duplicate, never a storm
  *   - it shares `isActionable` with graph, so the two cannot disagree
  *   - a run that could not look is logged differently from a run that found
@@ -24,7 +25,8 @@ import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { notifyKey, selectToNotify, formatNotification, selectDefectsToNotify, formatDefectNotification } from "../../lib/report/monitor.mjs";
+import { notifyKey, selectToNotify, formatNotification, selectDefectsToNotify, formatDefectNotification, heldIds } from "../../lib/report/monitor.mjs";
+import { decideChannel, mergeChannel, HOLD_MS } from "../../lib/glance/notifications.mjs";
 import { isActionable } from "../../lib/graph/graph.mjs";
 
 let seq = 0;
@@ -43,20 +45,18 @@ function row(state, { edge, src = "s1", dn = "d1", from = "/a.md", to = "/b.md" 
 // the key — this is the design, so it gets the most tests
 // ---------------------------------------------------------------------------
 
-test("the key is the CONTENT triple, not the edge id", () => {
+test("the key is the EDGE ID, never the content triple (propagate#296)", () => {
   const a = row("DRIFTED", { edge: "x", src: "aaa", dn: "bbb" });
-  const b = row("DRIFTED", { edge: "x", src: "aaa", dn: "bbb" });
   const c = row("DRIFTED", { edge: "x", src: "CHANGED", dn: "bbb" });
-
-  assert.equal(notifyKey(a), notifyKey(b), "identical bytes are the same finding");
-  assert.notEqual(notifyKey(a), notifyKey(c), "changed bytes are a NEW finding");
-  // FAILING INPUT: key on edge_id alone and the third assertion fails — a real
-  // change would be suppressed as already-seen, which is silence about drift.
+  assert.equal(notifyKey(a), "edge:x");
+  assert.equal(notifyKey(a), notifyKey(c), "changed bytes are the SAME finding: the edge, still drifted");
+  // FAILING INPUT: put the content back in the key and the second assertion fails. That was the
+  // 2026-08-17 design; it re-notified on every edit cycle (76% of notifications, measured 2026-08-29).
 });
 
-test("null content is preserved, not coerced — an UNMATCHED glob has a stable identity", () => {
+test("null content changes nothing — an UNMATCHED glob has the same stable identity", () => {
   const u = { edge_id: "g", source: { contentId: "aaa" }, downstream: { contentId: null } };
-  assert.equal(notifyKey(u), "g|aaa|null");
+  assert.equal(notifyKey(u), "edge:g");
   assert.equal(notifyKey(u), notifyKey({ ...u }), "and it is stable across runs");
 });
 
@@ -76,21 +76,29 @@ test("a second run over unchanged bytes notifies nothing", () => {
   assert.equal(second.suppressed.length, 2, "and says it suppressed two, rather than reporting zero work");
 });
 
-test("changed bytes re-notify, even for an edge already seen", () => {
+test("changed bytes do NOT re-notify an edge already told about", () => {
   const before = row("DRIFTED", { edge: "a", src: "v1", dn: "d" });
   const seen = new Set([notifyKey(before)]);
 
   const after = row("DRIFTED", { edge: "a", src: "v2", dn: "d" });
   const { toNotify } = selectToNotify([after], seen);
-  assert.equal(toNotify.length, 1, "the source moved again — that is a new finding");
+  assert.equal(toNotify.length, 0, "the source moved again, but the finding is the same edge: still drifted");
 });
 
-test("a fixed-then-broken edge is notified again", () => {
-  // drift → human fixes it → it drifts again with different content.
-  const first = row("DRIFTED", { edge: "a", src: "v1", dn: "d1" });
-  const seen = new Set([notifyKey(first)]);
-  const again = row("DRIFTED", { edge: "a", src: "v2", dn: "d2" });
-  assert.equal(selectToNotify([again], seen).toNotify.length, 1);
+test("a fixed-then-broken edge is notified again once the 24 h hold has passed", () => {
+  // drift → human fixes it → it drifts again later. Decided by decideChannel, the way cli.mjs composes it.
+  const t0 = Date.parse("2026-11-16T00:00:00Z");
+  const pass = (read, rows, now) => {
+    const ids = selectToNotify(rows).actionable.map(notifyKey);
+    const d = decideChannel({ read, channel: "edges", ids, now });
+    return { n: selectToNotify(rows, heldIds(ids, d.notify)).toNotify.length, read: { status: "ok", state: mergeChannel(read, "edges", d.next) } };
+  };
+  let r = pass({ status: "ok", state: { channels: { edges: { seeded_at: "x", last_run: "x", ids: {} } } } }, [row("DRIFTED", { edge: "a", src: "v1", dn: "d1" })], t0);
+  assert.equal(r.n, 1);
+  r = pass(r.read, [row("CLEAN", { edge: "a" })], t0 + 3600000);
+  r = pass(r.read, [], t0 + 7200000);
+  r = pass(r.read, [row("DRIFTED", { edge: "a", src: "v2", dn: "d2" })], t0 + 7200000 + HOLD_MS + 1);
+  assert.equal(r.n, 1, "it cleared and came back after the hold: a new finding");
 });
 
 // ---------------------------------------------------------------------------
@@ -232,13 +240,13 @@ test("open items produce ZERO notifications — only defects reach the channel",
 });
 
 test("notifyKey honours a defect's precomputed key, so both kinds share one store", () => {
-  // A defect's identity is its FILE, not a pair of content hashes: it should
-  // stay quiet until fixed, not re-fire when the file's bytes change.
+  // A defect's identity is its FILE, not content: it should stay quiet until
+  // fixed, not re-fire when the file's bytes change. Edges now follow the same rule.
   assert.equal(notifyKey({ key: "backlog:unparsed:/x/TODOS.md" }), "backlog:unparsed:/x/TODOS.md");
   // ...and an edge row, which has no `key`, still derives one as before.
   const row = { edge_id: "abc123", source: { contentId: "s" }, downstream: { contentId: "d" } };
-  assert.equal(notifyKey(row), "abc123|s|d", "the edge path must be untouched");
-  assert.equal(notifyKey({ key: "", edge_id: "e" }), "e|null|null", "an empty key is not a key");
+  assert.equal(notifyKey(row), "edge:abc123", "an edge derives its stable id");
+  assert.equal(notifyKey({ key: "", edge_id: "e" }), "edge:e", "an empty key is not a key");
 });
 
 test("the defect notification NAMES files — a count sends nobody anywhere", () => {

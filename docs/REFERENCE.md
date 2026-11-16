@@ -451,6 +451,8 @@ them stays in `cli.mjs`.
 |---|---|
 | `status` | List open drift rows, scoped to the workspace at cwd by default. `--all` for every workspace, `--cross` for the cross-repo ledger, `--json` for machine-readable output. |
 | `glance [--json] [--no-write] [--no-color]` | **What is working, what is broken, what needs you** (#295), from files other commands already wrote; never runs reconcile, doctor or `gh`, so a standalone run takes well under a second. Prints ONE line per source, `<badge> <source>: <count> <verdict> (<top subjects>) · <fix>` (at most 80 characters, no word cut, needs-you sources first, at most 5 source lines then `+N more sources`, working sources as one `OK` line), `[OK] all clear · N signals checked · HH:MM`, or `[UNKNOWN] glance: nothing to read yet`. Badges are coloured on a TTY; `NO_COLOR`, `--no-color` or piped output print the plain `[BROKEN]` word. Writes `<state dir>/glance.json` atomically and prunes guard-log months older than 90 days; `--no-write` writes and deletes nothing. `--json` prints exactly the `glance.json` object. **Exit 0** working, **1** broken or needs you (an unknown counts as broken), **2** nothing could be read, or a usage error. See "The glance" below. |
+| `glance ack <id>... [--until <date\|date-time\|Nh\|Nd>] [--json]` | **Acknowledge or snooze glance items** (#296), by id (`propagate glance --json` lists them). Writes `<state dir>/glance-acks.json` only. Without `--until` the ack holds for the item's current episode (it applies while the item's `since` is at or before the ack); with it, until that instant (a bare date means the end of that UTC day). An acked item is shown as acked and is not notified; **its verdict, the glance verdict and `needs_you_ids` are unchanged.** Ids must be id-shaped (no spaces or shell characters). Exit 0 written, 2 usage error. See "Notifications" under "The glance". |
+| `glance unack <id>... [--json]` | Remove an ack or snooze (#296). Ids with none are reported, not refused. |
 | `doctor [--full] [--json] [--since <span\|date>]` | **Default view is folded (#107):** failures (`✗`), inconclusive (`?`) and unknown-kind (`?!`) lines are always printed verbatim; repeated `!` warnings with one label in a section become one `! <label> ×N  <first detail> (+N-1 more: doctor --full)` line; `✓`/`·` lines become one `· N ok · N info` count per section; the first line states `showing folded view: N lines of M`. The fold is applied to the rendered lines (the same capture `--json` uses), so it cannot omit a section, and the exit code is identical to `--full`. **`--full`** prints every line (the pre-#107 output); `--json` is unchanged. Lines doctor writes to stderr are not folded and may appear out of place. Not done: a severity threshold (warnings at or above a level shown individually), because the rendered lines do not carry the module's severity. Health check: launchd plist loaded (`launchctl list \| grep <label>`), heartbeat age (warn >1h during active periods, fail >1 day), all `.propagates.yml` sidecars pass schema validation, sidecar downstream paths resolve on disk (warn-only), `state.json` parseable with `.bak` present. **No longer asserts that an in-tree ledger parses** — retired 2026-09-24 (PR-009): it passed unconditionally for a file `ensureLedgerPair` creates empty and nothing appends to, so it reported success for having read nothing. The row count is now an `info`, and a genuine read failure is still a check. **`# Unrecorded work`** (#131, `lib/report/doctor/unrecorded.mjs`): per repo in the discovery census (`ownerCandidates`) plus repos nested under it, record files (STATE, DECISIONS, GOTCHAS, HANDOVERS, TODOS, TODO, ISSUES, `.propagates.yml`, `.sidecar.yml`, ledgers, markdown under `plans/` or `rules/`, matched by name or pattern) that are modified, staged or untracked with an mtime at least `PROPAGATE_UNRECORDED_DAYS` days old (default 7); files edited on today's local day are always excluded. Also local branches with commits on no remote: ahead of their upstream, upstream gone, or no upstream (printed as such, never as zero); a no-upstream branch whose commits are all on some remote is counted in the summary, not listed. Worktrees of one repo list shared branches once. Output names repo, branch, file and age. **Warn-only: it never votes on the exit code**, because uncommitted work is the normal state of a working day and #129 recorded an always-red doctor going unread; the issue's "makes doctor fail" is deliberately not followed. Zero repos scanned prints `scan is blind`, never a clean line. |
 | `init <dir> [--workspace\|--edges-only]` | Scaffold `.propagates.yml`. `--workspace` (default) writes `workspace: true` and verifies the directory becomes discoverable, exiting non-zero if not (N15). **No longer touches the plist** — that moved to `reload` (N14). |
 | `reload` | **Obsolete as of 2026-08-14** — its only purpose was regenerating the (now retired) watcher's plist and reloading it into launchd; `lib/core/plist.mjs` has never generated any other plist (grep confirms it — the digest plist is installed by a separate mechanism it never touches, see "Canonical state" above). Not removed from `cli.mjs` by this change (out of scope — no live launchd command was run to verify/enact this), but there is no remaining reason to run it. |
@@ -925,6 +927,61 @@ at most 140 characters, at most 3 SOURCES plus the age (`as of HH:MM`, or `Nh ag
 `Run: propagate glance`. It uses PLAIN bracketed badges (`[BROKEN] jobs: 3 failing`) and never an escape code: hook
 output is read by Claude, not shown in a terminal. Its source order is a copy of `SOURCE_RANK`, parity-tested. Absent: `glance: not computed yet; run propagate glance`. It is the last line of the block and
 last to be cut, and it prints in unplaced folders, with no checkouts cache, and on the hook's fail-open path.
+
+### Notifications (propagate#296)
+
+The monitor sends at most three notifications per run, each replacing the previous one of its kind (`-group`), and
+each opening a view of `propagate ui` when clicked. **They fire on ADDITIONS ONLY**, decided by
+`lib/glance/notifications.mjs` `decideChannel` over `<state dir>/notify-state.json`:
+
+| Channel | Ids | Sent | Click opens |
+|---|---|---|---|
+| `edges` | `edge:<edge_id>` for every actionable edge (`isActionable`) | first, before doctor | one edge: `/judge?edge=<id>`; several: `/judge` |
+| `backlog` | `backlog:<kind>:<path>` for each backlog defect | after edges | `/backlog` |
+| `glance` | the glance's needs-you and broken items (an unknown counts as broken), minus the `edges` signal, which the edge channel already covers | after doctor and the glance write | one item: `/glance/<id>`; several: `/glance` |
+
+- **An id has no content hash and no number.** An edge whose bytes change on every run is one id. This supersedes the
+  content-triple key `(edge_id, source_content, downstream_content)`, which re-notified on every edit cycle.
+- **Present on the previous run:** silent. **Left and back within 24 h:** silent. **Otherwise:** notified once.
+  **Removal** never notifies.
+- **The first run with no record of a channel seeds it silently**, so upgrading does not replay every open finding. A
+  **corrupt** store is not an upgrade: every present id is notified once and the store is rewritten. Neither throws.
+- **Acked ids** are recorded as present but their notification is owed, not sent; a snooze that runs out sends it.
+- `notified.jsonl` stays as the audit log of what was sent (with `run_id`); it no longer suppresses anything. The
+  Judge "new" dot still keys on the content triple (`monitor.mjs` `contentKey`), because "have I seen these bytes" is
+  the right question for a row being judged.
+- **Copy.** One glance item: title `<Needs you|Broken|Unknown>: <subject>: <what>`, body its fix command. Several:
+  `propagate: 2 need you, 1 broken`, then one line per distinct subject and fix, at most 3, then `+N more`.
+- **The digest** notification's body is the glance verdict line (the first line `propagate glance` prints), never the
+  digest's timestamp heading; an absent or unreadable glance says so. Its click opens `/glance`.
+- `--dry-run` sends nothing and writes no `notify-state.json`.
+
+**How a click resolves its URL.** `notify()`'s `open` option takes `{route}` built by `uiRoute(kind, id)` from the
+fixed vocabulary above, with the id percent-encoded and the result checked against a pattern that admits no quote,
+space or shell character. terminal-notifier's `-execute` then runs
+`PROPAGATE_STATE_DIR=<state> PROPAGATE_CLI=<plugin>/cli.mjs /bin/bash <plugin>/widget/open-ui.sh <route>`: the same
+script the widget's buttons run. It reads the running server's URL and token from `<state dir>/ui-url`, starts
+`propagate ui` when none is up, replaces a stale one it can verify, and opens `<url>#<route>`; the client routes on
+the fragment. Item text never reaches the command. Without terminal-notifier the osascript fallback has no click.
+
+### The web glance view (propagate#296)
+
+`propagate ui` → **GLANCE** (the TODAY group). `GET /api/glance` returns `glance.json` with each problem item's `ack`
+re-derived from `glance-acks.json` at read time; an absent or unreadable file is a named state, never an empty list.
+`POST /api/glance/ack` takes `{action: "ack"|"unack", ids: [...], until: null|"24h"|"7d"|<ISO>}`, validated whole
+before anything is written. Both sit behind the same token, Host and Origin guard as every `/api` route.
+
+- **List:** one row per item, needs-you first; filters by verdict and by source (`#/glance?verdict=broken&source=jobs`,
+  so a reload keeps them); columns verdict badge, item, source, since, next (with a copy button).
+- **Row menu:** right-click, the ContextMenu key or Shift+F10: open detail, copy fix, acknowledge, snooze 24 h or 7 days,
+  remove ack.
+- **Selection:** a checkbox per problem row and select-all; the bulk bar acknowledges, snoozes or unacks every
+  selected id in one request.
+- **Detail pane, a route per item:** `#/glance/<id>` shows why, the fix, the source, since, how much was looked at, the
+  ack and the id.
+- **Badges** are `.badge.gl-<kind>` and always show an icon, a word and a count (`! NEEDS YOU 1`), so state is never
+  colour alone; fills are the semantic status tokens. A status strip above the filters is drawn with Observable Plot
+  when it loaded, and says so when it did not.
 
 ## Subagents (propagate#251)
 

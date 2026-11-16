@@ -5056,9 +5056,24 @@ async function monitorCmd() {
     process.exit(1);
   }
 
-  const already = await mon.readNotified();
-  const { toNotify, suppressed, actionable } = mon.selectToNotify(rows, already);
+  // WHICH IDS NOTIFY (propagate#296). Additions only, keyed `edge:<edge_id>` / `backlog:<kind>:<path>`, with a 24 h
+  // re-entry hold and a silent first run, decided in lib/glance/notifications.mjs over $STATE/notify-state.json.
+  // notified.jsonl stays as the audit log of what was sent; it is no longer what suppresses a repeat.
+  const nst = await import("./lib/glance/notifications.mjs");
+  const { readAcks, ackApplies } = await import("./lib/glance/acks.mjs");
+  const { uiRoute } = await import("./lib/report/notify.mjs");
+  const noteDir = CONFIG_ROOT_DIR || stateDir();
+  const nowMs = Date.now();
+  let notifyRead = nst.readNotifyState(noteDir);
+  let acks = new Map();
+  try { acks = readAcks(noteDir); } catch { /* fail open: no acks means tell, never silence */ }
+  const ackedAt = (now) => (id, since) => ackApplies(acks.get(id), since, now);
+  const edgeIds = mon.selectToNotify(rows).actionable.map(mon.notifyKey);
+  const edgeDecision = nst.decideChannel({ read: notifyRead, channel: "edges", ids: edgeIds, now: nowMs, acked: ackedAt(nowMs) });
+  const { toNotify, suppressed, actionable } = mon.selectToNotify(rows, mon.heldIds(edgeIds, edgeDecision.notify));
   const { title, body } = mon.formatNotification(toNotify, { root: SEARCH_ROOTS[0] });
+  // One edge opens that edge in Judge; several open the Judge list. Built from the route vocabulary, never item text.
+  const edgeOpen = { route: toNotify.length === 1 ? uiRoute("edge", toNotify[0].edge_id) : uiRoute("judge") };
 
   // Backlog DEFECTS — registers nothing can parse, handovers nothing can close.
   // Never the open items: there are 500 and they are the normal state of a
@@ -5102,16 +5117,32 @@ async function monitorCmd() {
   } catch (e) {
     backlogErr = String(e && e.message);
   }
-  const defectPick = mon.selectDefectsToNotify(defects, already);
+  const defectIds = defects.map((d) => d.key);
+  // A backlog that could not be read has no ids, and recording that as "every defect left" would re-arm them all;
+  // so the channel is decided (and later written) only when the backlog was read.
+  const defectDecision = backlogErr ? null : nst.decideChannel({ read: notifyRead, channel: "backlog", ids: defectIds, now: nowMs, acked: ackedAt(nowMs) });
+  const defectPick = mon.selectDefectsToNotify(defects, defectDecision ? mon.heldIds(defectIds, defectDecision.notify) : new Set(defectIds));
 
   if (!dryRun && toNotify.length > 0) {
-    await notify(title, body, { group: "propagate-monitor" });
+    await notify(title, body, { group: "propagate-monitor", open: edgeOpen });
     await mon.recordNotified(toNotify, undefined, new Date(), monitorRunId);
   }
   if (!dryRun && defectPick.toNotify.length > 0) {
     const d = mon.formatDefectNotification(defectPick.toNotify, { root: SEARCH_ROOTS[0] });
-    await notify(d.title, d.body, { group: "propagate-monitor" });
+    await notify(d.title, d.body, { group: "propagate-monitor-backlog", open: { route: uiRoute("backlog") } });
     await mon.recordNotified(defectPick.toNotify, undefined, new Date(), monitorRunId);
+  }
+  // The edge and backlog records are written NOW, before doctor's tens of seconds, so a run killed during doctor has
+  // still remembered what it told. A write failure is a stderr line: the cost is one more notification next run.
+  if (!dryRun) {
+    try {
+      let next = nst.mergeChannel(notifyRead, "edges", edgeDecision.next);
+      if (defectDecision) next = nst.mergeChannel({ status: "ok", state: next }, "backlog", defectDecision.next);
+      nst.writeNotifyState(next, noteDir);
+      notifyRead = { status: "ok", state: next };
+    } catch (e) {
+      console.error(`${YELLOW}monitor: notify state not written:${RESET} ${String(e?.message ?? e)}`);
+    }
   }
   if (backlogErr) console.error(`${YELLOW}monitor: backlog check could not run:${RESET} ${backlogErr}`);
 
@@ -5219,15 +5250,32 @@ async function monitorCmd() {
   // doctor was skipped, the snapshot on disk). The glance never runs reconcile or doctor itself. Last, after every
   // notification and the snapshot, and in its own try: a glance that throws must not move this run's outcome.
   // Skipped on --dry-run, which writes nothing.
+  //
+  // THEN its notification (propagate#296): additions to the needs-you and broken set, after doctor (design §5: edges
+  // first, then glance additions), one grouped notification replacing the previous (-group), opening the item's
+  // route. In the same try as the glance: a glance that failed has nothing to compare, and must not notify.
+  let glanceNotified = 0;
   if (!dryRun) {
     try {
       const { runGlance } = await import("./lib/glance/compute.mjs");
       const { envPaths } = await import("./cli/glance.mjs");
-      runGlance({ dir: CONFIG_ROOT_DIR || stateDir(), rows, doctor: freshDoctor, paths: envPaths() });
+      const { glance } = runGlance({ dir: CONFIG_ROOT_DIR || stateDir(), rows, doctor: freshDoctor, paths: envPaths() });
+      const cands = nst.glanceCandidates(glance);
+      const byId = new Map(cands.map((i) => [i.id, i]));
+      const gNow = Date.now();
+      // The ack is judged against the ITEM's episode (its `since` in the glance), the same rule the view shows.
+      const gd = nst.decideChannel({ read: notifyRead, channel: "glance", ids: cands.map((i) => i.id), now: gNow, acked: (id) => ackApplies(acks.get(id), byId.get(id)?.since, gNow) });
+      if (gd.notify.length) {
+        const n = nst.formatGlanceNotification(gd.notify.map((id) => byId.get(id)));
+        await notify(n.title, n.body, { group: "propagate-glance", open: { route: uiRoute(n.route.kind, n.route.id) } });
+        glanceNotified = gd.notify.length;
+      }
+      nst.writeNotifyState(nst.mergeChannel(notifyRead, "glance", gd.next), noteDir);
     } catch (e) {
-      console.error(`${YELLOW}monitor: glance not written:${RESET} ${String(e?.message ?? e)}`);
+      console.error(`${YELLOW}monitor: glance not written or not notified:${RESET} ${String(e?.message ?? e)}`);
     }
   }
+  if (glanceNotified) console.log(`${DIM}monitor: glance: notified ${glanceNotified} new item(s)${RESET}`);
 
   if (json) {
     console.log(JSON.stringify({ generatedAt: new Date().toISOString(), dryRun, ...stats, would: toNotify.map((r) => ({ edge_id: r.edge_id, state: r.state, source: r.source.path, downstream: r.downstream.path })) }, null, 2));

@@ -2118,8 +2118,18 @@ async function deliverViaDailyMdAndNotify(text) {
   await writeFile(tmp, updated, "utf8");
   await rename(tmp, DAILY_MD_PATH);
 
-  const firstLine = text.split("\n").find((l) => l.trim().length > 0) || "propagate digest";
-  await notify("propagate digest", firstLine.slice(0, 200));
+  // propagate#296: the body is the glance's VERDICT LINE (what `propagate glance` prints first), not the digest's
+  // first line, which is its timestamp heading. The click opens the glance view. A glance that cannot be read says so.
+  const { digestNotification } = await import("./lib/glance/notifications.mjs");
+  const { readGlanceState } = await import("./lib/glance/store.mjs");
+  const { uiRoute } = await import("./lib/report/notify.mjs");
+  let n;
+  try {
+    n = digestNotification(readGlanceState());
+  } catch (e) {
+    n = { title: "propagate digest", body: `glance unavailable (${e.message}): run propagate glance`, route: { kind: "glance", id: null } };
+  }
+  await notify(n.title, n.body, { open: { route: uiRoute(n.route.kind, n.route.id) } });
 }
 
 /**

@@ -42,7 +42,7 @@ function divisions() {
    FIRST_EXPLORE and the `explore` flag are gone (a second source of truth for the boundary would let them disagree). */
 
 const GROUPS = {
-  today: ["overview"],
+  today: ["overview", "glance"], // glance joined 2026-11-16 (propagate#296): where notification clicks land
   settle: ["judge", "unblock"],
   machinery: ["health", "claims", "rules", "caps", "skills"],
   work: ["backlog", "goals", "registers", "reminders"],
@@ -78,10 +78,10 @@ test("inserting a view into the middle MOVES the boundary instead of leaving it 
   // The exact edit that would have broken the old code: a view added in the middle of an existing group.
   const mutated = [ui.DIVISIONS[0], { key: "injected", label: "X", group: "today" }, ...ui.DIVISIONS.slice(1)];
   const after = keysOf(ui.railGroups(mutated));
-  assert.equal(after[0], "today:overview,injected", "the new view joined its own group; no other label moved");
+  assert.equal(after[0], "today:overview,injected,glance", "the new view joined its own group; no other label moved");
   assert.deepEqual(after.slice(1), real.slice(1));
   // And a group that appears twice is NOT merged: it repeats its label, which the order test above forbids.
-  const split = keysOf(ui.railGroups([ui.DIVISIONS[0], ui.DIVISIONS[1], { key: "z", label: "Z", group: "today" }]));
+  const split = keysOf(ui.railGroups([ui.DIVISIONS[0], ui.DIVISIONS.find((d) => d.group !== "today"), { key: "z", label: "Z", group: "today" }]));
   assert.equal(split.length, 3, "non-contiguous members start a new group");
 });
 
@@ -97,7 +97,7 @@ test("the rail the client actually renders: five labels in order, a rule above e
   assert.equal(byClass(nav, "lbl").length, 5, JSON.stringify(kids));
   const flat = kids.join(" ");
   assert.equal(flat, [
-    "LBL:today B:OVERVIEW", "| LBL:settle B:JUDGE B:UNBLOCK", "| LBL:machinery B:HEALTH B:CLAIMS B:RULES B:CAPS B:SKILLS",
+    "LBL:today B:OVERVIEW B:GLANCE", "| LBL:settle B:JUDGE B:UNBLOCK", "| LBL:machinery B:HEALTH B:CLAIMS B:RULES B:CAPS B:SKILLS",
     "| LBL:work B:BACKLOG B:GOALS B:REGISTERS B:REMINDERS", "| LBL:history B:ACTIVITY B:HISTORY B:GRAPH",
   ].join(" "));
 });

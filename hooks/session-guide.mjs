@@ -133,8 +133,11 @@ export function glanceLine(dir, now = Date.now()) {
   const age = ageMs > 3600000 ? `Glance ${Math.round(ageMs / 3600000)}h ago` : `Glance as of ${hhmm(Date.parse(g.generatedAt))}`;
   if (ageMs > (Number(g.stale_after_s) || 21600) * 1000) return `${age} (stale): unknown, recompute${GLANCE_TAIL}`;
   const by = new Map();
+  // An acked item (propagate#296, lib/glance/acks.mjs) is counted, never listed: someone said "I know".
+  let acked = 0;
   for (const i of g.items) {
     if (!i || typeof i !== "object" || i.verdict === "working") continue;
+    if (i.ack) { acked++; continue; }
     if (!by.has(i.signal)) by.set(i.signal, []);
     by.get(i.signal).push(i);
   }
@@ -145,9 +148,10 @@ export function glanceLine(dir, now = Date.now()) {
     const broken = its.length - needs - unknown;
     return { signal, its, needs, broken, unknown, state: needs ? "needs_you" : broken ? "broken" : "unknown" };
   }).sort((a, b) => (a.state === "needs_you" ? 0 : 1) - (b.state === "needs_you" ? 0 : 1) || rank(a.signal) - rank(b.signal));
+  if (!groups.length && acked) return `${age}: no unacknowledged problems, ${acked} acked${GLANCE_TAIL}`;
   if (!groups.length) return `${age}: all clear, ${g.signals_checked ?? "?"} signals checked${GLANCE_TAIL}`;
   const shown = groups.slice(0, 3);
-  const more = groups.length > 3 ? `; +${groups.length - 3} more` : "";
+  const more = (groups.length > 3 ? `; +${groups.length - 3} more` : "") + (acked ? `; ${acked} acked` : "");
   const head = `${age}: `;
   const word = { needs_you: "[NEEDS YOU]", broken: "[BROKEN]", unknown: "[UNKNOWN]" };
   const one = (gr) => {
