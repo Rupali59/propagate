@@ -360,7 +360,7 @@ sources:
   # AUDIT-2026-08.md -> GOTCHAS.md. `check --changed` run inside this repo cannot see them;
   # `reconcile` at the hub can. New edge ids, so each was re-baselined, not carried over.
 
-  # Declared 2026-10-12. REFERENCE.md §"The ten kinds" is the only prose that specifies the
+  # Declared 2026-10-12. REFERENCE.md §"The kinds" (was "The ten kinds") is the only prose that specifies the
   # doc taxonomy; it was coupled to nothing, while a hub edge claimed rules/conventions/
   # STATE_MANAGEMENT.md specified it (7 of the 10 kinds appear nowhere there). That edge
   # (a11f834b) was decoupled the same day, with the evidence in its event.
@@ -368,7 +368,27 @@ sources:
     propagates_to:
       - path: docs/REFERENCE.md
         why: >-
-          KINDS here is the list REFERENCE.md §"The ten kinds" tabulates, one row per
+          KINDS here is the list REFERENCE.md §"The kinds" tabulates, one row per
           kind with what it is for and when to write one. A kind added, renamed or
           removed here leaves that table describing a taxonomy the code no longer has.
+        kind: prose
+
+  # Declared 2026-11-17 (#269 final review, finding 10). REFERENCE.md §"`propagate standards`" restates the
+  # page grammar and the doctor findings table; nothing watched either, so a field or finding added in code
+  # left the prose describing the old one.
+  lib/standards/parse.mjs:
+    propagates_to:
+      - path: docs/REFERENCE.md
+        why: >-
+          parse.mjs defines the standards page grammar (row fields, states, check kinds) that
+          REFERENCE.md §"`propagate standards`" documents. A field or check kind added, renamed or
+          removed here leaves that section describing a grammar the parser no longer reads.
+        kind: prose
+  lib/report/doctor/standards.mjs:
+    propagates_to:
+      - path: docs/REFERENCE.md
+        why: >-
+          FINDING_SEVERITY and the findings emitted here are the table in REFERENCE.md
+          §"`propagate standards`" (doctor: `# Standards`). A finding added, renamed or re-severitied
+          here leaves that table wrong.
         kind: prose
