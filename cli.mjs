@@ -930,16 +930,13 @@ async function doctor({ exitProcess = true } = {}) {
   }
 
   // # Standards — offline only (no network call, no probe spawn). Findings warn; only a declaration error fails.
+  // A throw is an inconclusive entry (counted), never a silent yellow line: could-not-run is not no-problem.
   {
-    try {
-      const { checkStandards } = await import("./lib/report/doctor/standards.mjs");
-      const reporter = new Reporter();
-      await checkStandards({ reporter });
-      renderDoctorEntries(reporter.drain());
-      problems += reporter.problems;
-    } catch (err) {
-      console.log(`  ${YELLOW}!${RESET} standards  ${DIM}could not be derived: ${err.message}${RESET}`);
-    }
+    const { runStandardsSection } = await import("./lib/report/doctor/standards.mjs");
+    const reporter = new Reporter();
+    await runStandardsSection({ reporter });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
   }
 
   // # Goals — arrival conditions. Surfaced HERE rather than left to whoever

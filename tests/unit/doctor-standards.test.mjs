@@ -197,3 +197,24 @@ test("the cache age is shown, and a cached non-version value reads as not read",
   assert.ok(find(r, "info", /versions read 3h ago/));
   assert.ok(find(r, "info", /version not read/), "\"is\" is not a version");
 });
+
+test("a sidecar whose adopted: is not a list is ONE inconclusive entry with no doubled prefix", async () => {
+  const r = await run(fixture({ versions: "1.2.0", sidecars: { p0: "project: p0\nstandards:\n  adopted: notalist\n" } }));
+  const bad = r.entriesOfKind("inconclusive").filter((e) => /notalist|must be a mapping|adopted/.test(e.detail));
+  assert.equal(bad.length, 1, JSON.stringify(bad));
+  assert.doesNotMatch(bad[0].detail, /STANDARDS-UNREADABLE:.*STANDARDS-UNREADABLE:/);
+  assert.equal(r.problems, 1);
+});
+
+test("a throw inside checkStandards is an inconclusive entry and counts as a problem, never silent", async () => {
+  const { runStandardsSection } = await import("../../lib/report/doctor/standards.mjs");
+  const fx = fixture({ versions: "1.2.0" });
+  // a registry entry with a non-string `page` throws out of loadStandards (registry.mjs path.join)
+  const regFile = fx.integrations.standardsFile;
+  writeFileSync(regFile, "schema_version: 1\nstandards:\n  acme-tool:\n    kind: tool\n    page: 5\n");
+  const reporter = new Reporter();
+  await runStandardsSection({ reporter, ...fx });
+  const e = find(reporter, "inconclusive", /standards could not run/);
+  assert.ok(e, JSON.stringify(reporter.entries));
+  assert.ok(reporter.problems >= 1);
+});
