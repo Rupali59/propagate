@@ -114,6 +114,9 @@ Regenerate it with `npm run readme:commands`.
 - `propagate services` — which units use which external service, and what is wrong with how each is described (offline)
 - `propagate standards` — which standards apply, which rows need re-verifying against the tool version in use (offline; status is derived, never written)
 - `propagate standards versions` — the cached tool versions; --refresh runs each registry probe and writes them (the only command that spawns a tool)
+- `propagate standards adopt` — record that a project adopted a standard in its sidecar (dry run unless --apply; detection proposes, adoption stays)
+- `propagate standards decline` — record that a detected standard does not apply to a project, with a reason (dry run; --apply needs approvals, slice S4)
+- `propagate standards remove` — record the removal of an adopted standard, with a reason (dry run; --apply needs approvals, slice S4)
 - `propagate plans` — plan documents and their lifecycle
 - `propagate docs` — document kinds, structure and supersession
 - `propagate journal` — ledger events in a time window

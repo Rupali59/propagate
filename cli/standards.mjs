@@ -8,16 +8,18 @@
  * `<CODE>: <what>. Next: <command>` on stderr, or `{ok:false, code, what, next}` with --json.
  * Import prefix is `../lib/…` from here (G60).
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { stateDir } from "../lib/core/paths.mjs";
 import { readSidecar } from "../lib/report/manifest.mjs";
 import { collectUnits, loadServices, MIN_UNITS } from "../lib/report/services.mjs";
+import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/standards/adopt.mjs";
 import { loadStandards } from "../lib/standards/registry.mjs";
 import { buildStandardsReport } from "../lib/standards/status.mjs";
 import { readVersions, refreshVersions, writeVersions } from "../lib/standards/versions.mjs";
 
-const USAGE = "usage: propagate standards [--json] [--std <id>] [--project <p>] | standards versions [--refresh] [--json]";
+const USAGE = "usage: propagate standards [--json] [--std <id>] [--project <p>] | standards versions [--refresh] [--json] | standards adopt <std> <project> [--units a,b] [--evidence <text>] [--apply] | standards decline|remove <std> <project> --reason <r> [--apply]";
 
 const fail = (code, what, next) => ({ ok: false, code, what, next });
 
@@ -88,6 +90,7 @@ function loadOrFail(integrations) {
 export async function standardsCmd(argv = [], inject = {}) {
   const io = inject.io ?? console;
   const asJson = argv.includes("--json");
+  if (["adopt", "decline", "remove"].includes(argv[0])) return adoptionCmd(argv, inject, io, asJson);
   if (argv[0] === "versions") return versionsCmd(argv.slice(1), inject, io, asJson);
   const p = parse(argv, ["--std", "--project"], ["--json"]);
   if (p.error) return emitFailure(p.error, asJson, io);
@@ -167,5 +170,108 @@ async function versionsCmd(rest, inject, io, asJson) {
   }
   io.log(`tool versions (read ${versions.at}):`);
   for (const [k, v] of Object.entries(versions.tools)) io.log(`  ${k}  ${v.version ?? `unknown (${v.error})`}`);
+  return 0;
+}
+
+/** The GitHub login that did it, from `gh api user`. null when it cannot be read: never a blank `by`. */
+function ghLogin() {
+  try {
+    return execFileSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The sidecar of `project`, found under the discovered workspace roots, never built from a name alone. */
+function findSidecar(workspaces, project) {
+  const expected = (workspaces ?? []).map((w) => path.join(w.root, "propagation", "state", project, ".sidecar.yml"));
+  const hit = expected.find((f) => existsSync(f));
+  return hit ? { file: hit } : { expected: expected.length ? expected : [`<workspace root>/propagation/state/${project}/.sidecar.yml`] };
+}
+
+/** `standards adopt|decline|remove <std> <project>`. Dry run unless --apply. */
+async function adoptionCmd(argv, inject, io, asJson) {
+  const verb = argv[0];
+  const rest = argv.slice(1);
+  const pos = [];
+  const flagArgs = [];
+  const valued = ["--units", "--evidence", "--reason"];
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i].startsWith("--")) {
+      flagArgs.push(rest[i]);
+      if (valued.includes(rest[i]) && rest[i + 1] !== undefined) flagArgs.push(rest[++i]);
+    } else pos.push(rest[i]);
+  }
+  const p = parse(flagArgs, valued, ["--json", "--apply"]);
+  if (p.error) return emitFailure(p.error, asJson, io);
+  const f = p.flags;
+  if (pos.length !== 2) return emitFailure(fail("STANDARDS_USAGE", `${verb} needs <std> <project>`, USAGE), asJson, io);
+  const [stdId, project] = pos;
+  if (verb !== "adopt" && !(f["--reason"] ?? "").trim()) return emitFailure(fail("STANDARDS_USAGE", `${verb} needs --reason`, `propagate standards ${verb} ${stdId} ${project} --reason "<why>"`), asJson, io);
+  const { integrations, workspaces } = await env(inject);
+  const loaded = loadOrFail(integrations);
+  if (!loaded.ok) return emitFailure(loaded, asJson, io);
+  const std = loaded.standards.find((s) => s.id === stdId);
+  if (!std) return emitFailure(fail("STANDARDS_UNKNOWN", `no standard named ${JSON.stringify(stdId)} (known: ${loaded.standards.map((s) => s.id).join(", ")})`, "propagate standards"), asJson, io);
+  const sc = findSidecar(workspaces, project);
+  if (!sc.file) return emitFailure(fail("STANDARDS_PROJECT_UNKNOWN", `no sidecar for project ${JSON.stringify(project)}; expected ${sc.expected.join(" or ")}`, "create the project's state folder (see rule:state-and-decisions) or check the project name"), asJson, io);
+  const cur = readAdoptions(sc.file);
+  if (cur.error) return emitFailure(fail("STANDARDS_UNREADABLE", cur.error, "fix the `standards:` block named above"), asJson, io);
+  const isAdopted = cur.adopted.some((a) => a?.standard === stdId);
+  if (verb === "remove" && !isAdopted) return emitFailure(fail("STANDARDS_NOT_ADOPTED", `${project} has not adopted ${stdId}, so there is nothing to remove`, `propagate standards decline ${stdId} ${project} --reason "<why>"`), asJson, io);
+  if (verb === "decline" && isAdopted) return emitFailure(fail("STANDARDS_ALREADY_ADOPTED", `${project} has adopted ${stdId}; declining it would contradict the adoption`, `propagate standards remove ${stdId} ${project} --reason "<why>"`), asJson, io);
+
+  // Rows, the version in use and the detected units, from the same report `standards` prints.
+  const units = inject.units ?? collectUnits(workspaces, { integrations });
+  const report = buildStandardsReport({
+    standards: loaded.standards, units, sidecars: inject.sidecars ?? readSidecars(workspaces),
+    versions: readVersions(inject.stateDirPath ?? stateDir()), minUnits: inject.minUnits ?? MIN_UNITS, std: stdId, problems: [],
+  });
+  if (!report.ok) return emitFailure(fail("STANDARDS_BLIND", report.blind ?? "scan failed", "check PROPAGATE_WORKSPACES and the workspace roots, then re-run"), asJson, io);
+  const rep = report.standards[0];
+  const mine = rep.projects.find((pr) => pr.project === project);
+  const detectedUnits = (mine?.units ?? []).map((u) => u.unit);
+  const vers = [...new Set((mine?.units ?? []).map((u) => u.version).filter(Boolean))];
+  const key = std.page?.versionProbe ?? std.id;
+  const verifiedOn = vers.length ? `${key} ${vers.join(", ")}` : `${key}: version not read`;
+  const chosenUnits = f["--units"] ? f["--units"].split(",").map((x) => x.trim()).filter(Boolean) : detectedUnits;
+  if (verb === "adopt" && chosenUnits.length === 0 && !cur.adopted.some((a) => a?.standard === stdId)) {
+    return emitFailure(fail("STANDARDS_USAGE", `${stdId} is detected on no unit of ${project}`, `propagate standards adopt ${stdId} ${project} --units <unit,unit>`), asJson, io);
+  }
+  const live = (std.page?.rows ?? []).filter((r) => r.state !== "retired");
+  const rows = rep.rows.map((r) => ({ id: r.id, status: mine?.rows.find((x) => x.id === r.id)?.status ?? r.status }));
+  const checksToRun = live.filter((r) => r.check.kind === "command" || r.check.kind === "test").map((r) => ({ row: r.id, kind: r.check.kind, target: r.check.target }));
+
+  const apply = Boolean(f["--apply"]);
+  if (apply && verb !== "adopt") return emitFailure(fail("STANDARDS_APPROVAL_UNAVAILABLE", APPROVAL_UNAVAILABLE, `propagate standards ${verb} ${stdId} ${project} --reason "<why>"  (a dry run)`), asJson, io);
+  let by = null;
+  if (apply) {
+    by = typeof inject.by === "function" ? inject.by() : inject.by !== undefined ? inject.by : ghLogin();
+    if (!by) return emitFailure(fail("STANDARDS_IDENTITY_UNKNOWN", "could not read the GitHub login (gh api user --jq .login), so `by` would be blank", "run `gh auth status`, then retry"), asJson, io);
+  }
+  const plan = planAdopt({ kind: verb, std: stdId, project, sidecarFile: sc.file, units: chosenUnits, evidence: f["--evidence"] ?? null, by, now: (inject.now ?? Date.now)(), verifiedOn, reason: f["--reason"] ?? null, rows, checksToRun });
+  if (plan.error) return emitFailure(fail("STANDARDS_UNREADABLE", plan.error, "fix the sidecar named above"), asJson, io);
+  let written = false;
+  if (apply) {
+    const r = applyPlan(plan);
+    if (!r.written) return emitFailure(fail("STANDARDS_WRITE_REFUSED", r.error, "re-run"), asJson, io);
+    written = true;
+  }
+  const shown = { ...plan.entry, ...(by === null && "by" in plan.entry ? { by: "(the gh login, read at --apply)" } : {}) };
+  if (asJson) {
+    io.log(JSON.stringify({ ok: true, verb, dry_run: !apply, written, sidecar: plan.sidecarFile, entry: shown, refresh: plan.refresh, rows: plan.rows, checks_to_run: plan.checksToRun }, null, 2));
+    return 0;
+  }
+  const past = { adopt: "adopted", decline: "declined", remove: "removed" }[verb];
+  io.log(`${apply ? "applied" : "dry run (nothing written; add --apply)"}: ${verb} ${stdId} for ${project}${plan.refresh ? " (already adopted: refreshing verified_on)" : ""}`);
+  io.log(`  sidecar: ${plan.sidecarFile}`);
+  io.log(`  would be recorded as ${past}: ${JSON.stringify(shown)}`);
+  if (verb === "adopt") {
+    io.log(`  version in use: ${verifiedOn}`);
+    io.log(`  rows (${plan.rows.length}):`);
+    for (const r of plan.rows) io.log(`    ${r.id}  ${r.status}`);
+    io.log(`  checks it would run (${plan.checksToRun.length}; adopt does not run them, record their output with --evidence):`);
+    for (const c of plan.checksToRun) io.log(`    ${c.row}  ${c.kind}: ${c.target}`);
+  } else io.log(`  approval: ${APPROVAL_UNAVAILABLE}`);
   return 0;
 }
