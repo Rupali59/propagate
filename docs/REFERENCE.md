@@ -713,9 +713,9 @@ Detection proposes, adoption decides, and the adoption stays (design §2.2). A s
 |---|---|
 | `standards [--json] [--std <id>] [--project <p>]` | the report above |
 | `standards versions [--refresh] [--json]` | the cached versions; `--refresh` probes |
-| `standards adopt <std> <project> [--units a,b] [--evidence <text>] [--apply]` | record the adoption |
-| `standards decline <std> <project> --reason <r>` | record "detected, does not apply" |
-| `standards remove <std> <project> --reason <r>` | record the removal of an adoption |
+| `standards adopt <std> <project\|workspace/project> [--units a,b] [--evidence <text>] [--apply]` | record the adoption |
+| `standards decline <std> <project\|workspace/project> --reason <r>` | record "detected, does not apply" |
+| `standards remove <std> <project\|workspace/project> --reason <r>` | record the removal of an adoption |
 
 **Every adoption command is a dry run unless `--apply`.** The dry run prints the entry, the rows with their status,
 and the `command` / `test` checks adoption would run; **`adopt` does not run them**, so their output goes in with
@@ -723,9 +723,11 @@ and the `command` / `test` checks adoption would run; **`adopt` does not run the
 `STANDARDS_APPROVAL_UNAVAILABLE` until approvals exist (S4). `--apply` writes `by` from `gh api user`; if that cannot
 be read the command stops with `STANDARDS_IDENTITY_UNKNOWN` and never writes a blank. Re-adopting refreshes
 `verified_on` (and `units` and `evidence` when given) and keeps `since` and `by`. The sidecar is found through
-discovery's workspace roots, never built from a name.
+discovery's workspace roots by the sidecar's `project:` field, never built from a directory name. A bare project name
+that several workspaces share (every workspace's root unit is `workspace`) is refused with `STANDARDS_PROJECT_AMBIGUOUS`,
+which lists `<workspace>/<project>` candidates; pass the qualified form. Units come from that workspace only.
 
-Refusals: `STANDARDS_USAGE`, `STANDARDS_UNKNOWN`, `STANDARDS_PROJECT_UNKNOWN`, `STANDARDS_ALREADY_ADOPTED` (decline
+Refusals: `STANDARDS_USAGE`, `STANDARDS_UNKNOWN`, `STANDARDS_PROJECT_UNKNOWN`, `STANDARDS_PROJECT_AMBIGUOUS`, `STANDARDS_ALREADY_ADOPTED` (decline
 of an adopted standard), `STANDARDS_NOT_ADOPTED` (remove of one not adopted), `STANDARDS_UNREADABLE`,
 `STANDARDS_WRITE_REFUSED` (the sidecar changed since the plan was made), `STANDARDS_NOT_CONFIGURED`,
 `STANDARDS_BLIND`, `STANDARDS_UNKNOWN_PROJECT`. Each prints `<CODE>: <what>. Next: <command>` on stderr, or
@@ -764,12 +766,12 @@ which is counted.
 
 | Finding | Reported as | Meaning |
 |---|---|---|
-| `STANDARDS-UNREADABLE` | inconclusive | a registry, page or sidecar problem, a non-list `overrides:` or `declined:`, or a blind scan |
+| `STANDARDS-UNREADABLE` | inconclusive | a registry, page or sidecar problem, a non-list `overrides:` or `declined:`, a blind scan, or an exception inside the section (`standards could not run`); one defect is one entry |
 | `RE-VERIFY` | warn | rows whose `Version` is older than the version in use |
 | `VERSION-NOT-READ` | info | rows with no version in use; counted apart from re-verify |
 | `UNCHECKED-ROW` | info | a count of review and none rows |
 | `CHECK-CANNOT-FAIL` | warn | a `command` or `test` row with no `Fails when:` |
-| `DETECTED-NOT-ADOPTED` | warn | detected, neither adopted nor declined |
+| `DETECTED-NOT-ADOPTED` | warn | detected, neither adopted nor declined; a name shared by two workspaces is listed as `<workspace>/<project>` |
 | `ADOPTED-UNDETECTED` | warn | adopted, detector finds nothing |
 | `UNIT-NOT-ON-DISK` | warn | an adopted unit not on disk (never "not detected") |
 | `OVERRIDE-NO-REASON`, `OVERRIDE-STALE`, `DECLINE-NO-REASON` | check, fails | a declaration error; stale = standard not adopted, or the row retired or missing |
