@@ -1,7 +1,7 @@
 {
  "header": {
-  "recordedAt": "2026-11-17T06:45:29.949Z",
-  "commit": "bba6e45ce0f64da69827a6a3232434bbda455241",
+  "recordedAt": "2026-11-17T08:00:32.636Z",
+  "commit": "82b0ca9fb81fd382167518d6a544b2686c35e6a0",
   "node": "v26.13.0",
   "tests": 330,
   "withStaticDeps": 264,
@@ -9,8 +9,12 @@
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2231,
-  "unresolvedStaticSpecifiers": 114
+  "recordedProcesses": 2200,
+  "unresolvedStaticSpecifiers": 114,
+  "suite": {
+   "pass": 4348,
+   "fail": 0
+  }
  },
  "tests": {
   "hooks/gotcha-guard.test.mjs": {
@@ -10625,7 +10629,6 @@
     ".github/workflows/test.yml",
     ".gitignore",
     ".propagates.yml",
-    ".superpowers/sdd/2026-11-15-standards-increment-1/task-2-report.md",
     "CHANGELOG.md",
     "DESIGN.md",
     "LICENSE",
@@ -11365,7 +11368,6 @@
     ".github/workflows/test.yml",
     ".gitignore",
     ".propagates.yml",
-    ".superpowers/sdd/2026-11-15-standards-increment-1/task-2-report.md",
     "CHANGELOG.md",
     "DESIGN.md",
     "LICENSE",
