@@ -69,3 +69,33 @@ test("an undeclared repo three levels into the workspace is would-be-missed", ()
     assert.ok(hit, `depth-3 repo not reported; gaps: ${JSON.stringify(m.gaps.map((g) => [g.kind, g.project]))}`);
   } finally { cleanup(root); }
 });
+
+test("a sidecar-less workspace whose root has a lockfile yields a . unit", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "roots-"));
+  try {
+    touch(root, "package-lock.json");
+    const m = run(root);
+    assert.deepEqual(wsUnits(m).map((u) => [u.rel, u.toolchain]), [[".", "npm"]]);
+    assert.equal(m.unitsScanned, 1);
+  } finally { cleanup(root); }
+});
+
+test("a sidecar-less workspace with no lockfile has no root unit", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "roots-"));
+  try {
+    const m = run(root);
+    assert.equal(m.projects.length, 0);
+  } finally { cleanup(root); }
+});
+
+test("an undeclared repo five levels deep is would-be-missed; a skipped directory is not entered", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "roots-"));
+  try {
+    sidecar(root, "workspace", ".");
+    gitInit(path.join(root, "a", "b", "c", "d", "deep"));
+    gitInit(path.join(root, "node_modules", "pkg", "vendored"));
+    const m = run(root);
+    const wbm = m.gaps.filter((g) => g.kind === "would-be-missed").map((g) => g.project);
+    assert.deepEqual(wbm, ["a/b/c/d/deep"]);
+  } finally { cleanup(root); }
+});
