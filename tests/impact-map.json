@@ -1,7 +1,7 @@
 {
  "header": {
-  "recordedAt": "2026-11-17T05:49:03.038Z",
-  "commit": "424eb8e98e3e6d4b102c3cd5a5d40f433fac60a7",
+  "recordedAt": "2026-11-17T06:07:47.725Z",
+  "commit": "585b21f6446ec9bedc448d41067a11c4888fc4f1",
   "node": "v26.13.0",
   "tests": 330,
   "withStaticDeps": 264,
@@ -9,11 +9,11 @@
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2200,
+  "recordedProcesses": 2199,
   "unresolvedStaticSpecifiers": 114,
   "suite": {
-   "pass": 4334,
-   "fail": 1
+   "pass": 4338,
+   "fail": 0
   }
  },
  "tests": {
