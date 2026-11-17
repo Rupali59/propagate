@@ -140,8 +140,8 @@ commit."
 
 The authoritative measurement is `.github/workflows/test.yml`'s matrix — node
 20, 22, and 24, with 20 kept in deliberately as the **below-floor probe**: it
-is *expected* to fail (`fs.globSync` is the binding constraint, landed in
-Node 22), and a matrix where everything passes would tell you nothing about
+is *expected* to fail (`fs.globSync` landed in Node 22, and `node:sqlite` for
+the work queue needs 22.13, which the `work-node-floor` job pins), and a matrix where everything passes would tell you nothing about
 where the floor actually is. `engines.node` in `package.json` may only claim
 what that matrix has measured.
 

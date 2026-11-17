@@ -450,7 +450,11 @@ them stays in `cli.mjs`.
 | Command | What it does |
 |---|---|
 | `status` | List open drift rows, scoped to the workspace at cwd by default. `--all` for every workspace, `--cross` for the cross-repo ledger, `--json` for machine-readable output. |
+| `glance [--json] [--no-write] [--no-color]` | **What is working, what is broken, what needs you** (#295), from files other commands already wrote; never runs reconcile, doctor or `gh`, so a standalone run takes well under a second. Prints ONE line per source, `<badge> <source>: <count> <verdict> (<top subjects>) · <fix>` (at most 80 characters, no word cut, needs-you sources first, at most 5 source lines then `+N more sources`, working sources as one `OK` line), `[OK] all clear · N signals checked · HH:MM`, or `[UNKNOWN] glance: nothing to read yet`. Badges are coloured on a TTY; `NO_COLOR`, `--no-color` or piped output print the plain `[BROKEN]` word. Writes `<state dir>/glance.json` atomically and prunes guard-log months older than 90 days; `--no-write` writes and deletes nothing. `--json` prints exactly the `glance.json` object. **Exit 0** working, **1** broken or needs you (an unknown counts as broken), **2** nothing could be read, or a usage error. See "The glance" below. |
+| `glance ack <id>... [--until <date\|date-time\|Nh\|Nd>] [--json]` | **Acknowledge or snooze glance items** (#296), by id (`propagate glance --json` lists them). Writes `<state dir>/glance-acks.json` only. Without `--until` the ack holds for the item's current episode (it applies while the item's `since` is at or before the ack); with it, until that instant (a bare date means the end of that UTC day). An acked item is shown as acked and is not notified; **its verdict, the glance verdict and `needs_you_ids` are unchanged.** Ids must be id-shaped (no spaces or shell characters). Exit 0 written, 2 usage error. See "Notifications" under "The glance". |
+| `glance unack <id>... [--json]` | Remove an ack or snooze (#296). Ids with none are reported, not refused. |
 | `doctor [--full] [--json] [--since <span\|date>]` | **Default view is folded (#107):** failures (`✗`), inconclusive (`?`) and unknown-kind (`?!`) lines are always printed verbatim; repeated `!` warnings with one label in a section become one `! <label> ×N  <first detail> (+N-1 more: doctor --full)` line; `✓`/`·` lines become one `· N ok · N info` count per section; the first line states `showing folded view: N lines of M`. The fold is applied to the rendered lines (the same capture `--json` uses), so it cannot omit a section, and the exit code is identical to `--full`. **`--full`** prints every line (the pre-#107 output); `--json` is unchanged. Lines doctor writes to stderr are not folded and may appear out of place. Not done: a severity threshold (warnings at or above a level shown individually), because the rendered lines do not carry the module's severity. Health check: launchd plist loaded (`launchctl list \| grep <label>`), heartbeat age (warn >1h during active periods, fail >1 day), all `.propagates.yml` sidecars pass schema validation, sidecar downstream paths resolve on disk (warn-only), `state.json` parseable with `.bak` present. **No longer asserts that an in-tree ledger parses** — retired 2026-09-24 (PR-009): it passed unconditionally for a file `ensureLedgerPair` creates empty and nothing appends to, so it reported success for having read nothing. The row count is now an `info`, and a genuine read failure is still a check. **`# Unrecorded work`** (#131, `lib/report/doctor/unrecorded.mjs`): per repo in the discovery census (`ownerCandidates`) plus repos nested under it, record files (STATE, DECISIONS, GOTCHAS, HANDOVERS, TODOS, TODO, ISSUES, `.propagates.yml`, `.sidecar.yml`, ledgers, markdown under `plans/` or `rules/`, matched by name or pattern) that are modified, staged or untracked with an mtime at least `PROPAGATE_UNRECORDED_DAYS` days old (default 7); files edited on today's local day are always excluded. Also local branches with commits on no remote: ahead of their upstream, upstream gone, or no upstream (printed as such, never as zero); a no-upstream branch whose commits are all on some remote is counted in the summary, not listed. Worktrees of one repo list shared branches once. Output names repo, branch, file and age. **Warn-only: it never votes on the exit code**, because uncommitted work is the normal state of a working day and #129 recorded an always-red doctor going unread; the issue's "makes doctor fail" is deliberately not followed. Zero repos scanned prints `scan is blind`, never a clean line. |
+| `doctor` § `# Retirement candidates` | **#298, `lib/report/doctor/retirement.mjs`.** Lists unadopted systems from every discovered `SYSTEMS.md`: `<workspace>/docs/SYSTEMS.md`, `<workspace>/docs/<project>/SYSTEMS.md`, `<workspace>/propagation/docs/<project>/SYSTEMS.md`, and propagate's own `docs/SYSTEMS.md`. The files are read by `scanSystems` in `lib/report/adoption.mjs`, the one scan the digest's ADOPTION ask and the glance also use; each applies its own rule. Tables are parsed **by header name**, so column order and count do not matter; `id`, `status`, `last_verified` and `adoption_date` are required. **Two rules (2026-11-16).** A retirement candidate (`classifyRetirementRows`) has a status that starts with `active` once emphasis is stripped, so plain `active`, `active-unadopted` and prose such as `active, and since …` all count. It also has a blank `adoption_date`, and more than 30 days (`RETIREMENT_MIN_DAYS`) have passed since the earliest ISO date in `last_verified`. `retired`, `dormant`, `proposed` and `installed-never-invoked` rows are not candidates. The digest's one ADOPTION ask keeps the narrow rule (`classifyAdoptionRows`): status exactly `active-unadopted` or `installed-never-invoked`, with a blank `adoption_date`. A row that qualifies but has no date prints `unknown: no start date`, never a candidate. A worktree copy of a file (same git common dir and path) is counted once, and the main checkout wins. A file with no table carrying the required headers prints `SYSTEMS.md unreadable` with its path, never 0 candidates. No file at all prints `retirement: no SYSTEMS.md found in N workspaces scanned`. **Warn-only:** the section never votes on the exit code. |
 | `init <dir> [--workspace\|--edges-only]` | Scaffold `.propagates.yml`. `--workspace` (default) writes `workspace: true` and verifies the directory becomes discoverable, exiting non-zero if not (N15). **No longer touches the plist** — that moved to `reload` (N14). |
 | `reload` | **Obsolete as of 2026-08-14** — its only purpose was regenerating the (now retired) watcher's plist and reloading it into launchd; `lib/core/plist.mjs` has never generated any other plist (grep confirms it — the digest plist is installed by a separate mechanism it never touches, see "Canonical state" above). Not removed from `cli.mjs` by this change (out of scope — no live launchd command was run to verify/enact this), but there is no remaining reason to run it. |
 | `check` | Commit-time drift gate. Flags below. |
@@ -690,6 +694,85 @@ The same hook adds one `Broadcast:` line for the open broadcast items in the rep
 - **`broadcast status --json` changed shape:** each child carries `title`, `number` and `shown`; the header counts come from the children's states; `missing` is gone (the phase 1 body comparison printed false lines for a scrubbed public parent).
 - **Goal.** A `--to` child, and a `--from goals-check` child with no item evidence, no longer take the hub's goal: Goal is the workspace's single active goal, else unset (`Goal: not set` in the dry run; no board write).
 
+## `propagate work`: the work event queue (propagate#150)
+
+A local queue of work for sessions to claim, one item per labelled GitHub issue. The queue is a **view over GitHub**: `work sync` reads the open issues that carry a kind's label and makes the queue match; nothing in `work` ever writes to GitHub. The first kind is `evaluate` (what a session evaluates and why: the evaluator design, `propagation/docs/propagate/plans/2026-11-15-evaluator.md`, which this section does not restate).
+
+```
+propagate work list [--kind k] [--state s] [--json]
+propagate work sync --kind k [--hub owner/repo] [--json]
+propagate work claim --kind k [--session id] [--json]
+propagate work ack <id> --token t [--session id] [--json]
+propagate work release <id> --token t [--session id] [--refusal] [--reason r] [--json]
+propagate work unpark <id> [--json]
+propagate work prune [--older-than <days>] [--apply] [--json]
+```
+
+**Where it lives.** One SQLite file, `$PROPAGATE_STATE_DIR/work/queue.db` (default `~/.propagate/work/queue.db`), in WAL mode, with a 5 s busy timeout. **`queue.db`, `queue.db-wal` and `queue.db-shm` are state, not cache.** A cleaner that removes "cache entries older than N days" must exclude the whole state directory; deleting the file loses every acked and parked row, and the next `work sync` rebuilds only the open issues, as `pending`. The store lives on a local disk: `openDb` refuses a synced folder or a network mount (`WORK_STORE_UNSAFE`) and warns when its probe cannot run.
+
+**One machine per state dir.** SQLite locks do not work across machines, and two machines each syncing and claiming would double-claim. Share the queue by sharing GitHub (each machine syncs its own), never the file.
+
+### States and fields
+
+`pending` -> `claimed` (session, token, `lease_until`) -> `acked`, or `expired` (the issue closed, its URL changed, or its ttl passed), or `parked`.
+
+- **Item:** `id`, `kind`, `scope` (the repo), `dedupe_key`, `payload` (JSON; for `evaluate`: `issue_repo`, `issue_number`, `url`, `canonical_url`), `created`, `expires_at`, `state`, `session`, `lease_until`, `claims` (a receive count), `refusals`. Times are epoch milliseconds in the database and ISO in the output.
+- **Lease:** 30 minutes. A claimed item whose lease ran out is claimable again, and `list` shows it as `pending (lease expired)`. Expiry is the only release for a dead run.
+- **Token (the fence):** every claim mints a random `token`, printed by `claim` and carried by `claim --json`. `ack` and `release` must present it, and they are fenced by session **and** token, never by the clock: lanes of one session share a session id, so the session alone cannot tell two claims apart. A lease that ran out but was not re-claimed still accepts its own token. After a re-claim, the old token gets `WORK_LEASE_EXPIRED`, and its `next` says to run `propagate work list --kind <k>` before redoing any side effect. **`list` never prints a token**, in text or `--json`: a stale lane must not be able to copy the current claimant's.
+- **Park rule:** the 2nd `release --refusal` parks the item (`PARK_AFTER = 2`); a parked item is never claimed. It leaves `parked` by `work unpark <id>`, or when `sync` sees the `evaluate:parked` label on the issue go away after it had been seen there.
+- **Dedupe rule:** the key is `<kind>:<canonical_url>`, held by a partial unique index; only `expired` frees a key. `acked` keeps it held, so a re-sync of a still-open issue adds nothing. A URL is canonicalised before it becomes a key (`lib/work/canonical.mjs`): the scheme, `www.`, query, fragment and trailing slash are dropped, a closing sentence mark or markdown `)` is not part of it, and a `github.com` URL collapses to `github.com/<owner>/<repo>` (lowercased, no `.git`, no deeper path), so a repo and its `tree/main/docs` page are one thing; any other host keeps its path's case. The URL is the first one in the issue body; **when the body has none, a URL in the title is used.** An issue with neither is listed under `unparsed` by `sync` and never queued.
+- **At-least-once, not exactly-once.** A run can finish its side effect and then die or outlive its lease before `ack`; a second session then redoes it. **Every consumer of a kind must be idempotent, with its effect keyed by the item's `dedupe_key`** (each `KINDS` entry declares `idempotent_by`).
+
+### Subcommands and exit codes
+
+Exit 0 = ok; 1 = refused; 2 = could not run (usage, a store that cannot be read, GitHub). "Looked at nothing" is never a silent 0: it is stated.
+
+| Command | Does | Notes |
+|---|---|---|
+| `list` | the items, with `effective_state` | an empty queue prints `0 work items`. On a store created by this call it also prints `store created now: acked/parked history before this point is not known` (`--json`: `created_now: true`). Reads without waiting (WAL), so it answers while a claim holds the write lock |
+| `sync --kind k` | enqueue new items, expire items whose issue closed or whose URL changed, unpark | `--hub` defaults to the hub root's `origin`. Two `gh` calls (`label list`, `issue list`, limit 1000), then one transaction. A missing label reads `label kind:evaluate does not exist on <repo>: looked at nothing` (exit 0, `label_missing: true`). A result at the limit is `WORK_SYNC_TRUNCATED`. A fetch older than the stored `sync_marks` row is not applied (`stale: true`) |
+| `claim --kind k` | take the oldest pending item for this session | session = `--session`, else `CLAUDE_CODE_SESSION_ID`; neither is `WORK_USAGE`. An empty queue prints `nothing pending for <k>` and exits 0 |
+| `ack <id> --token t` | finish it | a repeated ack with the same token is `already: true`, exit 0 |
+| `release <id> --token t` | give it back; `--refusal` counts toward parking | `--reason` is recorded in the event |
+| `unpark <id>` | parked -> pending, refusals reset | any other state is `WORK_USAGE` |
+| `prune` | delete finished history | below |
+
+`--json` failures are `{ok:false, code, what, next}`; text failures are `<CODE>: <what>. Next: <command>` on stderr. A raw `SQLITE_BUSY` (a lost lock at BEGIN or COMMIT) is always `WORK_STORE_UNREADABLE`, never surfaced raw. Warnings from opening the store (for example a safety probe that could not run) go to stderr and into `--json` `warnings`.
+
+### `work prune`
+
+`work_events` is append-only **except** `work prune --apply`. It deletes the events of `acked` and `expired` items whose **last event** is older than `--older-than` days (default 180; the item's `created` is not its age). An `expired` item's row goes too; an `acked` row stays as a tombstone. It never touches `pending`, `claimed` or `parked` items, of any age. Without `--apply` it is a dry run that changes no row; both forms print and `--json`-report the counts (`items`, `events`). One consequence to know before applying:
+
+- **An acked row is never deleted** (R22 overrides C9b), so its dedupe key stays held and acked work is never re-queued, however old.
+- **A stale token after a prune.** Prune deletes the events that record which token a session held, so a late `ack` on an item whose row was removed (an expired one) reads `WORK_NOT_FOUND`. A late ack with the right token on a still-held acked row stays `already: true`.
+
+### Known limits (stated, not built)
+
+- **A reopened issue after ack is not re-queued.** The acked item still holds the dedupe key, by design, and prune never removes it. A requeue path is not built; to redo the work, file a new issue.
+- **A backup restore without `queue.db-wal` loses rows silently.** In WAL mode the recent writes live in the `-wal` file until a checkpoint; restoring `queue.db` alone returns an older, consistent-looking database. No cheap detector exists. Back up the three files together, or none.
+- **The store is recreated empty if the file is lost** (the `created_now` line is the only sign).
+
+### The `evaluate` kind
+
+Reads open issues labelled `kind:evaluate` on the hub repo; an issue also labelled `evaluate:parked` is skipped and marks a parked item as seen. An item expires after 30 days. Its claim pattern follows goqite and sqliteq (one `UPDATE ... WHERE id = (SELECT ...) RETURNING *` statement, a receive count, a visibility timeout); the database is Node's built-in `node:sqlite` (Node 22.13 or later), with no new dependency.
+
+### Error codes
+
+| Code | Exit | Meaning |
+|---|---|---|
+| `WORK_USAGE` | 2 | wrong arguments, an unknown kind, or no session id |
+| `WORK_STORE_UNREADABLE` | 2 | the database cannot be opened, read or locked in time |
+| `WORK_STORE_UNSAFE` | 2 | the state dir is on a synced folder or a network mount |
+| `WORK_STORE_TOO_NEW` | 2 | the file's schema is newer than this propagate |
+| `WORK_NODE_TOO_OLD` | 2 | `node:sqlite` is unavailable (Node older than 22.13) |
+| `WORK_SYNC_TRUNCATED` | 2 | the issue list hit its 1000 limit, so nothing was expired |
+| `WORK_GITHUB_FAILED` | 2 | a `gh` call failed or printed something other than a list |
+| `WORK_HUB_UNKNOWN` | 2 | no hub repo could be derived; pass `--hub owner/repo` |
+| `WORK_NOT_FOUND` | 1 | no item with that id |
+| `WORK_NOT_CLAIMANT` | 1 | this session and token do not hold a claim on the item |
+| `WORK_LEASE_EXPIRED` | 1 | the claim was lost (the lease ran out and the item was claimed again) |
+| `WORK_ITEM_EXPIRED` | 1 | the item expired: its issue closed, its URL changed or its ttl passed; nothing to do |
+
 ## `propagate day`: day open and day close (propagate#240)
 
 `propagate day open [--json]` is read-only.
@@ -701,6 +784,7 @@ The same hook adds one `Broadcast:` line for the open broadcast items in the rep
 - **Sessions per goal (propagate#272):** under every goal block, one `sessions: <project> · #<n> (<state>, <since>)` line per live session associated with that goal (`sessions: none` when there are none), then `no session: #a, #b` for that goal's Ready items no live associated session covers (omitted when every Ready item is covered). The sessions come from `claude agents --json` joined to `propagate sessions assoc` records, read once per run. If that read fails, one line `sessions: could not read (<CODE>: <what>)` follows the goal blocks. **The exit code is the same whether the reader succeeds, returns nothing or fails:** sessions are information beside the capacity verdict. `--json`: each `goalBlocks` entry carries `sessions: {live:[{project,item,state,since}], uncovered:["owner/repo#n"]}`, or `sessions: {error:{code,what}}`.
 - **Verdict:** `short by ~N points` (with the top promotable Backlog items), `enough` (budget ≤ supply ≤ 2× budget), or `over` (with what will not fit).
 - **Exit:** 0 enough; 1 short or over; 2 cannot judge (no good sample, no count basis, the rate limit too low, or the read went blind).
+- **The glance (propagate#295):** `day open` computes the glance after its broadcast refresh and writes `glance.json`, which also deletes `<state dir>/guard/YYYY-MM.jsonl` files whose month ended more than 90 days ago (the prune moved into the glance; see "The glance" and "The background-guard log" below). It is local, runs whatever the verdict, and leaves any other file name alone. A removal is one `note: guard log: removed N month file(s) …` line; a failure is a `glance not written (…)` note. Neither moves the exit code.
 
 `propagate day close [--apply] [--json]` is a dry run unless `--apply`. It proposes:
 - **(a) Promotions** from Backlog to Ready. An item qualifies when it is open, in Backlog, **is under an active goal**, has a Size and a stated "Done when", is not an Epic, and has no block / question / decision / waiting / needs- label. Each board is topped up to 3 Ready.
@@ -736,8 +820,61 @@ The same hook adds one `Broadcast:` line for the open broadcast items in the rep
 - **The rule:** the plan has a line `Goal: G<n>` (bold or plain, any case) naming an active goal → allowed, and one row
   `{ts, plan, goal}` goes to `<state dir>/plans/approvals.jsonl`. Otherwise **denied**, naming the active ids and both
   fixes, unless a `goal_reason: <why>` line is present: then it is allowed and logged with `goal: null`.
-- **Fails open on its own bugs**, saying so in `additionalContext`.
+- **Fails open on its own bugs**, saying so in `additionalContext`. A missing section is not a bug: it blocks.
 - **#244's own clause** (a UI plan must carry `design deps` output) is not built: it needs #243. It belongs in this hook.
+
+### The plan grammar: Surface, Need, References checked (#297)
+
+The same hook also requires every plan to declare what a person will read or click:
+
+```
+Goal: G<n>                 (or goal_reason: <why>)
+Surface: none              (or ui | widget | command | job | skill | notification | hook)
+```
+
+- **`Surface:`** is bold or plain, any case, optionally a list item (`**Surface:** widget`, `Surface: UI`). `none`
+  means the plan adds nothing a person reads. `command` covers a new command or changed output. Any other value is
+  refused, naming the allowed ones.
+- **When it is not `none`**, the plan needs both sections, at heading level `##` (or `###`):
+
+  ```
+  ## Need
+
+  - Question: <what the person asks that this answers>
+  - Decision: <what they decide from it>
+  - Today: <what they do now, without it>
+  - Retire when: <the signal that it is no longer needed>
+
+  ## References checked
+
+  - <library, standard or reference>: <why it did or did not fit>
+  ```
+
+  The four labels count only inside `## Need`, which ends at the next heading of its level or higher, and each needs
+  real text after the colon. `## References checked` needs at least one entry of real text. **A placeholder is not
+  text:** a value that is empty, only `<...>` placeholders, punctuation (`?`, `-`), or `TODO`/`TBD` is refused as
+  `## Need unfilled (<labels>)` or `## References checked unfilled`, so the pasted template never passes as-is. Anything inside a fenced code
+  block is ignored, so a quoted template never satisfies the gate.
+- **Override:** a line `surface_reason: <why>` allows the plan whatever its Surface, and is logged as
+  `surface_reason` in the `approvals.jsonl` row (which also gains `surface`, the declared value or `null`).
+- **One denial** covers Goal and Surface together. It starts `this plan is missing: <Goal, Surface, ## Need (...),
+  ## References checked>`, gives each fix, and carries the template above to paste.
+- **Every path with plan text runs it.** When no active goal can be read, the goal is "not checked" but the Surface
+  is still checked and can still deny. With no plan text at all, both are "not checked" and the plan is allowed.
+- **Grace:** until `SURFACE_ENFORCE_FROM` (2026-11-30: `SURFACE_GRACE_START` 2026-11-16 plus `SURFACE_GRACE_DAYS` 14,
+  constants in the hook), a plan with **no** `Surface:` line is allowed with a warning naming that date. A plan that
+  declares a Surface but lacks its sections is denied from day one.
+- **`Surface: none` mismatch (#301):** a `Surface: none` plan whose text names a surface marker (any case: `notify(`, `hooks/`, `widget`/`widgets` as a word, `launchd`/`.plist`/`LaunchAgents`; case-sensitive: the identifier `COMMANDS` or `lib/core/commands.mjs`, never the prose word "commands") is **warned, never denied**, naming each marker and the kind it suggests (notification, hook, widget, command, job), and logged with verdict `warn-surface-mismatch` and `missing` = the markers.
+- **Denial log:** every deny and every warn appends one row `{ts, session, verdict: "deny"|"warn", missing: [...]}`
+  to `<state dir>/plan-gate/YYYY-MM.jsonl` (month of `ts`, UTC). No plan text is written. A failed write is named in
+  the hook's output and never turns a deny into an allow.
+- **Test seam:** `PROPAGATE_PLAN_GATE_NOW` (an ISO date) replaces the clock for the grace decision and the log.
+- **Off switch:** `hooks.planSurfaceGate: on|off` in `config.yml`, overridden by `PROPAGATE_PLAN_SURFACE_GATE=on|off`
+  (also `true|false|yes|no|1|0`). **Unset, the gate is on only in the owner's tree** — a declared hub (`hubRoot` /
+  `PROPAGATE_HUB_ROOT`, the root goal discovery walks) or an existing `<state dir>/plans/approvals.jsonl` — and off
+  everywhere else, where it neither warns, denies nor logs. Off skips the Surface half only; the Goal check is
+  unchanged. Resolved by `planSurfaceGate()` in `lib/core/config.mjs`; if that cannot be read the hook says
+  `Surface not checked` and allows.
 
 ## The dispatch model check (propagate#265, #214 part 2)
 
@@ -749,6 +886,156 @@ The same hook adds one `Broadcast:` line for the open broadcast items in the rep
 - **Mismatch:** the item's Model (case-insensitive) against `tool_input.model`. An omitted model is a mismatch, because the subagent would inherit the parent's. Without a `model_reason: <text>` line at the start of a prompt line the dispatch is **denied**, naming the ref, both models and both fixes. With one it is allowed and a row `{ts, ref, expected, actual, reason, subagent_type}` is appended to `<state dir>/day/overrides.jsonl`. With several refs, any unreasoned mismatch denies the whole dispatch.
 - **The one write:** on an allow, an item in Backlog or Ready is set to In progress (one `updateProjectV2ItemFieldValue` through `gh api graphql`, 5 s timeout; `PROPAGATE_GH_BIN` overrides the binary). A deny writes nothing; In progress, In review and Done are never written. A failed write is reported in `additionalContext` and the dispatch is still allowed. After a success the snapshot's status is updated so a second dispatch does not write again.
 - **Fails open on its own bugs**, reporting the error in `additionalContext`. Exit code is always 0.
+
+## The background-guard log (propagate#294)
+
+`hooks/background-guard.mjs` (PreToolUse, Bash) appends one row per **`deny`** and per **`allow-bg`** (a backgrounded
+main-session call that rule 1 would have denied in the foreground) to `<state dir>/guard/YYYY-MM.jsonl`, the UTC month
+of the row's `ts`. The state dir is `$PROPAGATE_STATE_DIR`, default `~/.propagate`. A plain call writes nothing.
+- **`allow-bg` is main-session only.** A subagent's foreground heavy call (exempt by rule 4) writes no row.
+- **Fields, exactly:** `{ts, session, event, rule, label, program, command_hash, timeout_ms}`.
+  - `session`: the payload's `session_id`, or `null`.
+  - `rule`: `timeout | heavy | shell-bg | sub-bg`.
+  - `label`: from the fixed HEAVY or network table, `&` or `nohup` for `shell-bg`, else `null`.
+  - `program`: the basename of the first word after every `NAME=value` prefix (`/usr/local/bin/npm` is `npm`, never a
+    path), kept only if it matches `^[\w.-]{1,32}$`, else `null`.
+  - `command_hash`: the first 16 hex characters of the sha256 of the whitespace-normalised command.
+  - `timeout_ms`: the call's `timeout`, or `null`.
+- **Never command text.** No command head, no cwd, no `NAME=value` value: `SECRET=x npm test` stores `program: "npm"` and a hash.
+- **Order and failure:** the deny JSON goes to stdout first. The append then runs in its own `try`, so a failed
+  append (unwritable state dir, `guard` not a directory, full disk) never changes the decision. The hook still exits 0.
+- **One write per row.** `guard/` is created on the first logged event; an install without it works unchanged.
+- **Pruning belongs to the CLI, never the hook:** `lib/guard/log.mjs` `pruneGuard`, run by every glance write
+  (`propagate glance`, the monitor, CLI `doctor`, `day open`; #295), deletes month files that ended more than 90 days ago.
+
+## The glance (propagate#295)
+
+One answer to *what is working, what is broken, what needs me*, as a terminal command (`propagate glance`), a file
+(`<state dir>/glance.json`) and the session-start line. Code: `lib/glance/` (`signals.mjs` the definitions,
+`verdict.mjs` the daily rule, `compute.mjs` the readers, `store.mjs` the file, `render.mjs` the line).
+
+**Where it is computed, always from inputs already held.** The monitor, after its doctor snapshot, from its own
+reconcile rows and doctor result; CLI `doctor` (default and `--json`), from its in-memory result; `day open`, after the
+broadcast refresh; and `propagate glance` itself. None of them lets the glance run reconcile, doctor or `gh`. Without
+reconcile rows the edges item is carried from the previous glance while that glance is under 6 h old, else unknown.
+A glance failure is one stderr line or note; it never moves the caller's exit code. CLI `doctor` also prints its
+verdict line first now.
+
+**Signals.** `kind` decides what unknown means: a *heartbeat* is unknown when its source is missing, unreadable or
+older than its threshold; an *event log*'s missing or empty file is 0 events, working, never unknown for being quiet.
+
+| Signal | kind | Source | Failure | Stale after |
+|---|---|---|---|---|
+| doctor | heartbeat | the caller's doctor JSON, else `doctor-snapshot.json` | a red check; with the `human` marker it is needs-you | 26 h |
+| metrics | heartbeat | `doctor.problems` in `metrics.jsonl` | today more than twice the 7-day median and at least 3 | 26 h |
+| monitor | heartbeat | `monitor.log` | the last run logged `error=` | 3 x 1800 s |
+| edges | heartbeat | the caller's reconcile rows, through `actionOf` (`lib/edges/states.mjs`) | `broken` (UNMATCHED, UNRESOLVABLE, NOT_PRESENT_ON_REF); judge, pick-a-side and blocked are working | 6 h (carried) |
+| hooks | event log | `sessions/errors.log`, `costs/errors.log` | an error-shaped line; `skipped:` and `row written without it` traces are not | — |
+| guard | event log | `guard/YYYY-MM.jsonl` | a `deny` with no `allow-bg` of the same session and `command_hash` within 10 minutes | — |
+| jobs | heartbeat | the doctor result's `# Scheduled jobs` section | a warned job (no live pid and a non-zero exit, or a daily job not run in 26 h); a running job's past exit is not a failure | with doctor |
+| broadcast | heartbeat | `broadcast/index.json` and the shown rows | needs-you: an open child not shown for more than 2 days | 7 days |
+| work | heartbeat | the work queue (`work/queue.db`) | needs-you: an item in `parked` | — |
+
+A signal whose source is not set up on the install (no broadcast index, no work store, no scheduled-jobs section, not
+macOS) is listed in `skipped` with its reason and not counted. One reader throwing makes that signal unknown with the
+reason; the rest still run.
+
+**Verdicts.** Per UTC data day (a day with no data is absent, never 0): fewer than 3 prior days is `learning`; broken is
+more than twice the median of up to 7 prior days and at least 3, or failures on each of the last 3 data days. Every item
+carries `owner` (`propagate` retries it, `you` must act); a propagate-owned item still broken after 6 monitor runs is
+promoted to needs-you. `since` is carried from the previous glance by id. Ids carry no numbers:
+`doctor:<section>:<check_id or label slug>`, `job:<label>`, `work:<id>`, `edges:broken`, `broadcast:unattended`.
+
+**Doctor markers.** A Reporter entry's `{human: true}` and `{check_id}` cross the text seam in-band, as one trailing
+`  ⚑ human id=<check_id>` marker placed before any `⇒` action, anchored at the end; `structure.mjs` parses it back.
+
+**The `glance.json` contract** (`schema_version: 1`):
+
+```
+{ schema_version: 1, generatedAt: "<ISO 8601 UTC>", stale_after_s: 21600,
+  verdict: "working|broken|needs_you|blind", signals_checked, needs_you_ids: [...], skipped: [{signal, reason}],
+  items: [{ id, signal, kind, verdict: "working|broken|needs_you", flag: null|"unknown"|"learning",
+            owner: "propagate|you", subject, what, line, why, fix: {text, command|null},
+            since, looked_at, source, ...signal extras (count, subjects, failures_today, carried) }] }
+```
+
+- Written atomically (`glance.json.<pid>.tmp`, then rename); last writer wins. `source` is a name, never a path.
+- Additive changes only within a major. A reader meeting a newer `schema_version` refuses: `glance format newer than
+  this reader`. An absent file reads as not computed, an unparsable one as unavailable; neither reads as clear.
+- The age is derived by each reader from `generatedAt`, never stored; past `stale_after_s` everything is unknown (stale).
+
+**The terminal view** (`lib/glance/render.mjs`) groups items by SOURCE: one line per signal, never one per item, so
+six doctor fails cannot push three failing jobs off the screen. Within a verdict, user-impacting sources
+(`SOURCE_RANK`: jobs, work, broadcast, hooks, guard, then monitor, edges, doctor history, doctor) come first. Counted
+sources (doctor, jobs, work) show `N <noun> failing (<tags>)`; tags are added while they fit and the rest is `…`,
+never a cut word. The per-item detail stays in the items array and `--json`; the grouping is rendering only.
+
+**Badges** are drawn with node:util `styleText` (no dependency): fixed-width (11), bold, `NEEDS YOU` black on
+yellow, `BROKEN` white on red, `UNKNOWN` black on grey, `LEARNING` black on cyan, `OK` black on green; the source
+name follows, then the count, then the subjects and fix dim. Colour only when stdout is a TTY and neither `NO_COLOR`
+nor `--no-color` is set (`FORCE_COLOR` turns it on for a non-TTY; `NO_COLOR` still wins). Without colour the badge is
+the bracketed word padded to the same width, so the 80-character rule holds either way.
+
+**The session line** (`hooks/session-guide.mjs`, through `readGlanceCopy`, parity-tested against `readGlance`): one line,
+at most 140 characters, at most 3 SOURCES plus the age (`as of HH:MM`, or `Nh ago` past 1 h), ending
+`Run: propagate glance`. It uses PLAIN bracketed badges (`[BROKEN] jobs: 3 failing`) and never an escape code: hook
+output is read by Claude, not shown in a terminal. Its source order is a copy of `SOURCE_RANK`, parity-tested. Absent: `glance: not computed yet; run propagate glance`. It is the last line of the block and
+last to be cut, and it prints in unplaced folders, with no checkouts cache, and on the hook's fail-open path.
+
+### Notifications (propagate#296)
+
+The monitor sends at most three notifications per run, each replacing the previous one of its kind (`-group`), and
+each opening a view of `propagate ui` when clicked. **They fire on ADDITIONS ONLY**, decided by
+`lib/glance/notifications.mjs` `decideChannel` over `<state dir>/notify-state.json`:
+
+| Channel | Ids | Sent | Click opens |
+|---|---|---|---|
+| `edges` | `edge:<edge_id>` for every actionable edge (`isActionable`) | first, before doctor | one edge: `/judge?edge=<id>`; several: `/judge` |
+| `backlog` | `backlog:<kind>:<path>` for each backlog defect | after edges | `/backlog` |
+| `glance` | the glance's needs-you and broken items (an unknown counts as broken), minus the `edges` signal, which the edge channel already covers | after doctor and the glance write | one item: `/glance/<id>`; several: `/glance` |
+
+- **An id has no content hash and no number.** An edge whose bytes change on every run is one id. This supersedes the
+  content-triple key `(edge_id, source_content, downstream_content)`, which re-notified on every edit cycle.
+- **Present on the previous run:** silent. **Left and back within 24 h:** silent. **Otherwise:** notified once.
+  **Removal** never notifies.
+- **The first run with no record of a channel seeds it silently**, so upgrading does not replay every open finding. A
+  **corrupt** store is not an upgrade: every present id is notified once and the store is rewritten. Neither throws.
+- **Acked ids** are recorded as present but their notification is owed, not sent; a snooze that runs out sends it.
+- `notified.jsonl` stays as the audit log of what was sent (with `run_id`); it no longer suppresses anything. The
+  Judge "new" dot still keys on the content triple (`monitor.mjs` `contentKey`), because "have I seen these bytes" is
+  the right question for a row being judged.
+- **Copy.** One glance item: title `<Needs you|Broken|Unknown>: <subject>: <what>`, body its fix command. Several:
+  `propagate: 2 need you, 1 broken`, then one line per distinct subject and fix, at most 3, then `+N more`.
+- **The digest** notification's body is the glance verdict line (the first line `propagate glance` prints), never the
+  digest's timestamp heading; an absent or unreadable glance says so. Its click opens `/glance`.
+- `--dry-run` sends nothing and writes no `notify-state.json`.
+
+**How a click resolves its URL.** `notify()`'s `open` option takes `{route}` built by `uiRoute(kind, id)` from the
+fixed vocabulary above, with the id percent-encoded and the result checked against a pattern that admits no quote,
+space or shell character. terminal-notifier's `-execute` then runs
+`PROPAGATE_STATE_DIR=<state> PROPAGATE_CLI=<plugin>/cli.mjs /bin/bash <plugin>/widget/open-ui.sh <route>`: the same
+script the widget's buttons run. It reads the running server's URL and token from `<state dir>/ui-url`, starts
+`propagate ui` when none is up, replaces a stale one it can verify, and opens `<url>#<route>`; the client routes on
+the fragment. Item text never reaches the command. Without terminal-notifier the osascript fallback has no click.
+
+### The web glance view (propagate#296)
+
+`propagate ui` → **GLANCE** (the TODAY group). `GET /api/glance` returns `glance.json` with each problem item's `ack`
+re-derived from `glance-acks.json` at read time; an absent or unreadable file is a named state, never an empty list.
+`POST /api/glance/ack` takes `{action: "ack"|"unack", ids: [...], until: null|"24h"|"7d"|<ISO>}`, validated whole
+before anything is written. Both sit behind the same token, Host and Origin guard as every `/api` route.
+
+- **List:** one row per item, needs-you first; filters by verdict and by source (`#/glance?verdict=broken&source=jobs`,
+  so a reload keeps them); columns verdict badge, item, source, since, next (with a copy button).
+- **Row menu:** right-click, the ContextMenu key or Shift+F10: open detail, copy fix, acknowledge, snooze 24 h or 7 days,
+  remove ack.
+- **Selection:** a checkbox per problem row and select-all; the bulk bar acknowledges, snoozes or unacks every
+  selected id in one request.
+- **Detail pane, a route per item:** `#/glance/<id>` shows why, the fix, the source, since, how much was looked at, the
+  ack and the id.
+- **Badges** are `.badge.gl-<kind>` and always show an icon, a word and a count (`! NEEDS YOU 1`), so state is never
+  colour alone; fills are the semantic status tokens. A status strip above the filters is drawn with Observable Plot
+  when it loaded, and says so when it did not.
 
 ## Subagents (propagate#251)
 

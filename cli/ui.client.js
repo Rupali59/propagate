@@ -121,6 +121,8 @@ const JSON_HEADERS = { "content-type": "application/json" };
 // An unknown hash still lands on Judge, because Judge is where the work is.
 const DIVISIONS = [
   { key: "overview", label: "OVERVIEW", group: "today" },
+  // propagate#296: where every notification click lands (lib/report/notify.mjs uiRoute).
+  { key: "glance", label: "GLANCE", group: "today" },
   { key: "judge", label: "JUDGE", act: true, group: "settle" },
   { key: "unblock", label: "UNBLOCK", act: true, group: "settle" },
   { key: "health", label: "HEALTH", group: "machinery" },
@@ -146,7 +148,7 @@ const DIVISIONS = [
    The new keys map to themselves so readHash has ONE lookup. */
 const HASH_TO_VIEW = { ready: "judge", parked: "judge", gap: "judge", blocked: "unblock",
   reference: "health", analytics: "activity", stream: "activity", conflicts: "reminders",
-  overview: "overview", judge: "judge", unblock: "unblock", health: "health", activity: "activity",
+  overview: "overview", glance: "glance", judge: "judge", unblock: "unblock", health: "health", activity: "activity",
   registers: "registers", reminders: "reminders", graph: "graph",
   claims: "claims", rules: "rules", caps: "caps", skills: "skills", backlog: "backlog", goals: "goals", history: "history" };
 
@@ -2961,6 +2963,209 @@ function HistoryView({ st, retry, nav }) {
   }}<//>`;
 }
 
+/* -- the glance (propagate#296) -------------------------------------------- */
+
+/* The web glance view: the same glance.json `propagate glance` prints, as a list and a detail of one item, with
+   acknowledge and snooze. Every notification the monitor and the digest send opens a route here (`#/glance` or
+   `#/glance/<id>`, lib/report/notify.mjs uiRoute).
+
+   A BADGE IS AN ICON, A WORD AND A COUNT, never colour alone (std:design-web-047): the icon and the word carry the
+   state for anyone who cannot see the fill, and the fill is a semantic status token (.badge.gl-*, 40-components.css)
+   meeting 3:1 against the card (-013, -003). */
+const GLANCE_KINDS = ["needs_you", "broken", "unknown", "learning", "working", "acked"];
+const GLANCE_BADGE = {
+  needs_you: { icon: "!", word: "NEEDS YOU" },
+  broken: { icon: "✕", word: "BROKEN" },
+  unknown: { icon: "?", word: "UNKNOWN" },
+  learning: { icon: "…", word: "LEARNING" },
+  working: { icon: "✓", word: "OK" },
+  acked: { icon: "⏸", word: "ACKED" },
+};
+const GLANCE_RANK = { needs_you: 0, broken: 1, unknown: 2, acked: 3, learning: 4, working: 5 };
+const GLANCE_SNOOZE = [{ key: "24h", label: "Snooze 24 h" }, { key: "7d", label: "Snooze 7 days" }];
+
+/** Which badge an item takes. An acked problem is ACKED; otherwise the flag (unknown, learning) wins over the verdict. */
+function glanceKind(it) {
+  if (it.ack && it.verdict !== "working") return "acked";
+  if (it.flag === "unknown") return "unknown";
+  if (it.flag === "learning") return "learning";
+  return GLANCE_BADGE[it.verdict] ? it.verdict : "unknown";
+}
+
+function GlanceBadge({ kind, n }) {
+  const b = GLANCE_BADGE[kind] || GLANCE_BADGE.unknown;
+  const count = typeof n === "number" ? n : 1;
+  return html`<span class=${"badge gl-" + kind} aria-label=${b.word.toLowerCase() + ", " + count}><span class="gl-ic" aria-hidden="true">${b.icon}</span> ${b.word} <span class="gl-n">${count}</span></span>`;
+}
+
+/**
+ * The list model: rows filtered by verdict kind and source, ordered needs-you first, and the per-kind counts over
+ * EVERY item (so a filter never hides how many of another kind there are). Pure, for the test.
+ */
+function glanceModel(data, filter) {
+  const items = (data && Array.isArray(data.items)) ? data.items : [];
+  const f = filter || {};
+  const counts = {};
+  for (const k of GLANCE_KINDS) counts[k] = 0;
+  const sources = [];
+  for (const it of items) {
+    counts[glanceKind(it)] += 1;
+    if (sources.indexOf(it.signal) < 0) sources.push(it.signal);
+  }
+  const rows = items.filter((it) => (!f.verdict || glanceKind(it) === f.verdict) && (!f.source || it.signal === f.source))
+    .slice().sort((a, b) => GLANCE_RANK[glanceKind(a)] - GLANCE_RANK[glanceKind(b)] || String(a.signal).localeCompare(String(b.signal)) || String(a.id).localeCompare(String(b.id)));
+  return { rows: rows, counts: counts, sources: sources.sort(), total: items.length };
+}
+
+/** The ack request body for the server. `until` is a duration key ("24h") or null. */
+function glanceAckBody(action, ids, until) {
+  return { action: action, ids: ids.slice(), until: until || null };
+}
+
+/** The hash for a glance filter set; an empty value drops its parameter. */
+function glanceHash(filter, item) {
+  const q = [];
+  if (filter.verdict) q.push("verdict=" + encodeURIComponent(filter.verdict));
+  if (filter.source) q.push("source=" + encodeURIComponent(filter.source));
+  return "glance" + (item ? "/" + encodeURIComponent(item) : "") + (q.length ? "?" + q.join("&") : "");
+}
+
+/** The status strip: one stacked bar per kind count, drawn with Observable Plot when it loaded. */
+function GlanceStrip({ counts }) {
+  const ref = useRef(null);
+  const data = GLANCE_KINDS.filter((k) => counts[k] > 0).map((k) => ({ key: k, word: GLANCE_BADGE[k].word, n: counts[k] }));
+  const missing = plotUnavailable();
+  useEffect(() => {
+    const node = ref.current;
+    if (missing || !node || !data.length) return;
+    const tokOf = { needs_you: "--st-caution", broken: "--st-warn", unknown: "--dim", learning: "--st-accent", working: "--st-ok", acked: "--line" };
+    try {
+      const svg = Plot.plot({ height: 44, marginLeft: 0, marginRight: 0, style: { background: "transparent", color: resolveToken("--fg"), fontSize: "11px" },
+        x: { label: null, axis: null }, y: { axis: null },
+        color: { domain: data.map((d) => d.word), range: data.map((d) => resolveToken(tokOf[d.key])) },
+        marks: [Plot.barX(data, Plot.stackX({ x: "n", fill: "word", ariaLabel: (d) => d.word + " " + d.n })),
+          Plot.text(data, Plot.stackX({ x: "n", text: (d) => d.word + " " + d.n, fill: resolveToken("--on-fill") }))] });
+      node.replaceChildren(svg);
+    } catch (e) { node.textContent = "status strip unavailable"; }
+  });
+  if (!data.length) return null;
+  return html`<div class="gl-strip" role="img" aria-label=${data.map((d) => d.word.toLowerCase() + " " + d.n).join(", ")}>
+    ${missing ? html`<span class="dmeta">status strip unavailable (${missing}); the counts are on the filters below</span>` : html`<div ref=${ref}></div>`}
+  </div>`;
+}
+
+function GlanceDetail({ it, act, nav, filter }) {
+  if (!it) return html`<div class="gl-detail empty"><b>Pick an item</b> to see why, what to run and where it was read from.</div>`;
+  const kind = glanceKind(it);
+  const fix = (it.fix && (it.fix.command || it.fix.text)) || "propagate glance";
+  return html`<section class="gl-detail" aria-label=${"glance item " + it.id}>
+    <div class="gl-dhead"><${GlanceBadge} kind=${kind} n=${typeof it.count === "number" ? it.count : 1} /> <h3 class="dtitle">${it.subject}</h3></div>
+    <p class="gl-what">${it.what}</p>
+    <dl class="gl-dl">
+      <dt>why</dt><dd>${it.why || "no reason recorded"}</dd>
+      <dt>next</dt><dd><code>${fix}</code> <${Copy} text=${fix} label="copy fix" /></dd>
+      <dt>source</dt><dd>${it.source || "unknown"} · signal <b>${it.signal}</b> · owner ${it.owner || "you"}</dd>
+      <dt>since</dt><dd>${it.since ? stamp(it.since) : "unknown"}${it.carried ? " · carried from the monitor's last glance" : ""}</dd>
+      <dt>looked at</dt><dd>${plural(it.looked_at || 0, "record")}</dd>
+      <dt>ack</dt><dd>${it.ack ? (it.ack.until ? "snoozed until " + stamp(it.ack.until) : "acknowledged " + stamp(it.ack.at) + ", for this episode") : "none"}</dd>
+      <dt>id</dt><dd><code>${it.id}</code></dd>
+    </dl>
+    ${it.verdict !== "working" ? html`<div class="gl-acts">
+      ${it.ack ? html`<button onClick=${() => act("unack", [it.id])}>Remove ack</button>`
+        : html`<button onClick=${() => act("ack", [it.id])}>Acknowledge</button>${GLANCE_SNOOZE.map((s) => html`<button key=${s.key} class="ghost" onClick=${() => act("ack", [it.id], s.key)}>${s.label}</button>`)}`}
+    </div>` : null}
+    <button class="ghost" onClick=${() => nav(glanceHash(filter, null))}>← back to the list</button>
+  </section>`;
+}
+
+function GlanceMenu({ menu, close, act, nav, filter }) {
+  const first = useRef(null);
+  useEffect(() => { if (first.current && first.current.focus) first.current.focus(); }, [menu && menu.id]);
+  if (!menu) return null;
+  const it = menu.item;
+  const fix = (it.fix && (it.fix.command || it.fix.text)) || "propagate glance";
+  const run = (fn) => () => { close(); fn(); };
+  const key = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  const live = it.verdict !== "working";
+  return html`<div class="gl-menu" role="menu" aria-label=${"actions for " + it.id} style=${"left:" + menu.x + "px;top:" + menu.y + "px"} onKeyDown=${key}>
+    <button role="menuitem" ref=${first} onClick=${run(() => nav(glanceHash(filter, it.id)))}>Open detail</button>
+    <button role="menuitem" onClick=${run(() => copyText(fix, () => {}))}>Copy fix</button>
+    ${live && !it.ack ? html`<button role="menuitem" onClick=${run(() => act("ack", [it.id]))}>Acknowledge</button>` : null}
+    ${live && !it.ack ? GLANCE_SNOOZE.map((s) => html`<button key=${s.key} role="menuitem" onClick=${run(() => act("ack", [it.id], s.key))}>${s.label}</button>`) : null}
+    ${it.ack ? html`<button role="menuitem" onClick=${run(() => act("unack", [it.id]))}>Remove ack</button>` : null}
+  </div>`;
+}
+
+function GlanceView({ st, retry, route, nav, say }) {
+  const filter = { verdict: route.verdict || null, source: route.source || null };
+  const [sel, setSel] = useState(() => new Set());
+  const [menu, setMenu] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const data = st.data || {};
+  const m = glanceModel(data, filter);
+  const act = useCallback(async (action, ids, until) => {
+    setBusy(true);
+    const r = await api("/api/glance/ack", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(glanceAckBody(action, ids, until)) });
+    setBusy(false);
+    if (r.ok && r.data && r.data.ok) {
+      say({ ok: true, text: (action === "unack" ? "ack removed from " : until ? "snoozed " + until + ": " : "acknowledged: ") + plural(ids.length, "item") });
+      setSel(new Set());
+      retry();
+    } else {
+      say({ ok: false, text: r.kind === "token" ? TOKEN_EXPIRED : "not saved — " + (r.error || (r.data && r.data.error) || "the server gave no reason") });
+    }
+  }, [retry, say]);
+  useEffect(() => {
+    if (!menu) return;
+    const off = () => setMenu(null);
+    addEventListener("click", off);
+    return () => removeEventListener("click", off);
+  }, [menu]);
+  if (st.status === "idle" || st.status === "loading") return html`<div class="detail wide"><${Skeleton} rows=${3} /></div>`;
+  if (st.status === "error") return html`<div class="detail wide"><${ErrorBanner} what="the glance could not be read —" st=${st} retry=${retry} /></div>`;
+  if (data.state && data.state !== "ok") {
+    return html`<div class="detail wide"><h2 class="dtitle">Glance</h2><div class="empty"><b>${data.state === "absent" ? "glance: not computed yet" : "glance unavailable"}</b>${data.reason ? " — " + data.reason : ""}. Run <${Cmd} text="propagate glance" label="copy" /></div></div>`;
+  }
+  const item = route.item ? (data.items || []).find((i) => i.id === route.item) || null : null;
+  const toggle = (id) => setSel((s) => { const x = new Set(s); if (x.has(id)) x.delete(id); else x.add(id); return x; });
+  const actionable = m.rows.filter((r) => r.verdict !== "working");
+  const allOn = actionable.length > 0 && actionable.every((r) => sel.has(r.id));
+  const picked = [...sel].filter((id) => m.rows.some((r) => r.id === id));
+  const openMenu = (e, r) => { e.preventDefault(); stop(e); setMenu({ id: r.id, item: r, x: e.clientX || 40, y: e.clientY || 40 }); };
+  const setF = (k, v) => nav(glanceHash(Object.assign({}, filter, { [k]: filter[k] === v ? null : v }), null));
+  return html`<div class="detail wide glance">
+    <h2 class="dtitle">Glance</h2>
+    <div class="hline">${dot("verdict " + String(data.verdict || "unknown").replace("_", " "), plural(data.signals_checked || 0, "signal") + " checked", "as of " + stamp(data.generatedAt) + (data.stale ? " (stale)" : ""))}</div>
+    <${GlanceStrip} counts=${m.counts} />
+    <div class="chips" role="group" aria-label="filter by verdict">${GLANCE_KINDS.filter((k) => m.counts[k] > 0).map((k) => html`<button key=${k} class=${"chip" + (filter.verdict === k ? " on" : "")} aria-pressed=${filter.verdict === k} onClick=${() => setF("verdict", k)}><${GlanceBadge} kind=${k} n=${m.counts[k]} /></button>`)}</div>
+    <div class="chips" role="group" aria-label="filter by source">${m.sources.map((s) => html`<button key=${s} class=${"chip" + (filter.source === s ? " on" : "")} aria-pressed=${filter.source === s} onClick=${() => setF("source", s)}>${s}</button>`)}</div>
+    ${picked.length ? html`<div class="bulkstrip" role="region" aria-label="bulk actions"><b>${plural(picked.length, "item")} selected</b>
+      <button disabled=${busy} onClick=${() => act("ack", picked)}>Acknowledge ${picked.length}</button>
+      ${GLANCE_SNOOZE.map((s) => html`<button key=${s.key} class="ghost" disabled=${busy} onClick=${() => act("ack", picked, s.key)}>${s.label}</button>`)}
+      <button class="ghost" disabled=${busy} onClick=${() => act("unack", picked)}>Remove ack</button>
+      <button class="ghost" onClick=${() => setSel(new Set())}>Clear</button></div>` : null}
+    <div class="gl-split">
+      ${m.rows.length === 0 ? html`<div class="empty"><b>0 items</b> match this filter · ${plural(m.total, "item")} in the glance.</div>` : html`<table class="t gl-table" aria-label="glance items">
+        <thead><tr><th scope="col"><input type="checkbox" aria-label="select every problem item shown" checked=${allOn} onChange=${() => setSel(allOn ? new Set() : new Set(actionable.map((r) => r.id)))} /></th>
+          <th scope="col">verdict</th><th scope="col">item</th><th scope="col">source</th><th scope="col">since</th><th scope="col">next</th></tr></thead>
+        <tbody>${m.rows.map((r) => html`<tr key=${r.id} class=${"dt-row pick gl-row" + (item && item.id === r.id ? " focus" : "") + (sel.has(r.id) ? " sel" : "")} tabIndex="0" data-id=${r.id}
+            onClick=${() => nav(glanceHash(filter, r.id))} onContextMenu=${(e) => openMenu(e, r)}
+            onKeyDown=${(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter") { e.preventDefault(); nav(glanceHash(filter, r.id)); } else if (e.key === " ") { e.preventDefault(); toggle(r.id); } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) openMenu(e, r); }}>
+          <td onClick=${stop}>${r.verdict !== "working" ? html`<input type="checkbox" aria-label=${"select " + r.id} checked=${sel.has(r.id)} onChange=${() => toggle(r.id)} />` : null}</td>
+          <td><${GlanceBadge} kind=${glanceKind(r)} n=${typeof r.count === "number" ? r.count : 1} /></td>
+          <td><span class="nm">${r.subject}</span>: ${r.what}</td>
+          <td>${r.signal}</td>
+          <td class="dmeta">${r.since ? ageLabel(Date.now() - Date.parse(r.since)) : ""}</td>
+          <td onClick=${stop}><code>${(r.fix && r.fix.text) || ""}</code>${r.fix && (r.fix.command || r.fix.text) ? html` <${Copy} text=${r.fix.command || r.fix.text} label="copy" />` : null}</td>
+        </tr>`)}</tbody></table>`}
+      <${GlanceDetail} it=${item} act=${act} nav=${nav} filter=${filter} />
+    </div>
+    ${route.item && !item ? html`<div class="empty" role="status">item <code>${route.item}</code> is not in this glance any more — it may have cleared</div>` : null}
+    <div class="dmeta">Right-click a row (or Shift+F10) for its actions · Space selects · Enter opens · Acknowledge hides an item from notifications until it clears; it does not change the verdict.</div>
+    <${GlanceMenu} menu=${menu} close=${() => setMenu(null)} act=${act} nav=${nav} filter=${filter} />
+  </div>`;
+}
+
 /* -- the app -------------------------------------------------------------- */
 
 function parseHash(hash) {
@@ -2969,7 +3174,13 @@ function parseHash(hash) {
   // /judge, never a blank page.
   const raw = (hash || "").slice(1).replace(/^[/]+/, "");
   const q = raw.indexOf("?");
-  const name = q >= 0 ? raw.slice(0, q) : raw;
+  let name = q >= 0 ? raw.slice(0, q) : raw;
+  // `glance/<id>` (propagate#296): one glance item's route, the target of a notification click.
+  let item = null;
+  if (name.indexOf("glance/") === 0) {
+    try { item = decodeURIComponent(name.slice(7)) || null; } catch { item = null; }
+    name = "glance";
+  }
   // Deep links from the widget (2026-10-15, "give me cta for everything"): `section=` opens
   // Health at a doctor section, `state=` filters Judge to one edge state, `chip=` opens a Judge
   // chip. A value the view does not know is ignored and the view opens normally.
@@ -2981,7 +3192,8 @@ function parseHash(hash) {
   // `focus=` (Unblock, 2026-10-16) names the part of the page to scroll to; the view ignores a value it does not know.
   return { view: name === "" ? "overview" : (HASH_TO_VIEW[name] || "judge"), edge: get("edge"), section: get("section"), state: get("state"), chip: get("chip"), focus: get("focus"),
     tick: parseTick(get("tick")),
-    ws: get("ws") || null, age: AGE_KEYS.indexOf(age) >= 0 ? age : null, source: get("source") || null };
+    ws: get("ws") || null, age: AGE_KEYS.indexOf(age) >= 0 ? age : null, source: get("source") || null,
+    item: item, verdict: GLANCE_KINDS.indexOf(get("verdict")) >= 0 ? get("verdict") : null };
 }
 function readHash() { return parseHash(location.hash); }
 
@@ -3021,6 +3233,7 @@ function App() {
   const [goalsSt, retryGoals] = useResource("/api/goals", view === "goals");
   const [historySt, retryHistory] = useResource("/api/history", view === "history");
   const [remSt, retryRem] = useResource("/api/conflicts", view === "reminders");
+  const [glanceSt, retryGlance] = useResource("/api/glance", view === "glance");
   const [buildNote, setBuildNote] = useState(null);
   const [judged, setJudged] = useState(0);
   const [msg, setMsgState] = useState(null);
@@ -3234,6 +3447,7 @@ function App() {
     const retryPage = { claims: retryClaims, rules: retryRules, caps: retryCaps, skills: retrySkills, backlog: retryBacklog, goals: retryGoals, history: retryHistory }[view];
     if (retryPage) api("/api/" + view + "?fresh=1").then(() => retryPage());
     if (view === "reminders") retryRem();
+    if (view === "glance") retryGlance();
   };
 
   const model = useMemo(() => judgeModel(inboxSt.data, heldIds), [inboxSt.data, heldIds]);
@@ -3245,6 +3459,7 @@ function App() {
 
   let body;
   if (view === "overview") body = html`<${OverviewView} app=${app} surfaceSt=${surfaceSt} healthSt=${healthSt} machSt=${machSt} nav=${nav} />`;
+  else if (view === "glance") body = html`<${GlanceView} st=${glanceSt} retry=${retryGlance} route=${route} nav=${nav} say=${say} />`;
   else if (view === "judge") body = html`<${JudgeView} app=${app} route=${route} />`;
   else if (view === "unblock") body = html`<${UnblockView} app=${app} route=${route} />`;
   else if (view === "health") body = html`<${HealthView} st=${healthSt} retry=${retryHealth} focus=${route.section} />`;
@@ -3301,6 +3516,7 @@ if (typeof globalThis !== "undefined") {
     KPI_NO_REASON, ROW_NO_REASON, Kpi, DataTable, nextAction, machineryTiles, MACH_TILES,
     claimLocator, claimRows, ruleRows, capRows, skillRows, claimsEmpty, SKILL_STATUS_RANK, RULE_STATUS_RANK,
     pageWindow, TABLE_PAGE_SIZE, backlogRows, backlogLocator, backlogEmpty, BACKLOG_TEXT_CHARS, goalRows, planRows, goalDerivation, stamp, historyParts,
+    GLANCE_KINDS, GLANCE_BADGE, glanceKind, glanceModel, glanceAckBody, glanceHash, GlanceBadge,
     tipText, tipPlace, inlineMd, dayLabel, dayShort, axisTicks, priorityLabel, remindersTimeoutText, boundaryLabel, VERDICT_MEANING };
 }
 

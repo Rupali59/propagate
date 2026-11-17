@@ -13,7 +13,8 @@ name: test
 #   node 22  loaded fine; only env-dependent tests failed (since fixed).
 #   node 24  same failures as 22 — i.e. not version-specific.
 # engines.node was ">=24" on nobody's measurement and excluded the current LTS. It is now
-# ">=22", which is what the runner actually proved.
+# ">=22", which is what the runner actually proved. It is now ">=22.13": `node:sqlite` (the work
+# queue, lib/work/db.mjs) is the binding constraint, and the `work-node-floor` job below pins 22.13.0.
 #
 # 20 STAYS IN THE MATRIX and is expected to fail. A matrix where everything passes tells
 # you nothing about where the floor is, and the day globSync stops being the constraint
@@ -36,7 +37,7 @@ jobs:
       # manual run away rather than a rewrite.
       #
       # 22 is the kept version because it is the measured floor: `fs.globSync`
-      # (cli.mjs:100) landed in 22, which is what `engines.node: >=22` rests on. Testing
+      # (cli.mjs:100) landed in 22; `engines.node: >=22.13` rests on `node:sqlite`, proven by `work-node-floor`. Testing
       # the floor catches a regression below it; testing 24 only catches one above it.
       #
       # Run the full matrix from the Actions tab (Run workflow) whenever `engines.node`
@@ -185,6 +186,28 @@ jobs:
 
       - name: suite
         run: npm test --prefix skills/curate-docs
+
+  # work-node-floor (propagate#150, R10) — `engines.node` claims >=22.13 because the work queue needs `node:sqlite`,
+  # and a floor asserted without a run is a guess. This job runs the work tests on EXACTLY that version. It is pinned
+  # to a full version, not "22": `setup-node` would resolve "22" to the newest 22.x and the floor would never run.
+  # tests/unit/work.test.mjs asserts this pin and `engines.node` agree.
+  work-node-floor:
+    runs-on: ubuntu-latest
+    name: work queue on node 22.13.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+
+      - run: npm ci
+
+      - name: work tests on the floor
+        # Each work test makes its own mkdtemp dir; PROPAGATE_STATE_DIR keeps anything else off real state.
+        run: |
+          export PROPAGATE_STATE_DIR="$(mktemp -d)"
+          node --test tests/unit/work*.test.mjs
 
   # bump-gate — the PREVENTION half of doctor's `# Delivery` check
   # (lib/report/doctor/delivery.mjs), decided at D7 in

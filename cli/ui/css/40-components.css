@@ -58,6 +58,34 @@
 .badge.pri-P1 { background: var(--st-caution); }
 .badge.pri-P2, .badge.pri-P3 { background: var(--st-accent); }
 .badge.pri-none { background: var(--dim); }
+/* The glance (propagate#296). Each badge also carries an icon and a word (GlanceBadge), so the fill is never the only
+   carrier of state (std:design-web-047); the fills are the semantic status tokens (-003), the same ones whose 3:1
+   against --card the token file derives (-013). ACKED and UNKNOWN are "not a verdict": quiet, never a status colour. */
+.badge.gl-needs_you { background: var(--st-caution); }
+.badge.gl-broken { background: var(--st-warn); }
+.badge.gl-unknown { background: var(--dim); }
+.badge.gl-learning { background: var(--st-accent); }
+.badge.gl-working { background: var(--st-ok); }
+.badge.gl-acked { background: var(--line); color: var(--fg); }
+.badge .gl-ic { font-weight: 800; }
+.badge .gl-n { font-variant-numeric: tabular-nums; opacity: .9; }
+.glance .chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s2) 0; }
+.glance .chip .badge { margin-top: 0; }
+.gl-strip { margin: var(--s2) 0; min-height: 20px; }
+.gl-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: var(--s4); align-items: start; margin: var(--s3) 0; }
+.gl-table td code { font-size: 11px; }
+.gl-row.sel td { background: var(--accent-quiet); }
+.gl-detail { background: var(--card); border: 1px solid var(--line); border-radius: var(--r3); padding: var(--s3) var(--s4); box-shadow: var(--lift-1); }
+.gl-detail.empty { color: var(--dim); }
+.gl-dhead { display: flex; gap: var(--s2); align-items: center; }
+.gl-dhead .dtitle { margin: 0; }
+.gl-dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--s1) var(--s3); font-size: 12.5px; }
+.gl-dl dt { color: var(--dim); }
+.gl-dl dd { margin: 0; overflow-wrap: anywhere; }
+.gl-acts { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s3) 0; }
+.gl-menu { position: fixed; z-index: 20; display: flex; flex-direction: column; min-width: 170px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--lift-2); padding: var(--s1); }
+.gl-menu button { text-align: left; background: transparent; color: var(--fg); border: 0; padding: var(--s1) var(--s2); border-radius: var(--r1); }
+.gl-menu button:hover, .gl-menu button:focus-visible { background: var(--accent-quiet); }
 .badge.g-open, .badge.pl-undeclared, .badge.h-none { background: var(--st-caution); }
 .badge.g-unknown, .badge.g-unreadable, .badge.pl-unreadable, .badge.h-failed { background: var(--st-warn); }
 .badge.g-closed, .badge.pl-finished, .badge.pl-archived { background: var(--dim); }

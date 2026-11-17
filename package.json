@@ -9,7 +9,7 @@
     "propagate": "cli.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "scripts": {
     "test": "npm run test:propagate; A=$?; npm run test:curate-docs; B=$?; printf '\\n== suites: propagate exit=%s, curate-docs exit=%s\\n' \"$A\" \"$B\"; [ \"$A\" -eq 0 ] && [ \"$B\" -eq 0 ]",
@@ -17,6 +17,7 @@
     "doctor": "node cli.mjs doctor",
     "test:propagate": "PROPAGATE_GH_BIN=\"$PWD/scripts/test-gh-stub.sh\" PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs' 'hooks/**/*.test.mjs'",
     "test:curate-docs": "npm test --prefix skills/curate-docs",
+    "readme:commands": "node scripts/readme-commands.mjs",
     "test:affected": "node scripts/test-impact/affected.mjs",
     "test:record": "node scripts/test-impact/map.mjs"
   },

@@ -79,6 +79,136 @@ sources:
 Bump `VERSION` and forget a manifest, and `check` names the ones you missed at commit
 time. Before that edge existed, the same mistake produced silence.
 
+## What it covers
+
+The command surface is grouped into these areas, and `propagate help` lists the same groups:
+
+- **Is anything drifting?** read-only views of declared couplings, goals, plans, services and docs.
+- **Settle drift** the gates and verbs that record a human's decision on an edge.
+- **Health and release** the glance, doctor, usage, cost, sprint and release checks.
+- **Set up and move things** install, scaffold, migrate, roll up and broadcast.
+- **Who works where** live sessions and the work queue.
+- **Skills** the skill census and lifecycle.
+- **Claims and reminders** checking what documents assert, and reminders.
+
+## Commands
+
+The list below is generated from the command table (`lib/core/commands.mjs`); do not edit it by hand.
+Regenerate it with `npm run readme:commands`.
+
+<!-- commands:start -->
+
+**Is anything drifting?**
+
+- `propagate status` — are any declared file couplings drifting
+- `propagate check` — drift check scoped to a change (--changed, --range, --staged)
+- `propagate reconcile` — derive every edge's state from the ledger and the files
+- `propagate why` — explain one edge: what declared it and what happened to it
+- `propagate queue` — the disposition backlog, once, as text or JSON
+- `propagate surface` — edges, registers and machinery health as one payload
+- `propagate backlog` — open work recorded across STATE, TODOS and handovers
+- `propagate goals` — arrival conditions declared across the tree
+- `propagate goals allow` — approve one goal's exact Derived by: command so check-done may run it
+- `propagate goals check` — standing check: active-goal limit, appetite and retro, board items carry an active goal and their fields; exit 0 pass, 1 violations, 2 could not check
+- `propagate goals check-done` — run the approved Derived by: commands; exit 0 = met; writes Resolved only with --apply
+- `propagate services` — which units use which external service, and what is wrong with how each is described (offline)
+- `propagate standards` — which standards apply, which rows need re-verifying against the tool version in use (offline; status is derived, never written)
+- `propagate standards versions` — the cached tool versions; --refresh runs each registry probe and writes them (the only command that spawns a tool)
+- `propagate plans` — plan documents and their lifecycle
+- `propagate docs` — document kinds, structure and supersession
+- `propagate journal` — ledger events in a time window
+
+**Settle drift**
+
+- `propagate settle` — one file's worklist and the exact verify commands (read-only)
+- `propagate check-curator` — the doc-curator gate: refuse unquoted, misquoted or structural claims; passing claims are inferred (read-only)
+- `propagate check-review` — the adversarial-reviewer gate: coverage of declared edges, real file:line, demos re-run through the agent guard (read-only)
+- `propagate verify` — record a disposition on an edge (dry-run unless --apply)
+- `propagate rekey` — carry an edge's history to its new id after a reworded why or a renamed file (dry-run unless --apply)
+- `propagate drain` — list and close open propagation rows
+- `propagate graph` — the fix-order worklist, or one file's neighbourhood (--node)
+- `propagate bootstrap` — turn NEVER_VERIFIED edges into an honest baseline
+- `propagate ui` — local web UI over the disposition queue
+
+**Health and release**
+
+- `propagate glance` — what is working, what is broken, what needs you, from files already written (never reruns reconcile or doctor; exit 0 working, 1 broken or needs you, 2 nothing to read)
+- `propagate glance ack` — acknowledge glance items, or snooze them with --until: shown as acked, not notified, verdict unchanged
+- `propagate glance unack` — remove an acknowledgement or snooze from glance items
+- `propagate doctor` — health checks over the install, workspaces and ledgers
+- `propagate monitor` — one monitor pass (--dry-run to preview)
+- `propagate usage` — which commands are run and how often they fail (--backfill derives history from transcripts)
+- `propagate release` — release gate checks (--check); never publishes
+- `propagate release notes` — Keep a Changelog draft from the commits since the last tag (--write fills CHANGELOG.md; --write --version X releases it)
+- `propagate caps` — context-budget caps derived tree-wide (report only)
+- `propagate instructions` — per-directory session instruction budget (--calibrate against a load log)
+- `propagate hooks instructions-gate` — add the instruction-budget gate to every repo tracking CLAUDE.md/AGENTS.md/GEMINI.md (dry run; --apply)
+- `propagate context` — gotcha-guard injection volume per compaction window, from a session transcript
+- `propagate costs lanes` — lane cost rows grouped by agent_type, last row per agent, lanes that ran commands in the background flagged (read-only)
+- `propagate costs window` — tokens and minutes for a window of a main-session transcript, between two anchors (read-only)
+- `propagate day open` — is there enough Ready work for today's budget, across every board (read-only)
+- `propagate day close` — groom the boards for tomorrow: promotions, refusals, closed-not-Done, cost gaps (writes only with --apply)
+- `propagate sprint plan` — does the Ready work fit the usage left until the sprint ends: budget in week-% points, uncalibrated Sizes counted not summed (read-only)
+- `propagate sprint review` — done against planned per board for the last ended Sprint, calibration gain, missing cost fields; carry-over moves only with --apply (read-only by default)
+- `propagate rules` — canonical-rules lifecycle: list, check, selftest, promote
+- `propagate inventory` — what was built: skills, plugins, repos, standalone artifacts, with status (read-only)
+
+**Set up and move things**
+
+- `propagate setup` — install and configure propagate
+- `propagate init` — scaffold a sidecar in a directory
+- `propagate reload` — regenerate the v1 watcher plist (obsolete since 2026-08-14)
+- `propagate manifest` — how to stand a workspace up on another machine
+- `propagate migrate` — move a workspace to the v3 layout (dry-run unless --apply)
+- `propagate migrate-refs` — migrate a workspace's ref snapshots (dry-run unless --apply)
+- `propagate migrate-ledger` — copy a ledger to the v3 layout (dry-run by default)
+- `propagate relocate-ledger` — relocate a ledger (dry-run by default)
+- `propagate freeze-ledger` — freeze a v1 ledger (dry-run by default)
+- `propagate registers` — issue and todo registers
+- `propagate rollup` — generate the ecosystem rollup
+- `propagate graph-index` — emit the graph as sqlite or cypher
+- `propagate tasks` — move open TODOS/ISSUES register entries to GitHub issues (read-only plan; --apply creates the issues and delegates the register)
+- `propagate broadcast new` — publish one piece of work to many workspaces: a hub parent issue and one child per repo (dry run unless --apply)
+- `propagate broadcast status` — progress of each open broadcast, folded from GitHub sub-issues; exit 2 when GitHub could not be read
+
+**Who works where**
+
+- `propagate sessions` — which Claude Code sessions are live, in which folder, on which goal and item (read-only; reads claude agents --json)
+- `propagate sessions show` — one session: live row, association and history, repos, guidance files, and the next command
+- `propagate sessions assoc` — record which goal and board item a live session serves (the one write; --from derives the goal from the dispatch snapshot)
+- `propagate sessions new` — start a background Claude Code session on a board item: folder, goal and name derived (dry run unless --apply; --apply runs claude --bg, never with a bypass flag)
+- `propagate sessions stop` — stop a background session (claude stop); --force sends SIGTERM to an interactive session by its pid, re-verified first (dry run unless --apply)
+- `propagate sessions rm` — remove a stopped or done background session (claude rm; dry run unless --apply)
+- `propagate work list` — the work event queue: items by kind and state; never prints a claim token (propagate#150)
+- `propagate work sync` — make the queue match the open labelled issues of the hub repo (reads GitHub; writes only the local queue)
+- `propagate work claim` — take the oldest pending item of a kind for this session; prints the token ack and release need
+- `propagate work ack` — finish a claimed item (needs the claim's --token)
+- `propagate work release` — give a claimed item back; --refusal counts toward parking (needs the claim's --token)
+- `propagate work unpark` — return a parked item to pending
+- `propagate work prune` — delete acked and expired items and their events older than --older-than days (dry run unless --apply)
+
+**Skills**
+
+- `propagate skills` — skill census
+- `propagate skills-create` — create a skill from an intent
+- `propagate skills-promote` — promote a skill
+- `propagate skills-demote` — demote a skill
+- `propagate skills-reap` — reap dormant skills
+
+**Claims and reminders**
+
+- `propagate claims check` — check claims
+- `propagate claims judge` — judge claims in a file
+- `propagate claims render` — render claims into a file
+- `propagate claims contradict` — find claims contradicting an authored file
+- `propagate claims restate` — find restated claims
+- `propagate claims verdict` — apply verdicts read from stdin
+- `propagate claims answer` — record a run's answer
+- `propagate reminders` — reminders read path
+- `propagate reminders sync` — sync reminders (dry-run unless --apply)
+
+<!-- commands:end -->
+
 ## Design notes
 
 - **State is derived, never stored.** An observation is only valid for the content it was
@@ -123,7 +253,7 @@ variable does not exist.
 
 ## Requirements
 
-Node — see `engines` in `package.json`. `fs.globSync` is the binding constraint.
+Node — see `engines` in `package.json` (22.13 or later). `node:sqlite` (the work queue's store, experimental on the 22.x line) is the binding constraint; `fs.globSync` (22.0) is looser.
 
 ## Licence
 

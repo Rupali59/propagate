@@ -75,8 +75,12 @@ test("propagate includes ITSELF when the search root contains it", async (t) => 
   const here = path.dirname(new URL(import.meta.url).pathname);
   const repoRoot = path.resolve(here, "../..");
   const hub = path.dirname(repoRoot);
+  // Named by the checkout's own directory, not the literal "propagate": a git worktree
+  // is named after its branch (.claude/worktrees/fix-302-...), and self-inclusion uses
+  // basename(MODULE_ROOT), so the expectation must read the same name.
   const got = names(ownerCandidates([hub], []));
-  assert.ok(got.includes("propagate"), `scanning the hub must include propagate; got ${got.length} owners`);
+  const self = path.basename(repoRoot);
+  assert.ok(got.includes(self), `scanning the hub must include ${self}; got ${got.length} owners`);
 });
 
 test("propagate does NOT inject itself into a population that is looking elsewhere", async (t) => {
