@@ -99,3 +99,20 @@ test("an undeclared repo five levels deep is would-be-missed; a skipped director
     assert.deepEqual(wbm, ["a/b/c/d/deep"]);
   } finally { cleanup(root); }
 });
+
+test("a repo inside a nested discovered workspace is reported only by that workspace; a plain nested repo stays with the hub", () => {
+  const hub = mkdtempSync(path.join(tmpdir(), "roots-"));
+  try {
+    sidecar(hub, "workspace", ".");
+    const nested = path.join(hub, "team", "nested-ws");
+    gitInit(nested);
+    gitInit(path.join(nested, "tools", "inner-repo"));
+    gitInit(path.join(hub, "plain", "plain-repo"));
+    const roots = [hub, nested];
+    const wbm = (m) => m.gaps.filter((g) => g.kind === "would-be-missed").map((g) => g.project).sort();
+    const h = workspaceManifest(hub, { integrations: NO_REGISTRIES, home: hub, workspaceRoots: roots });
+    assert.deepEqual(wbm(h), ["plain/plain-repo"], "the hub must not report the nested workspace's repos, nor the nested root itself");
+    const n = workspaceManifest(nested, { integrations: NO_REGISTRIES, home: hub, workspaceRoots: roots });
+    assert.deepEqual(wbm(n), ["tools/inner-repo"]);
+  } finally { cleanup(hub); }
+});
