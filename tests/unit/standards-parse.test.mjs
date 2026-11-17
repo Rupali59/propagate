@@ -225,3 +225,54 @@ test("loadStandards: with two standards, one missing page does not stop the othe
   assert.equal(r.standards.find((s) => s.id === "beta-tool").page, null);
   assert.ok(r.problems.some((x) => x.includes("beta-tool") && x.includes("not found")));
 });
+
+// #290: a project page extends a standard and its rows cite which standard row they apply.
+const PROJECT_PAGE = `---
+id: acme-app
+kind: project
+extends: [std:acme-tool]
+---
+
+### acme-app-001 · Settle cap is 30 s here
+**State:** adopted
+**Source:** local decision
+**Applies:** std:acme-tool-001
+**Check:** review: reviewer confirms
+
+### acme-app-002 · One bundle id until flavors
+**State:** adopted
+**Source:** local decision
+**Applies:** local-1
+**Check:** none
+`;
+
+test("#290: extends: and Applies: parse with 0 problems", () => {
+  const p = parsePage(PROJECT_PAGE, "acme-app.md", { extendedRows: { "acme-tool": ["acme-tool-001", "acme-tool-002"] } });
+  assert.deepEqual(p.problems, []);
+  assert.deepEqual(p.extends, ["std:acme-tool"]);
+  assert.equal(p.rows[0].applies, "std:acme-tool-001");
+  assert.equal(p.rows[1].applies, "local-1");
+});
+
+test("#290: extends: as a single string is accepted", () => {
+  const p = parsePage(PROJECT_PAGE.replace("extends: [std:acme-tool]", "extends: std:acme-tool"), "acme-app.md");
+  assert.deepEqual(p.extends, ["std:acme-tool"]);
+  assert.deepEqual(p.problems, []);
+});
+
+test("#290: Applies: naming a row the extended standard does not have is a reported problem", () => {
+  const p = parsePage(PROJECT_PAGE.replace("std:acme-tool-001", "std:acme-tool-099"), "acme-app.md", { extendedRows: { "acme-tool": ["acme-tool-001"] } });
+  assert.ok(p.problems.some((x) => x.includes("std:acme-tool-099") && /no such row/.test(x)), p.problems.join("|"));
+});
+
+test("#290: Applies: naming a standard the page does not extend, or a malformed id, is a reported problem", () => {
+  const other = parsePage(PROJECT_PAGE.replace("std:acme-tool-001", "std:other-001"), "acme-app.md");
+  assert.ok(other.problems.some((x) => /does not extend std:other/.test(x)), other.problems.join("|"));
+  const bad = parsePage(PROJECT_PAGE.replace("std:acme-tool-001", "acme-tool-001"), "acme-app.md");
+  assert.ok(bad.problems.some((x) => /not std:<id>-NNN or local-<n>/.test(x)), bad.problems.join("|"));
+});
+
+test("#290: an unknown field is still reported, unchanged", () => {
+  const p = parsePage(PROJECT_PAGE.replace("**Applies:**", "**Aplies:**"), "acme-app.md");
+  assert.ok(p.problems.some((x) => x.includes('unknown field "Aplies"')), p.problems.join("|"));
+});
