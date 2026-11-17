@@ -1,18 +1,18 @@
 {
  "header": {
-  "recordedAt": "2026-11-16T11:04:15.632Z",
-  "commit": "07ebaf2c0efbb6cc57e9d68db6131ae7c6acb490",
+  "recordedAt": "2026-11-17T04:49:38.732Z",
+  "commit": "762db34b1772150f3f0a2f6b2febf9beae778247",
   "node": "v26.13.0",
-  "tests": 323,
-  "withStaticDeps": 257,
+  "tests": 324,
+  "withStaticDeps": 258,
   "withRecordedSpawnDeps": 119,
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
   "recordedProcesses": 2187,
-  "unresolvedStaticSpecifiers": 114,
+  "unresolvedStaticSpecifiers": 115,
   "suite": {
-   "pass": 4224,
+   "pass": 4227,
    "fail": 1
   }
  },
@@ -1838,6 +1838,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
@@ -11668,6 +11669,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
@@ -12451,6 +12453,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
@@ -16402,6 +16405,20 @@
    ],
    "size": "small"
   },
+  "tests/unit/notify-launchd-env.test.mjs": {
+   "deps": [
+    "SKILL.md",
+    "lib/core/config.mjs",
+    "lib/core/discovery.mjs",
+    "lib/core/package.json",
+    "lib/core/paths.mjs",
+    "lib/core/plist.mjs",
+    "lib/package.json",
+    "package.json",
+    "tests/unit/notify-launchd-env.test.mjs"
+   ],
+   "size": "small"
+  },
   "tests/unit/owner-candidates-ownership.test.mjs": {
    "deps": [
     "lib/core/discovery.mjs",
@@ -19474,6 +19491,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
