@@ -276,3 +276,33 @@ test("#290: an unknown field is still reported, unchanged", () => {
   const p = parsePage(PROJECT_PAGE.replace("**Applies:**", "**Aplies:**"), "acme-app.md");
   assert.ok(p.problems.some((x) => x.includes('unknown field "Aplies"')), p.problems.join("|"));
 });
+
+// #290 (decided 2026-11-17): a project-local row inherits or defaults its state; it carries no `State:` line.
+const LOCAL_HEAD = "---\nid: acme-app\nkind: project\nextends: [std:acme-tool]\n---\n\n";
+
+test("#290: an Applies: row with no State: inherits the hub state and is not a problem", () => {
+  const p = parsePage(`${LOCAL_HEAD}### acme-app-001 · Cap\n**Applies:** std:acme-tool-001\n**Check:** none\n`, "acme-app.md");
+  assert.deepEqual(p.problems, []);
+  assert.equal(p.rows[0].state, null);
+  assert.equal(p.rows[0].stateSource, "inherited");
+});
+
+test("#290: a local-<n> row with no State: defaults to adopted", () => {
+  const p = parsePage(`${LOCAL_HEAD}### local-1 · One bundle id\n**Check:** none\n`, "acme-app.md");
+  assert.deepEqual(p.problems, []);
+  assert.equal(p.rows[0].state, "adopted");
+  assert.equal(p.rows[0].stateSource, "default");
+});
+
+test("#290: State: retired on a local row needs a Reason, or it is a problem", () => {
+  const bad = parsePage(`${LOCAL_HEAD}### local-2 · Old\n**State:** retired\n**Check:** none\n`, "acme-app.md");
+  assert.ok(bad.problems.some((x) => x.includes("local-2") && x.includes("Reason")), bad.problems.join("|"));
+  const ok = parsePage(`${LOCAL_HEAD}### local-2 · Old\n**State:** retired\n**Reason:** flavors landed\n**Check:** none\n`, "acme-app.md");
+  assert.deepEqual(ok.problems, []);
+  assert.equal(ok.rows[0].reason, "flavors landed");
+});
+
+test("#290: a hub-page row with no State: is still a problem", () => {
+  const p = parsePage("---\nid: acme-tool\nkind: tool\n---\n### acme-tool-001 · x\n**Check:** none\n", "acme-tool.md");
+  assert.ok(p.problems.some((x) => x.includes("no State")), p.problems.join("|"));
+});

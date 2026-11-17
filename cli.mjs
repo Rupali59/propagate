@@ -929,6 +929,19 @@ async function doctor({ exitProcess = true } = {}) {
     }
   }
 
+  // # Standards — offline only (no network call, no probe spawn). Findings warn; only a declaration error fails.
+  {
+    try {
+      const { checkStandards } = await import("./lib/report/doctor/standards.mjs");
+      const reporter = new Reporter();
+      await checkStandards({ reporter });
+      renderDoctorEntries(reporter.drain());
+      problems += reporter.problems;
+    } catch (err) {
+      console.log(`  ${YELLOW}!${RESET} standards  ${DIM}could not be derived: ${err.message}${RESET}`);
+    }
+  }
+
   // # Goals — arrival conditions. Surfaced HERE rather than left to whoever
   // remembers to type `propagate goals`, because a capability nobody invokes is
   // indistinguishable from one that was never built

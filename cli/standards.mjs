@@ -9,13 +9,13 @@
  * Import prefix is `../lib/…` from here (G60).
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { stateDir } from "../lib/core/paths.mjs";
-import { readSidecar } from "../lib/report/manifest.mjs";
-import { collectUnits, loadServices, MIN_UNITS } from "../lib/report/services.mjs";
+import { collectUnits, MIN_UNITS } from "../lib/report/services.mjs";
 import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/standards/adopt.mjs";
 import { loadStandards } from "../lib/standards/registry.mjs";
+import { readSidecars, serviceDetectsFor } from "../lib/standards/sidecars.mjs";
 import { buildStandardsReport } from "../lib/standards/status.mjs";
 import { readVersions, refreshVersions, writeVersions } from "../lib/standards/versions.mjs";
 
@@ -42,29 +42,6 @@ function parse(rest, valued, bools) {
     else return { error: fail("STANDARDS_USAGE", `unknown argument ${a}`, USAGE) };
   }
   return { flags };
-}
-
-/** Each workspace's `propagation/state/<project>/.sidecar.yml` `standards:` block, read leniently. */
-function readSidecars(workspaces) {
-  const out = [];
-  for (const ws of workspaces ?? []) {
-    const dir = path.join(ws.root, "propagation", "state");
-    let names = [];
-    try {
-      names = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
-    } catch {
-      continue;
-    }
-    for (const name of names) {
-      const file = path.join(dir, name, ".sidecar.yml");
-      if (!existsSync(file)) continue;
-      const { sidecar, error } = readSidecar(file);
-      const wsName = ws.name ?? path.basename(ws.root);
-      if (error) out.push({ workspace: wsName, project: name, file, error: `unreadable sidecar: ${error}` });
-      else out.push({ workspace: wsName, project: sidecar?.project ?? name, file, standards: sidecar?.standards });
-    }
-  }
-  return out;
 }
 
 async function env(inject) {
@@ -102,12 +79,7 @@ export async function standardsCmd(argv = [], inject = {}) {
   }
   const units = inject.units ?? collectUnits(workspaces, { integrations });
   const sidecars = inject.sidecars ?? readSidecars(workspaces);
-  let serviceDetects = null;
-  if (loaded.standards.some((s) => s.service && !s.detect) && integrations.servicesFile) {
-    const sv = loadServices(integrations.servicesFile);
-    if (sv.ok) serviceDetects = Object.fromEntries(sv.services.map((s) => [s.id, s.detect]));
-    else loaded.problems.push(`services.yml could not be read, so standards that reuse a service's detect read nothing: ${sv.reason}`);
-  }
+  const serviceDetects = serviceDetectsFor(loaded, integrations);
   const report = buildStandardsReport({
     standards: loaded.standards,
     units,
