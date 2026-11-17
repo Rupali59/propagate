@@ -25,7 +25,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,13 +76,16 @@ test("skills-scan degrades attributably when no search tool exists at all", () =
   assert.equal(out, "null", `with an empty PATH the scanner must be null, got ${out}`);
 });
 
-test("notify does not fall back to a hardcoded Homebrew path", () => {
+test("notify resolves a Homebrew path only when the file is there, else null", () => {
+  // #312: the Homebrew prefixes ARE probed after $PATH (launchd's PATH misses them), but a path comes back only
+  // if the binary exists in one of them. The old bug was returning a literal path without looking.
   const out = evalIn(
     `import { resolveNotifier } from "./lib/report/notify.mjs";
      console.log(JSON.stringify(resolveNotifier()));`,
     { PATH: "/nonexistent-bin-dir", PROPAGATE_NOTIFIER: "" },
   );
-  assert.equal(out, "null", `unresolvable notifier must be null, got ${out}`);
+  const present = ["/opt/homebrew/bin", "/usr/local/bin"].map((d) => `${d}/terminal-notifier`).find((p) => existsSync(p));
+  assert.equal(out, JSON.stringify(present ?? null), `expected ${present ?? "null"}, got ${out}`);
 });
 
 test("the telegram integration is configurable, not rebuilt from HOME", () => {
