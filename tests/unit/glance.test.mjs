@@ -249,6 +249,36 @@ test("T-D2 a doctor fail with the human marker is needs-you; a fail without it i
   assert.equal(plain.id, "doctor:auth:ledger-has-n-malformed-rows", "an id never carries a number from the label");
 });
 
+test("#312 a doctor fail's `what` is its detail (a sentence) when it has one, its message next, its label only last", () => {
+  const dir = healthy();
+  const fail = (extra) => ({ kind: "fail", label: "instructions.over_ceiling == 0", ...extra });
+  const doc = doctorJson({ sections: [{ name: "Metrics", entries: [
+    fail({ check_id: "a", detail: "4 directories are over the instruction budget (largest +2,631)", message: "ignored when detail exists" }),
+    fail({ check_id: "b", detail: "  ", message: "message wins over the label" }),
+    fail({ check_id: "c" }),
+  ] }] });
+  const items = computeGlance({ dir, now: NOW, doctor: doc }).glance.items.filter((i) => i.signal === "doctor");
+  const what = (id) => items.find((i) => i.id === `doctor:metrics:${id}`).what;
+  assert.equal(what("a"), "4 directories are over the instruction budget (largest +2,631)");
+  assert.equal(what("b"), "message wins over the label");
+  assert.equal(what("c"), "instructions.over_ceiling == 0", "the label is the fallback only");
+});
+
+test("#312 doctorWhat keeps only the detail's first clause (before ' \u2014 '); a detail with no separator is kept whole", () => {
+  const dir = healthy();
+  const fail = (extra) => ({ kind: "fail", label: "docs.supersedes-unresolvable-n <= 0", ...extra });
+  const doc = doctorJson({ sections: [{ name: "Metrics", entries: [
+    fail({ check_id: "a", detail: "12 supersedes: target(s) do not resolve \u2014 observed 12 \u2014 A declared `supersedes:` naming a path" }),
+    fail({ check_id: "b", detail: "no separator here, hyphen-ated - and dashes" }),
+    fail({ check_id: "c", message: "msg first clause \u2014 rationale" }),
+  ] }] });
+  const items = computeGlance({ dir, now: NOW, doctor: doc }).glance.items.filter((i) => i.signal === "doctor");
+  const what = (id) => items.find((i) => i.id === `doctor:metrics:${id}`).what;
+  assert.equal(what("a"), "12 supersedes: target(s) do not resolve");
+  assert.equal(what("b"), "no separator here, hyphen-ated - and dashes");
+  assert.equal(what("c"), "msg first clause");
+});
+
 test("parked work is needs-you, from the work queue's parked state", async () => {
   const dir = healthy();
   const { enqueue, claim, release } = await import("../../lib/work/queue.mjs");
