@@ -66,3 +66,6 @@ evals/results/
 
 # Agent worktrees (isolation: worktree) are checkouts of this repo, never content of it (#129).
 /.claude/worktrees/
+
+# Superpowers SDD ledgers are working records, never published (this repo is public).
+.superpowers/
