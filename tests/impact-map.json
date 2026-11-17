@@ -1,19 +1,19 @@
 {
  "header": {
-  "recordedAt": "2026-11-17T08:00:32.636Z",
-  "commit": "82b0ca9fb81fd382167518d6a544b2686c35e6a0",
+  "recordedAt": "2026-11-17T09:49:45.666Z",
+  "commit": "bedbcb93004baf089645e7ba66c1882e9e740d98",
   "node": "v26.13.0",
-  "tests": 330,
-  "withStaticDeps": 264,
+  "tests": 331,
+  "withStaticDeps": 265,
   "withRecordedSpawnDeps": 119,
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2200,
-  "unresolvedStaticSpecifiers": 114,
+  "recordedProcesses": 2202,
+  "unresolvedStaticSpecifiers": 115,
   "suite": {
-   "pass": 4348,
-   "fail": 0
+   "pass": 4351,
+   "fail": 1
   }
  },
  "tests": {
@@ -1882,6 +1882,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
@@ -11252,6 +11253,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
@@ -11992,6 +11994,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
@@ -12790,6 +12793,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
@@ -16864,6 +16868,20 @@
    ],
    "size": "small"
   },
+  "tests/unit/notify-launchd-env.test.mjs": {
+   "deps": [
+    "SKILL.md",
+    "lib/core/config.mjs",
+    "lib/core/discovery.mjs",
+    "lib/core/package.json",
+    "lib/core/paths.mjs",
+    "lib/core/plist.mjs",
+    "lib/package.json",
+    "package.json",
+    "tests/unit/notify-launchd-env.test.mjs"
+   ],
+   "size": "small"
+  },
   "tests/unit/owner-candidates-ownership.test.mjs": {
    "deps": [
     "lib/core/discovery.mjs",
@@ -20100,6 +20118,7 @@
     "tests/unit/monitor-run-id.test.mjs",
     "tests/unit/mount-client-settle.test.mjs",
     "tests/unit/nearest-owner.test.mjs",
+    "tests/unit/notify-launchd-env.test.mjs",
     "tests/unit/owner-candidates-ownership.test.mjs",
     "tests/unit/pathcheck-aggregate.test.mjs",
     "tests/unit/plans-lazy-import.test.mjs",
