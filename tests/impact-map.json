@@ -1,7 +1,7 @@
 {
  "header": {
-  "recordedAt": "2026-11-17T06:22:37.349Z",
-  "commit": "85ce627b89ed778b055bf0faee4b00fc71c93240",
+  "recordedAt": "2026-11-17T06:45:29.949Z",
+  "commit": "bba6e45ce0f64da69827a6a3232434bbda455241",
   "node": "v26.13.0",
   "tests": 330,
   "withStaticDeps": 264,
@@ -9,12 +9,8 @@
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2197,
-  "unresolvedStaticSpecifiers": 114,
-  "suite": {
-   "pass": 4339,
-   "fail": 0
-  }
+  "recordedProcesses": 2231,
+  "unresolvedStaticSpecifiers": 114
  },
  "tests": {
   "hooks/gotcha-guard.test.mjs": {
