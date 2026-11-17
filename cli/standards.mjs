@@ -16,7 +16,7 @@ import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../li
 import { loadStandards } from "../lib/standards/registry.mjs";
 import { readSidecars, serviceDetectsFor } from "../lib/standards/sidecars.mjs";
 import { buildStandardsReport } from "../lib/standards/status.mjs";
-import { readVersions, refreshVersions, writeVersions } from "../lib/standards/versions.mjs";
+import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/standards/versions.mjs";
 
 const USAGE = "usage: propagate standards [--json] [--std <id>] [--project <p>] | standards versions [--refresh] [--json] | standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | standards decline|remove <std> <project|workspace/project> --reason <r> [--apply]";
 
@@ -78,12 +78,13 @@ export async function standardsCmd(argv = [], inject = {}) {
   }
   const units = inject.units ?? collectUnits(workspaces, { integrations });
   const sidecars = inject.sidecars ?? readSidecars(workspaces);
+  const cachedVersions = readVersions(inject.stateDirPath ?? stateDir());
   const serviceDetects = serviceDetectsFor(loaded, integrations);
   const report = buildStandardsReport({
     standards: loaded.standards,
     units,
     sidecars,
-    versions: readVersions(inject.stateDirPath ?? stateDir()),
+    versions: cachedVersions,
     now: (inject.now ?? Date.now)(),
     minUnits: inject.minUnits ?? MIN_UNITS,
     std: p.flags["--std"] ?? null,
@@ -99,6 +100,7 @@ export async function standardsCmd(argv = [], inject = {}) {
     return code;
   }
   io.log(`# standards  (offline; ${report.units_scanned} unit(s) scanned, floor ${report.floor}; ${report.sidecars_scanned} sidecar(s) read, ${report.sidecars_unreadable.length} unreadable)`);
+  io.log(cachedVersions ? `  tool versions read ${cacheAge(cachedVersions, (inject.now ?? Date.now)()) ?? "at an unreadable time"} (standards versions --refresh)` : "  tool versions: never read (standards versions --refresh)");
   for (const u of report.sidecars_unreadable) io.log(`  unreadable sidecar ${u.file}: ${u.reason}`);
   for (const s of report.standards) {
     const c = s.counts;

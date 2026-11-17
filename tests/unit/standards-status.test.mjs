@@ -191,3 +191,18 @@ test("F14/F15: a service reference with no usable detect is a problem, never eve
   assert.equal(r.standards[0].detected.length, 0);
   assert.ok(r.problems.some((p) => /acme-glob/.test(p) && /ghost/.test(p)));
 });
+
+test("refreshVersions: a capture that is not a version (\"is\") is recorded as null with the error, never stored", () => {
+  const v = refreshVersions({ probes: { f: { cmd: "f", parse: "Flutter (\\S+)" } }, run: () => "Flutter is not on the path", now: () => "2026-11-15T10:00:00Z" });
+  assert.equal(v.tools.f.version, null);
+  assert.equal(v.tools.f.error, "probe output did not contain a version: is");
+});
+
+test("a cached non-version value is treated as not read, and the cache age is derived", async () => {
+  const { usableVersion, cacheAge } = await import("../../lib/standards/versions.mjs");
+  const cache = { at: "2026-11-15T07:00:00Z", tools: { flutter: { version: "is", at: "x" }, ok: { version: "3.1.0", at: "x" } } };
+  assert.equal(usableVersion(cache, "flutter"), null);
+  assert.equal(usableVersion(cache, "ok"), "3.1.0");
+  assert.equal(cacheAge(cache, Date.parse("2026-11-15T10:00:00Z")), "3h ago");
+  assert.equal(cacheAge(null), null);
+});

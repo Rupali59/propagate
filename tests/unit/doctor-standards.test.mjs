@@ -190,3 +190,10 @@ test("DETECTED-NOT-ADOPTED: a project name shared by two workspaces is listed as
   assert.match(w.detail, /(^|[ ,])p1([ ,]|$)/, "a unique name stays bare");
   assert.match(w.detail, /propagate standards adopt acme-tool <workspace>\/<project>/);
 });
+
+test("the cache age is shown, and a cached non-version value reads as not read", async () => {
+  const fx = fixture({ rows: ROWS.ok(1), versions: "is" });
+  const r = await run({ ...fx, now: Date.parse("2026-11-15T03:00:00Z") });
+  assert.ok(find(r, "info", /versions read 3h ago/));
+  assert.ok(find(r, "info", /version not read/), "\"is\" is not a version");
+});
