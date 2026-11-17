@@ -1,18 +1,18 @@
 {
  "header": {
-  "recordedAt": "2026-11-17T05:35:35.037Z",
-  "commit": "17ce34ca08ff204c2eb02ed6425311e231de2252",
+  "recordedAt": "2026-11-17T05:49:03.038Z",
+  "commit": "424eb8e98e3e6d4b102c3cd5a5d40f433fac60a7",
   "node": "v26.13.0",
-  "tests": 329,
-  "withStaticDeps": 263,
+  "tests": 330,
+  "withStaticDeps": 264,
   "withRecordedSpawnDeps": 119,
   "partial": 4,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2199,
+  "recordedProcesses": 2200,
   "unresolvedStaticSpecifiers": 114,
   "suite": {
-   "pass": 4331,
+   "pass": 4334,
    "fail": 1
   }
  },
@@ -1675,6 +1675,7 @@
     "tests/cli/help.test.mjs",
     "tests/cli/init-reload.test.mjs",
     "tests/cli/inventory.test.mjs",
+    "tests/cli/manifest-roots.test.mjs",
     "tests/cli/manifest.test.mjs",
     "tests/cli/monitor-trackers.test.mjs",
     "tests/cli/monitor.test.mjs",
@@ -4272,6 +4273,20 @@
     "lib/skills/skills-scan.mjs",
     "package.json",
     "tests/cli/inventory.test.mjs"
+   ],
+   "size": "small"
+  },
+  "tests/cli/manifest-roots.test.mjs": {
+   "deps": [
+    "SKILL.md",
+    "lib/core/config.mjs",
+    "lib/core/discovery.mjs",
+    "lib/core/package.json",
+    "lib/core/paths.mjs",
+    "lib/package.json",
+    "lib/report/manifest.mjs",
+    "package.json",
+    "tests/cli/manifest-roots.test.mjs"
    ],
    "size": "small"
   },
@@ -11031,6 +11046,7 @@
     "tests/cli/help.test.mjs",
     "tests/cli/init-reload.test.mjs",
     "tests/cli/inventory.test.mjs",
+    "tests/cli/manifest-roots.test.mjs",
     "tests/cli/manifest.test.mjs",
     "tests/cli/monitor-trackers.test.mjs",
     "tests/cli/monitor.test.mjs",
@@ -11771,6 +11787,7 @@
     "tests/cli/help.test.mjs",
     "tests/cli/init-reload.test.mjs",
     "tests/cli/inventory.test.mjs",
+    "tests/cli/manifest-roots.test.mjs",
     "tests/cli/manifest.test.mjs",
     "tests/cli/monitor-trackers.test.mjs",
     "tests/cli/monitor.test.mjs",
@@ -12568,6 +12585,7 @@
     "tests/cli/help.test.mjs",
     "tests/cli/init-reload.test.mjs",
     "tests/cli/inventory.test.mjs",
+    "tests/cli/manifest-roots.test.mjs",
     "tests/cli/manifest.test.mjs",
     "tests/cli/monitor-trackers.test.mjs",
     "tests/cli/monitor.test.mjs",
@@ -19818,6 +19836,7 @@
     "tests/cli/help.test.mjs",
     "tests/cli/init-reload.test.mjs",
     "tests/cli/inventory.test.mjs",
+    "tests/cli/manifest-roots.test.mjs",
     "tests/cli/manifest.test.mjs",
     "tests/cli/monitor-trackers.test.mjs",
     "tests/cli/monitor.test.mjs",
