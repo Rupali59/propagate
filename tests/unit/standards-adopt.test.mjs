@@ -244,3 +244,67 @@ test("a reviews: list beside adopted is read, and survives an adopt --apply (Tas
   assert.equal(doc.standards.reviews[0].row, "acme-tool-002");
   assert.equal(doc.standards.adopted.length, 1);
 });
+
+/** Two workspaces that each hold a project called `shared`, each with its own acme.yaml unit and its own sidecar. */
+function twoWorkspaces() {
+  const f = fixture();
+  const rootB = path.join(f.dir, "wsb");
+  const sidecars = [f.sidecarFile];
+  const add = (root, name, dirName, project) => {
+    const sdir = path.join(root, "propagation", "state", dirName);
+    mkdirSync(sdir, { recursive: true });
+    const file = path.join(sdir, ".sidecar.yml");
+    writeFileSync(file, `project: ${project}\nrepo_root: /nowhere/${name}\n`);
+    sidecars.push(file);
+  };
+  add(f.workspaces[0].root, "acme-ws", "shared", "shared");
+  add(rootB, "ws-b", "shared", "shared");
+  // a sidecar whose directory name differs from its project: field
+  add(rootB, "ws-b", "dirname-differs", "renamed");
+  for (const [ws, rel] of [["acme-ws", "shared-unit"], ["ws-b", "b-unit"], ["ws-b", "r-unit"]]) {
+    const abs = path.join(f.dir, rel);
+    mkdirSync(abs);
+    writeFileSync(path.join(abs, "acme.yaml"), "x: 1\n");
+    f.units.push({ workspace: ws, project: rel === "r-unit" ? "renamed" : "shared", rel, abs });
+  }
+  f.workspaces.push({ name: "ws-b", root: rootB });
+  f.allSidecars = sidecars;
+  return f;
+}
+const snapshot = (f) => f.allSidecars.map((x) => readFileSync(x, "utf8")).join("\n--\n");
+
+test("an ambiguous bare project name is refused with exit 2 and writes no sidecar at all", async () => {
+  const f = twoWorkspaces();
+  const before = snapshot(f);
+  for (const argv of [["adopt", "acme-tool", "shared"], ["adopt", "acme-tool", "shared", "--apply"], ["decline", "acme-tool", "shared", "--reason", "r"], ["remove", "acme-tool", "shared", "--reason", "r"]]) {
+    const r = await run(argv, f);
+    assert.equal(r.code, 2, argv.join(" "));
+    assert.match(r.err, /STANDARDS_PROJECT_AMBIGUOUS/);
+    assert.match(r.err, /acme-ws\/shared/);
+    assert.match(r.err, /ws-b\/shared/);
+    assert.equal(snapshot(f), before, `${argv.join(" ")} must write no sidecar`);
+  }
+});
+
+test("a qualified <workspace>/<project> targets that workspace's sidecar and its units only", async () => {
+  const f = twoWorkspaces();
+  const r = await run(["adopt", "acme-tool", "ws-b/shared", "--apply"], f);
+  assert.equal(r.code, 0, r.err);
+  const bFile = f.allSidecars[2];
+  const doc = yaml.parse(readFileSync(bFile, "utf8"));
+  assert.deepEqual(doc.standards.adopted[0].units, ["b-unit"], "units come from ws-b only, not acme-ws/shared-unit");
+  assert.equal(doc.standards.adopted[0].standard, "acme-tool");
+  assert.equal(yaml.parse(readFileSync(f.allSidecars[1], "utf8")).standards, undefined, "the other workspace's `shared` sidecar is untouched");
+  assert.equal(readFileSync(f.sidecarFile, "utf8"), SIDECAR);
+});
+
+test("a project resolves by the sidecar's `project:` field, not by its directory name", async () => {
+  const f = twoWorkspaces();
+  const r = await run(["adopt", "acme-tool", "renamed", "--apply"], f);
+  assert.equal(r.code, 0, r.err);
+  const doc = yaml.parse(readFileSync(f.allSidecars[3], "utf8"));
+  assert.deepEqual(doc.standards.adopted[0].units, ["r-unit"]);
+  const r2 = await run(["adopt", "acme-tool", "dirname-differs"], f);
+  assert.equal(r2.code, 2);
+  assert.match(r2.err, /STANDARDS_PROJECT_UNKNOWN/);
+});

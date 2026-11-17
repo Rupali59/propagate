@@ -9,7 +9,6 @@
  * Import prefix is `../lib/…` from here (G60).
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { stateDir } from "../lib/core/paths.mjs";
 import { collectUnits, MIN_UNITS } from "../lib/report/services.mjs";
@@ -19,7 +18,7 @@ import { readSidecars, serviceDetectsFor } from "../lib/standards/sidecars.mjs";
 import { buildStandardsReport } from "../lib/standards/status.mjs";
 import { readVersions, refreshVersions, writeVersions } from "../lib/standards/versions.mjs";
 
-const USAGE = "usage: propagate standards [--json] [--std <id>] [--project <p>] | standards versions [--refresh] [--json] | standards adopt <std> <project> [--units a,b] [--evidence <text>] [--apply] | standards decline|remove <std> <project> --reason <r> [--apply]";
+const USAGE = "usage: propagate standards [--json] [--std <id>] [--project <p>] | standards versions [--refresh] [--json] | standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | standards decline|remove <std> <project|workspace/project> --reason <r> [--apply]";
 
 const fail = (code, what, next) => ({ ok: false, code, what, next });
 
@@ -154,11 +153,21 @@ function ghLogin() {
   }
 }
 
-/** The sidecar of `project`, found under the discovered workspace roots, never built from a name alone. */
-function findSidecar(workspaces, project) {
+/**
+ * The sidecar of `<project>` or `<workspace>/<project>`, resolved the way `readSidecars` keys a project: by the
+ * sidecar's `project:` field, inside one workspace. A bare name several workspaces share is ambiguous, never
+ * first-match-wins (a write to the wrong repo).
+ * @returns {{file:string, workspace:string, project:string}|{ambiguous:string[]}|{expected:string[]}}
+ */
+function findSidecar(workspaces, arg, sidecars) {
+  const cut = arg.lastIndexOf("/");
+  const wsName = cut > 0 ? arg.slice(0, cut) : null;
+  const project = cut > 0 ? arg.slice(cut + 1) : arg;
+  const hits = sidecars.filter((s) => s.project === project && (wsName === null || s.workspace === wsName));
+  if (hits.length === 1) return { file: hits[0].file, workspace: hits[0].workspace, project };
+  if (hits.length > 1) return { ambiguous: hits.map((h) => `${h.workspace}/${h.project}`).sort() };
   const expected = (workspaces ?? []).map((w) => path.join(w.root, "propagation", "state", project, ".sidecar.yml"));
-  const hit = expected.find((f) => existsSync(f));
-  return hit ? { file: hit } : { expected: expected.length ? expected : [`<workspace root>/propagation/state/${project}/.sidecar.yml`] };
+  return { expected: expected.length ? expected : [`<workspace root>/propagation/state/<dir>/.sidecar.yml naming project: ${project}`] };
 }
 
 /** `standards adopt|decline|remove <std> <project>`. Dry run unless --apply. */
@@ -178,15 +187,18 @@ async function adoptionCmd(argv, inject, io, asJson) {
   if (p.error) return emitFailure(p.error, asJson, io);
   const f = p.flags;
   if (pos.length !== 2) return emitFailure(fail("STANDARDS_USAGE", `${verb} needs <std> <project>`, USAGE), asJson, io);
-  const [stdId, project] = pos;
-  if (verb !== "adopt" && !(f["--reason"] ?? "").trim()) return emitFailure(fail("STANDARDS_USAGE", `${verb} needs --reason`, `propagate standards ${verb} ${stdId} ${project} --reason "<why>"`), asJson, io);
+  const [stdId, projectArg] = pos;
+  if (verb !== "adopt" && !(f["--reason"] ?? "").trim()) return emitFailure(fail("STANDARDS_USAGE", `${verb} needs --reason`, `propagate standards ${verb} ${stdId} ${projectArg} --reason "<why>"`), asJson, io);
   const { integrations, workspaces } = await env(inject);
   const loaded = loadOrFail(integrations);
   if (!loaded.ok) return emitFailure(loaded, asJson, io);
   const std = loaded.standards.find((s) => s.id === stdId);
   if (!std) return emitFailure(fail("STANDARDS_UNKNOWN", `no standard named ${JSON.stringify(stdId)} (known: ${loaded.standards.map((s) => s.id).join(", ")})`, "propagate standards"), asJson, io);
-  const sc = findSidecar(workspaces, project);
-  if (!sc.file) return emitFailure(fail("STANDARDS_PROJECT_UNKNOWN", `no sidecar for project ${JSON.stringify(project)}; expected ${sc.expected.join(" or ")}`, "create the project's state folder (see rule:state-and-decisions) or check the project name"), asJson, io);
+  const allSidecars = readSidecars(workspaces);
+  const sc = findSidecar(workspaces, projectArg, allSidecars);
+  if (sc.ambiguous) return emitFailure(fail("STANDARDS_PROJECT_AMBIGUOUS", `${JSON.stringify(projectArg)} names a project in ${sc.ambiguous.length} workspaces: ${sc.ambiguous.join(", ")}`, `propagate standards ${verb} ${stdId} <workspace>/<project>  (one of the above)`), asJson, io);
+  const project = sc.project ?? projectArg;
+  if (!sc.file) return emitFailure(fail("STANDARDS_PROJECT_UNKNOWN", `no sidecar for project ${JSON.stringify(projectArg)}; looked for ${sc.expected.join(" or ")}`, "create the project's state folder (see rule:state-and-decisions) or check the project name"), asJson, io);
   const cur = readAdoptions(sc.file);
   if (cur.error) return emitFailure(fail("STANDARDS_UNREADABLE", cur.error, "fix the `standards:` block named above"), asJson, io);
   const isAdopted = cur.adopted.some((a) => a?.standard === stdId);
@@ -201,7 +213,7 @@ async function adoptionCmd(argv, inject, io, asJson) {
   });
   if (!report.ok) return emitFailure(fail("STANDARDS_BLIND", report.blind ?? "scan failed", "check PROPAGATE_WORKSPACES and the workspace roots, then re-run"), asJson, io);
   const rep = report.standards[0];
-  const mine = rep.projects.find((pr) => pr.project === project);
+  const mine = rep.projects.find((pr) => pr.project === project && pr.workspace === sc.workspace);
   const detectedUnits = (mine?.units ?? []).map((u) => u.unit);
   const vers = [...new Set((mine?.units ?? []).map((u) => u.version).filter(Boolean))];
   const key = std.page?.versionProbe ?? std.id;
