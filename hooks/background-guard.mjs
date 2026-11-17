@@ -43,7 +43,9 @@ import { stateDir as defaultStateDir } from "../lib/core/paths.mjs";
 export const TIMEOUT_MS = 120000;
 
 const START = String.raw`^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*`; // optional VAR=x prefixes
-const PROPAGATE = String.raw`(?:propagate|node\s+\S*cli\.mjs)\s+`;
+// propagate#300: `propagate` by any path whose basename is exactly `propagate` (`/abs/bin/propagate`, `./bin/propagate`).
+// The basename must end at whitespace, so `/x/propagate-notes.sh` is not matched.
+const PROPAGATE = String.raw`(?:(?:\S*/)?propagate\s+|node\s+\S*cli\.mjs\s+)`;
 const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**

@@ -123,6 +123,26 @@ const ALLOW = [
   [{}, "empty payload"],
 ];
 
+// propagate#300: propagate invoked by a path (any directory whose basename is exactly `propagate`) is the same command.
+test("path-invoked propagate doctor (/abs/bin/propagate) is denied in the foreground in the main session", async () => {
+  const d = await decide(main("/abs/bin/propagate doctor"));
+  assert.equal(d.deny, true, "a path-invoked doctor must be denied, not run unflagged");
+  assert.match(d.reason, /doctor/);
+  assert.equal((await decide(main("/abs/bin/propagate doctor", { run_in_background: true }))).deny, false, "backgrounded must pass");
+});
+
+test("path-invoked propagate backlog (./bin/propagate) is denied in the foreground (status is not heavy, so backlog stands in)", async () => {
+  const d = await decide(main("./bin/propagate backlog"));
+  assert.equal(d.deny, true, "a relative-path network command must be denied");
+  assert.match(d.reason, /backlog/);
+  assert.equal((await decide(main("./bin/propagate backlog", { run_in_background: true }))).deny, false, "backgrounded must pass");
+});
+
+test("a path whose basename is not exactly propagate is not propagate (/x/propagate-notes.sh doctor)", async () => {
+  assert.deepEqual(await decide(main("/x/propagate-notes.sh doctor")), { deny: false });
+  assert.deepEqual(await decide(main("./propagate.bak doctor")), { deny: false });
+});
+
 for (const [input, why] of DENY) {
   test(`denies: ${input.agent_id ? "[subagent] " : ""}${input.tool_input.command} ${JSON.stringify({ ...input.tool_input, command: undefined })}`, async () => {
     const d = await decide(input);
