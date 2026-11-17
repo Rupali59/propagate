@@ -175,3 +175,18 @@ test("KEY NEGATIVE: 'version not read' alone leaves the problem count at 0 (desi
   assert.equal(r.entriesOfKind("inconclusive").length, 0);
   assert.ok(find(r, "info", /version not read/));
 });
+
+test("DETECTED-NOT-ADOPTED: a project name shared by two workspaces is listed as <workspace>/<project>, and the command uses it", async () => {
+  const fx = fixture({ versions: "1.2.0" });
+  // a second workspace with its own project called p0, also carrying acme.yaml
+  const abs = path.join(path.dirname(fx.stateDir), "units", "b0");
+  mkdirSync(abs, { recursive: true });
+  writeFileSync(path.join(abs, "acme.yaml"), "x: 1\n");
+  fx.units.push({ workspace: "ws-b", project: "p0", rel: "b0", abs });
+  const w = find(await run(fx), "warn", /DETECTED-NOT-ADOPTED/);
+  assert.ok(w);
+  assert.match(w.detail, /acme-ws\/p0/);
+  assert.match(w.detail, /ws-b\/p0/);
+  assert.match(w.detail, /(^|[ ,])p1([ ,]|$)/, "a unique name stays bare");
+  assert.match(w.detail, /propagate standards adopt acme-tool <workspace>\/<project>/);
+});
