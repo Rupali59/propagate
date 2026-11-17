@@ -200,7 +200,7 @@ async function adoptionCmd(argv, inject, io, asJson) {
   const sc = findSidecar(workspaces, projectArg, allSidecars);
   if (sc.ambiguous) return emitFailure(fail("STANDARDS_PROJECT_AMBIGUOUS", `${JSON.stringify(projectArg)} names a project in ${sc.ambiguous.length} workspaces: ${sc.ambiguous.join(", ")}`, `propagate standards ${verb} ${stdId} <workspace>/<project>  (one of the above)`), asJson, io);
   const project = sc.project ?? projectArg;
-  if (!sc.file) return emitFailure(fail("STANDARDS_PROJECT_UNKNOWN", `no sidecar for project ${JSON.stringify(projectArg)}; looked for ${sc.expected.join(" or ")}`, "create the project's state folder (see rule:state-and-decisions) or check the project name"), asJson, io);
+  if (!sc.file) return emitFailure(fail("STANDARDS_PROJECT_UNKNOWN", `no sidecar for project ${JSON.stringify(projectArg)}; looked for ${sc.expected.slice(0, 3).join(" or ")}${sc.expected.length > 3 ? ` (and ${sc.expected.length - 3} more workspace roots)` : ""}`, "create the project's state folder (see rule:state-and-decisions) or check the project name"), asJson, io);
   const cur = readAdoptions(sc.file);
   if (cur.error) return emitFailure(fail("STANDARDS_UNREADABLE", cur.error, "fix the `standards:` block named above"), asJson, io);
   const isAdopted = cur.adopted.some((a) => a?.standard === stdId);
