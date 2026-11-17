@@ -65,6 +65,41 @@ test("a typo glob that matches nothing FAILS and says it matches 0 files", () =>
   } finally { f.cleanup(); }
 });
 
+test("a glob naming a SKIP directory (.vercel) that exists is not reported dead", () => {
+  const f = fixture();
+  try {
+    f.filler(6);
+    f.file("proj/.vercel/project.json");
+    f.rule("scoped.md", 'paths:\n  - "**/.vercel/**"');
+    const r = f.run();
+    assert.equal(r.status, "pass", r.reason);
+    assert.deepEqual(r.findings, []);
+  } finally { f.cleanup(); }
+});
+
+test("a glob naming a SKIP directory that does not exist is unmeasured, never 'matches 0 files'", () => {
+  const f = fixture();
+  try {
+    f.filler(6);
+    f.rule("scoped.md", 'paths:\n  - "**/.vercel/**"');
+    const r = f.run();
+    assert.deepEqual(r.findings, []);
+    assert.ok(r.notes.some((n) => /unmeasured \(glob names a skipped directory: \.vercel\)/.test(n)), r.notes.join("|"));
+  } finally { f.cleanup(); }
+});
+
+test("a glob for a nonexistent ordinary path still FAILS", () => {
+  const f = fixture();
+  try {
+    f.filler(6);
+    f.file("proj/.vercel/project.json");
+    f.rule("scoped.md", 'paths:\n  - "**/nonexistent/**"');
+    const r = f.run();
+    assert.equal(r.status, "fail");
+    assert.match(r.findings[0].problem, /matches 0 files/);
+  } finally { f.cleanup(); }
+});
+
 test("a glob whose only matches are Read-denied FAILS as a dead glob", () => {
   const f = fixture();
   try {
