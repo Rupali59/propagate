@@ -132,6 +132,9 @@ test("migration equality — all 36 pre-existing config.mjs exports are byte-ide
       accessFile: null,
       servicesFile: null,
       servicesDir: null,
+      kbStandardsFile: null,
+      kbStandardsDir: null,
+      kbReferencesFile: null,
       standardsFile: null,
       standardsDir: null,
       instructionBudgetFile: null,
@@ -172,6 +175,8 @@ test("migration equality — all 36 pre-existing config.mjs exports are byte-ide
       // `planSurfaceGate` added 2026-11-16 (#297): the plan-goal Surface gate's off switch, a function so it reads
       // the state dir's approvals log at call time.
       "planSurfaceGate",
+      // `LEGACY_CONFIG_USED` added 2026-11-18 (#322): the renamed config keys that still supplied a value.
+      "LEGACY_CONFIG_USED",
     ]);
     const actualKeys = new Set(Object.keys(after).filter((k) => k !== "searchRootsExplain()"));
     const unexpected = [...actualKeys].filter((k) => !PREEXISTING.has(k) && !NEW.has(k));

@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { compareVersions, rowStatus, buildStandardsReport, NO_VERSION_REASON } from "../../lib/standards/status.mjs";
-import { readVersions, refreshVersions, writeVersions } from "../../lib/standards/versions.mjs";
-import { loadRegistry, loadStandards } from "../../lib/standards/registry.mjs";
+import { compareVersions, rowStatus, buildStandardsReport, NO_VERSION_REASON } from "../../lib/kb/standards/status.mjs";
+import { readVersions, refreshVersions, writeVersions } from "../../lib/kb/standards/versions.mjs";
+import { loadRegistry, loadStandards } from "../../lib/kb/standards/registry.mjs";
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), "std-status-"));
 
@@ -49,8 +49,8 @@ test("with no versions cache every tool row is unverifiable with the stated reas
   assert.equal(r.ok, true);
   const s = r.standards[0];
   assert.deepEqual(s.rows.map((x) => x.status), ["unverifiable", "unchecked"]);
-  assert.equal(s.rows[0].reason, "version not read (standards versions --refresh)");
-  assert.equal(NO_VERSION_REASON, "version not read (standards versions --refresh)");
+  assert.equal(s.rows[0].reason, "version not read (kb standards versions --refresh)");
+  assert.equal(NO_VERSION_REASON, "version not read (kb standards versions --refresh)");
   assert.equal(s.detected.length, 2);
   assert.deepEqual(s.counts, { verified: 0, "re-verify": 0, unverifiable: 1, unchecked: 1 });
 });
@@ -199,7 +199,7 @@ test("refreshVersions: a capture that is not a version (\"is\") is recorded as n
 });
 
 test("a cached non-version value is treated as not read, and the cache age is derived", async () => {
-  const { usableVersion, cacheAge } = await import("../../lib/standards/versions.mjs");
+  const { usableVersion, cacheAge } = await import("../../lib/kb/standards/versions.mjs");
   const cache = { at: "2026-11-15T07:00:00Z", tools: { flutter: { version: "is", at: "x" }, ok: { version: "3.1.0", at: "x" } } };
   assert.equal(usableVersion(cache, "flutter"), null);
   assert.equal(usableVersion(cache, "ok"), "3.1.0");

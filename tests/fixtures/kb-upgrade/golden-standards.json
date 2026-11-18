@@ -1,0 +1,71 @@
+{
+  "ok": true,
+  "standards": [
+    {
+      "id": "example-tool",
+      "kind": "tool",
+      "versionSource": "none",
+      "rows": [
+        {
+          "id": "example-tool-001",
+          "title": "Cap waits",
+          "status": "unverifiable",
+          "reason": "version not read (standards versions --refresh)"
+        }
+      ],
+      "projects": [
+        {
+          "workspace": "ws",
+          "project": "p00",
+          "units": [
+            {
+              "unit": "p00",
+              "version": null,
+              "source": null
+            }
+          ],
+          "rows": [
+            {
+              "id": "example-tool-001",
+              "title": "Cap waits",
+              "status": "unverifiable",
+              "reason": "version not read (standards versions --refresh)"
+            }
+          ]
+        }
+      ],
+      "projectCounts": {
+        "verified": 0,
+        "re-verify": 0,
+        "unverifiable": 1,
+        "unchecked": 0
+      },
+      "detected": [
+        "ws/p00"
+      ],
+      "adopted": [
+        {
+          "workspace": "ws",
+          "project": "p00",
+          "standard": "example-tool",
+          "units": [
+            "p00"
+          ],
+          "verified_on": "example-tool 1.0.0",
+          "since": "2026-11-01"
+        }
+      ],
+      "counts": {
+        "verified": 0,
+        "re-verify": 0,
+        "unverifiable": 1,
+        "unchecked": 0
+      }
+    }
+  ],
+  "problems": [],
+  "units_scanned": 12,
+  "floor": 10,
+  "sidecars_scanned": 12,
+  "sidecars_unreadable": []
+}

@@ -929,10 +929,10 @@ async function doctor({ exitProcess = true } = {}) {
     }
   }
 
-  // # Standards — offline only (no network call, no probe spawn). Findings warn; only a declaration error fails.
+  // # Knowledge base — offline only (no network call, no probe spawn). Findings warn; only a declaration error fails.
   // A throw is an inconclusive entry (counted), never a silent yellow line: could-not-run is not no-problem.
   {
-    const { runStandardsSection } = await import("./lib/report/doctor/standards.mjs");
+    const { runStandardsSection } = await import("./lib/report/doctor/kb.mjs");
     const reporter = new Reporter();
     await runStandardsSection({ reporter });
     renderDoctorEntries(reporter.drain());
@@ -5989,8 +5989,11 @@ if (_invokedDirectly) {
   } else if (mode === "goals") {
     const { goalsCmd } = await import("./cli/goals.mjs");
     process.exitCode = await goalsCmd(process.argv.slice(3));
+  } else if (mode === "kb") {
+    const { kbCmd } = await import("./cli/kb.mjs");
+    process.exitCode = await kbCmd(process.argv.slice(3));
   } else if (mode === "standards") {
-    const { standardsCmd } = await import("./cli/standards.mjs");
+    const { standardsCmd } = await import("./cli/kb.mjs");
     process.exitCode = await standardsCmd(process.argv.slice(3));
   } else if (mode === "services") {
     const { servicesCmd } = await import("./cli/services.mjs");

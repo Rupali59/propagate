@@ -4,8 +4,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import yaml from "yaml";
-import { standardsCmd } from "../../cli/standards.mjs";
-import { readAdoptions } from "../../lib/standards/adopt.mjs";
+import { standardsCmd } from "../../cli/kb.mjs";
+import { readAdoptions } from "../../lib/kb/standards/adopt.mjs";
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), "std-adopt-"));
 
@@ -64,7 +64,7 @@ version_probe: acme-tool
     units,
     sidecarFile,
     workspaces: [{ name: "acme-ws", root }],
-    integrations: { standardsFile: path.join(dir, "standards.yml"), standardsDir: dir, servicesFile: null },
+    integrations: { kbStandardsFile: path.join(dir, "standards.yml"), kbStandardsDir: dir, servicesFile: null },
   };
 }
 
@@ -91,15 +91,15 @@ test("adopt dry run leaves the sidecar bytes identical and prints the rows and t
   assert.match(r.out, /u0/);
 });
 
-test("adopt --apply writes standards.adopted[0] and leaves credentials: byte for byte", async () => {
+test("adopt --apply writes kb.adopted[0] and leaves credentials: byte for byte", async () => {
   const f = fixture();
   const r = await run(["adopt", "acme-tool", "p0", "--evidence", "t:waits exit 0", "--apply"], f);
   assert.equal(r.code, 0, r.err);
   const after = bytes(f);
   assert.ok(after.startsWith(SIDECAR), "every original byte is kept, unchanged and in place");
   const doc = yaml.parse(after);
-  assert.equal(doc.standards.adopted.length, 1);
-  const a = doc.standards.adopted[0];
+  assert.equal(doc.kb.adopted.length, 1);
+  const a = doc.kb.adopted[0];
   assert.equal(a.standard, "acme-tool");
   assert.deepEqual(a.units, ["u0"]);
   assert.equal(String(a.since), "2026-11-16");
@@ -112,7 +112,7 @@ test("adopt --apply writes standards.adopted[0] and leaves credentials: byte for
 test("adopting again is idempotent: one entry, refreshed verified_on, other keys untouched", async () => {
   const f = fixture();
   await run(["adopt", "acme-tool", "p0", "--apply"], f);
-  const first = yaml.parse(bytes(f)).standards.adopted[0];
+  const first = yaml.parse(bytes(f)).kb.adopted[0];
   const later = Date.parse("2026-12-01T10:00:00Z");
   const stateDirPath = tmp();
   mkdirSync(path.join(stateDirPath, "standards"));
@@ -120,11 +120,11 @@ test("adopting again is idempotent: one entry, refreshed verified_on, other keys
   const r = await run(["adopt", "acme-tool", "p0", "--apply"], f, { now: () => later, by: "someone-else", stateDirPath });
   assert.equal(r.code, 0, r.err);
   const doc = yaml.parse(bytes(f));
-  assert.equal(doc.standards.adopted.length, 1);
-  assert.equal(String(doc.standards.adopted[0].since), String(first.since), "since is the first adoption");
-  assert.equal(doc.standards.adopted[0].by, first.by, "by is the first adopter");
-  assert.notEqual(doc.standards.adopted[0].verified_on, first.verified_on, "verified_on is refreshed");
-  assert.equal(doc.standards.adopted[0].verified_on, "acme-tool 1.3.0");
+  assert.equal(doc.kb.adopted.length, 1);
+  assert.equal(String(doc.kb.adopted[0].since), String(first.since), "since is the first adoption");
+  assert.equal(doc.kb.adopted[0].by, first.by, "by is the first adopter");
+  assert.notEqual(doc.kb.adopted[0].verified_on, first.verified_on, "verified_on is refreshed");
+  assert.equal(doc.kb.adopted[0].verified_on, "acme-tool 1.3.0");
   assert.ok(bytes(f).startsWith(SIDECAR));
   assert.match(r.out, /refresh/);
 });
@@ -132,7 +132,7 @@ test("adopting again is idempotent: one entry, refreshed verified_on, other keys
 test("--units overrides the detected units", async () => {
   const f = fixture();
   await run(["adopt", "acme-tool", "p0", "--units", "u0,u5", "--apply"], f);
-  assert.deepEqual(yaml.parse(bytes(f)).standards.adopted[0].units, ["u0", "u5"]);
+  assert.deepEqual(yaml.parse(bytes(f)).kb.adopted[0].units, ["u0", "u5"]);
 });
 
 test("adopt --apply with no gh identity is exit 2 STANDARDS_IDENTITY_UNKNOWN and writes nothing", async () => {
@@ -224,8 +224,8 @@ test("only the standards: block is rewritten: keys before and after it keep thei
   assert.ok(after.startsWith(SIDECAR));
   assert.ok(after.endsWith(tail), after);
   const doc = yaml.parse(after);
-  assert.equal(doc.standards.adopted[0].standard, "acme-tool");
-  assert.equal(doc.standards.local_page, "docs/x.md");
+  assert.equal(doc.kb.adopted[0].standard, "acme-tool");
+  assert.equal(doc.kb.local_page, "docs/x.md");
 });
 
 test("decline of an adopted standard, and remove of one never adopted, are exit 2", async () => {
@@ -241,8 +241,8 @@ test("a reviews: list beside adopted is read, and survives an adopt --apply (Tas
   assert.equal(readAdoptions(f.sidecarFile).reviews[0].row, "acme-tool-002");
   await run(["adopt", "acme-tool", "p0", "--apply"], f);
   const doc = yaml.parse(bytes(f));
-  assert.equal(doc.standards.reviews[0].row, "acme-tool-002");
-  assert.equal(doc.standards.adopted.length, 1);
+  assert.equal(doc.kb.reviews[0].row, "acme-tool-002");
+  assert.equal(doc.kb.adopted.length, 1);
 });
 
 /** Two workspaces that each hold a project called `shared`, each with its own acme.yaml unit and its own sidecar. */
@@ -292,9 +292,9 @@ test("a qualified <workspace>/<project> targets that workspace's sidecar and its
   assert.equal(r.code, 0, r.err);
   const bFile = f.allSidecars[2];
   const doc = yaml.parse(readFileSync(bFile, "utf8"));
-  assert.deepEqual(doc.standards.adopted[0].units, ["b-unit"], "units come from ws-b only, not acme-ws/shared-unit");
-  assert.equal(doc.standards.adopted[0].standard, "acme-tool");
-  assert.equal(yaml.parse(readFileSync(f.allSidecars[1], "utf8")).standards, undefined, "the other workspace's `shared` sidecar is untouched");
+  assert.deepEqual(doc.kb.adopted[0].units, ["b-unit"], "units come from ws-b only, not acme-ws/shared-unit");
+  assert.equal(doc.kb.adopted[0].standard, "acme-tool");
+  assert.equal(yaml.parse(readFileSync(f.allSidecars[1], "utf8")).kb, undefined, "the other workspace's `shared` sidecar is untouched");
   assert.equal(readFileSync(f.sidecarFile, "utf8"), SIDECAR);
 });
 
@@ -303,8 +303,30 @@ test("a project resolves by the sidecar's `project:` field, not by its directory
   const r = await run(["adopt", "acme-tool", "renamed", "--apply"], f);
   assert.equal(r.code, 0, r.err);
   const doc = yaml.parse(readFileSync(f.allSidecars[3], "utf8"));
-  assert.deepEqual(doc.standards.adopted[0].units, ["r-unit"]);
+  assert.deepEqual(doc.kb.adopted[0].units, ["r-unit"]);
   const r2 = await run(["adopt", "acme-tool", "dirname-differs"], f);
   assert.equal(r2.code, 2);
   assert.match(r2.err, /STANDARDS_PROJECT_UNKNOWN/);
+});
+
+test("adopt --apply into a legacy standards: sidecar leaves only kb:, and every other line byte-identical", async () => {
+  const tail = "after_key:   {a: 1,   b: 2}   # trailing\n";
+  const f = fixture({ sidecar: `${SIDECAR}standards:\n  adopted: []\n${tail}` });
+  const r = await run(["adopt", "acme-tool", "p0", "--apply"], f);
+  assert.equal(r.code, 0, r.err);
+  const after = bytes(f);
+  assert.ok(after.startsWith(SIDECAR));
+  assert.ok(after.endsWith(tail), after);
+  const doc = yaml.parse(after);
+  assert.equal(doc.standards, undefined);
+  assert.equal(doc.kb.adopted[0].standard, "acme-tool");
+});
+
+test("adopt on a sidecar carrying both keys is refused with the both-keys message and writes nothing", async () => {
+  const f = fixture({ sidecar: `${SIDECAR}kb:\n  adopted: []\nstandards:\n  adopted: []\n` });
+  const before = bytes(f);
+  const r = await run(["adopt", "acme-tool", "p0", "--apply"], f);
+  assert.equal(r.code, 2);
+  assert.ok(r.err.includes(`${f.sidecarFile}: both kb: and standards: are present; keep one (kb migrate)`), r.err);
+  assert.equal(bytes(f), before);
 });

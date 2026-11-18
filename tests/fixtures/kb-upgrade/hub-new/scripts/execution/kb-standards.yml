@@ -1,0 +1,6 @@
+schema_version: 1
+standards:
+  example-tool:
+    kind: tool
+    page: tool/example.md
+    detect: {files: [example.yaml]}

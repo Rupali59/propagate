@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parsePage } from "../../lib/standards/parse.mjs";
-import { loadRegistry, loadStandards } from "../../lib/standards/registry.mjs";
+import { parsePage } from "../../lib/kb/standards/parse.mjs";
+import { loadRegistry, loadStandards } from "../../lib/kb/standards/registry.mjs";
 
 const PAGE = `---
 id: acme-tool
@@ -122,13 +122,14 @@ test("loadRegistry: null file is 'standards not configured'", () => {
   assert.deepEqual(loadRegistry(null), { ok: false, reason: "standards not configured" });
 });
 
-test("loadRegistry: a broken file is 'standards.yml unreadable: <err>'", () => {
+test("loadRegistry: a broken file is '<resolved path> unreadable: <err>', naming the file actually read", () => {
   const f = fixture("standards: [unclosed\n  : :");
   const r = loadRegistry(f.file);
   assert.equal(r.ok, false);
-  assert.match(r.reason, /^standards\.yml unreadable: /);
-  const missing = loadRegistry(path.join(f.dir, "nope.yml"));
-  assert.match(missing.reason, /^standards\.yml unreadable: not found/);
+  assert.ok(r.reason.startsWith(`${f.file} unreadable: `), r.reason);
+  const gone = path.join(f.dir, "kb-standards.yml");
+  const missing = loadRegistry(gone);
+  assert.ok(missing.reason.startsWith(`${gone} unreadable: not found`), missing.reason);
 });
 
 test("loadRegistry: a good file yields standards keyed by id", () => {

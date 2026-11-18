@@ -1,7 +1,8 @@
 /**
- * `propagate standards [--json] [--std <id>] [--project <p>]` and `standards versions [--refresh] [--json]`
- * (#269). OFFLINE: neither reaches GitHub. The only spawn is the tool-version probe in `versions --refresh`
- * (lib/standards/versions.mjs), behind an injectable `run`.
+ * `propagate kb standards [--json] [--std <id>] [--project <p>]`, `kb standards versions|adopt|decline|remove` and
+ * `kb references [--json]` and `kb migrate [--apply] [--json]` (#269, #322). `propagate standards …` is a deprecated alias that says so on stderr and
+ * calls the same code. OFFLINE: none reaches GitHub. The only spawn is the tool-version probe in `versions --refresh`
+ * (lib/kb/standards/versions.mjs), behind an injectable `run`.
  *
  * EXIT CODES. 0 report produced and no problems; 1 report produced with problems (a page or sidecar could not
  * be read); 2 could not run (not configured, registry unreadable, blind scan, usage). Every failure is
@@ -12,13 +13,18 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { stateDir } from "../lib/core/paths.mjs";
 import { collectUnits, MIN_UNITS } from "../lib/report/services.mjs";
-import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/standards/adopt.mjs";
-import { loadStandards } from "../lib/standards/registry.mjs";
-import { readSidecars, serviceDetectsFor } from "../lib/standards/sidecars.mjs";
-import { buildStandardsReport } from "../lib/standards/status.mjs";
-import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/standards/versions.mjs";
+import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/kb/standards/adopt.mjs";
+import { applyMigrate, planMigrate } from "../lib/kb/migrate.mjs";
+import { loadReferences } from "../lib/kb/references.mjs";
+import { loadStandards } from "../lib/kb/standards/registry.mjs";
+import { readSidecars, serviceDetectsFor } from "../lib/kb/standards/sidecars.mjs";
+import { buildStandardsReport } from "../lib/kb/standards/status.mjs";
+import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/kb/standards/versions.mjs";
 
-const USAGE = "usage: propagate standards [--json] [--std <id>] [--project <p>] | standards versions [--refresh] [--json] | standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | standards decline|remove <std> <project|workspace/project> --reason <r> [--apply]";
+const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb migrate [--apply] [--json]";
+
+/** The exact line `propagate standards …` writes to stderr, once per run. */
+export const STANDARDS_DEPRECATION = "propagate standards is now propagate kb standards; the old name is removed in the release after 0.21.0";
 
 const fail = (code, what, next) => ({ ok: false, code, what, next });
 
@@ -52,18 +58,89 @@ async function env(inject) {
 }
 
 function loadOrFail(integrations) {
-  const l = loadStandards({ standardsFile: integrations.standardsFile, standardsDir: integrations.standardsDir });
+  const l = loadStandards({ standardsFile: integrations.kbStandardsFile, standardsDir: integrations.kbStandardsDir });
   if (l.ok) return l;
   const code = /^standards not configured/.test(l.reason) ? "STANDARDS_NOT_CONFIGURED" : "STANDARDS_UNREADABLE";
-  const next = code === "STANDARDS_NOT_CONFIGURED" ? "set PROPAGATE_STANDARDS_FILE and PROPAGATE_STANDARDS_DIR (or standardsFile and standardsDir in config.yml)" : "fix the registry file named above";
+  const next = code === "STANDARDS_NOT_CONFIGURED" ? "set PROPAGATE_KB_STANDARDS_FILE and PROPAGATE_KB_STANDARDS_DIR (or kbStandardsFile and kbStandardsDir under integrations: in config.yml)" : "fix the registry file named above";
   return fail(code, l.reason, next);
 }
 
 /**
- * @param {string[]} argv everything after `standards`
+ * @param {string[]} argv everything after `kb`: `standards …` or `references …`
  * @param {object} [inject] tests: io, integrations, workspaces, units, sidecars, stateDirPath, now, run, minUnits
  */
+export async function kbCmd(argv = [], inject = {}) {
+  const io = inject.io ?? console;
+  const asJson = argv.includes("--json");
+  if (argv[0] === "standards") return standardsBody(argv.slice(1), inject);
+  if (argv[0] === "references") return referencesCmd(argv.slice(1), inject, io, asJson);
+  if (argv[0] === "migrate") return migrateCmd(argv.slice(1), inject, io, asJson);
+  return emitFailure(fail("KB_USAGE", argv[0] === undefined ? "kb needs a subcommand" : `unknown kb subcommand ${JSON.stringify(argv[0])}`, USAGE), asJson, io);
+}
+
+/** `propagate standards …`: the deprecated name. One stderr line, then exactly what `kb standards …` does. */
 export async function standardsCmd(argv = [], inject = {}) {
+  (inject.io ?? console).error(STANDARDS_DEPRECATION);
+  return kbCmd(["standards", ...argv], inject);
+}
+
+/**
+ * `kb migrate [--apply] [--json]`: rename each sidecar's `standards:` key to `kb:`. Dry run unless --apply, and a dry
+ * run writes nothing. EXIT CODES. 0 nothing to migrate, or the migration was applied; 1 a conflict (a sidecar with both
+ * keys, or one that cannot be read), or a refused write; 2 the workspaces could not be read. A dry run with changes
+ * pending is 0, as `kb standards adopt` is: nothing is wrong, the next step is printed.
+ */
+async function migrateCmd(rest, inject, io, asJson) {
+  const p = parse(rest, [], ["--json", "--apply"]);
+  if (p.error) return emitFailure({ ...p.error, code: "KB_USAGE" }, asJson, io);
+  const { workspaces } = await env(inject);
+  if (!workspaces || workspaces.length === 0) return emitFailure(fail("KB_BLIND", "no workspaces were found, so no sidecar could be read", "check PROPAGATE_WORKSPACES and the workspace roots, then re-run"), asJson, io);
+  const files = readSidecars(workspaces).map((s) => s.file);
+  const plan = planMigrate(files);
+  const apply = Boolean(p.flags["--apply"]);
+  const { written, skipped } = apply ? applyMigrate(plan) : { written: [], skipped: [] };
+  const conflicts = [...plan.conflicts, ...skipped];
+  const code = conflicts.length ? 1 : 0;
+  if (asJson) {
+    io.log(JSON.stringify({ ok: code === 0, dry_run: !apply, scanned: files.length, changes: plan.changes, written, conflicts }, null, 2));
+    return code;
+  }
+  io.log(`${apply ? "applied" : "dry run (nothing written; add --apply)"}: ${files.length} sidecar(s) scanned, ${plan.changes.length} carry \`standards:\``);
+  for (const c of plan.changes) io.log(`  ${apply && written.includes(c.file) ? "renamed" : "would rename"} ${c.from}: -> ${c.to}:  ${c.file}`);
+  if (conflicts.length) {
+    io.log("\n# conflicts (not rewritten)");
+    for (const x of conflicts) io.log(`  ${x}`);
+  }
+  return code;
+}
+
+/** `kb references [--json]`: the registry's entries, ids shown as `ref:<key>` (the file keeps the bare key). */
+async function referencesCmd(rest, inject, io, asJson) {
+  const p = parse(rest, [], ["--json"]);
+  if (p.error) return emitFailure({ ...p.error, code: "KB_USAGE" }, asJson, io);
+  const { integrations } = await env(inject);
+  const file = integrations.kbReferencesFile ?? null;
+  const { references, problems } = loadReferences(file);
+  if (references.length === 0) {
+    const code = file ? "KB_REFERENCES_UNREADABLE" : "KB_REFERENCES_NOT_CONFIGURED";
+    const next = file ? "fix the registry file named above" : "set PROPAGATE_KB_REFERENCES_FILE (or kbReferencesFile under integrations: in config.yml)";
+    return emitFailure(fail(code, problems.join("; "), next), asJson, io);
+  }
+  const shown = references.map((r) => ({ ...r, id: `ref:${r.id}` }));
+  if (asJson) {
+    io.log(JSON.stringify({ ok: true, references: shown, problems }, null, 2));
+    return problems.length ? 1 : 0;
+  }
+  io.log(`# references  (${shown.length} entr${shown.length === 1 ? "y" : "ies"})`);
+  for (const r of shown) io.log(`  ${r.id}  ${r.kind ?? "?"}  ${r.url ?? r.repo ?? ""}${r.verdict ? `  (${r.verdict})` : ""}`);
+  if (problems.length) {
+    io.log("\n# problems");
+    for (const x of problems) io.log(`  ${x}`);
+  }
+  return problems.length ? 1 : 0;
+}
+
+async function standardsBody(argv, inject) {
   const io = inject.io ?? console;
   const asJson = argv.includes("--json");
   if (["adopt", "decline", "remove"].includes(argv[0])) return adoptionCmd(argv, inject, io, asJson);
@@ -74,7 +151,7 @@ export async function standardsCmd(argv = [], inject = {}) {
   const loaded = loadOrFail(integrations);
   if (!loaded.ok) return emitFailure(loaded, asJson, io);
   if (p.flags["--std"] && !loaded.standards.some((s) => s.id === p.flags["--std"])) {
-    return emitFailure(fail("STANDARDS_UNKNOWN", `no standard named ${JSON.stringify(p.flags["--std"])} (known: ${loaded.standards.map((s) => s.id).join(", ")})`, "propagate standards"), asJson, io);
+    return emitFailure(fail("STANDARDS_UNKNOWN", `no standard named ${JSON.stringify(p.flags["--std"])} (known: ${loaded.standards.map((s) => s.id).join(", ")})`, "propagate kb standards"), asJson, io);
   }
   const units = inject.units ?? collectUnits(workspaces, { integrations });
   const sidecars = inject.sidecars ?? readSidecars(workspaces);
@@ -92,7 +169,7 @@ export async function standardsCmd(argv = [], inject = {}) {
     serviceDetects,
     problems: loaded.problems,
   });
-  if (report.unknownProject) return emitFailure(fail("STANDARDS_UNKNOWN_PROJECT", `no project named ${JSON.stringify(report.unknownProject)} among the scanned units or sidecars (known: ${report.known.join(", ")})`, "propagate standards"), asJson, io);
+  if (report.unknownProject) return emitFailure(fail("STANDARDS_UNKNOWN_PROJECT", `no project named ${JSON.stringify(report.unknownProject)} among the scanned units or sidecars (known: ${report.known.join(", ")})`, "propagate kb standards"), asJson, io);
   if (!report.ok) return emitFailure(fail("STANDARDS_BLIND", report.blind, "check PROPAGATE_WORKSPACES and the workspace roots, then re-run"), asJson, io);
   const code = report.problems.length ? 1 : 0;
   if (asJson) {
@@ -100,7 +177,7 @@ export async function standardsCmd(argv = [], inject = {}) {
     return code;
   }
   io.log(`# standards  (offline; ${report.units_scanned} unit(s) scanned, floor ${report.floor}; ${report.sidecars_scanned} sidecar(s) read, ${report.sidecars_unreadable.length} unreadable)`);
-  io.log(cachedVersions ? `  tool versions read ${cacheAge(cachedVersions, (inject.now ?? Date.now)()) ?? "at an unreadable time"} (standards versions --refresh)` : "  tool versions: never read (standards versions --refresh)");
+  io.log(cachedVersions ? `  tool versions read ${cacheAge(cachedVersions, (inject.now ?? Date.now)()) ?? "at an unreadable time"} (kb standards versions --refresh)` : "  tool versions: never read (kb standards versions --refresh)");
   for (const u of report.sidecars_unreadable) io.log(`  unreadable sidecar ${u.file}: ${u.reason}`);
   for (const s of report.standards) {
     const c = s.counts;
@@ -129,7 +206,7 @@ async function versionsCmd(rest, inject, io, asJson) {
     if (!loaded.ok) return emitFailure(loaded, asJson, io);
     const probes = {};
     for (const s of loaded.standards) if (s.probe && typeof s.probe === "object") probes[s.page?.versionProbe ?? s.id] = s.probe;
-    if (Object.keys(probes).length === 0) return emitFailure(fail("STANDARDS_NO_PROBES", "no registry entry declares a probe, so there is nothing to refresh and the cache is left as it was", "add `probe: {cmd, args, parse}` to a standard in standards.yml"), asJson, io);
+    if (Object.keys(probes).length === 0) return emitFailure(fail("STANDARDS_NO_PROBES", "no registry entry declares a probe, so there is nothing to refresh and the cache is left as it was", "add `probe: {cmd, args, parse}` to a standard in kb-standards.yml"), asJson, io);
     versions = refreshVersions({ probes, run: inject.run });
     writeVersions(dir, versions);
   }
@@ -138,7 +215,7 @@ async function versionsCmd(rest, inject, io, asJson) {
     return 0;
   }
   if (!versions) {
-    io.log("no tool versions cached. Run: propagate standards versions --refresh");
+    io.log("no tool versions cached. Run: propagate kb standards versions --refresh");
     return 0;
   }
   io.log(`tool versions (read ${versions.at}):`);
@@ -172,7 +249,7 @@ function findSidecar(workspaces, arg, sidecars) {
   return { expected: expected.length ? expected : [`<workspace root>/propagation/state/<dir>/.sidecar.yml naming project: ${project}`] };
 }
 
-/** `standards adopt|decline|remove <std> <project>`. Dry run unless --apply. */
+/** `kb standards adopt|decline|remove <std> <project>`. Dry run unless --apply. */
 async function adoptionCmd(argv, inject, io, asJson) {
   const verb = argv[0];
   const rest = argv.slice(1);
@@ -190,22 +267,22 @@ async function adoptionCmd(argv, inject, io, asJson) {
   const f = p.flags;
   if (pos.length !== 2) return emitFailure(fail("STANDARDS_USAGE", `${verb} needs <std> <project>`, USAGE), asJson, io);
   const [stdId, projectArg] = pos;
-  if (verb !== "adopt" && !(f["--reason"] ?? "").trim()) return emitFailure(fail("STANDARDS_USAGE", `${verb} needs --reason`, `propagate standards ${verb} ${stdId} ${projectArg} --reason "<why>"`), asJson, io);
+  if (verb !== "adopt" && !(f["--reason"] ?? "").trim()) return emitFailure(fail("STANDARDS_USAGE", `${verb} needs --reason`, `propagate kb standards ${verb} ${stdId} ${projectArg} --reason "<why>"`), asJson, io);
   const { integrations, workspaces } = await env(inject);
   const loaded = loadOrFail(integrations);
   if (!loaded.ok) return emitFailure(loaded, asJson, io);
   const std = loaded.standards.find((s) => s.id === stdId);
-  if (!std) return emitFailure(fail("STANDARDS_UNKNOWN", `no standard named ${JSON.stringify(stdId)} (known: ${loaded.standards.map((s) => s.id).join(", ")})`, "propagate standards"), asJson, io);
+  if (!std) return emitFailure(fail("STANDARDS_UNKNOWN", `no standard named ${JSON.stringify(stdId)} (known: ${loaded.standards.map((s) => s.id).join(", ")})`, "propagate kb standards"), asJson, io);
   const allSidecars = readSidecars(workspaces);
   const sc = findSidecar(workspaces, projectArg, allSidecars);
-  if (sc.ambiguous) return emitFailure(fail("STANDARDS_PROJECT_AMBIGUOUS", `${JSON.stringify(projectArg)} names a project in ${sc.ambiguous.length} workspaces: ${sc.ambiguous.join(", ")}`, `propagate standards ${verb} ${stdId} <workspace>/<project>  (one of the above)`), asJson, io);
+  if (sc.ambiguous) return emitFailure(fail("STANDARDS_PROJECT_AMBIGUOUS", `${JSON.stringify(projectArg)} names a project in ${sc.ambiguous.length} workspaces: ${sc.ambiguous.join(", ")}`, `propagate kb standards ${verb} ${stdId} <workspace>/<project>  (one of the above)`), asJson, io);
   const project = sc.project ?? projectArg;
   if (!sc.file) return emitFailure(fail("STANDARDS_PROJECT_UNKNOWN", `no sidecar for project ${JSON.stringify(projectArg)}; looked for ${sc.expected.slice(0, 3).join(" or ")}${sc.expected.length > 3 ? ` (and ${sc.expected.length - 3} more workspace roots)` : ""}`, "create the project's state folder (see rule:state-and-decisions) or check the project name"), asJson, io);
   const cur = readAdoptions(sc.file);
-  if (cur.error) return emitFailure(fail("STANDARDS_UNREADABLE", cur.error, "fix the `standards:` block named above"), asJson, io);
+  if (cur.error) return emitFailure(fail("STANDARDS_UNREADABLE", cur.error, "fix the sidecar block named above, or run propagate kb migrate if it has both kb: and standards:"), asJson, io);
   const isAdopted = cur.adopted.some((a) => a?.standard === stdId);
-  if (verb === "remove" && !isAdopted) return emitFailure(fail("STANDARDS_NOT_ADOPTED", `${project} has not adopted ${stdId}, so there is nothing to remove`, `propagate standards decline ${stdId} ${project} --reason "<why>"`), asJson, io);
-  if (verb === "decline" && isAdopted) return emitFailure(fail("STANDARDS_ALREADY_ADOPTED", `${project} has adopted ${stdId}; declining it would contradict the adoption`, `propagate standards remove ${stdId} ${project} --reason "<why>"`), asJson, io);
+  if (verb === "remove" && !isAdopted) return emitFailure(fail("STANDARDS_NOT_ADOPTED", `${project} has not adopted ${stdId}, so there is nothing to remove`, `propagate kb standards decline ${stdId} ${project} --reason "<why>"`), asJson, io);
+  if (verb === "decline" && isAdopted) return emitFailure(fail("STANDARDS_ALREADY_ADOPTED", `${project} has adopted ${stdId}; declining it would contradict the adoption`, `propagate kb standards remove ${stdId} ${project} --reason "<why>"`), asJson, io);
 
   // Rows, the version in use and the detected units, from the same report `standards` prints.
   const units = inject.units ?? collectUnits(workspaces, { integrations });
@@ -222,14 +299,14 @@ async function adoptionCmd(argv, inject, io, asJson) {
   const verifiedOn = vers.length ? `${key} ${vers.join(", ")}` : `${key}: version not read`;
   const chosenUnits = f["--units"] ? f["--units"].split(",").map((x) => x.trim()).filter(Boolean) : detectedUnits;
   if (verb === "adopt" && chosenUnits.length === 0 && !cur.adopted.some((a) => a?.standard === stdId)) {
-    return emitFailure(fail("STANDARDS_USAGE", `${stdId} is detected on no unit of ${project}`, `propagate standards adopt ${stdId} ${project} --units <unit,unit>`), asJson, io);
+    return emitFailure(fail("STANDARDS_USAGE", `${stdId} is detected on no unit of ${project}`, `propagate kb standards adopt ${stdId} ${project} --units <unit,unit>`), asJson, io);
   }
   const live = (std.page?.rows ?? []).filter((r) => r.state !== "retired");
   const rows = rep.rows.map((r) => ({ id: r.id, status: mine?.rows.find((x) => x.id === r.id)?.status ?? r.status }));
   const checksToRun = live.filter((r) => r.check.kind === "command" || r.check.kind === "test").map((r) => ({ row: r.id, kind: r.check.kind, target: r.check.target }));
 
   const apply = Boolean(f["--apply"]);
-  if (apply && verb !== "adopt") return emitFailure(fail("STANDARDS_APPROVAL_UNAVAILABLE", APPROVAL_UNAVAILABLE, `propagate standards ${verb} ${stdId} ${project} --reason "<why>"  (a dry run)`), asJson, io);
+  if (apply && verb !== "adopt") return emitFailure(fail("STANDARDS_APPROVAL_UNAVAILABLE", APPROVAL_UNAVAILABLE, `propagate kb standards ${verb} ${stdId} ${project} --reason "<why>"  (a dry run)`), asJson, io);
   let by = null;
   if (apply) {
     by = typeof inject.by === "function" ? inject.by() : inject.by !== undefined ? inject.by : ghLogin();

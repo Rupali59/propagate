@@ -607,7 +607,11 @@ matter (8e14732: astro-darpan's G2 wrapped its Active-since paragraph past the 3
 found, or no board read (a rate limit, a listing that returned 0 open boards, an item with no field values). A blind
 scan never exits 0.
 
-## `propagate standards` (propagate#269)
+<a id="propagate-standards"></a>
+
+## `propagate kb` (propagate#269, renamed from `propagate standards` in #322)
+
+This section was `propagate standards`; its old anchor `propagate-standards` still resolves. `propagate standards` is a deprecated alias of `propagate kb standards`; the old name is removed in the release after 0.21.0.
 
 Standards are rule-like documents that name a tool or a practice and carry checkable rows. This section records what
 is **built** on `feat/269-standards-core`; the reasons and the phasing are in the design, not here:
@@ -615,16 +619,28 @@ is **built** on `feat/269-standards-core`; the reasons and the phasing are in th
 phasing), and the build plan `2026-11-15-standards-increment-1.md`. Decisions made after the design are on
 propagate#290 and #291 and are cited below. Where the code and the design differ, the code is described.
 
-**Offline.** `standards`, `standards adopt|decline|remove` and doctor's `# Standards` make no network call.
-The one spawn is the tool-version probe, and only `standards versions --refresh` runs it. `adopt --apply` reads the
+**Offline.** `kb standards`, `kb standards adopt|decline|remove`, `kb references`, `kb migrate` and doctor's `# Knowledge base` make no network call.
+The one spawn is the tool-version probe, and only `kb standards versions --refresh` runs it. `adopt --apply` reads the
 GitHub login with `gh api user`.
 
 ### Where it is configured
 
 | Key | Env | Default | Holds |
 |---|---|---|---|
-| `standardsFile` | `PROPAGATE_STANDARDS_FILE` | `<hub>/scripts/execution/standards.yml` | the registry |
-| `standardsDir` | `PROPAGATE_STANDARDS_DIR` | `<hub>/standards` | the pages the registry names |
+| `kbStandardsFile` | `PROPAGATE_KB_STANDARDS_FILE` | `<hub>/scripts/execution/kb-standards.yml` | the standards registry |
+| `kbStandardsDir` | `PROPAGATE_KB_STANDARDS_DIR` | `<hub>/kb/standards` | the pages the registry names |
+| `kbReferencesFile` | `PROPAGATE_KB_REFERENCES_FILE` | `<hub>/scripts/execution/kb-references.yml` | the references registry (`kb references`) |
+| `standardsFile` | `PROPAGATE_STANDARDS_FILE` | `<hub>/scripts/execution/standards.yml` | deprecated, read until the release after 0.21.0; use `kbStandardsFile` |
+| `standardsDir` | `PROPAGATE_STANDARDS_DIR` | `<hub>/standards` | deprecated, read until the release after 0.21.0; use `kbStandardsDir` |
+
+Each value resolves in this order: the new env variable or key, the old env variable or key, the new default path if it
+exists, the old default path if it exists, otherwise null. An old key that supplied a value is named by doctor's
+`LEGACY-NAME` finding.
+
+`kbReferencesFile` has the same fallback: when only the old `<hub>/scripts/execution/references.yml` exists, it is used, so
+an unmoved hub never reads as "not configured". An explicit old override (`standardsFile` or `standardsDir`) pinned to an
+old hub path must be renamed before the hub's move lands, because the old key outranks the new default and would keep
+pointing at the path that moved.
 
 The registry is `schema_version: 1` plus a `standards:` mapping, each entry `{kind, page, authority, detect, service,
 probe, pointer_globs}`. A null path reads as "standards not configured", never as zero standards, and an empty
@@ -672,12 +688,12 @@ on local rows only.
 
 ### Status is derived
 
-Never written onto a row. `lib/standards/status.mjs` `rowStatus`:
+Never written onto a row. `lib/kb/standards/status.mjs` `rowStatus`:
 
 | Status | When |
 |---|---|
 | `unchecked` | the row's check kind is `review` or `none` (decided first, so a review row is never `verified`) |
-| `unverifiable` | no version in use (`version not read (standards versions --refresh)`), or either side has no comparable number (`GA4`, `2026-11`) |
+| `unverifiable` | no version in use (`version not read (kb standards versions --refresh)`), or either side has no comparable number (`GA4`, `2026-11`) |
 | `re-verify` | the version in use is newer than the row's `Version`, by major.minor of the first `N.N` found in each |
 | `verified` | the same, or an older, major.minor |
 
@@ -685,14 +701,14 @@ A standard's row status is the worst across its detected projects (and each proj
 rows are left out. A row with a check kind that runs (`command`, `test`) is **not run** by the report: status says
 whether the row was written against the version in use, not that its check passed.
 
-`standards --json` carries per standard `rows`, `projects` (each unit with its `version` and `source`),
+`kb standards --json` carries per standard `rows`, `projects` (each unit with its `version` and `source`),
 `projectCounts`, `counts`, `detected`, `adopted` and `versionSource` (`lockfile`, `probe`, `mixed` or null).
 
 ### Versions and probes
 
 A registry entry may carry `probe: {cmd, args, parse}`. `parse` is a regex whose first group (else the whole match)
-is the version; the default is the first `N.N[.N]`. `standards versions --refresh` is the only caller of the spawn
-(30 s timeout) and writes `<state dir>/standards/versions.json`; doctor and `standards` only read it. A probe that
+is the version; the default is the first `N.N[.N]`. `kb standards versions --refresh` is the only caller of the spawn
+(30 s timeout) and writes `<state dir>/kb/versions.json`; doctor and `kb standards` only read it. A probe that
 fails is recorded as `{version: null, error}`, never left out. `--refresh` with no probe declared anywhere is
 `STANDARDS_NO_PROBES` and leaves the cache as it was.
 
@@ -711,11 +727,13 @@ Detection proposes, adoption decides, and the adoption stays (design §2.2). A s
 
 | Command | Does |
 |---|---|
-| `standards [--json] [--std <id>] [--project <p>]` | the report above |
-| `standards versions [--refresh] [--json]` | the cached versions; `--refresh` probes |
-| `standards adopt <std> <project\|workspace/project> [--units a,b] [--evidence <text>] [--apply]` | record the adoption |
-| `standards decline <std> <project\|workspace/project> --reason <r>` | record "detected, does not apply" |
-| `standards remove <std> <project\|workspace/project> --reason <r>` | record the removal of an adoption |
+| `kb standards [--json] [--std <id>] [--project <p>]` | the report above |
+| `kb standards versions [--refresh] [--json]` | the cached versions; `--refresh` probes |
+| `kb standards adopt <std> <project\|workspace/project> [--units a,b] [--evidence <text>] [--apply]` | record the adoption |
+| `kb standards decline <std> <project\|workspace/project> --reason <r>` | record "detected, does not apply" |
+| `kb standards remove <std> <project\|workspace/project> --reason <r>` | record the removal of an adoption |
+| `kb references [--json]` | the references registry, each id shown as `ref:<id>` |
+| `kb migrate [--apply] [--json]` | rename each sidecar's `standards:` key to `kb:`; a dry run unless `--apply`; a sidecar holding both keys is a conflict (exit 1) and is never merged |
 
 **Every adoption command is a dry run unless `--apply`.** The dry run prints the entry, the rows with their status,
 and the `command` / `test` checks adoption would run; **`adopt` does not run them**, so their output goes in with
@@ -733,23 +751,23 @@ of an adopted standard), `STANDARDS_NOT_ADOPTED` (remove of one not adopted), `S
 `STANDARDS_BLIND`, `STANDARDS_UNKNOWN_PROJECT`. Each prints `<CODE>: <what>. Next: <command>` on stderr, or
 `{ok:false, code, what, next}` with `--json`.
 
-**Exit codes** of `standards`: 0 a report and no problems; 1 a report with problems (a page or sidecar could not be
+**Exit codes** of `kb standards`: 0 a report and no problems; 1 a report with problems (a page or sidecar could not be
 read); 2 could not run (not configured, registry unreadable, blind, usage). The adoption commands exit 0 or 2.
 
-### The sidecar `standards:` block
+### The sidecar `kb:` block
 
 The record lives in the project's `propagation/state/<project>/.sidecar.yml`, never in `.propagates.yml` (its schema
-is closed; an extra key would disable every edge in the file). Only the `standards:` pair is rewritten, and every
+is closed; an extra key would disable every edge in the file). Only the `kb:` pair (a legacy `standards:` key is read until `kb migrate` renames it) is rewritten, and every
 other byte of the sidecar is kept; the cost is that comments **inside** the block are regenerated away.
 
 ```yaml
-standards:
+kb:
   adopted:
     - {standard: acme-tool, units: [apps/acme-app], since: 2026-11-16, by: acme-dev, verified_on: "acme-tool 3.4.1", evidence: "..."}
   overrides:            # {standard, row, reason}
   declined:             # {standard, reason}
   removed:              # {standard, on, by, reason, approved_pr: null}
-  reviews: []           # reserved for `standards review` (not built)
+  reviews: []           # reserved for `kb standards review` (not built)
   local_page: docs/acme-ws/reference/ACME-TOOL.md
 ```
 
@@ -757,9 +775,9 @@ standards:
 so `extends:`, `Applies:` and `local-<n>` rows are parsed (by `parsePage`) but not yet reported on. `reviews:` is read
 and preserved so the review command needs no schema change.
 
-### doctor: `# Standards`
+### doctor: `# Knowledge base`
 
-`lib/report/doctor/standards.mjs`, offline. Not configured is `info` and skipped (the normal state on another
+`lib/report/doctor/kb.mjs`, offline (the section was `# Standards` before #322). Not configured is `info` and skipped (the normal state on another
 machine). Could not run is `inconclusive`, which votes. A finding that is documentation debt is `warn`, which is never
 counted, so a tree with only warnings leaves doctor's problem count unchanged. A declaration error is `check(false)`,
 which is counted.
@@ -774,6 +792,7 @@ which is counted.
 | `DETECTED-NOT-ADOPTED` | warn | detected, neither adopted nor declined; a name shared by two workspaces is listed as `<workspace>/<project>` |
 | `ADOPTED-UNDETECTED` | warn | adopted, detector finds nothing |
 | `UNIT-NOT-ON-DISK` | warn | an adopted unit not on disk (never "not detected") |
+| `LEGACY-NAME` (S3) | warn | one per old config key that supplied a value (`<name> uses the old name; rename it to <replacement>`) and one per sidecar still carrying `standards:` (`<file> uses the old name; run propagate kb migrate`) |
 | `OVERRIDE-NO-REASON`, `OVERRIDE-STALE`, `DECLINE-NO-REASON` | check, fails | a declaration error; stale = standard not adopted, or the row retired or missing |
 
 The two adoption findings apply to `kind: tool` standards only: a `global` or `production` standard detects every
@@ -796,7 +815,7 @@ and **stops at any other discovered workspace's root**, the same ownership rule 
 
 | Not built | Where it lands |
 |---|---|
-| `standards review <row-id> [--apply]`: records who, when, tool version and evidence in the sidecar `reviews:` list; `verified` while the version is unchanged and the review is younger than a limit (proposed 90 days, open), `re-verify` when either changes, `unchecked` until the first review (decided 2026-11-17, #290; **Task 6b**) | until then `UNCHECKED-ROW` stays an info count |
+| `kb standards review <row-id> [--apply]`: records who, when, tool version and evidence in the sidecar `reviews:` list; `verified` while the version is unchanged and the review is younger than a limit (proposed 90 days, open), `re-verify` when either changes, `unchecked` until the first review (decided 2026-11-17, #290; **Task 6b**) | until then `UNCHECKED-ROW` stays an info count |
 | edges: drift of a standard's rows into projects, `adopt --apply` pinning an edge, `ADOPTED-UNSETTLED` | S3 |
 | approvals: applying `decline` and `remove`, `UNAPPROVED-CHANGE`, `APPROVALS-NOT-CONFIGURED` | S4 |
 | delivery: pointers into agent files, `POINTERS-DRIFT` | S5 |
@@ -804,7 +823,7 @@ and **stops at any other discovered workspace's root**, the same ownership rule 
 | plans in the standards flow | S7 |
 | per-unit versions from a project's lockfile, or a probe run with `cwd` set to the unit | #290 |
 | repo-level detect files | #316 |
-| `AUTHORITY-UNRESOLVED` and `standards audit --online` | online slice |
+| `AUTHORITY-UNRESOLVED` and `kb standards audit --online` | online slice |
 
 ## `propagate sessions`: who works where (propagate#272)
 

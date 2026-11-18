@@ -373,22 +373,22 @@ sources:
           removed here leaves that table describing a taxonomy the code no longer has.
         kind: prose
 
-  # Declared 2026-11-17 (#269 final review, finding 10). REFERENCE.md §"`propagate standards`" restates the
+  # Declared 2026-11-17 (#269 final review, finding 10). REFERENCE.md §"`propagate kb`" restates the
   # page grammar and the doctor findings table; nothing watched either, so a field or finding added in code
   # left the prose describing the old one.
-  lib/standards/parse.mjs:
+  lib/kb/standards/parse.mjs:
     propagates_to:
       - path: docs/REFERENCE.md
         why: >-
           parse.mjs defines the standards page grammar (row fields, states, check kinds) that
-          REFERENCE.md §"`propagate standards`" documents. A field or check kind added, renamed or
+          REFERENCE.md §"`propagate kb`" documents. A field or check kind added, renamed or
           removed here leaves that section describing a grammar the parser no longer reads.
         kind: prose
-  lib/report/doctor/standards.mjs:
+  lib/report/doctor/kb.mjs:
     propagates_to:
       - path: docs/REFERENCE.md
         why: >-
           FINDING_SEVERITY and the findings emitted here are the table in REFERENCE.md
-          §"`propagate standards`" (doctor: `# Standards`). A finding added, renamed or re-severitied
+          §"`propagate kb`" (doctor: `# Knowledge base`). A finding added, renamed or re-severitied
           here leaves that table wrong.
         kind: prose
