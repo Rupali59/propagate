@@ -607,7 +607,11 @@ matter (8e14732: astro-darpan's G2 wrapped its Active-since paragraph past the 3
 found, or no board read (a rate limit, a listing that returned 0 open boards, an item with no field values). A blind
 scan never exits 0.
 
-## `propagate standards` (propagate#269)
+<a id="propagate-standards"></a>
+
+## `propagate kb` (propagate#269, renamed from `propagate standards` in #322)
+
+This section was `propagate standards`; its old anchor `propagate-standards` still resolves. `propagate standards` is a deprecated alias of `propagate kb standards`; the old name is removed in the release after 0.21.0.
 
 Standards are rule-like documents that name a tool or a practice and carry checkable rows. This section records what
 is **built** on `feat/269-standards-core`; the reasons and the phasing are in the design, not here:
@@ -615,16 +619,23 @@ is **built** on `feat/269-standards-core`; the reasons and the phasing are in th
 phasing), and the build plan `2026-11-15-standards-increment-1.md`. Decisions made after the design are on
 propagate#290 and #291 and are cited below. Where the code and the design differ, the code is described.
 
-**Offline.** `standards`, `standards adopt|decline|remove` and doctor's `# Standards` make no network call.
-The one spawn is the tool-version probe, and only `standards versions --refresh` runs it. `adopt --apply` reads the
+**Offline.** `kb standards`, `kb standards adopt|decline|remove`, `kb references`, `kb migrate` and doctor's `# Knowledge base` make no network call.
+The one spawn is the tool-version probe, and only `kb standards versions --refresh` runs it. `adopt --apply` reads the
 GitHub login with `gh api user`.
 
 ### Where it is configured
 
 | Key | Env | Default | Holds |
 |---|---|---|---|
-| `standardsFile` | `PROPAGATE_STANDARDS_FILE` | `<hub>/scripts/execution/standards.yml` | the registry |
-| `standardsDir` | `PROPAGATE_STANDARDS_DIR` | `<hub>/standards` | the pages the registry names |
+| `kbStandardsFile` | `PROPAGATE_KB_STANDARDS_FILE` | `<hub>/scripts/execution/kb-standards.yml` | the standards registry |
+| `kbStandardsDir` | `PROPAGATE_KB_STANDARDS_DIR` | `<hub>/kb/standards` | the pages the registry names |
+| `kbReferencesFile` | `PROPAGATE_KB_REFERENCES_FILE` | `<hub>/scripts/execution/kb-references.yml` | the references registry (`kb references`) |
+| `standardsFile` | `PROPAGATE_STANDARDS_FILE` | `<hub>/scripts/execution/standards.yml` | deprecated, read until the release after 0.21.0; use `kbStandardsFile` |
+| `standardsDir` | `PROPAGATE_STANDARDS_DIR` | `<hub>/standards` | deprecated, read until the release after 0.21.0; use `kbStandardsDir` |
+
+Each value resolves in this order: the new env variable or key, the old env variable or key, the new default path if it
+exists, the old default path if it exists, otherwise null. An old key that supplied a value is named by doctor's
+`legacy-name` finding.
 
 The registry is `schema_version: 1` plus a `standards:` mapping, each entry `{kind, page, authority, detect, service,
 probe, pointer_globs}`. A null path reads as "standards not configured", never as zero standards, and an empty
@@ -711,11 +722,13 @@ Detection proposes, adoption decides, and the adoption stays (design §2.2). A s
 
 | Command | Does |
 |---|---|
-| `standards [--json] [--std <id>] [--project <p>]` | the report above |
-| `standards versions [--refresh] [--json]` | the cached versions; `--refresh` probes |
-| `standards adopt <std> <project\|workspace/project> [--units a,b] [--evidence <text>] [--apply]` | record the adoption |
-| `standards decline <std> <project\|workspace/project> --reason <r>` | record "detected, does not apply" |
-| `standards remove <std> <project\|workspace/project> --reason <r>` | record the removal of an adoption |
+| `kb standards [--json] [--std <id>] [--project <p>]` | the report above |
+| `kb standards versions [--refresh] [--json]` | the cached versions; `--refresh` probes |
+| `kb standards adopt <std> <project\|workspace/project> [--units a,b] [--evidence <text>] [--apply]` | record the adoption |
+| `kb standards decline <std> <project\|workspace/project> --reason <r>` | record "detected, does not apply" |
+| `kb standards remove <std> <project\|workspace/project> --reason <r>` | record the removal of an adoption |
+| `kb references [--json]` | the references registry, each id shown as `ref:<id>` |
+| `kb migrate [--apply] [--json]` | rename each sidecar's `standards:` key to `kb:`; a dry run unless `--apply`; a sidecar holding both keys is a conflict (exit 1) and is never merged |
 
 **Every adoption command is a dry run unless `--apply`.** The dry run prints the entry, the rows with their status,
 and the `command` / `test` checks adoption would run; **`adopt` does not run them**, so their output goes in with
@@ -736,14 +749,14 @@ of an adopted standard), `STANDARDS_NOT_ADOPTED` (remove of one not adopted), `S
 **Exit codes** of `standards`: 0 a report and no problems; 1 a report with problems (a page or sidecar could not be
 read); 2 could not run (not configured, registry unreadable, blind, usage). The adoption commands exit 0 or 2.
 
-### The sidecar `standards:` block
+### The sidecar `kb:` block
 
 The record lives in the project's `propagation/state/<project>/.sidecar.yml`, never in `.propagates.yml` (its schema
-is closed; an extra key would disable every edge in the file). Only the `standards:` pair is rewritten, and every
+is closed; an extra key would disable every edge in the file). Only the `kb:` pair (a legacy `standards:` key is read until `kb migrate` renames it) is rewritten, and every
 other byte of the sidecar is kept; the cost is that comments **inside** the block are regenerated away.
 
 ```yaml
-standards:
+kb:
   adopted:
     - {standard: acme-tool, units: [apps/acme-app], since: 2026-11-16, by: acme-dev, verified_on: "acme-tool 3.4.1", evidence: "..."}
   overrides:            # {standard, row, reason}
@@ -757,9 +770,9 @@ standards:
 so `extends:`, `Applies:` and `local-<n>` rows are parsed (by `parsePage`) but not yet reported on. `reviews:` is read
 and preserved so the review command needs no schema change.
 
-### doctor: `# Standards`
+### doctor: `# Knowledge base`
 
-`lib/report/doctor/standards.mjs`, offline. Not configured is `info` and skipped (the normal state on another
+`lib/report/doctor/kb.mjs`, offline (the section was `# Standards` before #322). Not configured is `info` and skipped (the normal state on another
 machine). Could not run is `inconclusive`, which votes. A finding that is documentation debt is `warn`, which is never
 counted, so a tree with only warnings leaves doctor's problem count unchanged. A declaration error is `check(false)`,
 which is counted.
@@ -774,6 +787,7 @@ which is counted.
 | `DETECTED-NOT-ADOPTED` | warn | detected, neither adopted nor declined; a name shared by two workspaces is listed as `<workspace>/<project>` |
 | `ADOPTED-UNDETECTED` | warn | adopted, detector finds nothing |
 | `UNIT-NOT-ON-DISK` | warn | an adopted unit not on disk (never "not detected") |
+| `legacy-name` (S3) | warn | one per old config key that supplied a value (`<name> uses the old name; rename it to <replacement>`) and one per sidecar still carrying `standards:` (`<file> uses the old name; run propagate kb migrate`) |
 | `OVERRIDE-NO-REASON`, `OVERRIDE-STALE`, `DECLINE-NO-REASON` | check, fails | a declaration error; stale = standard not adopted, or the row retired or missing |
 
 The two adoption findings apply to `kind: tool` standards only: a `global` or `production` standard detects every

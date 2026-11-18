@@ -279,7 +279,7 @@ async function adoptionCmd(argv, inject, io, asJson) {
   const project = sc.project ?? projectArg;
   if (!sc.file) return emitFailure(fail("STANDARDS_PROJECT_UNKNOWN", `no sidecar for project ${JSON.stringify(projectArg)}; looked for ${sc.expected.slice(0, 3).join(" or ")}${sc.expected.length > 3 ? ` (and ${sc.expected.length - 3} more workspace roots)` : ""}`, "create the project's state folder (see rule:state-and-decisions) or check the project name"), asJson, io);
   const cur = readAdoptions(sc.file);
-  if (cur.error) return emitFailure(fail("STANDARDS_UNREADABLE", cur.error, "fix the `standards:` block named above"), asJson, io);
+  if (cur.error) return emitFailure(fail("STANDARDS_UNREADABLE", cur.error, "fix the sidecar block named above, or run propagate kb migrate if it has both kb: and standards:"), asJson, io);
   const isAdopted = cur.adopted.some((a) => a?.standard === stdId);
   if (verb === "remove" && !isAdopted) return emitFailure(fail("STANDARDS_NOT_ADOPTED", `${project} has not adopted ${stdId}, so there is nothing to remove`, `propagate kb standards decline ${stdId} ${project} --reason "<why>"`), asJson, io);
   if (verb === "decline" && isAdopted) return emitFailure(fail("STANDARDS_ALREADY_ADOPTED", `${project} has adopted ${stdId}; declining it would contradict the adoption`, `propagate kb standards remove ${stdId} ${project} --reason "<why>"`), asJson, io);

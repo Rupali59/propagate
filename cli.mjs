@@ -929,10 +929,10 @@ async function doctor({ exitProcess = true } = {}) {
     }
   }
 
-  // # Standards — offline only (no network call, no probe spawn). Findings warn; only a declaration error fails.
+  // # Knowledge base — offline only (no network call, no probe spawn). Findings warn; only a declaration error fails.
   // A throw is an inconclusive entry (counted), never a silent yellow line: could-not-run is not no-problem.
   {
-    const { runStandardsSection } = await import("./lib/report/doctor/standards.mjs");
+    const { runStandardsSection } = await import("./lib/report/doctor/kb.mjs");
     const reporter = new Reporter();
     await runStandardsSection({ reporter });
     renderDoctorEntries(reporter.drain());

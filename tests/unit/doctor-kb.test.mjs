@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { checkStandards, FINDING_SEVERITY, SEVERITY } from "../../lib/report/doctor/standards.mjs";
+import { checkStandards, FINDING_SEVERITY, SEVERITY } from "../../lib/report/doctor/kb.mjs";
 import { Reporter } from "../../lib/report/doctor/reporter.mjs";
 import { writeVersions } from "../../lib/kb/standards/versions.mjs";
 
@@ -92,14 +92,14 @@ test("version not read: an info with the count and the command", async () => {
   const r = await run(fixture({ rows: ROWS.ok(1) + ROWS.ok(2), versions: null }));
   const i = find(r, "info", /version not read/);
   assert.ok(i);
-  assert.match(i.detail, /2 row\(s\) version not read: standards versions --refresh/);
+  assert.match(i.detail, /2 row\(s\) version not read: kb standards versions --refresh/);
 });
 
 test("UNCHECKED-ROW: an info count per page that points at `standards review`", async () => {
   const r = await run(fixture({ rows: ROWS.ok(1) + ROWS.review(2) + ROWS.review(3), versions: "1.2.0" }));
   const i = find(r, "info", /unchecked/);
   assert.ok(i);
-  assert.match(i.detail, /acme-tool: 2 row\(s\) unchecked; review rows are recorded with `standards review` \(#290\)/);
+  assert.match(i.detail, /acme-tool: 2 row\(s\) unchecked; review rows are recorded with `kb standards review` \(#290\)/);
   assert.equal(r.problems, 0);
 });
 
@@ -188,7 +188,7 @@ test("DETECTED-NOT-ADOPTED: a project name shared by two workspaces is listed as
   assert.match(w.detail, /acme-ws\/p0/);
   assert.match(w.detail, /ws-b\/p0/);
   assert.match(w.detail, /(^|[ ,])p1([ ,]|$)/, "a unique name stays bare");
-  assert.match(w.detail, /propagate standards adopt acme-tool <workspace>\/<project>/);
+  assert.match(w.detail, /propagate kb standards adopt acme-tool <workspace>\/<project>/);
 });
 
 test("the cache age is shown, and a cached non-version value reads as not read", async () => {
@@ -207,7 +207,7 @@ test("a sidecar whose adopted: is not a list is ONE inconclusive entry with no d
 });
 
 test("a throw inside checkStandards is an inconclusive entry and counts as a problem, never silent", async () => {
-  const { runStandardsSection } = await import("../../lib/report/doctor/standards.mjs");
+  const { runStandardsSection } = await import("../../lib/report/doctor/kb.mjs");
   const fx = fixture({ versions: "1.2.0" });
   // a registry entry with a non-string `page` throws out of loadStandards (registry.mjs path.join)
   const regFile = fx.integrations.kbStandardsFile;
@@ -217,4 +217,44 @@ test("a throw inside checkStandards is an inconclusive entry and counts as a pro
   const e = find(reporter, "inconclusive", /standards could not run/);
   assert.ok(e, JSON.stringify(reporter.entries));
   assert.ok(reporter.problems >= 1);
+});
+
+test("the section header is `# Knowledge base`", async () => {
+  const r = await run(fixture());
+  assert.ok(r.entries.some((e) => e.kind === "header" && e.label === "# Knowledge base"), "header entry present");
+  assert.ok(!r.entries.some((e) => e.label === "# Standards"), "old header gone");
+});
+
+test("the not-configured hint names the new keys", async () => {
+  const r = await run({ integrations: {}, workspaces: [], stateDir: os_tmp(), units: [] });
+  const hint = r.entriesOfKind("info").find((e) => /not configured/.test(e.detail)).detail;
+  assert.match(hint, /PROPAGATE_KB_STANDARDS_FILE/);
+  assert.match(hint, /kbStandardsDir/);
+});
+
+test("legacy-name: an old config key yields exactly one finding that names it and its replacement", async () => {
+  const legacy = [{ key: "standardsFile", via: "env", name: "PROPAGATE_STANDARDS_FILE", replacement: "PROPAGATE_KB_STANDARDS_FILE" }];
+  const r = await run({ ...fixture(), legacy });
+  const hits = r.entries.filter((e) => /legacy-name/.test(`${e.label} ${e.detail}`));
+  assert.equal(hits.length, 1);
+  assert.match(hits[0].detail, /PROPAGATE_STANDARDS_FILE uses the old name; rename it to PROPAGATE_KB_STANDARDS_FILE/);
+  assert.equal(hits[0].kind, "warn");
+});
+
+test("legacy-name: a sidecar still carrying `standards:` yields one finding naming the file", async () => {
+  const fx = fixture({ sidecars: { p0: adopt() } });
+  const r = await run({ ...fx, legacy: [] });
+  const hits = r.entries.filter((e) => /legacy-name/.test(`${e.label} ${e.detail}`));
+  assert.equal(hits.length, 1);
+  assert.match(hits[0].detail, /\.sidecar\.yml uses the old name; run propagate kb migrate/);
+});
+
+test("legacy-name: a clean fixture (new sidecar key, no old config) yields none", async () => {
+  const fx = fixture({ sidecars: { p0: adopt().replace("standards:", "kb:") } });
+  const r = await run({ ...fx, legacy: [] });
+  assert.equal(r.entries.filter((e) => /legacy-name/.test(`${e.label} ${e.detail}`)).length, 0);
+});
+
+test("legacy-name is declared S3", () => {
+  assert.equal(FINDING_SEVERITY["legacy-name"], "S3");
 });

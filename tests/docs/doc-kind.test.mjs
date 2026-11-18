@@ -501,6 +501,13 @@ test("a standards page reads as doc kind `standard`, whatever its frontmatter ki
   }
 });
 
+test("a page under kb/standards/ is still doc kind `standard` (#322)", () => {
+  // The hub moves `standards/` to `kb/standards/`; the guard keys on the `standards/` segment, which survives.
+  const r = kindOf("/hub/kb/standards/tool/flutter.md", () => "---\nid: flutter\nkind: tool\nauthority: vendor docs\n---\n# Flutter\n");
+  assert.equal(r.kind, "standard");
+  assert.equal(r.source, "frontmatter");
+});
+
 test("`standard` is declared in KINDS with a lifecycle, like every other kind", () => {
   assert.ok(Object.keys(KINDS).includes("standard"));
 });
