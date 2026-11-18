@@ -58,14 +58,18 @@ test("old key still resolves, and is recorded as legacy", () => {
   });
   // The file need not exist for an explicit value: pick() never checked, only defaults are gated.
   assert.equal(out.file, path.join(root, "x", "standards.yml"));
-  assert.ok(out.legacy.includes("standardsFile"));
+  assert.deepEqual(out.legacy, [
+    { key: "standardsFile", via: "config", name: "standardsFile", replacement: "kbStandardsFile" },
+  ]);
   assert.equal(out.aliasFile, out.file, "standardsFile stays an alias for one release");
 });
 
 test("old env variable still resolves, and is recorded as legacy", () => {
   const { out } = resolve({ env: { PROPAGATE_STANDARDS_DIR: "/tmp/old-dir" } });
   assert.equal(out.dir, "/tmp/old-dir");
-  assert.deepEqual(out.legacy, ["standardsDir"]);
+  assert.deepEqual(out.legacy, [
+    { key: "standardsDir", via: "env", name: "PROPAGATE_STANDARDS_DIR", replacement: "PROPAGATE_KB_STANDARDS_DIR" },
+  ]);
 });
 
 test("new key wins over the old key, and nothing is recorded as legacy", () => {
@@ -93,6 +97,15 @@ test("default falls back to the old path, and prefers the new one when both exis
     hubFiles: ["scripts/execution/standards.yml", "scripts/execution/kb-standards.yml"],
   });
   assert.equal(both.out.file, path.join(both.hub, "scripts/execution/kb-standards.yml"));
+});
+
+test("old key beats BOTH default files (precedence step 2 over step 3)", () => {
+  const { out, root } = resolve({
+    integrations: { standardsFile: "$ROOT/mine.yml" },
+    hubFiles: ["scripts/execution/standards.yml", "scripts/execution/kb-standards.yml"],
+  });
+  assert.equal(out.file, path.join(root, "mine.yml"));
+  assert.equal(out.legacy.length, 1);
 });
 
 test("directories and the references file resolve the same way", () => {
