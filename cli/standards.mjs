@@ -1,7 +1,7 @@
 /**
  * `propagate standards [--json] [--std <id>] [--project <p>]` and `standards versions [--refresh] [--json]`
  * (#269). OFFLINE: neither reaches GitHub. The only spawn is the tool-version probe in `versions --refresh`
- * (lib/standards/versions.mjs), behind an injectable `run`.
+ * (lib/kb/standards/versions.mjs), behind an injectable `run`.
  *
  * EXIT CODES. 0 report produced and no problems; 1 report produced with problems (a page or sidecar could not
  * be read); 2 could not run (not configured, registry unreadable, blind scan, usage). Every failure is
@@ -12,11 +12,11 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { stateDir } from "../lib/core/paths.mjs";
 import { collectUnits, MIN_UNITS } from "../lib/report/services.mjs";
-import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/standards/adopt.mjs";
-import { loadStandards } from "../lib/standards/registry.mjs";
-import { readSidecars, serviceDetectsFor } from "../lib/standards/sidecars.mjs";
-import { buildStandardsReport } from "../lib/standards/status.mjs";
-import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/standards/versions.mjs";
+import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/kb/standards/adopt.mjs";
+import { loadStandards } from "../lib/kb/standards/registry.mjs";
+import { readSidecars, serviceDetectsFor } from "../lib/kb/standards/sidecars.mjs";
+import { buildStandardsReport } from "../lib/kb/standards/status.mjs";
+import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/kb/standards/versions.mjs";
 
 const USAGE = "usage: propagate standards [--json] [--std <id>] [--project <p>] | standards versions [--refresh] [--json] | standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | standards decline|remove <std> <project|workspace/project> --reason <r> [--apply]";
 
@@ -52,7 +52,7 @@ async function env(inject) {
 }
 
 function loadOrFail(integrations) {
-  const l = loadStandards({ standardsFile: integrations.standardsFile, standardsDir: integrations.standardsDir });
+  const l = loadStandards({ standardsFile: integrations.kbStandardsFile, standardsDir: integrations.kbStandardsDir });
   if (l.ok) return l;
   const code = /^standards not configured/.test(l.reason) ? "STANDARDS_NOT_CONFIGURED" : "STANDARDS_UNREADABLE";
   const next = code === "STANDARDS_NOT_CONFIGURED" ? "set PROPAGATE_STANDARDS_FILE and PROPAGATE_STANDARDS_DIR (or standardsFile and standardsDir in config.yml)" : "fix the registry file named above";

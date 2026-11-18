@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import yaml from "yaml";
 import { standardsCmd } from "../../cli/standards.mjs";
-import { readAdoptions } from "../../lib/standards/adopt.mjs";
+import { readAdoptions } from "../../lib/kb/standards/adopt.mjs";
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), "std-adopt-"));
 
@@ -64,7 +64,7 @@ version_probe: acme-tool
     units,
     sidecarFile,
     workspaces: [{ name: "acme-ws", root }],
-    integrations: { standardsFile: path.join(dir, "standards.yml"), standardsDir: dir, servicesFile: null },
+    integrations: { kbStandardsFile: path.join(dir, "standards.yml"), kbStandardsDir: dir, servicesFile: null },
   };
 }
 

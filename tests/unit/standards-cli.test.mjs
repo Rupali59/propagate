@@ -37,7 +37,7 @@ version_probe: acme-tool
     if (i === 0) writeFileSync(path.join(abs, "acme.yaml"), "x: 1\n");
     units.push({ workspace: "acme-ws", project: `p${i}`, rel: `u${i}`, abs });
   }
-  return { dir, units, integrations: { standardsFile: path.join(dir, "standards.yml"), standardsDir: dir, servicesFile: null } };
+  return { dir, units, integrations: { kbStandardsFile: path.join(dir, "standards.yml"), kbStandardsDir: dir, servicesFile: null } };
 }
 
 function run(argv, inject) {
@@ -59,7 +59,7 @@ test("standards --json: exit 0 with the report", async () => {
 });
 
 test("standards: unconfigured is exit 2 STANDARDS_NOT_CONFIGURED, as JSON and as text", async () => {
-  const inject = { integrations: { standardsFile: null, standardsDir: null }, units: [] };
+  const inject = { integrations: { kbStandardsFile: null, kbStandardsDir: null }, units: [] };
   const r = await run(["--json"], inject);
   assert.equal(r.code, 2);
   const j = JSON.parse(r.out);
@@ -92,7 +92,7 @@ test("standards versions --refresh writes versions.json from an injected run; no
   const run1 = () => "Acme 1.3.0 build";
   const r = await run(["versions", "--refresh", "--json"], { integrations: h.integrations, stateDirPath, run: run1 });
   assert.equal(r.code, 0);
-  const file = path.join(stateDirPath, "standards", "versions.json");
+  const file = path.join(stateDirPath, "kb", "versions.json");
   assert.ok(existsSync(file));
   assert.equal(JSON.parse(readFileSync(file, "utf8")).tools["acme-tool"].version, "1.3.0");
   // without --refresh the injected run must not be called
@@ -135,8 +135,8 @@ test("F5: --refresh with no probes is exit 2 STANDARDS_NO_PROBES and leaves vers
   const h = hub();
   writeFileSync(path.join(h.dir, "standards.yml"), "schema_version: 1\nstandards:\n  acme-tool:\n    kind: tool\n    page: tool/acme-tool.md\n    detect: {files: [acme.yaml]}\n");
   const stateDirPath = tmp();
-  mkdirSync(path.join(stateDirPath, "standards"));
-  const file = path.join(stateDirPath, "standards", "versions.json");
+  mkdirSync(path.join(stateDirPath, "kb"));
+  const file = path.join(stateDirPath, "kb", "versions.json");
   const good = JSON.stringify({ at: "t", tools: { "acme-tool": { version: "1.0.0", at: "t" } } });
   writeFileSync(file, good);
   const r = await run(["versions", "--refresh", "--json"], { integrations: h.integrations, stateDirPath, run: () => "Acme 9.9.9" });

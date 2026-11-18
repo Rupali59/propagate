@@ -672,7 +672,7 @@ on local rows only.
 
 ### Status is derived
 
-Never written onto a row. `lib/standards/status.mjs` `rowStatus`:
+Never written onto a row. `lib/kb/standards/status.mjs` `rowStatus`:
 
 | Status | When |
 |---|---|
@@ -692,7 +692,7 @@ whether the row was written against the version in use, not that its check passe
 
 A registry entry may carry `probe: {cmd, args, parse}`. `parse` is a regex whose first group (else the whole match)
 is the version; the default is the first `N.N[.N]`. `standards versions --refresh` is the only caller of the spawn
-(30 s timeout) and writes `<state dir>/standards/versions.json`; doctor and `standards` only read it. A probe that
+(30 s timeout) and writes `<state dir>/kb/versions.json`; doctor and `standards` only read it. A probe that
 fails is recorded as `{version: null, error}`, never left out. `--refresh` with no probe declared anywhere is
 `STANDARDS_NO_PROBES` and leaves the cache as it was.
 

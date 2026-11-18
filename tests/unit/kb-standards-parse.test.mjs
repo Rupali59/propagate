@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parsePage } from "../../lib/standards/parse.mjs";
-import { loadRegistry, loadStandards } from "../../lib/standards/registry.mjs";
+import { parsePage } from "../../lib/kb/standards/parse.mjs";
+import { loadRegistry, loadStandards } from "../../lib/kb/standards/registry.mjs";
 
 const PAGE = `---
 id: acme-tool

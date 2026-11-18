@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { checkStandards, FINDING_SEVERITY, SEVERITY } from "../../lib/report/doctor/standards.mjs";
 import { Reporter } from "../../lib/report/doctor/reporter.mjs";
-import { writeVersions } from "../../lib/standards/versions.mjs";
+import { writeVersions } from "../../lib/kb/standards/versions.mjs";
 
 // Invented names only (public repo): standard `acme-tool`, workspace `acme-ws`, projects p0..pN.
 const ROWS = {
@@ -38,7 +38,7 @@ function fixture({ rows = ROWS.ok(1), sidecars = {}, versions = null, withAcme =
     if (i < withAcme) writeFileSync(path.join(abs, "acme.yaml"), "x: 1\n");
     units.push({ workspace: "acme-ws", project: `p${i}`, rel: `u${i}`, abs });
   }
-  return { integrations: { standardsFile: file, standardsDir: pdir }, workspaces: [{ name: "acme-ws", root: ws }], stateDir: state, units, minUnits: 10 };
+  return { integrations: { kbStandardsFile: file, kbStandardsDir: pdir }, workspaces: [{ name: "acme-ws", root: ws }], stateDir: state, units, minUnits: 10 };
 }
 
 async function run(fx) {
@@ -210,7 +210,7 @@ test("a throw inside checkStandards is an inconclusive entry and counts as a pro
   const { runStandardsSection } = await import("../../lib/report/doctor/standards.mjs");
   const fx = fixture({ versions: "1.2.0" });
   // a registry entry with a non-string `page` throws out of loadStandards (registry.mjs path.join)
-  const regFile = fx.integrations.standardsFile;
+  const regFile = fx.integrations.kbStandardsFile;
   writeFileSync(regFile, "schema_version: 1\nstandards:\n  acme-tool:\n    kind: tool\n    page: 5\n");
   const reporter = new Reporter();
   await runStandardsSection({ reporter, ...fx });
