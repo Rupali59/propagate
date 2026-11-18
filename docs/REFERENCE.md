@@ -703,7 +703,7 @@ whether the row was written against the version in use, not that its check passe
 
 A registry entry may carry `probe: {cmd, args, parse}`. `parse` is a regex whose first group (else the whole match)
 is the version; the default is the first `N.N[.N]`. `kb standards versions --refresh` is the only caller of the spawn
-(30 s timeout) and writes `<state dir>/kb/versions.json`; doctor and `standards` only read it. A probe that
+(30 s timeout) and writes `<state dir>/kb/versions.json`; doctor and `kb standards` only read it. A probe that
 fails is recorded as `{version: null, error}`, never left out. `--refresh` with no probe declared anywhere is
 `STANDARDS_NO_PROBES` and leaves the cache as it was.
 
@@ -746,7 +746,7 @@ of an adopted standard), `STANDARDS_NOT_ADOPTED` (remove of one not adopted), `S
 `STANDARDS_BLIND`, `STANDARDS_UNKNOWN_PROJECT`. Each prints `<CODE>: <what>. Next: <command>` on stderr, or
 `{ok:false, code, what, next}` with `--json`.
 
-**Exit codes** of `standards`: 0 a report and no problems; 1 a report with problems (a page or sidecar could not be
+**Exit codes** of `kb standards`: 0 a report and no problems; 1 a report with problems (a page or sidecar could not be
 read); 2 could not run (not configured, registry unreadable, blind, usage). The adoption commands exit 0 or 2.
 
 ### The sidecar `kb:` block
