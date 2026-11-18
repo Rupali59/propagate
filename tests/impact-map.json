@@ -1,7 +1,7 @@
 {
  "header": {
-  "recordedAt": "2026-11-18T07:42:30.332Z",
-  "commit": "fe6469d2309daa0203e14728d87621ebe5cc2a4b",
+  "recordedAt": "2026-11-18T07:49:47.217Z",
+  "commit": "5bbfee21dec1532435ad350d61c96ef0db2d83dd",
   "node": "v26.13.0",
   "tests": 333,
   "withStaticDeps": 266,
@@ -9,11 +9,11 @@
   "partial": 5,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2202,
+  "recordedProcesses": 2205,
   "unresolvedStaticSpecifiers": 116,
   "suite": {
-   "pass": 4365,
-   "fail": 1
+   "pass": 4366,
+   "fail": 0
   }
  },
  "tests": {
@@ -10810,6 +10810,7 @@
     "lib/graph/graph-index.mjs",
     "lib/graph/graph.mjs",
     "lib/guard/log.mjs",
+    "lib/kb/references.mjs",
     "lib/kb/standards/adopt.mjs",
     "lib/kb/standards/parse.mjs",
     "lib/kb/standards/registry.mjs",
@@ -11242,6 +11243,7 @@
     "tests/unit/instructions-gate.test.mjs",
     "tests/unit/instructions.test.mjs",
     "tests/unit/journal.test.mjs",
+    "tests/unit/kb-references.test.mjs",
     "tests/unit/kb-standards-adopt.test.mjs",
     "tests/unit/kb-standards-parse.test.mjs",
     "tests/unit/kb-standards-status.test.mjs",
@@ -20218,10 +20220,7 @@
     "tests/unit/sprint-plan.test.mjs",
     "tests/unit/sprint-review.test.mjs",
     "tests/unit/staging-heading-coupling.test.mjs",
-    "tests/unit/standards-adopt.test.mjs",
     "tests/unit/standards-cli.test.mjs",
-    "tests/unit/standards-parse.test.mjs",
-    "tests/unit/standards-status.test.mjs",
     "tests/unit/state-machine.test.mjs",
     "tests/unit/state-vocabulary-floor.test.mjs",
     "tests/unit/states.test.mjs",
