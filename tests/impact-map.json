@@ -1,18 +1,18 @@
 {
  "header": {
-  "recordedAt": "2026-11-17T09:49:45.666Z",
-  "commit": "bedbcb93004baf089645e7ba66c1882e9e740d98",
+  "recordedAt": "2026-11-18T07:29:40.942Z",
+  "commit": "071aebc76fb95a1539eb39026ceb634d162ab4ef",
   "node": "v26.13.0",
-  "tests": 331,
+  "tests": 332,
   "withStaticDeps": 265,
   "withRecordedSpawnDeps": 119,
-  "partial": 4,
+  "partial": 5,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
   "recordedProcesses": 2202,
-  "unresolvedStaticSpecifiers": 115,
+  "unresolvedStaticSpecifiers": 116,
   "suite": {
-   "pass": 4351,
+   "pass": 4358,
    "fail": 1
   }
  },
@@ -1803,6 +1803,7 @@
     "tests/unit/cli-commands.test.mjs",
     "tests/unit/cli-flag-parity.test.mjs",
     "tests/unit/color.test.mjs",
+    "tests/unit/config-kb.test.mjs",
     "tests/unit/context.test.mjs",
     "tests/unit/costs-window.test.mjs",
     "tests/unit/costs.test.mjs",
@@ -11915,6 +11916,7 @@
     "tests/unit/cli-commands.test.mjs",
     "tests/unit/cli-flag-parity.test.mjs",
     "tests/unit/color.test.mjs",
+    "tests/unit/config-kb.test.mjs",
     "tests/unit/context.test.mjs",
     "tests/unit/costs-window.test.mjs",
     "tests/unit/costs.test.mjs",
@@ -12714,6 +12716,7 @@
     "tests/unit/cli-commands.test.mjs",
     "tests/unit/cli-flag-parity.test.mjs",
     "tests/unit/color.test.mjs",
+    "tests/unit/config-kb.test.mjs",
     "tests/unit/context.test.mjs",
     "tests/unit/costs-window.test.mjs",
     "tests/unit/costs.test.mjs",
@@ -14042,6 +14045,13 @@
     "tests/unit/color.test.mjs"
    ],
    "size": "small"
+  },
+  "tests/unit/config-kb.test.mjs": {
+   "deps": [
+    "tests/unit/config-kb.test.mjs"
+   ],
+   "size": "medium",
+   "partial": true
   },
   "tests/unit/context.test.mjs": {
    "deps": [
@@ -20025,6 +20035,7 @@
     "tests/unit/cli/plans.mjs/index.js",
     "tests/unit/cli/plans.mjs/index.mjs",
     "tests/unit/color.test.mjs",
+    "tests/unit/config-kb.test.mjs",
     "tests/unit/context.test.mjs",
     "tests/unit/costs-window.test.mjs",
     "tests/unit/costs.test.mjs",
