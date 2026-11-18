@@ -1,6 +1,7 @@
 /**
- * `propagate standards [--json] [--std <id>] [--project <p>]` and `standards versions [--refresh] [--json]`
- * (#269). OFFLINE: neither reaches GitHub. The only spawn is the tool-version probe in `versions --refresh`
+ * `propagate kb standards [--json] [--std <id>] [--project <p>]`, `kb standards versions|adopt|decline|remove` and
+ * `kb references [--json]` (#269, #322). `propagate standards …` is a deprecated alias that says so on stderr and
+ * calls the same code. OFFLINE: none reaches GitHub. The only spawn is the tool-version probe in `versions --refresh`
  * (lib/kb/standards/versions.mjs), behind an injectable `run`.
  *
  * EXIT CODES. 0 report produced and no problems; 1 report produced with problems (a page or sidecar could not
@@ -13,12 +14,16 @@ import path from "node:path";
 import { stateDir } from "../lib/core/paths.mjs";
 import { collectUnits, MIN_UNITS } from "../lib/report/services.mjs";
 import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/kb/standards/adopt.mjs";
+import { loadReferences } from "../lib/kb/references.mjs";
 import { loadStandards } from "../lib/kb/standards/registry.mjs";
 import { readSidecars, serviceDetectsFor } from "../lib/kb/standards/sidecars.mjs";
 import { buildStandardsReport } from "../lib/kb/standards/status.mjs";
 import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/kb/standards/versions.mjs";
 
-const USAGE = "usage: propagate standards [--json] [--std <id>] [--project <p>] | standards versions [--refresh] [--json] | standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | standards decline|remove <std> <project|workspace/project> --reason <r> [--apply]";
+const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json]";
+
+/** The exact line `propagate standards …` writes to stderr, once per run. */
+export const STANDARDS_DEPRECATION = "propagate standards is now propagate kb standards; the old name is removed in the release after 0.21.0";
 
 const fail = (code, what, next) => ({ ok: false, code, what, next });
 
@@ -55,15 +60,55 @@ function loadOrFail(integrations) {
   const l = loadStandards({ standardsFile: integrations.kbStandardsFile, standardsDir: integrations.kbStandardsDir });
   if (l.ok) return l;
   const code = /^standards not configured/.test(l.reason) ? "STANDARDS_NOT_CONFIGURED" : "STANDARDS_UNREADABLE";
-  const next = code === "STANDARDS_NOT_CONFIGURED" ? "set PROPAGATE_STANDARDS_FILE and PROPAGATE_STANDARDS_DIR (or standardsFile and standardsDir in config.yml)" : "fix the registry file named above";
+  const next = code === "STANDARDS_NOT_CONFIGURED" ? "set PROPAGATE_KB_STANDARDS_FILE and PROPAGATE_KB_STANDARDS_DIR (or kbStandardsFile and kbStandardsDir under integrations: in config.yml)" : "fix the registry file named above";
   return fail(code, l.reason, next);
 }
 
 /**
- * @param {string[]} argv everything after `standards`
+ * @param {string[]} argv everything after `kb`: `standards …` or `references …`
  * @param {object} [inject] tests: io, integrations, workspaces, units, sidecars, stateDirPath, now, run, minUnits
  */
+export async function kbCmd(argv = [], inject = {}) {
+  const io = inject.io ?? console;
+  const asJson = argv.includes("--json");
+  if (argv[0] === "standards") return standardsBody(argv.slice(1), inject);
+  if (argv[0] === "references") return referencesCmd(argv.slice(1), inject, io, asJson);
+  return emitFailure(fail("KB_USAGE", argv[0] === undefined ? "kb needs a subcommand" : `unknown kb subcommand ${JSON.stringify(argv[0])}`, USAGE), asJson, io);
+}
+
+/** `propagate standards …`: the deprecated name. One stderr line, then exactly what `kb standards …` does. */
 export async function standardsCmd(argv = [], inject = {}) {
+  (inject.io ?? console).error(STANDARDS_DEPRECATION);
+  return kbCmd(["standards", ...argv], inject);
+}
+
+/** `kb references [--json]`: the registry's entries, ids shown as `ref:<key>` (the file keeps the bare key). */
+async function referencesCmd(rest, inject, io, asJson) {
+  const p = parse(rest, [], ["--json"]);
+  if (p.error) return emitFailure({ ...p.error, code: "KB_USAGE" }, asJson, io);
+  const { integrations } = await env(inject);
+  const file = integrations.kbReferencesFile ?? null;
+  const { references, problems } = loadReferences(file);
+  if (references.length === 0) {
+    const code = file ? "KB_REFERENCES_UNREADABLE" : "KB_REFERENCES_NOT_CONFIGURED";
+    const next = file ? "fix the registry file named above" : "set PROPAGATE_KB_REFERENCES_FILE (or kbReferencesFile under integrations: in config.yml)";
+    return emitFailure(fail(code, problems.join("; "), next), asJson, io);
+  }
+  const shown = references.map((r) => ({ ...r, id: `ref:${r.id}` }));
+  if (asJson) {
+    io.log(JSON.stringify({ ok: true, references: shown, problems }, null, 2));
+    return problems.length ? 1 : 0;
+  }
+  io.log(`# references  (${shown.length} entr${shown.length === 1 ? "y" : "ies"})`);
+  for (const r of shown) io.log(`  ${r.id}  ${r.kind ?? "?"}  ${r.url ?? r.repo ?? ""}${r.verdict ? `  (${r.verdict})` : ""}`);
+  if (problems.length) {
+    io.log("\n# problems");
+    for (const x of problems) io.log(`  ${x}`);
+  }
+  return problems.length ? 1 : 0;
+}
+
+async function standardsBody(argv, inject) {
   const io = inject.io ?? console;
   const asJson = argv.includes("--json");
   if (["adopt", "decline", "remove"].includes(argv[0])) return adoptionCmd(argv, inject, io, asJson);

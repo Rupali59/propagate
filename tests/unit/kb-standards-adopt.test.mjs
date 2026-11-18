@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import yaml from "yaml";
-import { standardsCmd } from "../../cli/standards.mjs";
+import { standardsCmd } from "../../cli/kb.mjs";
 import { readAdoptions } from "../../lib/kb/standards/adopt.mjs";
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), "std-adopt-"));

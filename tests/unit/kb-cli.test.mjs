@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { standardsCmd } from "../../cli/standards.mjs";
+import { kbCmd, standardsCmd, STANDARDS_DEPRECATION } from "../../cli/kb.mjs";
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), "std-cli-"));
 
@@ -154,4 +154,102 @@ test("F14: an unreadable services.yml is a reported problem for a standard that 
   const j = JSON.parse(r.out);
   assert.equal(r.code, 1);
   assert.ok(j.problems.some((p) => /services\.yml could not be read/.test(p)));
+});
+
+function runKb(argv, inject) {
+  const out = [];
+  const err = [];
+  const io = { log: (s) => out.push(String(s)), error: (s) => err.push(String(s)) };
+  return kbCmd(argv, { io, stateDirPath: tmp(), sidecars: [], workspaces: [], ...inject }).then((code) => ({ code, out: out.join("\n"), err }));
+}
+
+test("kb standards --json: the same bytes as the deprecated standards --json, on the same fixture", async () => {
+  const h = hub();
+  const state = tmp();
+  const a = await runKb(["standards", "--json"], { integrations: h.integrations, units: h.units, stateDirPath: state, now: () => 1 });
+  const b = await run(["--json"], { integrations: h.integrations, units: h.units, stateDirPath: state, now: () => 1 });
+  assert.equal(a.code, 0);
+  assert.equal(a.out, b.out);
+  assert.deepEqual(a.err, []);
+});
+
+test("standards (deprecated): the exact deprecation line on stderr, once, stdout unchanged", async () => {
+  assert.equal(STANDARDS_DEPRECATION, "propagate standards is now propagate kb standards; the old name is removed in the release after 0.21.0");
+  const h = hub();
+  const out = [];
+  const err = [];
+  const io = { log: (s) => out.push(String(s)), error: (s) => err.push(String(s)) };
+  const code = await standardsCmd(["--json"], { io, integrations: h.integrations, units: h.units, stateDirPath: tmp(), sidecars: [], workspaces: [] });
+  assert.equal(code, 0);
+  assert.deepEqual(err, [STANDARDS_DEPRECATION]);
+  assert.equal(JSON.parse(out.join("\n")).standards[0].id, "acme-tool");
+});
+
+test("kb standards writes no deprecation line", async () => {
+  const h = hub();
+  const r = await runKb(["standards", "--json"], { integrations: h.integrations, units: h.units });
+  assert.deepEqual(r.err, []);
+});
+
+test("kb standards: the not-configured hint names the new keys", async () => {
+  const r = await runKb(["standards", "--json"], { integrations: { kbStandardsFile: null, kbStandardsDir: null }, units: [] });
+  assert.equal(r.code, 2);
+  const j = JSON.parse(r.out);
+  assert.equal(j.code, "STANDARDS_NOT_CONFIGURED");
+  assert.match(j.next, /PROPAGATE_KB_STANDARDS_FILE/);
+  assert.match(j.next, /PROPAGATE_KB_STANDARDS_DIR/);
+  assert.match(j.next, /kbStandardsFile/);
+  assert.match(j.next, /kbStandardsDir/);
+});
+
+function refsFile(body) {
+  const dir = tmp();
+  const f = path.join(dir, "kb-references.yml");
+  writeFileSync(f, body);
+  return f;
+}
+const REFS = `schema_version: 1
+references:
+  quartz:
+    kind: tool
+    url: https://example.org/quartz
+    verdict: adopt
+  gizmo:
+    kind: repo
+    repo: example/gizmo
+`;
+
+test("kb references --json lists the entries as ref:<key>, the file untouched", async () => {
+  const f = refsFile(REFS);
+  const r = await runKb(["references", "--json"], { integrations: { kbReferencesFile: f } });
+  assert.equal(r.code, 0);
+  const j = JSON.parse(r.out);
+  assert.equal(j.ok, true);
+  assert.deepEqual(j.references.map((x) => x.id).sort(), ["ref:gizmo", "ref:quartz"]);
+  assert.equal(readFileSync(f, "utf8"), REFS);
+});
+
+test("kb references: text output carries the ref: prefix", async () => {
+  const r = await runKb(["references"], { integrations: { kbReferencesFile: refsFile(REFS) } });
+  assert.equal(r.code, 0);
+  assert.match(r.out, /ref:quartz/);
+});
+
+test("kb references: unconfigured is exit 2 KB_REFERENCES_NOT_CONFIGURED, never an empty list", async () => {
+  const r = await runKb(["references", "--json"], { integrations: { kbReferencesFile: null } });
+  assert.equal(r.code, 2);
+  assert.equal(JSON.parse(r.out).code, "KB_REFERENCES_NOT_CONFIGURED");
+});
+
+test("kb references: an unreadable file is exit 2 KB_REFERENCES_UNREADABLE", async () => {
+  const r = await runKb(["references", "--json"], { integrations: { kbReferencesFile: refsFile("schema_version: 9\n") } });
+  assert.equal(r.code, 2);
+  assert.equal(JSON.parse(r.out).code, "KB_REFERENCES_UNREADABLE");
+});
+
+test("kb: no subcommand and an unknown one are exit 2 KB_USAGE", async () => {
+  assert.equal((await runKb([], {})).code, 2);
+  const r = await runKb(["nope", "--json"], {});
+  assert.equal(r.code, 2);
+  assert.equal(JSON.parse(r.out).code, "KB_USAGE");
 });
