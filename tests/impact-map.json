@@ -1,19 +1,19 @@
 {
  "header": {
-  "recordedAt": "2026-11-18T09:22:47.094Z",
-  "commit": "ff54fbddfba7e5e202523803bce8ce6770feb685",
+  "recordedAt": "2026-11-18T09:59:36.532Z",
+  "commit": "8617cb437f9b0eb169a581f7595eefc1922536b9",
   "node": "v26.13.0",
-  "tests": 334,
-  "withStaticDeps": 267,
+  "tests": 335,
+  "withStaticDeps": 268,
   "withRecordedSpawnDeps": 119,
-  "partial": 5,
+  "partial": 6,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2209,
-  "unresolvedStaticSpecifiers": 116,
+  "recordedProcesses": 2211,
+  "unresolvedStaticSpecifiers": 117,
   "suite": {
-   "pass": 4395,
-   "fail": 0
+   "pass": 4397,
+   "fail": 1
   }
  },
  "tests": {
@@ -1746,6 +1746,7 @@
     "tests/docs/skill-word-budget.test.mjs",
     "tests/helpers/full-state-snapshot.mjs",
     "tests/helpers/impact-fixture.mjs",
+    "tests/helpers/kb-upgrade-workspace.mjs",
     "tests/helpers/minidom.mjs",
     "tests/helpers/mount-client.mjs",
     "tests/helpers/plain.mjs",
@@ -1987,6 +1988,7 @@
     "tests/unit/work.test.mjs",
     "tests/unit/workspace-resolve.test.mjs",
     "tests/unit/worktrees.test.mjs",
+    "tests/upgrade/kb-rename.test.mjs",
     "tests/watcher/content-id.test.mjs",
     "tests/watcher/edge-id-mount-independence.test.mjs",
     "tests/watcher/edge-id-stability.test.mjs",
@@ -4690,6 +4692,7 @@
     "tests/hooks/",
     "tests/portability/",
     "tests/unit/",
+    "tests/upgrade/",
     "tests/watcher/",
     "widget/"
    ],
@@ -11904,8 +11907,14 @@
     "tests/docs/docs-cmd.test.mjs",
     "tests/docs/skill-doc.test.mjs",
     "tests/docs/skill-word-budget.test.mjs",
+    "tests/fixtures/kb-upgrade/golden-standards.json",
+    "tests/fixtures/kb-upgrade/hub-new/kb/standards/tool/example.md",
+    "tests/fixtures/kb-upgrade/hub-new/scripts/execution/kb-standards.yml",
+    "tests/fixtures/kb-upgrade/hub-old/scripts/execution/standards.yml",
+    "tests/fixtures/kb-upgrade/hub-old/standards/tool/example.md",
     "tests/helpers/full-state-snapshot.mjs",
     "tests/helpers/impact-fixture.mjs",
+    "tests/helpers/kb-upgrade-workspace.mjs",
     "tests/helpers/minidom.mjs",
     "tests/helpers/mount-client.mjs",
     "tests/helpers/plain.mjs",
@@ -12147,6 +12156,7 @@
     "tests/unit/work.test.mjs",
     "tests/unit/workspace-resolve.test.mjs",
     "tests/unit/worktrees.test.mjs",
+    "tests/upgrade/kb-rename.test.mjs",
     "tests/watcher/content-id.test.mjs",
     "tests/watcher/edge-id-mount-independence.test.mjs",
     "tests/watcher/edge-id-stability.test.mjs",
@@ -12710,6 +12720,7 @@
     "tests/docs/skill-word-budget.test.mjs",
     "tests/helpers/full-state-snapshot.mjs",
     "tests/helpers/impact-fixture.mjs",
+    "tests/helpers/kb-upgrade-workspace.mjs",
     "tests/helpers/minidom.mjs",
     "tests/helpers/mount-client.mjs",
     "tests/helpers/plain.mjs",
@@ -12951,6 +12962,7 @@
     "tests/unit/work.test.mjs",
     "tests/unit/workspace-resolve.test.mjs",
     "tests/unit/worktrees.test.mjs",
+    "tests/upgrade/kb-rename.test.mjs",
     "tests/watcher/content-id.test.mjs",
     "tests/watcher/edge-id-mount-independence.test.mjs",
     "tests/watcher/edge-id-stability.test.mjs",
@@ -20058,6 +20070,7 @@
     "tests/docs/skill-doc.test.mjs",
     "tests/docs/skill-word-budget.test.mjs",
     "tests/helpers/full-state-snapshot.mjs",
+    "tests/helpers/kb-upgrade-workspace.mjs",
     "tests/helpers/minidom.mjs",
     "tests/helpers/mount-client.mjs",
     "tests/helpers/plain.mjs",
@@ -20359,6 +20372,7 @@
     "tests/unit/work.test.mjs",
     "tests/unit/workspace-resolve.test.mjs",
     "tests/unit/worktrees.test.mjs",
+    "tests/upgrade/kb-rename.test.mjs",
     "tests/watcher/content-id.test.mjs",
     "tests/watcher/edge-id-mount-independence.test.mjs",
     "tests/watcher/edge-id-stability.test.mjs",
@@ -21271,6 +21285,16 @@
     "tests/unit/worktrees.test.mjs"
    ],
    "size": "small"
+  },
+  "tests/upgrade/kb-rename.test.mjs": {
+   "deps": [
+    "cli.mjs",
+    "tests/fixtures/kb-upgrade/golden-standards.json",
+    "tests/helpers/kb-upgrade-workspace.mjs",
+    "tests/upgrade/kb-rename.test.mjs"
+   ],
+   "size": "medium",
+   "partial": true
   },
   "tests/watcher/content-id.test.mjs": {
    "deps": [
