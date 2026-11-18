@@ -99,6 +99,50 @@ test("a project with sub-packages yields one unit per lockfile", () => {
   }
 });
 
+test("a unit two levels down, under a directory with no lockfile of its own, is a unit", () => {
+  // Measured 2026-11-16: a Python repo whose Next.js app sits at `<repo>/dashboard/frontend` was dropped from
+  // every standards and services count, because the walk stopped at depth 1 and `dashboard/` has no lockfile.
+  const root = fixture({
+    sidecars: { app: { remote: "https://x/app.git" } },
+    dirs: {
+      app: ["pyproject.toml"],
+      "app/dashboard": ["docker-compose.yml"],
+      "app/dashboard/frontend": ["package-lock.json", "next.config.mjs"],
+      "app/dashboard/backend": ["pyproject.toml"],
+      "app/dashboard/node_modules/dep": ["package-lock.json"],
+    },
+  });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    assert.deepEqual(
+      m.projects[0].units.map((u) => `${u.rel}:${u.toolchain}`).sort(),
+      ["app/dashboard/backend:python", "app/dashboard/frontend:npm", "app:python"],
+      "the nested app and its sibling are units; node_modules under the container is not",
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("the walk does not descend into a unit, nor past two levels", () => {
+  // A unit's own sub-directories belong to it (fixtures, examples, workspace packages): only a directory that is
+  // NOT a unit is looked through. And the depth stays bounded: a unit three levels down is not reached.
+  const root = fixture({
+    sidecars: { mb: { remote: "https://x/mb.git" } },
+    dirs: {
+      "mb/ui": ["package-lock.json"],
+      "mb/ui/examples": ["package-lock.json"],
+      "mb/tools/a/b": ["package-lock.json"],
+    },
+  });
+  try {
+    const m = workspaceManifest(root, { integrations: NO_REGISTRIES });
+    assert.deepEqual(m.projects[0].units.map((u) => u.rel).sort(), ["mb/ui"]);
+  } finally {
+    cleanup(root);
+  }
+});
+
 test("no remote and not a repo of its own => cannot-clone", () => {
   const root = fixture({ sidecars: { solo: {} }, dirs: { solo: ["package.json"] } });
   try {

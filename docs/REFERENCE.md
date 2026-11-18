@@ -607,6 +607,205 @@ matter (8e14732: astro-darpan's G2 wrapped its Active-since paragraph past the 3
 found, or no board read (a rate limit, a listing that returned 0 open boards, an item with no field values). A blind
 scan never exits 0.
 
+## `propagate standards` (propagate#269)
+
+Standards are rule-like documents that name a tool or a practice and carry checkable rows. This section records what
+is **built** on `feat/269-standards-core`; the reasons and the phasing are in the design, not here:
+`propagation/docs/propagate/plans/2026-11-15-standards-design.md` (§2.1 storage, §2.2 adoption, §2.3 doctor, §2.12
+phasing), and the build plan `2026-11-15-standards-increment-1.md`. Decisions made after the design are on
+propagate#290 and #291 and are cited below. Where the code and the design differ, the code is described.
+
+**Offline.** `standards`, `standards adopt|decline|remove` and doctor's `# Standards` make no network call.
+The one spawn is the tool-version probe, and only `standards versions --refresh` runs it. `adopt --apply` reads the
+GitHub login with `gh api user`.
+
+### Where it is configured
+
+| Key | Env | Default | Holds |
+|---|---|---|---|
+| `standardsFile` | `PROPAGATE_STANDARDS_FILE` | `<hub>/scripts/execution/standards.yml` | the registry |
+| `standardsDir` | `PROPAGATE_STANDARDS_DIR` | `<hub>/standards` | the pages the registry names |
+
+The registry is `schema_version: 1` plus a `standards:` mapping, each entry `{kind, page, authority, detect, service,
+probe, pointer_globs}`. A null path reads as "standards not configured", never as zero standards, and an empty
+`standards:` mapping is "a shape this reader does not recognise" (`rule:discernment-checks` §6). A missing or broken
+page is a problem naming its file; the other standards still load.
+
+### The page and the row
+
+A page is YAML frontmatter plus rows. Frontmatter keys read: `id` (must equal the registry key), `kind`, `authority`
+(a list of `{name, url, scope}`), `version_probe` (the key in the versions cache, defaulting to the id), `supersedes`
+and `extends`.
+
+```
+### acme-tool-007 · A stuck wait is capped
+**State:** adopted
+**Source:** acme-tool API docs · **Version:** acme-tool 3.4.1 · **Checked:** 2026-11-14
+**Apply:** cap waits in the integration helpers so a stuck screen fails and names the step
+**Check:** test: **/integration/support.dart contains boundedWait
+**Fails when:** the cap is removed
+**Broadcast:** no
+**Superseded by:** —
+```
+
+- A row heading is `### <id> · <title>`; a hub row id is `<standard id>-<nnn>`, and the registry reader reports a
+  mismatch. Fields are bold-key lines and a continuation line extends the previous field.
+- **State** is `draft`, `adopted` or `retired`. **Check** is `kind` or `kind: target`, with kind one of `command`,
+  `test`, `propagate`, `gate`, `review`, `none`; `command` and `test` need a target. **Checked** must be `YYYY-MM-DD`.
+- The parser never throws on content. Every defect (unknown field, unknown state or check kind, a duplicate row id
+  with both rows kept, a heading that looks like a row but is not, a field outside any row, frontmatter that does not
+  parse) lands in `problems`, so a broken page is reported as broken, never as zero rows.
+- **Not built:** the design's projection hash and the fixed section checks (Authority, Rows, Plan, Retired rows).
+
+**A project page extends a hub standard (#290).** Frontmatter `extends: std:acme-tool` (one entry or a list). A row
+there is one of:
+
+| Row | State | Rule |
+|---|---|---|
+| `**Applies:** std:acme-tool-007`, with a project check path | **inherited** from the hub row | no `State:` line is written; when the hub retires the row every project follows with no edit |
+| `local-<n>` (as the row id, or as `Applies:`) | **defaults to adopted** | retiring one needs a `**Reason:**` field |
+| a hub-page row | explicit | a missing `State:` is a problem |
+
+`Applies:` must be `std:<id>-NNN` or `local-<n>`, and the page must extend that standard. Whether the named row
+exists is checked only when the caller passes `extendedRows`. Rejected on #290: a `State:` line on every row, and one
+on local rows only.
+
+### Status is derived
+
+Never written onto a row. `lib/standards/status.mjs` `rowStatus`:
+
+| Status | When |
+|---|---|
+| `unchecked` | the row's check kind is `review` or `none` (decided first, so a review row is never `verified`) |
+| `unverifiable` | no version in use (`version not read (standards versions --refresh)`), or either side has no comparable number (`GA4`, `2026-11`) |
+| `re-verify` | the version in use is newer than the row's `Version`, by major.minor of the first `N.N` found in each |
+| `verified` | the same, or an older, major.minor |
+
+A standard's row status is the worst across its detected projects (and each project's across its units). `retired`
+rows are left out. A row with a check kind that runs (`command`, `test`) is **not run** by the report: status says
+whether the row was written against the version in use, not that its check passed.
+
+`standards --json` carries per standard `rows`, `projects` (each unit with its `version` and `source`),
+`projectCounts`, `counts`, `detected`, `adopted` and `versionSource` (`lockfile`, `probe`, `mixed` or null).
+
+### Versions and probes
+
+A registry entry may carry `probe: {cmd, args, parse}`. `parse` is a regex whose first group (else the whole match)
+is the version; the default is the first `N.N[.N]`. `standards versions --refresh` is the only caller of the spawn
+(30 s timeout) and writes `<state dir>/standards/versions.json`; doctor and `standards` only read it. A probe that
+fails is recorded as `{version: null, error}`, never left out. `--refresh` with no probe declared anywhere is
+`STANDARDS_NO_PROBES` and leaves the cache as it was.
+
+Version in use for a unit, in order: its own `pubspec.lock` (`sdks.<probe key>`), then the machine probe, else none.
+**Known gap (recorded on #290):** `spawnRun` calls `spawnSync(cmd, args)` with **no `cwd`**. So a project-local tool,
+such as one installed in a project's `node_modules`, is never read from the project. Only a machine-installed tool is
+read correctly, and the probe is the same for every unit. Reading a project-local version per unit from its lockfile
+(or with `cwd` set to the unit) is not built; only the `pubspec.lock` branch exists.
+
+### Detection and adoption
+
+Detection proposes, adoption decides, and the adoption stays (design §2.2). A standard detects units from its own
+`detect` (`deps`, `files`, `env`) or reuses a service's through `service:` (read from `services.yml`); a `global` or
+`production` standard detects every unit with code. The unit scan reuses `services.mjs` and has a floor
+(`MIN_UNITS`): below it the report is `STANDARDS_BLIND`, never "0 detected".
+
+| Command | Does |
+|---|---|
+| `standards [--json] [--std <id>] [--project <p>]` | the report above |
+| `standards versions [--refresh] [--json]` | the cached versions; `--refresh` probes |
+| `standards adopt <std> <project\|workspace/project> [--units a,b] [--evidence <text>] [--apply]` | record the adoption |
+| `standards decline <std> <project\|workspace/project> --reason <r>` | record "detected, does not apply" |
+| `standards remove <std> <project\|workspace/project> --reason <r>` | record the removal of an adoption |
+
+**Every adoption command is a dry run unless `--apply`.** The dry run prints the entry, the rows with their status,
+and the `command` / `test` checks adoption would run; **`adopt` does not run them**, so their output goes in with
+`--evidence`. `--apply` is accepted for `adopt` only. For `decline` and `remove` it is refused with
+`STANDARDS_APPROVAL_UNAVAILABLE` until approvals exist (S4). `--apply` writes `by` from `gh api user`; if that cannot
+be read the command stops with `STANDARDS_IDENTITY_UNKNOWN` and never writes a blank. Re-adopting refreshes
+`verified_on` (and `units` and `evidence` when given) and keeps `since` and `by`. The sidecar is found through
+discovery's workspace roots by the sidecar's `project:` field, never built from a directory name. A bare project name
+that several workspaces share (every workspace's root unit is `workspace`) is refused with `STANDARDS_PROJECT_AMBIGUOUS`,
+which lists `<workspace>/<project>` candidates; pass the qualified form. Units come from that workspace only.
+
+Refusals: `STANDARDS_USAGE`, `STANDARDS_UNKNOWN`, `STANDARDS_PROJECT_UNKNOWN`, `STANDARDS_PROJECT_AMBIGUOUS`, `STANDARDS_ALREADY_ADOPTED` (decline
+of an adopted standard), `STANDARDS_NOT_ADOPTED` (remove of one not adopted), `STANDARDS_UNREADABLE`,
+`STANDARDS_WRITE_REFUSED` (the sidecar changed since the plan was made), `STANDARDS_NOT_CONFIGURED`,
+`STANDARDS_BLIND`, `STANDARDS_UNKNOWN_PROJECT`. Each prints `<CODE>: <what>. Next: <command>` on stderr, or
+`{ok:false, code, what, next}` with `--json`.
+
+**Exit codes** of `standards`: 0 a report and no problems; 1 a report with problems (a page or sidecar could not be
+read); 2 could not run (not configured, registry unreadable, blind, usage). The adoption commands exit 0 or 2.
+
+### The sidecar `standards:` block
+
+The record lives in the project's `propagation/state/<project>/.sidecar.yml`, never in `.propagates.yml` (its schema
+is closed; an extra key would disable every edge in the file). Only the `standards:` pair is rewritten, and every
+other byte of the sidecar is kept; the cost is that comments **inside** the block are regenerated away.
+
+```yaml
+standards:
+  adopted:
+    - {standard: acme-tool, units: [apps/acme-app], since: 2026-11-16, by: acme-dev, verified_on: "acme-tool 3.4.1", evidence: "..."}
+  overrides:            # {standard, row, reason}
+  declined:             # {standard, reason}
+  removed:              # {standard, on, by, reason, approved_pr: null}
+  reviews: []           # reserved for `standards review` (not built)
+  local_page: docs/acme-ws/reference/ACME-TOOL.md
+```
+
+`local_page` is read and kept, **but no code reads the page it names yet**: the report does not parse a project page,
+so `extends:`, `Applies:` and `local-<n>` rows are parsed (by `parsePage`) but not yet reported on. `reviews:` is read
+and preserved so the review command needs no schema change.
+
+### doctor: `# Standards`
+
+`lib/report/doctor/standards.mjs`, offline. Not configured is `info` and skipped (the normal state on another
+machine). Could not run is `inconclusive`, which votes. A finding that is documentation debt is `warn`, which is never
+counted, so a tree with only warnings leaves doctor's problem count unchanged. A declaration error is `check(false)`,
+which is counted.
+
+| Finding | Reported as | Meaning |
+|---|---|---|
+| `STANDARDS-UNREADABLE` | inconclusive | a registry, page or sidecar problem, a non-list `overrides:` or `declined:`, a blind scan, or an exception inside the section (`standards could not run`); one defect is one entry |
+| `RE-VERIFY` | warn | rows whose `Version` is older than the version in use |
+| `VERSION-NOT-READ` | info | rows with no version in use; counted apart from re-verify |
+| `UNCHECKED-ROW` | info | a count of review and none rows |
+| `CHECK-CANNOT-FAIL` | warn | a `command` or `test` row with no `Fails when:` |
+| `DETECTED-NOT-ADOPTED` | warn | detected, neither adopted nor declined; a name shared by two workspaces is listed as `<workspace>/<project>` |
+| `ADOPTED-UNDETECTED` | warn | adopted, detector finds nothing |
+| `UNIT-NOT-ON-DISK` | warn | an adopted unit not on disk (never "not detected") |
+| `OVERRIDE-NO-REASON`, `OVERRIDE-STALE`, `DECLINE-NO-REASON` | check, fails | a declaration error; stale = standard not adopted, or the row retired or missing |
+
+The two adoption findings apply to `kind: tool` standards only: a `global` or `production` standard detects every
+code unit, so each project would warn and the finding would carry nothing. The section's `SEVERITY` is a single `S2`
+(`doctor-severity.test.mjs` requires one value per section). `FINDING_SEVERITY` holds the per-finding values of the
+design (S1 to S3, info); **nothing reads it yet, so it is documentation, not behaviour**.
+
+### Units (#291)
+
+Detection reads the manifest's unit walk (`lib/report/manifest.mjs`). Decided 2026-11-17: **a workspace repo's root
+with its own lockfile is a unit, with or without a workspace sidecar.** With a sidecar, the root is probed for its own
+lockfile only and its nested units stay with their projects; without one, the root becomes a project named
+`workspace`. `pubspec.lock` is a lockfile (toolchain `dart`), and pub workspace members count as units. The walk goes
+through directories that are not units down to depth 2, and never into a unit.
+
+The undeclared-repo walk ("would be missed") is **unbounded**, limited only by discovery's skip set (`isSkippedDir`),
+and **stops at any other discovered workspace's root**, the same ownership rule as the cross-repo owner check.
+
+### Not built yet
+
+| Not built | Where it lands |
+|---|---|
+| `standards review <row-id> [--apply]`: records who, when, tool version and evidence in the sidecar `reviews:` list; `verified` while the version is unchanged and the review is younger than a limit (proposed 90 days, open), `re-verify` when either changes, `unchecked` until the first review (decided 2026-11-17, #290; **Task 6b**) | until then `UNCHECKED-ROW` stays an info count |
+| edges: drift of a standard's rows into projects, `adopt --apply` pinning an edge, `ADOPTED-UNSETTLED` | S3 |
+| approvals: applying `decline` and `remove`, `UNAPPROVED-CHANGE`, `APPROVALS-NOT-CONFIGURED` | S4 |
+| delivery: pointers into agent files, `POINTERS-DRIFT` | S5 |
+| migration of rules to standards | S6 |
+| plans in the standards flow | S7 |
+| per-unit versions from a project's lockfile, or a probe run with `cwd` set to the unit | #290 |
+| repo-level detect files | #316 |
+| `AUTHORITY-UNRESOLVED` and `standards audit --online` | online slice |
+
 ## `propagate sessions`: who works where (propagate#272)
 
 Which Claude Code sessions are live, in which folder, on which goal and item. Live state is derived from `claude agents --json` on every call and never cached; propagate stores only the association and a folder cache, both in the state directory (`$PROPAGATE_STATE_DIR/sessions/`), never in a repo.
@@ -1522,7 +1721,7 @@ replacement" section is the first place to look.
 
 Generated by `propagate docs --reference` from `KINDS` in `lib/report/doc-kind.mjs` — the single source (plan `i-saw-it-what-starry-sparkle.md` §5). **Do not hand-edit this section** — run `propagate docs --reference` to regenerate, or `propagate docs --reference --check` to verify this section still matches the tree without writing anything.
 
-### The ten kinds
+### The kinds
 
 | kind | what | create | maintain | link | never |
 |---|---|---|---|---|---|
@@ -1536,6 +1735,7 @@ Generated by `propagate docs --reference` from `KINDS` in `lib/report/doc-kind.m
 | `router` | routes to other docs and must not restate them | when a directory or topic has enough documents that a newcomer needs one place to start | completeness — its job is coverage, not freshness — a router is stale when it misses a doc, not when it ages | every doc in its scope, and nothing else | restate the content of a doc it routes to |
 | `gotchas` | hazards and their triggers; can be current and still INERT if a trigger cannot fire | when something costs more than ten minutes for a reason that was not obvious | none — hazards do not expire with age; its defect is an inert trigger, checked by lib/gotchas/parse.mjs, not by mtime | the code or command whose trigger it declares, and the incident that paid for it | describe a hazard with no trigger and no cost — that is advice, not a gotcha |
 | `issues` | a register of numbered entries with statuses; rots by reporting closed work as open | when a defect needs a numbered, re-triageable status rather than a narrative update | none — an old open issue is still open; age says nothing, only re-triage by a person can | the STATE.md or code that the issue's resolution will change | let an entry's status go stale after the underlying work is actually done |
+| `standard` | a rule or practice other docs and code are held to; declares its authority and how it is checked | when a practice must be applied the same way in more than one project and someone must be able to say what backs it | reference-integrity — a standard rots when the tool, version or source it cites moves; age alone says nothing | the authority it rests on, and the projects or checks that apply it | state a practice with no authority and no way to check it |
 
 ### Tier precedence — a trap worth naming
 
@@ -1565,9 +1765,9 @@ implies.
 
 <!-- propagate:docs-reference:inputs v1
 alg: sha256-12
-body: 7aec7f344ac8
+body: 4a87c8f24267
 generator: propagate docs --reference v0.19.0
 walk: n/a — single-source render, no tree walk
 inputs:
-  lib/report/doc-kind.mjs :: 8ca30ad52f91
+  lib/report/doc-kind.mjs :: 1ab6002bb761
 -->

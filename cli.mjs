@@ -929,6 +929,16 @@ async function doctor({ exitProcess = true } = {}) {
     }
   }
 
+  // # Standards — offline only (no network call, no probe spawn). Findings warn; only a declaration error fails.
+  // A throw is an inconclusive entry (counted), never a silent yellow line: could-not-run is not no-problem.
+  {
+    const { runStandardsSection } = await import("./lib/report/doctor/standards.mjs");
+    const reporter = new Reporter();
+    await runStandardsSection({ reporter });
+    renderDoctorEntries(reporter.drain());
+    problems += reporter.problems;
+  }
+
   // # Goals — arrival conditions. Surfaced HERE rather than left to whoever
   // remembers to type `propagate goals`, because a capability nobody invokes is
   // indistinguishable from one that was never built
@@ -5979,6 +5989,9 @@ if (_invokedDirectly) {
   } else if (mode === "goals") {
     const { goalsCmd } = await import("./cli/goals.mjs");
     process.exitCode = await goalsCmd(process.argv.slice(3));
+  } else if (mode === "standards") {
+    const { standardsCmd } = await import("./cli/standards.mjs");
+    process.exitCode = await standardsCmd(process.argv.slice(3));
   } else if (mode === "services") {
     const { servicesCmd } = await import("./cli/services.mjs");
     process.exitCode = await servicesCmd(process.argv.slice(3));

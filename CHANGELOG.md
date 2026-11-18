@@ -6,22 +6,154 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
-### Upgrading
-- **Node >= 22.13 is now required** (was 22.0). `propagate work` keeps its queue in Node's built-in `node:sqlite`, which is unflagged from 22.13.0. On the 22.x line that module is still marked experimental; propagate hides only its SQLite warning. Check with `node --version` before upgrading.
-- **`propagate work` creates `$PROPAGATE_STATE_DIR/work/queue.db`** (plus `-wal` and `-shm`) on first use. These files are state, not cache: never delete them as part of a cache clean.
-- **The background guard now logs its refusals** to `$PROPAGATE_STATE_DIR/guard/YYYY-MM.jsonl` (#294): one row per `deny` and per backgrounded call that matched a rule, holding a program name and a 16-hex hash, never command text. An install without a `guard/` directory works unchanged; it is created on the first logged event. Every glance write deletes month files older than 90 days (#295 moved the prune there from `day open`). Nothing to migrate, and a downgrade leaves the directory harmlessly unread.
-- **New `$PROPAGATE_STATE_DIR/glance.json`** (#295), written by `propagate glance`, the monitor, CLI `doctor` and `day open`. It does not exist after the upgrade until one of them runs; every reader handles the absent file (the session line says `glance: not computed yet; run propagate glance`). The first monitor pass after upgrading fills in the edges; until then a standalone `propagate glance` shows edges as unknown and exits 1. Nothing to migrate. A downgrade leaves the file harmlessly unread.
-- **The SessionStart line now always ends with a glance line**, also in folders outside every workspace and with no checkouts cache, where it was silent before (ruling 2026-11-16).
-- **Doctor entries may carry a `  ⚑ human id=<check_id>` marker** before any `⇒` action (#295). Unmarked lines are byte-identical; a consumer of doctor's text that splits label and detail should strip the marker the way `structure.mjs` does.
-- **The monitor sends far fewer notifications; that is intended** (#296). It notifies when an edge, a backlog defect or a needs-you or broken glance item is NEW (additions only, keyed `edge:<edge_id>` and the like, never on content), stays quiet while it remains, and stays quiet for 24 h if it clears and returns. Every notification now opens its view of `propagate ui` when clicked.
-- **New `$PROPAGATE_STATE_DIR/notify-state.json`** (#296), what the monitor has told you. The first monitor run after upgrading has no record, so it **seeds silently** and notifies nothing; from the next run on, only additions notify. Deleting it costs one more silent seeding run; a corrupt one costs one notification per open finding. `notified.jsonl` is kept as the audit log and is no longer read to suppress anything. A downgrade leaves the file harmlessly unread, and the old content-keyed dedupe resumes from `notified.jsonl` (its rows now carry `edge:<id>` keys, so expect one round of repeats).
-- **New `$PROPAGATE_STATE_DIR/glance-acks.json`** (#296), written by `propagate glance ack` / `unack` and the web view's acknowledge and snooze. Absent means no acks. glance.json items may carry an additive `ack: {at, until}` field.
-- **The digest notification's body is now the glance verdict line**, not the digest's timestamp heading (#296).
-- **`doctor` (default view) prints its verdict line first**, as well as last. **`# Scheduled jobs` no longer warns on a running job** (a live pid) whose last exit was non-zero, and a warned job's line carries `check_id jobs.<label>`.
-- **Plans need a `Surface:` line from 2026-11-30.** The plan-goal hook now also requires `Surface: none` or `Surface: ui|widget|command|job|skill|notification|hook`, and a non-`none` plan needs `## Need` (`Question:`, `Decision:`, `Today:`, `Retire when:`) and `## References checked` sections. Until 2026-11-30 a plan with no `Surface:` line is allowed with a warning; after it, it is denied. A plan that declares a Surface without its sections is denied now. Override with a `surface_reason: <why>` line. Grammar: `docs/REFERENCE.md` "The plan grammar". Placeholder values (`<...>`, `TODO`, `TBD`, `?`, `-`) do not count as filled.
-- **The Surface gate is off by default outside the owner's tree** (no declared hub and no `plans/approvals.jsonl`), so a fresh install is not denied. Turn it on or off with `hooks.planSurfaceGate: on|off` in `config.yml` or `PROPAGATE_PLAN_SURFACE_GATE`.
-- **The plan-goal hook writes `$PROPAGATE_STATE_DIR/plan-gate/YYYY-MM.jsonl`**, one `{ts, session, verdict, missing}` row per deny or warn (no plan text), and `plans/approvals.jsonl` rows gain `surface` and, when used, `surface_reason`. Older rows without them still read.
-- **`doctor` adds a warn-only `# Retirement candidates` section** (#298), and the digest's ADOPTION ask now reads every discovered workspace `SYSTEMS.md`, not only propagate's own. Both parse a table by header name. A `SYSTEMS.md` whose table lacks `id`, `status`, `last_verified` or `adoption_date` is now reported as unreadable, with its path, where it used to yield 0 candidates silently. The two use different rules on one scan. The section lists every row whose status starts with `active`, whose `adoption_date` is blank, and whose first verification was more than 30 days ago. Expect it to list more rows than the digest ever asked about. The digest's ask keeps its exact statuses. A digest candidate with no leading date in `last_verified` is now `unknown: no start date`, and the digest no longer asks about it. Nothing an existing install stores changes.
+### Added
+
+- standards: a sidecar-less workspace root is a unit; the undeclared-repo walk is unbounded (#291)
+- standards: probe a workspace repo's own root for a unit; report undeclared repos one level deeper (#291)
+- standards: doctor # Standards section; local rows inherit or default their State (#269, #290)
+- standards: adopt, decline and remove record adoption in the sidecar (#269)
+- standards: page parser reads extends: and Applies: (#269, #290)
+- plan-goal: warn when a plan says Surface: none but touches a surface (#301)
+- ui: the glance view: list with verdict and source filters, row menu, bulk ack and snooze, a detail route per item (#296)
+- monitor: every notification opens its propagate ui route; glance additions notify after doctor; digest body is the verdict line (#296)
+- glance: ack and snooze, persisted in glance-acks.json; propagate glance ack/unack (#296)
+- notify: additions-only notification ids with a 24 h re-entry hold; edges re-keyed on edge_id (#296)
+- doctor: retirement candidates use their own wider rule; the digest ask keeps the narrow one (#298)
+- doctor: retirement candidates from one header-keyed SYSTEMS.md scan (#298)
+- glance: one line per source with badges; the session line groups by source, plain (#295)
+- glance: monitor, doctor and day open write the glance from what they hold; doctor prints its verdict first (#295)
+- session-guide: the glance session line, last to be cut, in every folder (#295)
+- glance: signals, verdict rule, glance.json contract and propagate glance (#295)
+- doctor: human and check_id markers cross the text seam; a live pid is not a job failure (#295)
+- plan-goal: Surface / Need / References checked plan gates (#297)
+- guard: background-guard logs deny and allow-bg rows, never command text (#294)
+- docs: standards pages read as doc kind "standard" (#269)
+- standards: row status, tool versions, and the standards and standards versions commands (#269)
+- standards: the parser reports malformed headings, stray and unknown fields, targetless checks (#269)
+- standards: page and row parser, registry loader, two config keys (#269)
+- work: propagate work CLI, prune, wiring and REFERENCE (#150 task 4)
+- work: sync apply is linear, ids widen, markdown URLs and parked ttl fixed (#150 task 3 fix 1)
+- work: canonicalUrl and the GitHub sync, fetch first then one transaction (#150 task 3)
+- work: race test retries interleave under load; claims output no longer reads as a bare claim() call (#150 task 2)
+- work: queue operations, token-fenced claims and a two-process race test (#150 task 2)
+- work: the queue database, its v1 schema, typed errors and the Node 22.13 floor (#150 task 1)
+- broadcast: session-guide shows open broadcast children and records each showing (#267)
+- broadcast: a local index of open children, a shown record, and null-safe goals (#267)
+- hooks: background-guard denies the foreground and shell-& forms of a long run (#224)
+- sessions: `sessions new|stop|rm|stop --force`, day open's sessions lines, and a SessionStart guidance hook (#272 steps 2-4)
+- sessions: `propagate sessions`, `show` and `assoc`: which Claude Code session works where (#272 step 1, read)
+- broadcast: phase 1, `broadcast new` and `broadcast status`: one piece of work fanned out to many repos as GitHub sub-issues (#267)
+- hooks: rule-guard also runs on Bash, narrowed by `if: Bash(*vercel*)`, so a shell-command rule trigger can fire
+- goals,day: a plan must name an active goal at approval; the board reader pages past 100 (G3)
+- hooks: dispatch-model refuses a subagent dispatch whose model differs from its issue's Model, and moves the item to In progress (#265)
+- day: day open shows each active goal and its Ready work by Order; day close promotes only work under an active goal (#240)
+- goals: `propagate goals check`, the standing check the weekly goal workflow runs (#264)
+- goals: goals can close: approved Derived-by commands run, a pass writes Resolved (#55)
+- agents: adversarial-reviewer, gated by check-review (#251)
+- agents: doc-curator, gated by check-curator (#251)
+- day: propagate day open / day close, read-only open and dry-run-by-default close with read-back (#240)
+- agents: edge-settler, gated by settle --check; a read-only guard and a trigger hook (#251)
+- design-workflow: the standard design-guideline workflow skill, a per-stack matrix, and reference integrity for design docs (#242)
+- doctor: cross-repo edges are guarded for client isolation and .propagates-cross.yml entries fail as never-fired (#117)
+- doctor: the default render folds repeated warnings and counts ok/info per section; doctor --full keeps the full detail (#107)
+- hooks: propagate hooks instructions-gate puts the instruction-budget gate in every repo that commits instruction text (#221)
+
+### Fixed
+
+- standards: trim the PROJECT_UNKNOWN path list to three (#269)
+- doctor: standards section reports a malformed adopted: once, and a throw as inconclusive (#269)
+- standards: a probe capture that is not a version is recorded as null with the error; the cache age is shown (#269)
+- doctor: DETECTED-NOT-ADOPTED qualifies a project name shared by two workspaces (#269)
+- standards: adopt/decline/remove resolve a project by its sidecar's project: field, scoped to one workspace (#269)
+- manifest: no real workspace names in a public comment; stop tracking the SDD ledger
+- standards: a workspace's undeclared-repo walk stops at another discovered workspace's root (#291)
+- rules: paths-guard no longer calls a glob naming a skipped directory dead
+- plan-goal: match the COMMANDS identifier case-sensitively, widget on a word boundary (#301)
+- guard: catch propagate invoked by a path (#300)
+- tests: two tests no longer assume the checkout path contains 'propagate/' (#302)
+- plan-goal: refuse unfilled template values; Surface gate off outside the owner's tree (#297)
+- guard: log the program's basename, never a path (#294)
+- manifest: find a unit two levels down when the directory above it is not a unit (#269)
+- standards: version in use is per unit, global kinds skip toolchain-less units, and absences are attributable (#269)
+- manifest: pub workspace members cannot escape the project root, and unreadable workspaces are reported (#269)
+- sprint: measure a quota-reset day from the new week instead of refusing it (#279)
+- manifest: the walk sees Dart projects and pub workspace members (#269)
+- work: prune keeps acked tombstones, validates --older-than, leaves a read-only open byte-identical (#150 task 4 fix 1)
+- broadcast: the goal lookup joins repo to state dir through .sidecar.yml and says why it found nothing (#267 fix round 2)
+- broadcast: the goal lookup reads propagation/state, status names only causes it can establish, keys are case-folded (#267 fix round 1)
+- sessions: assoc accepts --from with --goal, and SESSION_AMBIGUOUS names the command that ran (#277)
+- hooks: background-guard loads COMMANDS only for a command that could name propagate (#224)
+- hooks: background-guard derives its network commands from COMMANDS (#224)
+- agent-guard: awk, sort and find can no longer write from inside their own arguments
+- agent-guard: a lone `&` and process substitution no longer slip a write past the read-only guard
+- sessions: an untrusted folder is SESSION_FOLDER_UNTRUSTED, matched on claude's text, never read as a launch (#272 DX-T8)
+- day,sprint: the usage widget dir comes from config.yml `integrations.usageWidgetDir`, not only the env var
+- day: the paging query defines only the fragment it spreads; GitHub rejected the unused one (bb58926)
+- day: no goal read skips day close's promotions with a warning; closed -> Done and cost gaps still run (#240)
+- goals: active no longer depends on where Done when sits; idle no-Goal boards fold into one line (#264)
+- agents: every gate is runnable from any workspace: check-curator and check-review subcommands, plugin-root paths (#253)
+- test: tasks-export snapshot names what changed; fixture git runs with auto-maintenance off (#252)
+- agent-nudge: read persistedOutputPath, because a worklist big enough to nudge is one Claude Code truncates (#251)
+- settle-check: evidence must postdate the edge's last verify (#251)
+- design-workflow: workspace docs resolve, integrity outranks age, and the word budget derives its skills (#242)
+- hooks: the instructions-gate block no longer exits 1 on a pass when it is the last thing in a hook (#221)
+- doctor: a hook's relative node target resolves against the repo root, not doctor's cwd
+- hooks: the gate hook finds propagate through its directory marketplace first; --apply updates an out-of-date gate block in place (#221)
+- hooks: no owner allowlist means one doctor info line, not a warn per repo; hooks.excludeRepos keeps a repo out even when its remote is owned (#221)
+- doctor: a scheduled job's last run comes from launchd's run counter, not log mtime; the monitor's doctor status goes to stdout; fingerprint git failures name their cause (workspace-hub#75, #239)
+
+### Changed
+
+- impact: re-record the impact map after the review fixes (#269)
+- reference: qualified project, STANDARDS_PROJECT_AMBIGUOUS, doctor entry shapes (#269)
+- propagates: fix the doc-kind edge's section name, declare the standards couplings (#269)
+- impact: re-record the impact map after Task 7's REFERENCE section (#269)
+- reference: propagate standards (#269)
+- impact: re-record the impact map for the nested-workspace test (#291)
+- impact: re-record the impact map for the manifest-roots tests (#291)
+- impact: record the impact map for the manifest-roots tests (#291)
+- impact: record the impact map for the doctor standards tests (#269)
+- impact: record the impact map for the adoption tests (#269)
+- impact: re-record the impact map for the fix set (gate)
+- readme: the command section is generated from COMMANDS and tested (#292)
+- impact: re-record the impact map on the combined glance set (gate)
+- impact: re-record the impact map for glance notifications and view (#296)
+- reference: notifications, the web glance view and glance ack; Upgrading notes for notify-state and acks (#296)
+- glance: PR3 notification, click target, digest, ack and view tests, with their mutations recorded (#296)
+- impact: re-record the impact map for retirement candidates (#298)
+- impact: re-record the impact map for the glance core (#295)
+- doctor: the folded view's first line is now the verdict, then the fold banner (#295)
+- reference: the glance command, signals table and glance.json contract; Upgrading notes (#295)
+- session-guide: T-S2 fixture fills the line to within 20 characters of CAP, so an unreserved glance overflows (#295)
+- changelog: Upgrading notes for the Node 22.13 floor and the work queue's state files (#150 task 5)
+- impact: re-record the impact map for the work queue (#150 task 5)
+- work: bound the race child's spin, and race production's busy path too (#150 task 2 fix 1)
+- work: tie the CI floor assertions to the work-node-floor job block (#150 task 1 fix)
+- node: raise the floor to 22.13 and pin a CI job to it (#150 task 1)
+- hooks: a registry-unavailable rules check records did-not-run with its own reason (#283)
+- hooks: census records did-not-run, renders a blind scan, and always shows its age (#283)
+- hooks: load-rules reads a cached rules census instead of scanning at session start (#283)
+- broadcast: delivery, the shown record and the re-recorded impact map (#267)
+- sessions: REFERENCE shows assoc's --from [--goal] form (#277)
+- impact: re-record the impact map after 59f4755
+- evals: agent-doc-curator case: a content-accuracy question dispatches doc-curator and gates it with check-curator (#251)
+- agents: every agent names a gate that exists; floor 3, no stale guard names; REFERENCE rows (#251)
+- day,costs: register day open/close and costs lanes; REFERENCE and routing rows; impact map (#240, #251)
+- reference: regenerate the ten-kinds table from KINDS — design is maintained by reference-integrity (#242)
+- test-impact: map re-recorded on main after #221 (3520 pass; the only red was the map's own membership test)
+- Merge origin/main into feat/269-standards-core (unprefixed)
+- Merge pull request #313 from Rupali59/fix/311-paths-guard-skip-dirs (unprefixed)
+- Merge pull request #310 from Rupali59/gate/fixes-2026-11-16 (unprefixed)
+- Merge remote-tracking branch 'origin/docs/292-readme-from-commands' into gate/fixes-2026-11-16 (unprefixed)
+- Merge remote-tracking branch 'origin/feat/301-surface-none-warning' into gate/fixes-2026-11-16 (unprefixed)
+- Merge remote-tracking branch 'origin/fix/300-guard-path-invocation' into gate/fixes-2026-11-16 (unprefixed)
+- Merge remote-tracking branch 'origin/fix/302-worktree-path-tests' into gate/fixes-2026-11-16 (unprefixed)
+- Glance: the analysed glance and need-first plan gates (#293) (#308) (unprefixed)
+- Merge remote-tracking branch 'origin/feat/298-retirement' into gate/glance-2026-11-16 (unprefixed)
+- Merge remote-tracking branch 'origin/feat/297-plan-gates' into gate/glance-2026-11-16 (unprefixed)
+- Merge remote-tracking branch 'origin/feat/296-glance-notify' into gate/glance-2026-11-16 (unprefixed)
+- Merge remote-tracking branch 'origin/feat/295-glance-core' into gate/glance-2026-11-16 (unprefixed)
+- Merge remote-tracking branch 'origin/feat/294-guard-log' into gate/glance-2026-11-16 (unprefixed)
 
 ## [0.19.0] — 2026-11-10
 

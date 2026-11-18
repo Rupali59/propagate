@@ -481,3 +481,49 @@ test("#212: a passive notice naming its superseder, and a doc naming ITSELF, are
   await writeFile(readme, "# probe\n\nThis supersedes `../README.md`.\n");
   assert.ok(proseOnlySupersession(readme), "../README.md from another folder's README is a real target");
 });
+
+// ---------------------------------------------------------------------------
+// standards pages — frontmatter `kind:` is the STANDARD's kind there, not a doc kind
+// ---------------------------------------------------------------------------
+
+test("a standards page reads as doc kind `standard`, whatever its frontmatter kind says", () => {
+  // `kind: tool` is a standard's kind (tool | global | production | design); read as a doc
+  // kind it was unknown, and `kind: design` was misread as a design doc.
+  const cases = {
+    "/hub/standards/tool/flutter.md": "---\nkind: tool\nauthority: vendor docs\n---\n# Flutter\n",
+    "/hub/standards/design/web.md": "---\nkind: design\nauthority: vendor docs\n---\n# Web\n",
+    "/hub/standards/global/naming.md": "---\nid: naming\nkind: global\n---\n# Naming\n",
+  };
+  for (const [p, body] of Object.entries(cases)) {
+    const r = kindOf(p, () => body);
+    assert.equal(r.kind, "standard", p);
+    assert.equal(r.source, "frontmatter", p);
+  }
+});
+
+test("`standard` is declared in KINDS with a lifecycle, like every other kind", () => {
+  assert.ok(Object.keys(KINDS).includes("standard"));
+});
+
+test("the standards guard needs the path segment and the marker, not either alone", () => {
+  // No `standards/` segment: an ordinary design doc keeps `design`.
+  assert.equal(kindOf("/p/docs/web.md", () => "---\nkind: design\nauthority: x\n---\n").kind, "design");
+  // Segment but no `authority:` and no `id:` with a standards kind: the declared doc kind stands.
+  assert.equal(kindOf("/p/standards/notes.md", () => "---\nkind: plan\n---\n").kind, "plan");
+  assert.equal(kindOf("/p/standards/notes.md", () => "---\nid: n\nkind: plan\n---\n").kind, "plan");
+});
+
+test("an ordinary doc's frontmatter kind still counts when it is a known kind", () => {
+  const r = kindOf("/p/docs/X.md", () => "---\nkind: plan\n---\n# X\n");
+  assert.deepEqual(r, { kind: "plan", source: "frontmatter", supersedes: [] });
+});
+
+test("an unknown frontmatter kind falls through to the filename and directory rules", () => {
+  const banana = "---\nkind: banana\n---\n# X\n";
+  const byName = kindOf("/p/docs/GOTCHAS.md", () => banana);
+  assert.deepEqual([byName.kind, byName.source], ["gotchas", "filename"]);
+  const byDir = kindOf("/p/docs/sdk/x.md", () => banana);
+  assert.deepEqual([byDir.kind, byDir.source], ["functionality-spec", "directory"]);
+  const none = kindOf("/p/docs/X.md", () => banana);
+  assert.deepEqual([none.kind, none.source], [null, "undeclared"]);
+});

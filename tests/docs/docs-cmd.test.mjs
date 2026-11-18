@@ -353,8 +353,8 @@ test("hand-editing the generated body: --check reports hand-edited (3) with the 
   const original = await readFile(artifact, "utf8");
 
   const mutated = original.replace(
-    "### The ten kinds",
-    "### The ten kinds\n\nHAND EDIT INJECTED BY TEST",
+    "### The kinds",
+    "### The kinds\n\nHAND EDIT INJECTED BY TEST",
   );
   assert.notEqual(mutated, original, "mutation must actually change the text");
   await writeFile(artifact, mutated, "utf8");

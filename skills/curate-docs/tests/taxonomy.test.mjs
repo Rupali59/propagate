@@ -36,7 +36,7 @@ test("kinds are propagate's, not restated here", async () => {
   const t = await loadTaxonomy();
   assert.deepEqual(
     Object.keys(t.KINDS).sort(),
-    ["decision-log", "design", "functionality-spec", "gotchas", "issues", "ops", "page-spec", "plan", "router", "state"],
+    ["decision-log", "design", "functionality-spec", "gotchas", "issues", "ops", "page-spec", "plan", "router", "standard", "state"],
   );
 });
 
