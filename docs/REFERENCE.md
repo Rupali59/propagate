@@ -688,7 +688,7 @@ Never written onto a row. `lib/kb/standards/status.mjs` `rowStatus`:
 | Status | When |
 |---|---|
 | `unchecked` | the row's check kind is `review` or `none` (decided first, so a review row is never `verified`) |
-| `unverifiable` | no version in use (`version not read (standards versions --refresh)`), or either side has no comparable number (`GA4`, `2026-11`) |
+| `unverifiable` | no version in use (`version not read (kb standards versions --refresh)`), or either side has no comparable number (`GA4`, `2026-11`) |
 | `re-verify` | the version in use is newer than the row's `Version`, by major.minor of the first `N.N` found in each |
 | `verified` | the same, or an older, major.minor |
 
@@ -696,13 +696,13 @@ A standard's row status is the worst across its detected projects (and each proj
 rows are left out. A row with a check kind that runs (`command`, `test`) is **not run** by the report: status says
 whether the row was written against the version in use, not that its check passed.
 
-`standards --json` carries per standard `rows`, `projects` (each unit with its `version` and `source`),
+`kb standards --json` carries per standard `rows`, `projects` (each unit with its `version` and `source`),
 `projectCounts`, `counts`, `detected`, `adopted` and `versionSource` (`lockfile`, `probe`, `mixed` or null).
 
 ### Versions and probes
 
 A registry entry may carry `probe: {cmd, args, parse}`. `parse` is a regex whose first group (else the whole match)
-is the version; the default is the first `N.N[.N]`. `standards versions --refresh` is the only caller of the spawn
+is the version; the default is the first `N.N[.N]`. `kb standards versions --refresh` is the only caller of the spawn
 (30 s timeout) and writes `<state dir>/kb/versions.json`; doctor and `standards` only read it. A probe that
 fails is recorded as `{version: null, error}`, never left out. `--refresh` with no probe declared anywhere is
 `STANDARDS_NO_PROBES` and leaves the cache as it was.
@@ -762,7 +762,7 @@ kb:
   overrides:            # {standard, row, reason}
   declined:             # {standard, reason}
   removed:              # {standard, on, by, reason, approved_pr: null}
-  reviews: []           # reserved for `standards review` (not built)
+  reviews: []           # reserved for `kb standards review` (not built)
   local_page: docs/acme-ws/reference/ACME-TOOL.md
 ```
 
@@ -810,7 +810,7 @@ and **stops at any other discovered workspace's root**, the same ownership rule 
 
 | Not built | Where it lands |
 |---|---|
-| `standards review <row-id> [--apply]`: records who, when, tool version and evidence in the sidecar `reviews:` list; `verified` while the version is unchanged and the review is younger than a limit (proposed 90 days, open), `re-verify` when either changes, `unchecked` until the first review (decided 2026-11-17, #290; **Task 6b**) | until then `UNCHECKED-ROW` stays an info count |
+| `kb standards review <row-id> [--apply]`: records who, when, tool version and evidence in the sidecar `reviews:` list; `verified` while the version is unchanged and the review is younger than a limit (proposed 90 days, open), `re-verify` when either changes, `unchecked` until the first review (decided 2026-11-17, #290; **Task 6b**) | until then `UNCHECKED-ROW` stays an info count |
 | edges: drift of a standard's rows into projects, `adopt --apply` pinning an edge, `ADOPTED-UNSETTLED` | S3 |
 | approvals: applying `decline` and `remove`, `UNAPPROVED-CHANGE`, `APPROVALS-NOT-CONFIGURED` | S4 |
 | delivery: pointers into agent files, `POINTERS-DRIFT` | S5 |
@@ -818,7 +818,7 @@ and **stops at any other discovered workspace's root**, the same ownership rule 
 | plans in the standards flow | S7 |
 | per-unit versions from a project's lockfile, or a probe run with `cwd` set to the unit | #290 |
 | repo-level detect files | #316 |
-| `AUTHORITY-UNRESOLVED` and `standards audit --online` | online slice |
+| `AUTHORITY-UNRESOLVED` and `kb standards audit --online` | online slice |
 
 ## `propagate sessions`: who works where (propagate#272)
 

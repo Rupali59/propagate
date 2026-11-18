@@ -177,7 +177,7 @@ async function standardsBody(argv, inject) {
     return code;
   }
   io.log(`# standards  (offline; ${report.units_scanned} unit(s) scanned, floor ${report.floor}; ${report.sidecars_scanned} sidecar(s) read, ${report.sidecars_unreadable.length} unreadable)`);
-  io.log(cachedVersions ? `  tool versions read ${cacheAge(cachedVersions, (inject.now ?? Date.now)()) ?? "at an unreadable time"} (standards versions --refresh)` : "  tool versions: never read (standards versions --refresh)");
+  io.log(cachedVersions ? `  tool versions read ${cacheAge(cachedVersions, (inject.now ?? Date.now)()) ?? "at an unreadable time"} (kb standards versions --refresh)` : "  tool versions: never read (kb standards versions --refresh)");
   for (const u of report.sidecars_unreadable) io.log(`  unreadable sidecar ${u.file}: ${u.reason}`);
   for (const s of report.standards) {
     const c = s.counts;
@@ -249,7 +249,7 @@ function findSidecar(workspaces, arg, sidecars) {
   return { expected: expected.length ? expected : [`<workspace root>/propagation/state/<dir>/.sidecar.yml naming project: ${project}`] };
 }
 
-/** `standards adopt|decline|remove <std> <project>`. Dry run unless --apply. */
+/** `kb standards adopt|decline|remove <std> <project>`. Dry run unless --apply. */
 async function adoptionCmd(argv, inject, io, asJson) {
   const verb = argv[0];
   const rest = argv.slice(1);

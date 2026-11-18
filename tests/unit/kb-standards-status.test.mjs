@@ -49,8 +49,8 @@ test("with no versions cache every tool row is unverifiable with the stated reas
   assert.equal(r.ok, true);
   const s = r.standards[0];
   assert.deepEqual(s.rows.map((x) => x.status), ["unverifiable", "unchecked"]);
-  assert.equal(s.rows[0].reason, "version not read (standards versions --refresh)");
-  assert.equal(NO_VERSION_REASON, "version not read (standards versions --refresh)");
+  assert.equal(s.rows[0].reason, "version not read (kb standards versions --refresh)");
+  assert.equal(NO_VERSION_REASON, "version not read (kb standards versions --refresh)");
   assert.equal(s.detected.length, 2);
   assert.deepEqual(s.counts, { verified: 0, "re-verify": 0, unverifiable: 1, unchecked: 1 });
 });
