@@ -7,7 +7,9 @@
  *
  * Each case runs the real `cli.mjs kb standards --json` as a child process over a generic 12-project workspace
  * and compares it with tests/fixtures/kb-upgrade/golden-standards.json, the output of the 0.20.0 code (base
- * 071aebc, `cli.mjs standards --json`) on the old-layout hub. The golden is committed raw.
+ * 071aebc, `cli.mjs standards --json`) on the old-layout hub. The golden is committed raw. Regenerate it by building the
+ * same workspace (tests/helpers/kb-upgrade-workspace.mjs) and running, from a `git archive 071aebc` tree with node_modules
+ * linked in, `PROPAGATE_HUB_ROOT=<hub-old> PROPAGATE_SEARCH_ROOTS=<root> PROPAGATE_STATE_DIR=<empty> node cli.mjs standards --json`.
  *
  * The ONE normalisation: 0.20.0 printed the hint `(standards versions --refresh)` in a row's `reason`; the renamed
  * command prints `(kb standards versions --refresh)`. `asGolden` maps the new text back to the old before comparing,
@@ -16,9 +18,9 @@
  */
 // @size medium — starts processes (CLI or script); run when affected
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -36,9 +38,15 @@ const GOLDEN = JSON.parse(readFileSync(path.join(FIX, "golden-standards.json"), 
 const OLD_HINT = "(standards versions --refresh)";
 const NEW_HINT = "(kb standards versions --refresh)";
 
+const SANDBOXES = [];
+after(() => {
+  for (const d of SANDBOXES) rmSync(d, { recursive: true, force: true });
+});
+
 /** A sandbox: one workspace, one state dir (optionally with a config.yml). Only PATH is inherited. */
 function sandbox({ hub = null, configYml = null, env = {} } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "kb-upgrade-"));
+  SANDBOXES.push(root);
   const searchRoot = path.join(root, "root");
   const state = path.join(root, "state");
   mkdirSync(state, { recursive: true });
@@ -56,7 +64,7 @@ function sandbox({ hub = null, configYml = null, env = {} } = {}) {
 }
 
 function legacyUsed(childEnv) {
-  const code = `import(${JSON.stringify(CONFIG_MJS)}).then(m => console.log(JSON.stringify({ legacy: m.LEGACY_CONFIG_USED, file: m.INTEGRATIONS.kbStandardsFile, dir: m.INTEGRATIONS.kbStandardsDir })))`;
+  const code = `import(${JSON.stringify(CONFIG_MJS)}).then(m => console.log(JSON.stringify({ legacy: m.LEGACY_CONFIG_USED, file: m.INTEGRATIONS.kbStandardsFile, dir: m.INTEGRATIONS.kbStandardsDir, refs: m.INTEGRATIONS.kbReferencesFile })))`;
   const r = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", env: childEnv });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout.trim().split("\n").pop());
@@ -74,6 +82,7 @@ function assertMatchesGolden(r) {
   assert.equal(r.stderr, "", "kb standards writes nothing to stderr");
   const got = asGolden(r.stdout);
   assert.equal(got.standards.length, 1, "the fixture registry has exactly one standard");
+  assert.equal(got.standards[0].adopted.length, 1, "the fixture sidecar carries one adoption under the legacy `standards:` key");
   assert.deepEqual(got, GOLDEN);
 }
 
@@ -111,4 +120,28 @@ test("old config key: standardsFile/standardsDir in config.yml still resolve, ar
     ["standardsFile", "config", "kbStandardsFile"],
     ["standardsDir", "config", "kbStandardsDir"],
   ]);
+});
+
+test("old hub, new code: the deprecated `standards --json` prints the golden, and stderr is exactly the deprecation line", () => {
+  const s = sandbox({ hub: HUB_OLD });
+  const r = s.run(["standards", "--json"]);
+  assert.equal(r.status, 0, `standards --json exited ${r.status}: ${r.stderr}`);
+  assert.equal(
+    r.stderr,
+    "propagate standards is now propagate kb standards; the old name is removed in the release after 0.21.0\n",
+    "stderr is the deprecation line, once, and nothing else",
+  );
+  assert.deepEqual(asGolden(r.stdout), GOLDEN);
+});
+
+test("old hub, new code: kb references --json lists the entries of the unmoved references.yml (no false absence)", () => {
+  const s = sandbox({ hub: HUB_OLD });
+  const r = s.run(["kb", "references", "--json"]);
+  assert.equal(r.status, 0, `kb references --json exited ${r.status}: ${r.stderr}`);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.ok, true);
+  assert.deepEqual(j.problems, []);
+  assert.deepEqual(j.references.map((x) => x.id), ["ref:example-site", "ref:example-repo"]);
+  const c = legacyUsed(s.childEnv);
+  assert.equal(c.refs, path.join(HUB_OLD, "scripts", "execution", "references.yml"));
 });

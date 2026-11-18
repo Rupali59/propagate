@@ -635,7 +635,12 @@ GitHub login with `gh api user`.
 
 Each value resolves in this order: the new env variable or key, the old env variable or key, the new default path if it
 exists, the old default path if it exists, otherwise null. An old key that supplied a value is named by doctor's
-`legacy-name` finding.
+`LEGACY-NAME` finding.
+
+`kbReferencesFile` has the same fallback: when only the old `<hub>/scripts/execution/references.yml` exists, it is used, so
+an unmoved hub never reads as "not configured". An explicit old override (`standardsFile` or `standardsDir`) pinned to an
+old hub path must be renamed before the hub's move lands, because the old key outranks the new default and would keep
+pointing at the path that moved.
 
 The registry is `schema_version: 1` plus a `standards:` mapping, each entry `{kind, page, authority, detect, service,
 probe, pointer_globs}`. A null path reads as "standards not configured", never as zero standards, and an empty
@@ -787,7 +792,7 @@ which is counted.
 | `DETECTED-NOT-ADOPTED` | warn | detected, neither adopted nor declined; a name shared by two workspaces is listed as `<workspace>/<project>` |
 | `ADOPTED-UNDETECTED` | warn | adopted, detector finds nothing |
 | `UNIT-NOT-ON-DISK` | warn | an adopted unit not on disk (never "not detected") |
-| `legacy-name` (S3) | warn | one per old config key that supplied a value (`<name> uses the old name; rename it to <replacement>`) and one per sidecar still carrying `standards:` (`<file> uses the old name; run propagate kb migrate`) |
+| `LEGACY-NAME` (S3) | warn | one per old config key that supplied a value (`<name> uses the old name; rename it to <replacement>`) and one per sidecar still carrying `standards:` (`<file> uses the old name; run propagate kb migrate`) |
 | `OVERRIDE-NO-REASON`, `OVERRIDE-STALE`, `DECLINE-NO-REASON` | check, fails | a declaration error; stale = standard not adopted, or the row retired or missing |
 
 The two adoption findings apply to `kind: tool` standards only: a `global` or `production` standard detects every

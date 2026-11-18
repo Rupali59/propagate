@@ -206,7 +206,7 @@ async function versionsCmd(rest, inject, io, asJson) {
     if (!loaded.ok) return emitFailure(loaded, asJson, io);
     const probes = {};
     for (const s of loaded.standards) if (s.probe && typeof s.probe === "object") probes[s.page?.versionProbe ?? s.id] = s.probe;
-    if (Object.keys(probes).length === 0) return emitFailure(fail("STANDARDS_NO_PROBES", "no registry entry declares a probe, so there is nothing to refresh and the cache is left as it was", "add `probe: {cmd, args, parse}` to a standard in standards.yml"), asJson, io);
+    if (Object.keys(probes).length === 0) return emitFailure(fail("STANDARDS_NO_PROBES", "no registry entry declares a probe, so there is nothing to refresh and the cache is left as it was", "add `probe: {cmd, args, parse}` to a standard in kb-standards.yml"), asJson, io);
     versions = refreshVersions({ probes, run: inject.run });
     writeVersions(dir, versions);
   }

@@ -123,3 +123,14 @@ test("unconfigured is null, never zero", () => {
   assert.equal(out.refs, null);
   assert.deepEqual(out.legacy, []);
 });
+
+test("references: only the old default references.yml exists, so it resolves (no false absence on an unmoved hub)", () => {
+  const { out, hub } = resolve({ hubFiles: ["scripts/execution/references.yml"] });
+  assert.equal(out.refs, path.join(hub, "scripts/execution/references.yml"));
+  assert.deepEqual(out.legacy, [], "a default path is not a legacy config key");
+});
+
+test("references: both default files exist, so the new kb-references.yml wins", () => {
+  const { out, hub } = resolve({ hubFiles: ["scripts/execution/references.yml", "scripts/execution/kb-references.yml"] });
+  assert.equal(out.refs, path.join(hub, "scripts/execution/kb-references.yml"));
+});

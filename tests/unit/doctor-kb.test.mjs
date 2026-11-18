@@ -232,29 +232,29 @@ test("the not-configured hint names the new keys", async () => {
   assert.match(hint, /kbStandardsDir/);
 });
 
-test("legacy-name: an old config key yields exactly one finding that names it and its replacement", async () => {
+test("LEGACY-NAME: an old config key yields exactly one finding that names it and its replacement", async () => {
   const legacy = [{ key: "standardsFile", via: "env", name: "PROPAGATE_STANDARDS_FILE", replacement: "PROPAGATE_KB_STANDARDS_FILE" }];
   const r = await run({ ...fixture(), legacy });
-  const hits = r.entries.filter((e) => /legacy-name/.test(`${e.label} ${e.detail}`));
+  const hits = r.entries.filter((e) => /LEGACY-NAME/.test(`${e.label} ${e.detail}`));
   assert.equal(hits.length, 1);
   assert.match(hits[0].detail, /PROPAGATE_STANDARDS_FILE uses the old name; rename it to PROPAGATE_KB_STANDARDS_FILE/);
   assert.equal(hits[0].kind, "warn");
 });
 
-test("legacy-name: a sidecar still carrying `standards:` yields one finding naming the file", async () => {
+test("LEGACY-NAME: a sidecar still carrying `standards:` yields one finding naming the file", async () => {
   const fx = fixture({ sidecars: { p0: adopt() } });
   const r = await run({ ...fx, legacy: [] });
-  const hits = r.entries.filter((e) => /legacy-name/.test(`${e.label} ${e.detail}`));
+  const hits = r.entries.filter((e) => /LEGACY-NAME/.test(`${e.label} ${e.detail}`));
   assert.equal(hits.length, 1);
   assert.match(hits[0].detail, /\.sidecar\.yml uses the old name; run propagate kb migrate/);
 });
 
-test("legacy-name: a clean fixture (new sidecar key, no old config) yields none", async () => {
+test("LEGACY-NAME: a clean fixture (new sidecar key, no old config) yields none", async () => {
   const fx = fixture({ sidecars: { p0: adopt().replace("standards:", "kb:") } });
   const r = await run({ ...fx, legacy: [] });
-  assert.equal(r.entries.filter((e) => /legacy-name/.test(`${e.label} ${e.detail}`)).length, 0);
+  assert.equal(r.entries.filter((e) => /LEGACY-NAME/.test(`${e.label} ${e.detail}`)).length, 0);
 });
 
-test("legacy-name is declared S3", () => {
-  assert.equal(FINDING_SEVERITY["legacy-name"], "S3");
+test("LEGACY-NAME is declared S3", () => {
+  assert.equal(FINDING_SEVERITY["LEGACY-NAME"], "S3");
 });

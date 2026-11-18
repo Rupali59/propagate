@@ -43,7 +43,18 @@
       "detected": [
         "ws/p00"
       ],
-      "adopted": [],
+      "adopted": [
+        {
+          "workspace": "ws",
+          "project": "p00",
+          "standard": "example-tool",
+          "units": [
+            "p00"
+          ],
+          "verified_on": "example-tool 1.0.0",
+          "since": "2026-11-01"
+        }
+      ],
       "counts": {
         "verified": 0,
         "re-verify": 0,

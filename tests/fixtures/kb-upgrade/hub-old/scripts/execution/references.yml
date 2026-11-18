@@ -1,0 +1,22 @@
+schema_version: 1
+references:
+  example-site:
+    kind: doc
+    url: https://example.com/guide
+    what: a reference guide
+    why: the guide is the upstream source for the example tool
+    applies_to: [example-tool]
+    verdict: adopt
+    checked: 2026-11-01
+    added: 2026-11-01
+  example-repo:
+    kind: repo
+    url: https://example.com/org/repo
+    repo: org/repo
+    license: MIT
+    what: a sample repository
+    why: an implementation to follow
+    applies_to: [example-tool]
+    verdict: follow
+    checked: 2026-11-01
+    added: 2026-11-01
