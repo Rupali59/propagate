@@ -76,6 +76,8 @@ This release carries two pieces of work: standards increment 1 (#320, `071aebc`)
 
 ### Fixed
 
+- sessions: one row per session id (a resumed or renamed session no longer shows twice), `assoc` writes to the shown row, and dispatching a lane for a board item associates the session with that item (#318)
+- test-impact: the recorder keeps only probes that found a file, so a renamed test no longer survives as a dependency and the map holds no non-existent paths (#330)
 - check: from a linked worktree, `check` resolves the worktree's own `.propagates.yml`; with no workspace it prints `no workspace resolved for <path>` and exits 2 (it used to exit 0 silently) (#333)
 - standards: trim the PROJECT_UNKNOWN path list to three (#269)
 - doctor: standards section reports a malformed adopted: once, and a throw as inconclusive (#269)
