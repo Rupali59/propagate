@@ -29,6 +29,12 @@
  * with no checkouts cache too, as the whole output (ruling 2026-11-16): never silent. `readGlanceCopy` is pinned to
  * lib/glance/store.mjs `readGlance` by a parity test.
  *
+ * DAY CLOSE CATCH-UP (propagate#339): `dayCloseStep` reads `$STATE/day/last-close.json`; when the last close has not run
+ * today it takes `$STATE/day/close.lock` and starts `day close --apply` DETACHED (never waited for), then prints one line.
+ * Otherwise the line is the last run's outcome (counts, `rate-limited, will retry next session`, `failed (exit N)`,
+ * `partial: N of M written`). The hook itself makes no GitHub call and no board write: lib/report/day-close-auto.mjs
+ * imports node builtins only. Off: PROPAGATE_DAY_CLOSE_AUTO=0 or `dayCloseAuto: false` in config.yml (the line says so).
+ *
  * FAILS OPEN: any error appends one line to `$STATE/sessions/errors.log` and exits 0, printing only the glance line.
  * Output is one `additionalContext` block of at most 2,000 characters (the platform ignores over 10,000).
  * Takes effect only after `/reload-plugins` or a new session.
@@ -40,6 +46,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { stateDir } from "../lib/core/paths.mjs";
+import { catchUpDecision, guideLine as dayCloseGuideLine, startCatchUp, ymd as dayYmd } from "../lib/report/day-close-auto.mjs";
 
 export const CAP = 2000;
 
@@ -342,10 +349,12 @@ export function buildBlock(args) {
 }
 
 /** buildBlock plus which broadcast cut level was used (0 items, 1 counts, -1 no line), so the shown rows match the text. */
-export function compose({ folder, assoc, sessionId, files, broadcast = null, glance = null }) {
+export function compose({ folder, assoc, sessionId, files, broadcast = null, glance = null, dayLine = null }) {
   // The glance line is LAST to be cut: its room comes off the cap before any other cut is considered (propagate#295).
-  const cap = glance ? CAP - glance.length - 1 : CAP;
-  const withGlance = (r) => (glance ? { ...r, text: `${r.text}\n${glance}` } : r);
+  // The day-close line (propagate#339) sits just above it and is reserved the same way: an outcome is never cut away.
+  const tail2 = [dayLine, glance].filter(Boolean).join("\n");
+  const cap = tail2 ? CAP - tail2.length - 1 : CAP;
+  const withGlance = (r) => (tail2 ? { ...r, text: `${r.text}\n${tail2}` } : r);
   const sid = String(sessionId).slice(0, 8);
   const head = folder.all ? "Session: hub (all repos)" : `Session: ${folder.project} (${folder.workspace})`;
   const tail = assoc
@@ -384,20 +393,21 @@ function logError(dir, err) {
 }
 
 /** @returns {string|null} the additionalContext text, or null for "inject nothing" */
-export function run(payload, dir = stateDirOf()) {
+export function run(payload, dir = stateDirOf(), { dayLine = null } = {}) {
   // The glance line prints in EVERY folder, placed or not, and with no checkouts cache (ruling 2026-11-16).
   const glance = glanceLine(dir);
+  const bare = dayLine ? `${dayLine}\n${glance}` : glance;
   let cache;
   try {
     cache = readCache(dir);
   } catch (e) {
-    if (e.code === "ENOENT") return glance; // no cache: the CLI has not run yet, so the glance is all there is to say
+    if (e.code === "ENOENT") return bare; // no cache: the CLI has not run yet, so the glance is all there is to say
     throw e;
   }
   const cwd = payload?.cwd || process.env.CLAUDE_PROJECT_DIR;
-  if (!cwd) return glance;
+  if (!cwd) return bare;
   const folder = placeOf(cwd, cache, dir);
-  if (folder.unplaced) return glance;
+  if (folder.unplaced) return bare;
   const sessionId = String(payload?.session_id ?? "");
   const assoc = sessionId ? associationFor(dir, sessionId) : null;
   // The broadcast read has its OWN try/catch: a failure drops only the broadcast line (propagate#267 review 4).
@@ -408,7 +418,7 @@ export function run(payload, dir = stateDirOf()) {
   } catch (e) {
     logError(dir, `broadcast: ${e?.message ?? e}`);
   }
-  const { text, level } = compose({ folder, assoc, sessionId: sessionId || "<id>", files: guidance(folder), broadcast, glance });
+  const { text, level } = compose({ folder, assoc, sessionId: sessionId || "<id>", files: guidance(folder), broadcast, glance, dayLine });
   if (broadcast && level >= 0) {
     try {
       const attended = process.env.CLAUDE_CODE_SESSION_ATTENDED;
@@ -425,6 +435,33 @@ export function run(payload, dir = stateDirOf()) {
   return text;
 }
 
+/**
+ * The day-close line, and the catch-up it may start. Never throws and never waits: a failure is a line saying so.
+ * @returns {string|null} null only when there is no record and nothing was started or refused
+ */
+export function dayCloseStep(dir, { env = process.env, now = Date.now() } = {}) {
+  try {
+    let configText = "";
+    try {
+      configText = readFileSync(path.join(dir, "config.yml"), "utf8");
+    } catch {
+      // no config.yml: defaults
+    }
+    const d = catchUpDecision({ dir, now, env, configText });
+    if (d.action === "off") return `day close: auto catch-up is off (${d.why})`;
+    if (d.action === "start") {
+      const s = startCatchUp(dir, { now, env });
+      if (s.started) return `day close: catch-up started in the background (${d.rec ? `last close ${d.rec.date}` : "first run"}), result in close-${dayYmd(now)}.txt`;
+      // Another session already holds the lock: that is a run in flight, not a failure.
+      return d.rec ? `day close: catch-up not started (${s.why}); last: ${dayCloseGuideLine(d.rec)}` : `day close: catch-up not started (${s.why})`;
+    }
+    return d.rec ? dayCloseGuideLine(d.rec) : null;
+  } catch (e) {
+    logError(dir, `day close: ${e?.message ?? e}`);
+    return `day close: catch-up check failed (${String(e?.message ?? e).slice(0, 80)}); see sessions/errors.log`;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const dir = stateDirOf();
   try {
@@ -435,7 +472,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       raw = "";
     }
     const payload = raw.trim() ? JSON.parse(raw) : {};
-    const text = run(payload, dir);
+    const text = run(payload, dir, { dayLine: dayCloseStep(dir) });
     if (text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } }));
   } catch (e) {
     logError(dir, e);

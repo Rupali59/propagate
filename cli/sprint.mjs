@@ -44,11 +44,11 @@ export async function loadWidget(dir = INTEGRATIONS.usageWidgetDir) {
 
 /** The real GitHub reader: `gh api rate_limit` (free) and `gh api graphql`. */
 export function ghFetcher(gh = process.env.PROPAGATE_GH_BIN || "gh") {
-  const run = (args) => {
-    const r = spawnSync(gh, args, { encoding: "utf8", timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+  const run = (args, input) => {
+    const r = spawnSync(gh, args, { encoding: "utf8", timeout: 60000, maxBuffer: 64 * 1024 * 1024, ...(input === undefined ? {} : { input }) });
     if (r.error) throw new Error(`${gh}: ${r.error.code || r.error.message}`);
     if (r.status !== 0) throw new Error(String(r.stderr || r.stdout).trim().split("\n")[0]);
-    return JSON.parse(r.stdout);
+    return r.stdout.trim() ? JSON.parse(r.stdout) : null;
   };
   return {
     rateLimit: () => run(["api", "rate_limit"]).resources,
@@ -56,6 +56,12 @@ export function ghFetcher(gh = process.env.PROPAGATE_GH_BIN || "gh") {
       const res = run(["api", "graphql", "-f", `query=${query}`]);
       if (res.errors?.length) throw new Error(res.errors.map((e) => e.message).join("; "));
       return res.data;
+    },
+    // The Projects REST API (propagate#339): `day close` falls back to it when GraphQL refuses. `get` of a list passes
+    // `{paginate: true}` (`gh api --paginate --slurp`, flattened). `patch` is a write; day close reaches it only behind --apply.
+    rest: {
+      get: async (p, { paginate = false } = {}) => (paginate ? run(["api", "--paginate", "--slurp", p]).flat() : run(["api", p])),
+      patch: async (p, body) => run(["api", "--method", "PATCH", p, "--input", "-"], JSON.stringify(body)),
     },
     // The only method that sends a mutation. sprint review reaches it solely behind --apply.
     write: async (mutation) => {
