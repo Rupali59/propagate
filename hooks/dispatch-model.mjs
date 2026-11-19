@@ -19,6 +19,13 @@
  * progress, In review and Done are never written. A failed write is reported and the dispatch is still allowed.
  * After a successful write the snapshot's status for that item is updated so a second dispatch does not write again.
  *
+ * THE OTHER WRITE (#318). An allowed dispatch for a board item also associates the DISPATCHING session with that item's
+ * goal and item (one `associate` line in `<stateDir>/sessions/assoc.jsonl`, rowKey `session:<session_id>`), so
+ * `propagate sessions` and `day open` show it without anyone running `assoc`. A session that already has an
+ * association keeps it: this never overwrites one, it says it skipped. The hook cannot read `claude agents` (nothing
+ * outside lib/sessions/live.mjs runs claude), which is why the key is the session id and not a row key; the sessions
+ * view joins on `row.sessionId`. With several items in one prompt the first one with a goal is used.
+ *
  * FAILS OPEN ON ITS OWN BUGS, LOUDLY: any exception allows the dispatch and says so in additionalContext.
  * Exit code is always 0.
  */
@@ -74,7 +81,7 @@ const matches = (expected, actual) => actual !== null && actual.includes(expecte
  * @returns {{refs: string[], deny?: string, notes: string[], overrides: object[], moves: object[]}}
  */
 export function decide(input, snapshot, now = new Date()) {
-  const out = { refs: [], notes: [], overrides: [], moves: [] };
+  const out = { refs: [], notes: [], overrides: [], moves: [], assoc: null };
   if (input?.tool_name !== "Agent" && input?.tool_name !== "Task") return out;
   const prompt = String(input?.tool_input?.prompt ?? "");
   out.refs = extractRefs(prompt);
@@ -116,11 +123,57 @@ export function decide(input, snapshot, now = new Date()) {
     return out; // a deny moves nothing and records nothing
   }
   for (const [ref, item] of checked) {
+    if (!out.assoc && typeof item.goal === "string" && /^G\d+$/.test(item.goal)) out.assoc = { item: ref, goal: item.goal };
     if (MOVE_FROM.includes(item.status) && item.projectId && item.itemId && item.statusFieldId && item.inProgressOptionId) {
       out.moves.push({ ref, projectId: item.projectId, itemId: item.itemId, statusFieldId: item.statusFieldId, optionId: item.inProgressOptionId });
     }
   }
   return out;
+}
+
+/**
+ * The association a session already holds in the log text: an `associate` not followed by a `forgotten` on its rowKey,
+ * whose row carries this session id (or whose key is `session:<id>`). Unparseable lines are skipped, as fold() does.
+ */
+export function existingAssociation(text, sessionId) {
+  const cur = new Map();
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    let ev;
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!ev || typeof ev.event !== "string" || typeof ev.rowKey !== "string") continue;
+    if (ev.event === "associate") cur.set(ev.rowKey, ev);
+    else if (ev.event === "forgotten") cur.set(ev.rowKey, null);
+  }
+  for (const a of cur.values()) if (a && (a.row?.sessionId === sessionId || a.rowKey === `session:${sessionId}`)) return a;
+  return null;
+}
+
+/**
+ * Associate the dispatching session unless it already has an association. One O_APPEND line; the hook is
+ * dependency-free (no proper-lockfile), like session-guide.
+ * @returns {{written: boolean, why?: string}}
+ */
+export function associateSession(sessionId, assoc, stateDirPath, now = new Date()) {
+  if (!sessionId) return { written: false, why: "no session id in the payload" };
+  const dir = path.join(stateDirPath, "sessions");
+  const file = path.join(dir, "assoc.jsonl");
+  let text = "";
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e; // unreadable is not "no association": refuse rather than write blind
+  }
+  const have = existingAssociation(text, sessionId);
+  if (have) return { written: false, why: `already associated with ${have.item ?? "?"}` };
+  mkdirSync(dir, { recursive: true });
+  const ev = { ts: now.toISOString(), event: "associate", rowKey: `session:${sessionId}`, goal: assoc.goal, item: assoc.item, source: "dispatch", workspace: null, project: null, row: { sessionId } };
+  appendFileSync(file, JSON.stringify(ev) + "\n");
+  return { written: true };
 }
 
 const q = (s) => JSON.stringify(String(s));
@@ -197,6 +250,15 @@ async function main() {
         notes.push(`${m.ref} moved to In progress`);
       } else {
         notes.push(`could not move ${m.ref} to In progress (dispatch allowed): ${r.error}`);
+      }
+    }
+    if (d.assoc) {
+      try {
+        const sid = typeof input.session_id === "string" ? input.session_id : "";
+        const a = associateSession(sid, d.assoc, stateDir());
+        notes.push(a.written ? `session associated with ${d.assoc.item} (${d.assoc.goal})` : `session not associated (${a.why})`);
+      } catch (e) {
+        notes.push(`session not associated (${e.message}); dispatch allowed`);
       }
     }
     if (changed) {
