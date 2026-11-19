@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MAP_MEMBERSHIP_TEST } from "../../lib/core/release.mjs";
@@ -65,6 +65,58 @@ test("map entries are well formed and their sizes match the files' @size headers
     if (readSize(t) !== e.size) bad.push(`${t}: map says ${e.size}, header says ${readSize(t)} — re-run \`npm run test:record\``);
   }
   assert.deepEqual(bad, []);
+});
+
+test("committed map: every key and every dep names a path that exists (floor: the map is not empty)", () => {
+  const keys = Object.keys(map.tests);
+  assert.ok(keys.length >= 100, `only ${keys.length} keys in tests/impact-map.json — the walk has gone blind, it has not found a clean map`);
+  const missing = [];
+  let checked = 0;
+  for (const [k, e] of Object.entries(map.tests)) {
+    for (const d of [k, ...e.deps]) {
+      checked++;
+      // "a/b/**" is a recursive-listing row, "a/" a one-directory listing and "**" the repo root: all name
+      // a directory that has to exist; a glob that is not one of those is a probe that found nothing.
+      const p = d === "**" || d === "./" ? "." : d.replace(/\/?\*\*$/, "").replace(/\/$/, "");
+      if (p.includes("*") || !existsSync(path.join(REPO, p))) missing.push(`${k} -> ${d}`);
+    }
+  }
+  assert.ok(checked >= keys.length * 2, `only ${checked} entries walked for ${keys.length} keys — the dep lists are empty, the walk has gone blind`);
+  assert.deepEqual(missing.slice(0, 20), [], `${missing.length} map entries name a path that does not exist — run \`npm run test:record\``);
+});
+
+// ---- the recorder keeps only probes that found a file (#330) ----------------------
+
+function recordingDir(repo, rows) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "testimpact-found-"));
+  const owner = "tests/a.test.mjs";
+  const lines = [{ o: owner, pid: 1, test: true, ms: 1 }, ...rows];
+  writeFileSync(path.join(dir, "1-x.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  return { dir, owner };
+}
+
+test("readRecordings: a renamed test file does not survive as a dep, and probes that found nothing are dropped", () => {
+  const repo = mkdtempSync(path.join(os.tmpdir(), "testimpact-repo-"));
+  for (const f of ["tests/a.test.mjs", "tests/new-name.test.mjs", "lib/a.mjs"]) {
+    mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
+    writeFileSync(path.join(repo, f), "");
+  }
+  // tests/old-name.test.mjs was renamed to new-name before this record: the map test (and anything else)
+  // still probes the old name, so the recorder logged it with nothing behind it.
+  const { dir, owner } = recordingDir(repo, [
+    { k: "r", p: "tests/old-name.test.mjs" },
+    { k: "r", p: "tests/new-name.test.mjs" },
+    { k: "m", p: "lib/a.js" }, // module-resolution guess
+    { k: "m", p: "lib/a/index.mjs" },
+    { k: "m", p: "lib/a.mjs" },
+    { k: "r", p: "tests/**" }, // a glob string is not a path
+    { k: "d", p: "lib/gone" },
+    { k: "R", p: "nowhere" },
+    { k: "d", p: "lib" },
+  ]);
+  const deps = [...readRecordings(dir, { repo }).owners.get(owner).deps].sort();
+  assert.deepEqual(deps, ["lib/", "lib/a.mjs", "tests/new-name.test.mjs"]);
+  assert.ok(!deps.includes("tests/old-name.test.mjs"), "the old name of a renamed test file is still a dep");
 });
 
 test("floors: the static graph and the recorded graph have not gone blind", (t) => {
@@ -235,16 +287,16 @@ test("readRecordings: two processes in one recording file are read as two proces
   const dir = mkdtempSync(path.join(os.tmpdir(), "impact-merged-"));
   writeFileSync(path.join(dir, "4242.jsonl"), [
     JSON.stringify({ o: "tests/unit/a.test.mjs", pid: 4242, test: true, ms: 10 }),
-    JSON.stringify({ k: "m", p: "lib/a.mjs" }),
+    JSON.stringify({ k: "m", p: "lib/core/config.mjs" }),
     JSON.stringify({ o: "tests/unit/b.test.mjs", pid: 4242, test: false }),
-    JSON.stringify({ k: "r", p: "lib/b.mjs" }),
+    JSON.stringify({ k: "r", p: "lib/core/costs.mjs" }),
     JSON.stringify({ k: "r" }),
   ].join("\n") + "\n");
   const r = readRecordings(dir);
   assert.equal(r.processes, 2, "the second header must start a second process");
-  assert.ok(r.owners.get("tests/unit/a.test.mjs").deps.has("lib/a.mjs"));
-  assert.ok(!r.owners.get("tests/unit/a.test.mjs").deps.has("lib/b.mjs"), "the second process's reads leaked into the first owner");
-  assert.ok(r.owners.get("tests/unit/b.test.mjs").deps.has("lib/b.mjs"));
+  assert.ok(r.owners.get("tests/unit/a.test.mjs").deps.has("lib/core/config.mjs"));
+  assert.ok(!r.owners.get("tests/unit/a.test.mjs").deps.has("lib/core/costs.mjs"), "the second process's reads leaked into the first owner");
+  assert.ok(r.owners.get("tests/unit/b.test.mjs").deps.has("lib/core/costs.mjs"));
   assert.equal(r.malformed, 1, "a row with no path is counted, not fatal");
 });
 

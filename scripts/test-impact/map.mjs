@@ -15,7 +15,7 @@
  *   --reuse  build the map from an existing --dir instead of running the suite
  */
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, createWriteStream, openSync, closeSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, createWriteStream, openSync, closeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,8 +35,18 @@ export const TEST_GLOBS = ["tests/**/*.test.mjs", "hooks/**/*.test.mjs"];
  * then read as a row with no path and the whole map build crashed (2026-10-17). A row without a string
  * path is counted as malformed and skipped, never fatal: a recorder fault may lose data, it must not
  * lose the map. The hooks file belongs to the file's FIRST process (it is written by that process).
+ *
+ * ONLY PROBES THAT FOUND A FILE ARE KEPT (#330). The recorder logs every existsSync/statSync/readFileSync
+ * call, including the ones that found nothing (module-resolution guesses with a .js/.cjs/index suffix, a
+ * glob string handed to a path API, a name a fixture creates and deletes). Kept as deps they select tests on
+ * paths that can never change, and a renamed test file survived as a dep because the map test itself
+ * probes every key of the committed map: the first re-record after a rename stored the old name, and only
+ * a second re-record dropped it. A path counts as found when it exists under `repo` when the map is built;
+ * a glob string (`*`) never does, it is not a path. The `**` tree rows of a recursive listing are written
+ * by this function from an existing directory, never taken from a probe.
  */
-export function readRecordings(dir) {
+export function readRecordings(dir, { repo = REPO } = {}) {
+  const found = (p) => !p.includes("*") && existsSync(path.join(repo, p));
   const owners = new Map(); // owner -> {deps:Set, spawned, lost, tree, ms}
   let unattributed = 0;
   let processes = 0;
@@ -83,11 +93,15 @@ export function readRecordings(dir) {
           continue;
         }
         const p = raw.length > 1 ? raw.replace(/\/+$/, "") : raw;
-        if (k === "m" || k === "r") e.deps.add(p);
-        else if (k === "d") e.deps.add(p === "." ? "./" : `${p}/`);
-        else if (k === "R") {
-          e.deps.add(p === "." ? "**" : `${p}/**`);
-          e.tree = true;
+        if (k === "m" || k === "r") {
+          if (found(p)) e.deps.add(p);
+        } else if (k === "d") {
+          if (found(p)) e.deps.add(p === "." ? "./" : `${p}/`);
+        } else if (k === "R") {
+          if (found(p)) {
+            e.deps.add(p === "." ? "**" : `${p}/**`);
+            e.tree = true;
+          }
         } else if (k === "c") e.lost = true;
         else if (k === "g") e.tree = true;
       }
