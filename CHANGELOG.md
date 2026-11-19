@@ -6,7 +6,23 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-11-19
+
+This release carries two pieces of work: standards increment 1 (#320, `071aebc`) and the rename of the standards and references model to the knowledge base, `kb` (#322, `f8bdd7d`). The plan was to release them separately (#332), but the rename merged before 0.20.0 was tagged, so both ship here.
+
+### Upgrading
+
+- **`propagate standards …` becomes `propagate kb standards …`.** The old command still works for this release. It prints one deprecation line to stderr, and its stdout is byte-identical to the new command's.
+- **Config keys:** `kbStandardsFile`, `kbStandardsDir` and `kbReferencesFile` (under `integrations:`) are read first. The old `standardsFile` and `standardsDir` still resolve for one release, and `doctor` names each old key that actually supplied a value (`legacy-name`, warn).
+- **Sidecars:** a `kb:` key replaces `standards:`. Both are read; a sidecar carrying both is refused with its path, never merged. `propagate kb migrate` rewrites `standards:` to `kb:` and is a dry run unless `--apply`.
+- **Cached tool versions** move to `$STATE/kb/versions.json`. The old `$STATE/standards/versions.json` is still read when the new one is absent, so an existing cache survives the upgrade.
+- **`doctor`'s `# Standards` section is now `# Knowledge base`.** Two declared edges change id with their renamed sources; neither had any verification events, so the new edges simply start unverified.
+- Upgrade tests run an existing 0.19.x-shaped install (old hub layout, new hub layout, old config keys) through `kb standards --json` against a golden captured from the pre-rename code.
+
 ### Added
+
+- kb: `propagate kb standards|references|migrate`; `standards` is a deprecated alias for one release (#322)
+- standards increment 1: the standards core, adoption in the sidecar, doctor's standards section and root units (#269, #290, #291)
 
 - standards: a sidecar-less workspace root is a unit; the undeclared-repo walk is unbounded (#291)
 - standards: probe a workspace repo's own root for a unit; report undeclared repos one level deeper (#291)
@@ -60,6 +76,9 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ### Fixed
 
+- sessions: one row per session id (a resumed or renamed session no longer shows twice), `assoc` writes to the shown row, and dispatching a lane for a board item associates the session with that item (#318)
+- test-impact: the recorder keeps only probes that found a file, so a renamed test no longer survives as a dependency and the map holds no non-existent paths (#330)
+- check: from a linked worktree, `check` resolves the worktree's own `.propagates.yml`; with no workspace it prints `no workspace resolved for <path>` and exits 2 (it used to exit 0 silently) (#333)
 - standards: trim the PROJECT_UNKNOWN path list to three (#269)
 - doctor: standards section reports a malformed adopted: once, and a throw as inconclusive (#269)
 - standards: a probe capture that is not a version is recorded as null with the error; the cache age is shown (#269)
