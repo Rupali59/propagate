@@ -76,6 +76,7 @@ This release carries two pieces of work: standards increment 1 (#320, `071aebc`)
 
 ### Fixed
 
+- check: from a linked worktree, `check` resolves the worktree's own `.propagates.yml`; with no workspace it prints `no workspace resolved for <path>` and exits 2 (it used to exit 0 silently) (#333)
 - standards: trim the PROJECT_UNKNOWN path list to three (#269)
 - doctor: standards section reports a malformed adopted: once, and a throw as inconclusive (#269)
 - standards: a probe capture that is not a version is recorded as null with the error; the cache age is shown (#269)
