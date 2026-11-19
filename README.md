@@ -154,6 +154,7 @@ Regenerate it with `npm run readme:commands`.
 - `propagate instructions` — per-directory session instruction budget (--calibrate against a load log)
 - `propagate hooks instructions-gate` — add the instruction-budget gate to every repo tracking CLAUDE.md/AGENTS.md/GEMINI.md (dry run; --apply)
 - `propagate context` — gotcha-guard injection volume per compaction window, from a session transcript
+- `propagate search-usage` — external-search use per source, failures by kind, ToolSearch loads and repeat rate, from session transcripts (read-only; exit 2 on a blind scan)
 - `propagate costs lanes` — lane cost rows grouped by agent_type, last row per agent, lanes that ran commands in the background flagged (read-only)
 - `propagate costs window` — tokens and minutes for a window of a main-session transcript, between two anchors (read-only)
 - `propagate day open` — is there enough Ready work for today's budget, across every board (read-only)
