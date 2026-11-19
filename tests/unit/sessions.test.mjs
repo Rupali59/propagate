@@ -48,7 +48,7 @@ process.exit(cfg.code ?? 0);
   return { bin, argv: () => { try { return readFileSync(path.join(dir, "argv.log"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } } };
 }
 
-/** 5 interactive + 1 background, one sessionId on both an interactive and the background row. */
+/** 5 interactive + 1 background, one sessionId on both an interactive and the background row: 5 sessions (#318). */
 const SHARED = "aaaaaaaa-1111-4111-8111-111111111111";
 const FIXTURE = [
   { id: "aaaaaaaa", cwd: "/w/acme/repo-a", kind: "background", startedAt: NOW - 3 * 86400000, sessionId: SHARED, name: "bg-lane", state: "blocked" },
@@ -237,7 +237,7 @@ test("buildCheckouts maps real git checkouts to their origin, skipping dot-direc
 
 // ── the table ──────────────────────────────────────────────────────────────
 
-test("sessions: one row per live session (6), grouped by workspace, the unassociated hint closes the table", async () => {
+test("sessions: one row per session id (5), grouped by workspace, the unassociated hint closes the table", async () => {
   const t = await run([]);
   assert.equal(t.code, 0);
   const text = t.out.join("\n");
@@ -245,7 +245,7 @@ test("sessions: one row per live session (6), grouped by workspace, the unassoci
   assert.match(text, /^unplaced$/m);
   assert.match(text, /^hub$/m);
   assert.match(text, /project\s+goal\s+item\s+state\s+since\s+id\s+name/);
-  assert.equal((text.match(/unassociated/g) ?? []).length, 6 + 1 - 1, "6 unassociated rows; the hint says `assoc:`, not `unassociated`");
+  assert.equal((text.match(/unassociated/g) ?? []).length, 5, "5 unassociated rows; the hint says `assoc:`, not `unassociated`");
   assert.equal(t.out.at(-1), "assoc: propagate sessions assoc <id> --from owner/repo#n");
   assert.match(text, /hub \(all\)/);
   assert.match(text, /\(workspace root\)\s+-\s+unassociated\s+waiting\s+2h/);
@@ -254,8 +254,8 @@ test("sessions: one row per live session (6), grouped by workspace, the unassoci
 test("sessions --json carries the same data and the counts: live, unassociated, unplaced, unknown, ended", async () => {
   const t = await run(["--json"]);
   assert.equal(t.json.ok, true);
-  assert.equal(t.json.sessions.length, 6);
-  assert.deepEqual(t.json.counts, { live: 6, unassociated: 6, unplaced: 1, unknown: 0, ended: 0 });
+  assert.equal(t.json.sessions.length, 5);
+  assert.deepEqual(t.json.counts, { live: 5, unassociated: 5, unplaced: 1, unknown: 0, ended: 0 });
 });
 
 test("an associated session shows its goal and item, and the hint disappears when none is unassociated", async () => {
@@ -291,18 +291,17 @@ test("renderView caps the ended list in text and says how to see the rest", () =
 test("show: an unknown id refuses SESSION_NOT_FOUND with a next command", async () => {
   const t = await run(["show", "nope"]);
   assert.equal(t.code, 1);
-  assert.match(t.err[0], /^SESSION_NOT_FOUND: no session matches "nope" \(6 live\)\. Next: propagate sessions$/);
+  assert.match(t.err[0], /^SESSION_NOT_FOUND: no session matches "nope" \(5 live\)\. Next: propagate sessions$/);
 });
 
 test("show: the select tiers: pid:, background id before sessionId, then name; a shared name is SESSION_AMBIGUOUS", async () => {
   const byPid = await run(["show", "pid:101", "--json"]);
   assert.equal(byPid.json.live.pid, 101);
   const byId = await run(["show", "aaaaaaaa", "--json"]);
-  assert.equal(byId.json.live.kind, "background", "the background id wins over the interactive row sharing its sessionId prefix");
+  assert.equal(byId.json.live.pid, 101, "the background id selects the one session its id belongs to, shown as its live row");
   const bySession = await run(["show", SHARED, "--json"]);
-  assert.equal(bySession.code, 1, "a sessionId shared by two rows is ambiguous");
-  assert.equal(bySession.json.code, "SESSION_AMBIGUOUS");
-  assert.match(bySession.json.next, /^propagate sessions show aaaaaaaa {2}\(or pid:101\)$/, "names both selectors that disambiguate");
+  assert.equal(bySession.code, 0, "one session id is one session: not ambiguous (#318)");
+  assert.equal(bySession.json.live.pid, 101);
   const dup = await run(["show", "same-name"]);
   assert.equal(dup.code, 1);
   assert.match(dup.err[0], /^SESSION_AMBIGUOUS: "same-name" matches 2 sessions .* Next: propagate sessions show pid:103/);
@@ -366,9 +365,8 @@ test("assoc --from derives the goal from the snapshot, records one event, and th
   const after = await run(["--json"], { state });
   const s = after.json.sessions.find((x) => x.pid === 101);
   assert.equal(s.association.item, "o/repo-a#9");
-  assert.equal(after.json.counts.unassociated, 5);
-  const bg = after.json.sessions.find((x) => x.kind === "background");
-  assert.equal(bg.association, null, "the background row sharing that sessionId is not associated by the interactive row's association");
+  assert.equal(after.json.counts.unassociated, 4, "5 sessions, one associated");
+  assert.equal(after.json.sessions.filter((x) => x.sessionId === SHARED).length, 1, "the background row sharing that sessionId is the same session (#318)");
 });
 
 test("assoc: a stale snapshot (over 24 h) warns and does not refuse", async () => {
@@ -406,9 +404,6 @@ test("assoc --from with no derivable goal names --from X --goal G<n> in its next
 });
 
 test("assoc: an ambiguous <id> names `assoc`, not `show`, in its next (#277)", async () => {
-  const t = await run(["assoc", SHARED, "--goal", "G3", "--item", "o/a#1", "--json"]);
-  assert.equal(t.json.code, "SESSION_AMBIGUOUS");
-  assert.match(t.json.next, /^propagate sessions assoc aaaaaaaa {2}\(or pid:101\)$/);
   const dup = await run(["assoc", "same-name", "--goal", "G3", "--item", "o/a#1"]);
   assert.match(dup.err[0], /Next: propagate sessions assoc pid:103/);
 });
@@ -510,4 +505,52 @@ test("buildView shows an unknown launch and an orphaned approval, and drops a la
   assert.ok(lines.some((l) => /launches with no known session/.test(l)), "the section is printed");
   assert.ok(lines.some((l) => /o\/r#1.*unknown \(no live row matched\)/.test(l)));
   assert.ok(lines.some((l) => /claude agents --json, then propagate sessions assoc/.test(l)), "it names the next command");
+});
+
+// ── one row per session id (propagate#318) ─────────────────────────────────
+
+const RENAMED = [
+  { id: "d652aba2", cwd: "/w/acme/repo-a", kind: "background", startedAt: NOW - 6 * 86400000, sessionId: "d652aba2-6fb7-4373-ab27-542f2c57ea68", name: "old-name", state: "blocked" },
+  { pid: 201, cwd: "/w/acme/repo-a", kind: "interactive", startedAt: NOW - 2 * 86400000, sessionId: "d652aba2-6fb7-4373-ab27-542f2c57ea68", name: "live-name", status: "busy" },
+];
+
+test("two entries for one id with different names: one row, the live one, carrying the current name", async () => {
+  const t = await run(["--json"], { cfg: { fixture: RENAMED } });
+  assert.equal(t.json.sessions.length, 1, "one row per session id");
+  assert.equal(t.json.sessions[0].name, "live-name");
+  assert.equal(t.json.sessions[0].state, "busy");
+  assert.equal(t.json.counts.live, 1);
+  const text = (await run([], { cfg: { fixture: RENAMED } })).out.join("\n");
+  assert.doesNotMatch(text, /old-name/);
+  // the order of the two entries does not decide it
+  const flipped = await run(["--json"], { cfg: { fixture: [...RENAMED].reverse() } });
+  assert.equal(flipped.json.sessions.length, 1);
+  assert.equal(flipped.json.sessions[0].name, "live-name");
+});
+
+test("assoc writes to the row `sessions` shows, and the table then shows it associated", async () => {
+  const state = fresh();
+  const a = await run(["assoc", "d652aba2", "--goal", "G3", "--item", "o/repo-a#9", "--json"], { cfg: { fixture: RENAMED }, state });
+  assert.equal(a.code, 0);
+  assert.equal(a.json.associated.rowKey, `interactive:d652aba2-6fb7-4373-ab27-542f2c57ea68:201`, "the shown (live) row's key, not the stale background one");
+  const t = await run(["--json"], { cfg: { fixture: RENAMED }, state });
+  assert.equal(t.json.sessions.length, 1);
+  assert.equal(t.json.sessions[0].association.item, "o/repo-a#9");
+  assert.equal(t.json.counts.unassociated, 0);
+});
+
+test("an association made against the stale row before the merge still shows on the one row", async () => {
+  const state = fresh();
+  await append({ event: "associate", rowKey: "background:d652aba2:", goal: "G3", item: "o/repo-a#9", row: { sessionId: "d652aba2-6fb7-4373-ab27-542f2c57ea68" } }, { stateDirPath: state, now: () => NOW });
+  const t = await run(["--json"], { cfg: { fixture: RENAMED }, state });
+  assert.equal(t.json.sessions[0].association.item, "o/repo-a#9");
+  assert.equal(t.json.ended.length, 0, "not listed as an ended association either");
+});
+
+test("an association the dispatch hook wrote (key session:<id>, no row key) shows on the live session and is not ended", async () => {
+  const state = fresh();
+  await append({ event: "associate", rowKey: "session:d652aba2-6fb7-4373-ab27-542f2c57ea68", goal: "G3", item: "o/repo-a#9", source: "dispatch", row: { sessionId: "d652aba2-6fb7-4373-ab27-542f2c57ea68" } }, { stateDirPath: state, now: () => NOW });
+  const t = await run(["--json"], { cfg: { fixture: RENAMED }, state });
+  assert.equal(t.json.sessions[0].association.goal, "G3");
+  assert.equal(t.json.ended.length, 0);
 });

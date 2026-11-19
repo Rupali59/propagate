@@ -264,3 +264,61 @@ test("decide (pure): an absent model against a Model is a mismatch", () => {
   assert.match(d.deny, /haiku/);
   assert.deepEqual(d.moves, []);
 });
+
+// ── auto-association (propagate#318) ───────────────────────────────────────
+// An allowed dispatch associates the DISPATCHING session with the item's goal and item. Tested by EFFECT: the bytes of
+// assoc.jsonl before and after, never the hook's own description of what it did.
+
+const assocLog = (sb) => {
+  const f = path.join(sb.state, "sessions", "assoc.jsonl");
+  return existsSync(f) ? readFileSync(f, "utf8") : "";
+};
+const withSession = (payload, id) => ({ ...payload, session_id: id });
+
+test("an allowed dispatch associates the dispatching session with the item's goal and item", () => {
+  const sb = sandbox({ snapshot: SNAP("Ready", "Sonnet") });
+  const r = sb.run(withSession(dispatch("Do o/r#7 now.", "sonnet"), "sess-aaaa"));
+  assert.equal(r.deny, false);
+  const lines = assocLog(sb).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].event, "associate");
+  assert.equal(lines[0].rowKey, "session:sess-aaaa");
+  assert.equal(lines[0].goal, "G1");
+  assert.equal(lines[0].item, "o/r#7");
+  assert.equal(lines[0].row.sessionId, "sess-aaaa", "session-guide finds an association by row.sessionId");
+  assert.match(r.ctx, /session associated with o\/r#7 \(G1\)/);
+});
+
+test("an existing association is not overwritten: the log is byte-identical and the hook says it skipped", () => {
+  const sb = sandbox({ snapshot: SNAP("Ready", "Sonnet") });
+  mkdirSync(path.join(sb.state, "sessions"), { recursive: true });
+  const prior = JSON.stringify({ ts: "2026-11-18T00:00:00.000Z", event: "associate", rowKey: "interactive:sess-bbbb:42", goal: "G9", item: "o/other#1", row: { sessionId: "sess-bbbb" } }) + "\n";
+  writeFileSync(path.join(sb.state, "sessions", "assoc.jsonl"), prior);
+  const r = sb.run(withSession(dispatch("Do o/r#7 now.", "sonnet"), "sess-bbbb"));
+  assert.equal(r.deny, false);
+  assert.equal(assocLog(sb), prior, "not one byte appended");
+  assert.match(r.ctx, /session not associated \(already associated with o\/other#1\)/);
+});
+
+test("a denied dispatch associates nothing", () => {
+  const sb = sandbox({ snapshot: SNAP("Ready", "Sonnet") });
+  const r = sb.run(withSession(dispatch("Do o/r#7 now."), "sess-cccc"));
+  assert.equal(r.deny, true);
+  assert.equal(assocLog(sb), "");
+});
+
+test("a payload with no session id associates nothing and says why", () => {
+  const sb = sandbox({ snapshot: SNAP("Ready", "Sonnet") });
+  const r = sb.run(dispatch("Do o/r#7 now.", "sonnet"));
+  assert.equal(r.deny, false);
+  assert.equal(assocLog(sb), "");
+  assert.match(r.ctx, /session not associated \(no session id/);
+});
+
+test("a second dispatch by the same session appends nothing", () => {
+  const sb = sandbox({ snapshot: SNAP("Ready", "Sonnet") });
+  sb.run(withSession(dispatch("Do o/r#7 now.", "sonnet"), "sess-dddd"));
+  const once = assocLog(sb);
+  sb.run(withSession(dispatch("Do o/r#7 again.", "sonnet"), "sess-dddd"));
+  assert.equal(assocLog(sb), once);
+});

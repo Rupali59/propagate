@@ -839,7 +839,7 @@ propagate sessions rm <id|name> [--apply] [--json]
 ```
 
 - **The table:** grouped by workspace, columns `project`, `goal`, `item`, `state`, `since`, then `id` and `name`. A session with no association says `unassociated` in the item column, and the table closes with `assoc: propagate sessions assoc <id> --from owner/repo#n`. An empty list prints `0 live sessions (claude agents read <ts>)`. A cwd at the hub root reads `hub (all)`; one outside every workspace is grouped as `unplaced`.
-- **Row key:** `(kind, id || sessionId, pid)`. `sessionId` is not unique (one id appears as both a background and an interactive row), so rows are never deduped on it.
+- **Row key and one row per session id (#318):** a row's key is `(kind, id || sessionId, pid)`, but `claude agents --json` lists one session id as both a background and an interactive row (a resumed or renamed session keeps its stale background row and name). `sessions` shows ONE row per `sessionId`: the most recently started (a tie goes to the interactive row), with that row's current name. The other rows stay on it as `rows`, so `show`/`assoc` selectors naming a sibling (its background id, its pid) still find the session. `assoc` writes to the shown row's key. A session's association is the newest one recorded under any of its row keys or carrying its session id.
 - **Selecting a session:** `pid:<n>`, then the background `id`, then `sessionId` (exact, or a prefix of 6+ characters), then the name. The first form that matches wins; more than one match inside it is `SESSION_AMBIGUOUS`.
 - **Repos:** a session works in every repo whose checkout is at or below its folder, plus the deepest checkout containing it. The repo to checkout map is `$STATE/sessions/checkouts.json`, rebuilt on every CLI read from discovery plus `git remote get-url origin`; a linked worktree resolves to its main checkout through `git rev-parse --git-common-dir`.
 - **Ended:** an association whose session is absent from `claude agents --json` reads `ended (not in claude agents)` and is never dropped. The text view lists the 10 newest; `--json` lists all.
@@ -890,6 +890,7 @@ Session: <project> (<workspace>) · repos: a, b · goal G<n> · item owner/repo#
 ```
 
 - With no association it says `unassociated: propagate sessions assoc <id> --from owner/repo#n`.
+- **Associated without `assoc` (#318):** the `dispatch-model` hook, on an allowed Agent/Task dispatch naming a board item in today's day snapshot, appends one `associate` line (`rowKey` `session:<session_id>`, `source: dispatch`) for the dispatching session with that item's goal and item. A session that already has an association is never overwritten; the hook's context line says it skipped. A deny, a missing session id or an item with no goal associates nothing.
 - The block is at most 2,000 characters; a long repo list ends with `+N more: propagate sessions show <id>`.
 - It reads only `$STATE/sessions/checkouts.json` (refreshed by the sessions CLI), `assoc.jsonl` and `.propagates.yml` markers up the cwd ancestry. Its state dir comes from `lib/core/paths.mjs`.
 - It never calls `claude`, the network or git, except one `git rev-parse --git-common-dir` when cwd is inside `.claude/worktrees/`.
