@@ -2888,6 +2888,61 @@ function printInboundAdvisory(inbound, repoRoot) {
   }
 }
 
+/**
+ * Which workspaces `check` should resolve `repoRoot` against (#333).
+ *
+ * A linked git worktree under `<repo>/.claude/worktrees/<name>` sits inside a dot-directory,
+ * which global discovery skips on purpose (walking into dot-directories would count every
+ * worktree as a second workspace). So discovery is blind to it and `check --changed` printed
+ * nothing, which read as "nothing coupled" when it had looked at nothing.
+ *
+ * Chosen over un-skipping dot-directories: resolve BY WALKING UP from the checkout's own root
+ * to the nearest `.propagates.yml`, and add that directory as a workspace for this one run.
+ * When it is deeper than a discovered workspace that lexically contains the worktree,
+ * `resolveChangedFile`'s longest-root-wins picks it, so paths are relative to the worktree's
+ * own copy of the declarations.
+ *
+ * Only for a linked worktree: an ordinary checkout keeps resolving through discovery exactly
+ * as before. When nothing resolves the result carries a `reason`, never an empty success.
+ *
+ * @param {string} repoRoot absolute git toplevel
+ * @param {Array<{name: string, root: string}>} workspaces discovered workspaces
+ * @param {boolean} linkedWorktree whether repoRoot is a linked worktree
+ * @returns {{workspaces: Array, reason: string|null}}
+ */
+export function resolveCheckWorkspaces(repoRoot, workspaces = WORKSPACES, linkedWorktree = false) {
+  let list = workspaces;
+  if (linkedWorktree) {
+    let dir = repoRoot;
+    for (;;) {
+      if (existsSync(path.join(dir, ".propagates.yml"))) break;
+      const up = path.dirname(dir);
+      if (up === dir) {
+        dir = null;
+        break;
+      }
+      dir = up;
+    }
+    if (dir && !list.some((w) => w.root === dir)) {
+      list = [...list, { name: path.basename(dir), root: dir }];
+    }
+  }
+  if (!resolveChangedFile(repoRoot, list)) {
+    return { workspaces: list, reason: `no workspace resolved for ${repoRoot}` };
+  }
+  return { workspaces: list, reason: null };
+}
+
+function isLinkedWorktree(repoRoot) {
+  try {
+    const rev = (flag) =>
+      realpathSync(path.resolve(repoRoot, execFileSync("git", ["rev-parse", flag], { cwd: repoRoot, encoding: "utf8" }).trim()));
+    return rev("--git-dir") !== rev("--git-common-dir");
+  } catch {
+    return false;
+  }
+}
+
 async function check() {
   const args = process.argv.slice(3);
   const strict = args.includes("--strict");
@@ -2930,8 +2985,17 @@ async function check() {
   const untracked = range || staged ? [] : gitDiffNames(["ls-files", "--others", "--exclude-standard"], repoRoot);
 
   // ONE reconcile per run, shared by the coupling annotations and the inbound advisory.
-  const edgeStates = await loadEdgeStates(WORKSPACES);
-  const { exitCode, couplings, statesUnknown } = await runCheck({ changedFiles, repoRoot, strict, json, edgeStates });
+  // #333: when nothing resolves, say so and fail; never print nothing.
+  const resolvedWs = resolveCheckWorkspaces(repoRoot, WORKSPACES, isLinkedWorktree(repoRoot));
+  if (resolvedWs.reason) {
+    console.error(`${RED}error:${RESET} ${resolvedWs.reason}`);
+    process.exit(2);
+  }
+  const edgeStates = await loadEdgeStates(resolvedWs.workspaces);
+  const { exitCode, couplings, statesUnknown } = await runCheck(
+    { changedFiles, repoRoot, strict, json, edgeStates },
+    resolvedWs.workspaces,
+  );
   const inbound = inboundAdvisory(edgeStates.rows, repoRoot);
   if (json) {
     console.log(

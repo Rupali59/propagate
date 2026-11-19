@@ -121,6 +121,8 @@ test("gitDiffNames: hostile --staged-adjacent backtick payload does not execute"
 test("check --range: legitimate range still returns the right changed files (behaviour preserved)", async () => {
   const { root, sha1, sha2 } = await makeGitRepo();
   try {
+    // #333: a repo no workspace covers now fails loudly, so give the fixture one (untracked).
+    await writeFile(path.join(root, ".propagates.yml"), "workspace: true\nsources: {}\n");
     const result = runCli(["--range", `${sha1}..${sha2}`, "--json"], root);
     assert.equal(result.status, 0);
     const parsed = JSON.parse(result.stdout);
