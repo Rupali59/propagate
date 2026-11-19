@@ -6071,6 +6071,9 @@ if (_invokedDirectly) {
   } else if (mode === "context") {
     const { contextCmd } = await import("./cli/context.mjs");
     process.exitCode = await contextCmd(process.argv.slice(3));
+  } else if (mode === "search-usage") {
+    const { searchUsageCmd } = await import("./cli/search-usage.mjs");
+    process.exitCode = await searchUsageCmd(process.argv.slice(3));
   } else if (mode === "costs") {
     const { costsCmd } = await import("./cli/costs.mjs");
     process.exitCode = await costsCmd(process.argv.slice(3));
