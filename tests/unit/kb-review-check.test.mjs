@@ -60,13 +60,17 @@ test("a quote outside 6-15 words is QUOTE_NOT_FOUND carrying findQuote's reason"
   assert.match(r.refusals[0].what, /6-15 are required/);
 });
 
-test("SUPERSEDES_INVALID: a target already superseded by another review refuses", () => {
+test("SUPERSEDES_INVALID: a target whose status.json says superseded by a different review refuses", () => {
   const fx = buildReview({ tweakProtocol: (t) => t.replace("supersedes: null", "supersedes: 2026-01-01-old") });
   const plain = renderProtocolTemplate({ slug: "old", date: "2026-01-01", decision: "d", decider: "x" });
-  addSiblingReview(fx, "2026-01-01-old", plain);
+  const old = addSiblingReview(fx, "2026-01-01-old", plain);
   assert.deepEqual(run(fx).refusals, [], "a clean supersedes passes");
-  addSiblingReview(fx, "2026-11-22-other", plain.replace("supersedes: null", "supersedes: 2026-01-01-old"));
+  writeFileSync(path.join(old, "status.json"), JSON.stringify({ schema_version: 1, status: "superseded", by: "2026-11-22-other", date: "2026-11-22" }));
   assert.deepEqual(codes(run(fx)), ["SUPERSEDES_INVALID"]);
+  writeFileSync(path.join(old, "status.json"), JSON.stringify({ schema_version: 1, status: "superseded", by: path.basename(fx.dir), date: "2026-11-22" }));
+  assert.deepEqual(run(fx).refusals, [], "superseded by this very review is not a conflict");
+  writeFileSync(path.join(old, "status.json"), "{not json");
+  assert.deepEqual(codes(run(fx)), ["SUPERSEDES_INVALID"], "an unreadable status is a refusal, not 'current'");
 });
 
 test("Review Focus 1: five URL forms of one source count once, duplicates 4", () => {

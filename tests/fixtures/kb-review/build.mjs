@@ -35,12 +35,12 @@ export const snapshot = (dir) => {
 };
 
 /**
- * @param {object} o {slug, supersedes, approved, searchDate, tweakBrief(brief), tweakProtocol(text), editProtocolAfter,
+ * @param {object} o {into (a fixture to add a second review to, sharing its hub and state), slug, supersedes, approved, searchDate, tweakBrief(brief), tweakProtocol(text), editProtocolAfter,
  *   leaveUncommitted, agreement: "reliable"|"unreliable"|null, referencesYaml, tiersYaml, omitBody, tweakFetched(records)}
  * @returns {{root, reviews, dir, state, refs, tiers, protocolSha, brief, integrations}}
  */
 export function buildReview(o = {}) {
-  const root = mkdtempSync(path.join(os.tmpdir(), "kb-rev-fx-"));
+  const root = o.into?.root ?? mkdtempSync(path.join(os.tmpdir(), "kb-rev-fx-"));
   const hub = path.join(root, "hub");
   const reviews = path.join(hub, "kb", "reviews");
   const state = path.join(root, "state");
@@ -48,9 +48,11 @@ export function buildReview(o = {}) {
   const dir = path.join(reviews, `2026-11-20-${slug}`);
   mkdirSync(dir, { recursive: true });
   mkdirSync(path.join(state, "kb", "fetched"), { recursive: true });
-  git(hub, ["init", "-q"]);
-  git(hub, ["config", "user.email", "t@example.com"]);
-  git(hub, ["config", "user.name", "t"]);
+  if (!o.into) {
+    git(hub, ["init", "-q"]);
+    git(hub, ["config", "user.email", "t@example.com"]);
+    git(hub, ["config", "user.name", "t"]);
+  }
 
   let proto = renderProtocolTemplate({ slug, date: "2026-11-20", decision: "pick a screening method", decider: "owner" })
     .replace("questions: []", 'questions: [{id: RQ1, text: "which method?"}]')
