@@ -13,13 +13,46 @@
  * recognised is denied with its reason. A denylist would let the first unanticipated writer through; this lets
  * the first unanticipated reader be denied, which costs one report line.
  *
+ * RESEARCH_READ_ONLY (below) is the second policy: Read confined to the saved-source store, everything else denied.
+ *
  * SCOPE. Only propagate's read-only agents. The main session (no agent_type) and every other subagent are never
  * touched: the hook exits 0 with no output for them. tests/hooks/agent-guard.test.mjs asserts both halves.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { stateDir } from "../lib/core/paths.mjs";
 
 export const READ_ONLY = Object.freeze(["edge-settler", "doc-curator", "adversarial-reviewer"]);
+
+/**
+ * The literature researcher (propagate#327) has a different policy from READ_ONLY: not "reads only", but "reads
+ * one directory only". Its single tool is Read, confined to the saved-source store `<state>/kb/fetched/`, so a page
+ * carrying injected instructions cannot send hub text anywhere: the agent has no way to move a byte out of the
+ * store, and no way to read anything outside it. Every other tool is denied.
+ */
+export const RESEARCH_READ_ONLY = Object.freeze(["literature-researcher"]);
+const isResearchAgent = (t) => typeof t === "string" && RESEARCH_READ_ONLY.includes(t.replace(/^propagate:/, ""));
+
+/** FAILS CLOSED: any path that cannot be resolved inside the store is denied. realpath, so a symlink out is followed
+ *  and judged by where it lands; the prefix ends in a separator, so `fetched-evil/` is not `fetched/`. */
+function researchDecision(input) {
+  const tool = input.tool_name;
+  if (tool !== "Read") return { deny: true, reason: `literature-researcher may only Read saved sources; ${tool} is not allowed` };
+  const notSaved = (why) => ({ deny: true, reason: `not a saved source: ${why}. literature-researcher may only Read the files the coordinator listed under ${path.join(stateDir(), "kb", "fetched")}` });
+  const file = input.tool_input?.file_path;
+  if (typeof file !== "string" || file === "" || !path.isAbsolute(file)) return notSaved("the path is missing or not absolute");
+  let real;
+  let store;
+  try {
+    store = realpathSync(path.join(stateDir(), "kb", "fetched"));
+    real = realpathSync(file);
+  } catch {
+    return notSaved("the path does not resolve to an existing file in the store");
+  }
+  if (!real.startsWith(store + path.sep)) return notSaved("the path resolves outside the store");
+  return { deny: false };
+}
 
 const isReadOnlyAgent = (t) => typeof t === "string" && READ_ONLY.includes(t.replace(/^propagate:/, ""));
 
@@ -82,6 +115,7 @@ function segmentProblem(seg) {
 
 /** @returns {{deny: boolean, reason?: string}} */
 export function decide(input) {
+  if (isResearchAgent(input?.agent_type)) return researchDecision(input);
   if (!isReadOnlyAgent(input?.agent_type)) return { deny: false };
   const tool = input.tool_name;
   if (tool === "Write" || tool === "Edit" || tool === "NotebookEdit") return { deny: true, reason: `${tool} is a write` };
