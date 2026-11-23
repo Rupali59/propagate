@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <title>arXiv Query</title>
+  <entry>
+    <id>http://arxiv.org/abs/2401.00001v1</id>
+    <published>2024-01-02T00:00:00Z</published>
+    <title>Agentic   screening
+ of papers</title>
+    <summary>We screen &amp; rank papers.</summary>
+    <link href="http://arxiv.org/abs/2401.00001v1" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2401.00001v1" rel="related" type="application/pdf"/>
+    <arxiv:doi>10.3000/Gamma</arxiv:doi>
+  </entry>
+</feed>
