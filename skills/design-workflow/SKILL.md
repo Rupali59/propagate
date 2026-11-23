@@ -28,7 +28,11 @@ Design-first for anything users see. Shipping before full compliance is allowed 
 ## How to run it
 
 1. **At plan time**, run step 1 before proposing anything: read the product DESIGN.md, then
-   `propagate design deps` once it ships (until then: not built yet, #243; audit by hand).
+   `propagate design deps` once it ships (until then: not built yet, #243; audit by hand). Then read
+   the references registry, `propagate kb references --json`, and keep the entries whose `applies_to`
+   names this project, its surface or `design-web`: each is a library, tool or design reference already
+   weighed, with a verdict. Step 2's "why no existing component fits" answers to them too; a `rejected`
+   entry carries its reason, so do not re-propose it without new evidence.
 2. Do steps 2 to 6 in the plan, 7 to 8 in the build, 9 to 10 before calling the work done.
 3. For the stack in front of you, Read its section. For a stack with no section, the step is done
    with the stack's own tools, "when reached".
