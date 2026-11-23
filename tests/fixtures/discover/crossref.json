@@ -1,0 +1,29 @@
+{
+ "status": "ok",
+ "message-type": "work-list",
+ "message": {
+  "total-results": 1,
+  "items": [
+   {
+    "DOI": "10.4000/delta",
+    "title": [
+     "Metadata for reviews"
+    ],
+    "container-title": [
+     "Journal of Delta"
+    ],
+    "type": "journal-article",
+    "issued": {
+     "date-parts": [
+      [
+       2022,
+       5,
+       1
+      ]
+     ]
+    },
+    "abstract": "<jats:p>Delta abstract.</jats:p>"
+   }
+  ]
+ }
+}

@@ -16,13 +16,15 @@ import { collectUnits, MIN_UNITS } from "../lib/report/services.mjs";
 import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/kb/standards/adopt.mjs";
 import { applyMigrate, planMigrate } from "../lib/kb/migrate.mjs";
 import { loadReferences } from "../lib/kb/references.mjs";
+import { discoverCmd } from "../lib/research/discover.mjs";
+import { FetchFatal, fetchAll } from "../lib/research/fetch.mjs";
 import { collectEntries, rankEntries } from "../lib/kb/search.mjs";
 import { loadStandards } from "../lib/kb/standards/registry.mjs";
 import { readSidecars, serviceDetectsFor } from "../lib/kb/standards/sidecars.mjs";
 import { buildStandardsReport } from "../lib/kb/standards/status.mjs";
 import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/kb/standards/versions.mjs";
 
-const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb search <terms> [--kind standard|reference] [--json] | kb migrate [--apply] [--json]";
+const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb search <terms> [--kind standard|reference] [--json] | kb migrate [--apply] [--json] | kb discover <dir> \"<query>\" [--engine openalex|s2|arxiv|crossref] [--limit n] [--lane <name>] [--json] | kb fetch <dir> <url...> [--json]";
 
 /** The exact line `propagate standards …` writes to stderr, once per run. */
 export const STANDARDS_DEPRECATION = "propagate standards is now propagate kb standards; the old name is removed in the release after 0.21.0";
@@ -66,6 +68,12 @@ function loadOrFail(integrations) {
   return fail(code, l.reason, next);
 }
 
+/** The polite-pool contact: `kbContact` under integrations (env PROPAGATE_KB_CONTACT wins inside discoverCmd). */
+async function kbContact(inject) {
+  const { integrations } = await env(inject);
+  return integrations.kbContact ?? null;
+}
+
 /**
  * @param {string[]} argv everything after `kb`: `standards …` or `references …`
  * @param {object} [inject] tests: io, integrations, workspaces, units, sidecars, stateDirPath, now, run, minUnits
@@ -76,6 +84,8 @@ export async function kbCmd(argv = [], inject = {}) {
   if (argv[0] === "standards") return standardsBody(argv.slice(1), inject);
   if (argv[0] === "references") return referencesCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "search") return searchCmd(argv.slice(1), inject, io, asJson);
+  if (argv[0] === "discover") return discoverCmd(argv.slice(1), { ...inject, io, contact: inject.contact ?? (await kbContact(inject)) });
+  if (argv[0] === "fetch") return fetchCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "migrate") return migrateCmd(argv.slice(1), inject, io, asJson);
   return emitFailure(fail("KB_USAGE", argv[0] === undefined ? "kb needs a subcommand" : `unknown kb subcommand ${JSON.stringify(argv[0])}`, USAGE), asJson, io);
 }
@@ -84,6 +94,49 @@ export async function kbCmd(argv = [], inject = {}) {
 export async function standardsCmd(argv = [], inject = {}) {
   (inject.io ?? console).error(STANDARDS_DEPRECATION);
   return kbCmd(["standards", ...argv], inject);
+}
+
+/**
+ * `kb fetch <dir> <url...> [--json]` (#324): read each URL's raw source into `<dir>/fetched.json`, bodies under
+ * `$STATE/kb/fetched/<sha256>`. EXIT CODES. 0 every URL ok; 1 at least one was not_retrieved, stale or hallucinated
+ * (the records say which); 2 could not run: usage, pdftotext missing when a PDF turned up, gh missing or logged out
+ * when a GitHub URL turned up, a body store that would land inside the repo or `<dir>`. Nothing is written on a 2.
+ * The contact address Unpaywall asks for is PROPAGATE_KB_CONTACT, or `kbContact` under `integrations:`; never guessed.
+ */
+async function fetchCmd(rest, inject, io, asJson) {
+  const pos = rest.filter((a) => a !== "--json");
+  const bad = pos.find((a) => a.startsWith("--"));
+  if (bad) return emitFailure(fail("KB_USAGE", `unknown argument ${bad}`, USAGE), asJson, io);
+  if (pos.length < 2) return emitFailure(fail("KB_USAGE", "kb fetch needs <dir> and at least one <url>", USAGE), asJson, io);
+  const [dir, ...urls] = pos;
+  const bareHost = urls.find((u) => !/^https?:\/\//i.test(u) && !/^10\.\d{4,9}\//.test(u));
+  if (bareHost) return emitFailure(fail("KB_USAGE", `${JSON.stringify(bareHost)} is not an http(s) URL or a DOI`, USAGE), asJson, io);
+  const norm = urls.map((u) => (/^10\./.test(u) ? `https://doi.org/${u}` : u));
+  let email = inject.contact;
+  if (email === undefined) {
+    email = process.env.PROPAGATE_KB_CONTACT;
+    if (!email) email = (await env(inject)).integrations?.kbContact;
+  }
+  let out;
+  try {
+    out = await fetchAll({
+      dir, urls: norm, stateDirPath: inject.stateDirPath ?? stateDir(), now: inject.now, fetchImpl: inject.fetchImpl, run: inject.run,
+      pdftotextBin: inject.pdftotextBin, ghBin: inject.ghBin, contact: typeof email === "string" && email.trim() ? email.trim() : null,
+      endpoints: inject.endpoints, timeoutMs: inject.timeoutMs,
+    });
+  } catch (e) {
+    if (e instanceof FetchFatal) return emitFailure(fail(e.code, e.what, e.next), asJson, io);
+    throw e;
+  }
+  const bad1 = out.records.filter((r) => r.classification !== "ok");
+  if (asJson) {
+    io.log(JSON.stringify({ ok: bad1.length === 0, file: out.file, records: out.records, duplicates: out.duplicates }, null, 2));
+    return bad1.length ? 1 : 0;
+  }
+  io.log(`# kb fetch  (${out.records.length} fetched, ${out.records.length - bad1.length} ok; records in ${out.file})`);
+  for (const r of out.records) io.log(`  ${r.classification.padEnd(13)} ${r.status ?? "-"}  ${r.url}${r.final_url && r.final_url !== r.url ? `  -> ${r.final_url}` : ""}${r.note ? `\n    ${r.note}` : ""}`);
+  for (const d of out.duplicates) io.log(`  duplicate (same source as an earlier URL, fetched once): ${d}`);
+  return bad1.length ? 1 : 0;
 }
 
 /**
