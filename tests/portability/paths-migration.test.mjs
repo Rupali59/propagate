@@ -136,6 +136,8 @@ test("migration equality — all 36 pre-existing config.mjs exports are byte-ide
       kbStandardsDir: null,
       kbReferencesFile: null,
       registersDir: null,
+      kbReviewsDir: null,
+      kbTiersFile: null,
       kbContact: null,
       standardsFile: null,
       standardsDir: null,

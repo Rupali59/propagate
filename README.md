@@ -122,6 +122,10 @@ Regenerate it with `npm run readme:commands`.
 - `propagate kb references` — the knowledge base's outside sources, ids shown as ref:<id> (offline)
 - `propagate kb search` — search the standards rows, references and evaluator's registers in one derived pass (no index); hits are std:/ref:/reg: with path:line and checked date
 - `propagate kb fetch` — read each URL's raw source (Node fetch, a fixed HTML-to-text step, pdftotext, gh api; arXiv, OpenReview, ACL Anthology and DOI resolve to open PDFs) into <dir>/fetched.json, classifying each ok, not_retrieved, stale or hallucinated (robots.txt respected; bodies stay under $STATE/kb/fetched)
+- `propagate kb review new` — start a literature review: write protocol.md from the template into the reviews folder (refuses an existing review)
+- `propagate kb review check` — the gate: decide whether a review's brief may reach the knowledge base (offline, writes nothing; exit 0 ok, 1 refused, 2 could not run; --refetch warns on source drift)
+- `propagate kb review agree` — draw the blind screening and support sample a person checks, record her answers (--apply), and score Cohen's kappa against 0.8
+- `propagate kb review apply` — re-run the gate, then write brief.md, new reference entries (verdict evaluate) and candidates.md; refuses and writes nothing on any refusal
 - `propagate standards` — deprecated: which standards apply, which rows need re-verifying against the tool version in use (offline; status is derived, never written)
 - `propagate standards versions` — deprecated: the cached tool versions; --refresh runs each registry probe and writes them (the only command that spawns a tool)
 - `propagate standards adopt` — deprecated: record that a project adopted a standard in its sidecar (dry run unless --apply; detection proposes, adoption stays)

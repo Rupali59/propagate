@@ -16,6 +16,7 @@ import { collectUnits, MIN_UNITS } from "../lib/report/services.mjs";
 import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/kb/standards/adopt.mjs";
 import { applyMigrate, planMigrate } from "../lib/kb/migrate.mjs";
 import { loadReferences } from "../lib/kb/references.mjs";
+import { reviewCmd } from "../lib/kb/review/cmd.mjs";
 import { discoverCmd } from "../lib/research/discover.mjs";
 import { FetchFatal, fetchAll } from "../lib/research/fetch.mjs";
 import { collectEntries, rankEntries } from "../lib/kb/search.mjs";
@@ -24,7 +25,7 @@ import { readSidecars, serviceDetectsFor } from "../lib/kb/standards/sidecars.mj
 import { buildStandardsReport } from "../lib/kb/standards/status.mjs";
 import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/kb/standards/versions.mjs";
 
-const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb search <terms> [--kind standard|reference] [--json] | kb migrate [--apply] [--json] | kb discover <dir> \"<query>\" [--engine openalex|s2|arxiv|crossref] [--limit n] [--lane <name>] [--json] | kb fetch <dir> <url...> [--json]";
+const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb search <terms> [--kind standard|reference] [--json] | kb migrate [--apply] [--json] | kb discover <dir> \"<query>\" [--engine openalex|s2|arxiv|crossref] [--limit n] [--lane <name>] [--json] | kb fetch <dir> <url...> [--json] | kb review new <slug> --decision <text> --decider <name> | kb review check <dir> [--refetch] [--json] | kb review agree <dir> [--record <file>] [--apply] [--json] | kb review apply <dir> [--json]";
 
 /** The exact line `propagate standards …` writes to stderr, once per run. */
 export const STANDARDS_DEPRECATION = "propagate standards is now propagate kb standards; the old name is removed in the release after 0.21.0";
@@ -86,6 +87,7 @@ export async function kbCmd(argv = [], inject = {}) {
   if (argv[0] === "search") return searchCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "discover") return discoverCmd(argv.slice(1), { ...inject, io, contact: inject.contact ?? (await kbContact(inject)) });
   if (argv[0] === "fetch") return fetchCmd(argv.slice(1), inject, io, asJson);
+  if (argv[0] === "review") return reviewCmd(argv.slice(1), { io, integrations: (await env(inject)).integrations, inject });
   if (argv[0] === "migrate") return migrateCmd(argv.slice(1), inject, io, asJson);
   return emitFailure(fail("KB_USAGE", argv[0] === undefined ? "kb needs a subcommand" : `unknown kb subcommand ${JSON.stringify(argv[0])}`, USAGE), asJson, io);
 }
