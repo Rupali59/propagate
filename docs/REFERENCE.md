@@ -1019,6 +1019,17 @@ Reads open issues labelled `kind:evaluate` on the hub repo; an issue also labell
 
 `--apply` writes only (a) and (c), 20 per request. It then reads each written item back by node id and prints MATCH n/n, or the mismatches with exit 1.
 
+### The catch-up: `day close` runs itself (propagate#339)
+
+The first SessionStart of each day starts `day close --apply` **detached**, if the last close has not run today. The hook (`hooks/session-guide.mjs` `dayCloseStep`, logic in `lib/report/day-close-auto.mjs`, node builtins only) reads `$STATE/day/last-close.json`, takes `$STATE/day/close.lock` (an atomic create; a lock whose process is dead or older than 2 hours is taken over) and spawns the run without waiting. Nothing else becomes automatic: `--apply` still writes only (a) and (c), read back by node id.
+- **`last-close.json`** is written by EVERY `day close` run: `{date, mode, promoted, closedToDone, inProgress, exit, status, finishedAt, reason, caughtUpDate, partial?, failureLabel?}`. `caughtUpDate` is the date of the last clean `--apply`; a dry run or a failure never moves it, so a hand-run dry run cannot make the catch-up believe the day was closed. The run's output is `close-<date>.txt` (a dry run writes `close-<date>.dry.txt`, so it never overwrites an apply).
+- **Decision:** start when `caughtUpDate` is not today. A transient failure today is retried by the next session after 10 minutes; any other failure waits for tomorrow. An unreadable record starts a run.
+- **The guide line**, in every session's SessionStart block, just above the glance line: `day close <date>: N promoted, M closed → Done, K In progress to look at (close-<date>.txt)`, or `rate-limited, will retry next session`, `github unavailable (HTTP 504), will retry next session` (the actual status, or `ETIMEDOUT` / `ECONNRESET`), `partial: N of M written, the rest next session`, or `failed (exit N): <reason>`. A record it cannot read says so.
+- **Off:** `PROPAGATE_DAY_CLOSE_AUTO=0` (the env var wins when set, `=1` re-enables for a session) or `dayCloseAuto: false` in `config.yml`. The guide line then says `auto catch-up is off` and why.
+- **Refusals** (rate limit, any 5xx, ETIMEDOUT or ECONNRESET): `day close` waits 60 seconds and retries once. A board read that is still refused falls back to the Projects REST API (`users/{owner}/projectsV2/{n}/items`, writes by PATCH with `fields`); writes GraphQL refuses twice finish over REST (re-planned, so written items are skipped). If that fails too, the record says which. A write that stops partway records `partial` and the next run finishes the rest: it is idempotent, since written items no longer qualify.
+- **Board reads are reused:** `day open` also writes `day/board-read.json`; a `day close` the same local day reads that instead of every board and calls GitHub only for the writes and their read-back (the output says so). `day close --fresh` re-reads.
+- **Tests never reach a board:** the hook's child is replaceable with `PROPAGATE_DAY_CLOSE_CMD`, and under the node test runner with no replacement the hook refuses to spawn (the `runClaude` rule, gotcha G91).
+
 "Done when" counts only when it is **stated**. The matcher strips fenced code and backtick spans, then needs a heading, a bold marker or a sentence that starts with the phrase. The workspace-hub#13 false positive is the case it excludes. Each item connection is read with `first:100` and not paged, and a truncated connection is noted in the output.
 
 ## Board reads page past 100 (propagate#214)

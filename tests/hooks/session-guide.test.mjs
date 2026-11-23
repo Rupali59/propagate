@@ -47,12 +47,14 @@ function hook(f, payload, extraEnv = {}) {
   return spawnSync(process.execPath, [HOOK], {
     input: typeof payload === "string" ? payload : JSON.stringify(payload),
     encoding: "utf8",
-    env: { ...process.env, PROPAGATE_STATE_DIR: f.state, PROPAGATE_CLAUDE_BIN: f.stub, PROPAGATE_HUB_ROOT: "", ...extraEnv },
+    // PROPAGATE_DAY_CLOSE_AUTO=0: this file is about the session block, not the day-close catch-up (propagate#339;
+    // tests/hooks/session-guide-day-close.test.mjs covers that). rawCtx drops the one "day close:" line it leaves.
+    env: { ...process.env, PROPAGATE_STATE_DIR: f.state, PROPAGATE_CLAUDE_BIN: f.stub, PROPAGATE_HUB_ROOT: "", PROPAGATE_DAY_CLOSE_AUTO: "0", ...extraEnv },
   });
 }
 /** The glance line (propagate#295) is the LAST line of every block; ctxOf asserts it is there and returns the rest. */
 const GLANCE_RE = /^(glance[: ].*|Glance .*Run: propagate glance)$/;
-const rawCtx = (r) => JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
+const rawCtx = (r) => JSON.parse(r.stdout).hookSpecificOutput.additionalContext.split("\n").filter((l) => !l.startsWith("day close")).join("\n");
 const ctxOf = (r) => {
   const lines = rawCtx(r).split("\n");
   assert.match(lines.at(-1), GLANCE_RE, "the block ends with the glance line");
