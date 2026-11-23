@@ -630,6 +630,7 @@ GitHub login with `gh api user`.
 | `kbStandardsFile` | `PROPAGATE_KB_STANDARDS_FILE` | `<hub>/scripts/execution/kb-standards.yml` | the standards registry |
 | `kbStandardsDir` | `PROPAGATE_KB_STANDARDS_DIR` | `<hub>/kb/standards` | the pages the registry names |
 | `kbReferencesFile` | `PROPAGATE_KB_REFERENCES_FILE` | `<hub>/scripts/execution/kb-references.yml` | the references registry (`kb references`) |
+| `registersDir` | `PROPAGATE_REGISTERS_DIR` | none (null) | a folder of `*.md` register files, each entry a `### <id> · <title>` block with an optional `**Checked:** YYYY-MM-DD`; read only by `kb search` |
 | `standardsFile` | `PROPAGATE_STANDARDS_FILE` | `<hub>/scripts/execution/standards.yml` | deprecated, read until the release after 0.21.0; use `kbStandardsFile` |
 | `standardsDir` | `PROPAGATE_STANDARDS_DIR` | `<hub>/standards` | deprecated, read until the release after 0.21.0; use `kbStandardsDir` |
 
@@ -733,6 +734,7 @@ Detection proposes, adoption decides, and the adoption stays (design §2.2). A s
 | `kb standards decline <std> <project\|workspace/project> --reason <r>` | record "detected, does not apply" |
 | `kb standards remove <std> <project\|workspace/project> --reason <r>` | record the removal of an adoption |
 | `kb references [--json]` | the references registry, each id shown as `ref:<id>` |
+| `kb search <terms> [--kind standard\|reference] [--json]` | one derived search (no index) over standards rows, references and the register files in `registersDir`; ids are `std:<row>`, `ref:<id>`, `reg:<id>`; every term must match; ranked id, then title, then summary fields, then detail, then body; each hit shows `path:line` and its checked date. `--kind` narrows to standards or references (registers appear only without it). No hits is exit 0; 0 entries parsed from every source is exit 2 `KB_BLIND` ("the scan has gone blind") |
 | `kb migrate [--apply] [--json]` | rename each sidecar's `standards:` key to `kb:`; a dry run unless `--apply`; a sidecar holding both keys is a conflict (exit 1) and is never merged |
 
 **Every adoption command is a dry run unless `--apply`.** The dry run prints the entry, the rows with their status,
