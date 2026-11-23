@@ -57,16 +57,20 @@ test("the valid fixture with a reliable agreement writes exactly brief.md, kb-re
 });
 
 test("superseding: A's protocol.md is never edited, its status.json says superseded by B, and check A still passes with a warning", () => {
-  // A proposes no reference, so B's new entry cannot make A a duplicate: the test is about status, not references.
-  const A = buildReview({ slug: "review-a", agreement: "reliable", tweakBrief: (b) => { b.proposals = b.proposals.filter((p) => p.target !== "reference"); } });
+  const A = buildReview({ slug: "review-a", agreement: "reliable" });
   const nameA = path.basename(A.dir);
   const sup = (t) => t.replace("supersedes: null", `supersedes: ${nameA}`);
-  const B = buildReview({ into: A, slug: "review-b", tweakProtocol: sup, agreement: "reliable" });
-  const C = buildReview({ into: A, slug: "review-c", tweakProtocol: sup, agreement: "reliable" });
+  const noRef = (b) => { b.proposals = b.proposals.filter((p) => p.target !== "reference"); };
+  const B = buildReview({ into: A, slug: "review-b", tweakProtocol: sup, tweakBrief: noRef, agreement: "reliable" });
+  const C = buildReview({ into: A, slug: "review-c", tweakProtocol: sup, tweakBrief: noRef, agreement: "reliable" });
   const protoBefore = readFileSync(path.join(A.dir, "protocol.md"));
   const checkA = () => checkReview(A.dir, { stateDirPath: A.state, integrations: A.integrations });
   assert.deepEqual(checkA().warnings.map((w) => w.code), [], "A is current before");
-
+  const ra = apply(A);
+  assert.equal(ra.ok, true, JSON.stringify(ra.refusals));
+  assert.match(readFileSync(A.refs, "utf8"), /example-a:/, "A's reference is present");
+  const protoBefore2 = readFileSync(path.join(A.dir, "protocol.md"));
+  assert.ok(protoBefore2.equals(protoBefore));
   const r = apply(B);
   assert.equal(r.ok, true, JSON.stringify(r.refusals));
   assert.equal(r.wrote.at(-1), path.join(A.dir, "status.json"));
@@ -103,4 +107,35 @@ test("a references file that cannot be appended to is refused before ANY write",
   assert.equal(r.ok, false);
   assert.equal(r.refusals[0].code, "REFERENCES_UNWRITABLE");
   assert.deepEqual([snapshot(fx.reviews), readFileSync(fx.refs, "utf8")], before);
+});
+
+const codesOf = (r) => r.refusals.map((x) => x.code);
+const checkOf = (fx) => checkReview(fx.dir, { stateDirPath: fx.state, integrations: fx.integrations });
+
+test("an applied review passes its own re-check: its own reference entry is not a duplicate of it", () => {
+  const A = buildReview({ slug: "review-a", agreement: "reliable" });
+  assert.equal(apply(A).ok, true);
+  assert.match(readFileSync(A.refs, "utf8"), /ask: "review-a"/);
+  const r = checkOf(A);
+  assert.equal(r.ok, true, JSON.stringify(r.refusals));
+  assert.ok(!codesOf(r).includes("DUPLICATE_REFERENCE"));
+});
+
+test("after A is applied, review B proposing the same URL is refused DUPLICATE_REFERENCE naming ref:<id>", () => {
+  const A = buildReview({ slug: "review-a", agreement: "reliable" });
+  const B = buildReview({ into: A, slug: "review-b", agreement: "reliable", tweakBrief: (b) => { b.proposals[0].ref_id = "another-id"; } });
+  assert.equal(apply(A).ok, true);
+  const r = checkOf(B);
+  assert.ok(r.refusals.some((x) => x.code === "DUPLICATE_REFERENCE" && /already exists as ref:example-a/.test(x.what)), JSON.stringify(r.refusals));
+  const rb = apply(B);
+  assert.equal(rb.ok, false);
+  assert.ok(codesOf(rb).includes("DUPLICATE_REFERENCE"));
+});
+
+test("a hand-added entry with the same URL and no added.by is still a duplicate for A, and so is one stamped for another review", () => {
+  const entry = (added) => `schema_version: 1\nreferences:\n  hand:\n    kind: doc\n    url: https://example.com/a\n    what: w\n    why: y\n    applies_to: []\n    verdict: adopt\n    checked: 2026-11-01\n    added: ${added}\n`;
+  for (const added of ["2026-11-01", '{date: 2026-11-01, by: "kb review apply", ask: "someone-else"}', '{date: 2026-11-01, by: "a person", ask: "review-a"}']) {
+    const A = buildReview({ slug: "review-a", agreement: "reliable", referencesYaml: entry(added) });
+    assert.ok(codesOf(checkOf(A)).includes("DUPLICATE_REFERENCE"), added);
+  }
 });
