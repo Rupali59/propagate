@@ -49,7 +49,7 @@ test("the agreement and AI-use disclosure are present; an unsampled review says 
 
 test("candidates.md carries the not-adopted heading and each standard-row claim, quote and tier-1 basis", () => {
   const { cand } = rendered();
-  assert.match(cand, /Not adopted: a candidate becomes a row only through a PR Rupali merges/);
+  assert.match(cand, /Not adopted: a candidate becomes a row only through a PR the maintainer merges/);
   assert.match(cand, /Tier-1 basis: https:\/\/docs\.example\.org\/guide \(official docs\)/);
   assert.match(cand, /C2: tests cover paths/);
   assert.ok(!cand.includes("a page about foxes"), "reference proposals are not candidates");
