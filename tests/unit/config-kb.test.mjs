@@ -38,7 +38,7 @@ function resolve({ hubFiles = [], integrations = null, env = {} }) {
     }
     const code = `import(${JSON.stringify(CONFIG_MJS)}).then(m => console.log(JSON.stringify({
       file: m.INTEGRATIONS.kbStandardsFile, dir: m.INTEGRATIONS.kbStandardsDir,
-      refs: m.INTEGRATIONS.kbReferencesFile, legacy: m.LEGACY_CONFIG_USED,
+      refs: m.INTEGRATIONS.kbReferencesFile, tiers: m.INTEGRATIONS.kbTiersFile, legacy: m.LEGACY_CONFIG_USED,
       aliasFile: m.INTEGRATIONS.standardsFile, aliasDir: m.INTEGRATIONS.standardsDir })))`;
     const r = spawnSync(process.execPath, ["-e", code], {
       encoding: "utf8",
@@ -133,4 +133,14 @@ test("references: only the old default references.yml exists, so it resolves (no
 test("references: both default files exist, so the new kb-references.yml wins", () => {
   const { out, hub } = resolve({ hubFiles: ["scripts/execution/references.yml", "scripts/execution/kb-references.yml"] });
   assert.equal(out.refs, path.join(hub, "scripts/execution/kb-references.yml"));
+});
+
+// Regression: ISSUE-002 — kbTiersFile had no hub default, so `kb review check` exited 2 KB_TIERS_NOT_CONFIGURED on
+// every hub, while its sibling kb-references.yml resolved. Found by /qa on 2026-11-23.
+test("tiers: the hub's scripts/execution/kb-tiers.yml resolves by default, absent stays null, an explicit key wins", () => {
+  const found = resolve({ hubFiles: ["scripts/execution/kb-tiers.yml"] });
+  assert.equal(found.out.tiers, path.join(found.hub, "scripts/execution/kb-tiers.yml"));
+  assert.equal(resolve({}).out.tiers, null, "no file and no key must read as not configured, never a guessed path");
+  const explicit = resolve({ hubFiles: ["scripts/execution/kb-tiers.yml"], integrations: { kbTiersFile: "$ROOT/elsewhere.yml" } });
+  assert.equal(explicit.out.tiers, path.join(explicit.root, "elsewhere.yml"));
 });
