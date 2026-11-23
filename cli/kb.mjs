@@ -67,10 +67,10 @@ function loadOrFail(integrations) {
   return fail(code, l.reason, next);
 }
 
-/** The polite-pool contact: `discoverContact` under integrations (env PROPAGATE_DISCOVER_CONTACT wins inside discoverCmd). */
-async function discoverContact(inject) {
+/** The polite-pool contact: `kbContact` under integrations (env PROPAGATE_KB_CONTACT wins inside discoverCmd). */
+async function kbContact(inject) {
   const { integrations } = await env(inject);
-  return integrations.discoverContact ?? null;
+  return integrations.kbContact ?? null;
 }
 
 /**
@@ -83,7 +83,7 @@ export async function kbCmd(argv = [], inject = {}) {
   if (argv[0] === "standards") return standardsBody(argv.slice(1), inject);
   if (argv[0] === "references") return referencesCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "search") return searchCmd(argv.slice(1), inject, io, asJson);
-  if (argv[0] === "discover") return discoverCmd(argv.slice(1), { ...inject, io, contact: inject.contact ?? (await discoverContact(inject)) });
+  if (argv[0] === "discover") return discoverCmd(argv.slice(1), { ...inject, io, contact: inject.contact ?? (await kbContact(inject)) });
   if (argv[0] === "migrate") return migrateCmd(argv.slice(1), inject, io, asJson);
   return emitFailure(fail("KB_USAGE", argv[0] === undefined ? "kb needs a subcommand" : `unknown kb subcommand ${JSON.stringify(argv[0])}`, USAGE), asJson, io);
 }

@@ -631,7 +631,7 @@ GitHub login with `gh api user`.
 | `kbStandardsDir` | `PROPAGATE_KB_STANDARDS_DIR` | `<hub>/kb/standards` | the pages the registry names |
 | `kbReferencesFile` | `PROPAGATE_KB_REFERENCES_FILE` | `<hub>/scripts/execution/kb-references.yml` | the references registry (`kb references`) |
 | `registersDir` | `PROPAGATE_REGISTERS_DIR` | none (null) | a folder of `*.md` register files, each entry a `### <id> · <title>` block with an optional `**Checked:** YYYY-MM-DD`; read only by `kb search` |
-| `discoverContact` | `PROPAGATE_DISCOVER_CONTACT` | none (null) | the contact address sent as `mailto` to OpenAlex and Crossref (their polite pools); read only by `kb discover`; never guessed, and with none set the command says so |
+| `kbContact` | `PROPAGATE_KB_CONTACT` | none (null) | the contact address sent as `mailto` to OpenAlex and Crossref (their polite pools); read by `kb discover` (and `kb fetch`, for Unpaywall); never guessed, and with none set the command says so |
 | `standardsFile` | `PROPAGATE_STANDARDS_FILE` | `<hub>/scripts/execution/standards.yml` | deprecated, read until the release after 0.21.0; use `kbStandardsFile` |
 | `standardsDir` | `PROPAGATE_STANDARDS_DIR` | `<hub>/standards` | deprecated, read until the release after 0.21.0; use `kbStandardsDir` |
 

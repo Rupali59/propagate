@@ -90,6 +90,18 @@ test("arxiv: parses the Atom feed (entities, whitespace, pdf link, doi)", async 
   assert.equal(d[0].is_peer_reviewed_hint, false);
 });
 
+test("arxiv: one all: term per token joined by AND, a quoted phrase stays one term, sorted by relevance (exact URLs)", async () => {
+  const cases = [
+    ["systematic literature review", "https://export.arxiv.org/api/query?search_query=all%3Asystematic+AND+all%3Aliterature+AND+all%3Areview&max_results=5&sortBy=relevance"],
+    ['"large language models" screening', "https://export.arxiv.org/api/query?search_query=all%3A%22large+language+models%22+AND+all%3Ascreening&max_results=5&sortBy=relevance"],
+  ];
+  for (const [q, url] of cases) {
+    const f = stub({ "export.arxiv.org": [ok(fx("arxiv.xml"))] });
+    assert.equal(await discoverCmd([tmp(), q, "--engine", "arxiv", "--limit", "5"], base({ fetch: f })), 0);
+    assert.equal(f.calls[0].url, url);
+  }
+});
+
 test("crossref: parses a work list, and a DOI query does a single-work lookup", async () => {
   const dir = tmp();
   const f = stub({ "api.crossref.org": [ok(fx("crossref.json"))] });
@@ -157,15 +169,15 @@ test("a missing key degrades to the keyless rate with one stated line; no contac
   const err = b.io.err.join("\n");
   assert.equal(err.match(/OPENALEX_API_KEY is not set/g).length, 1);
   assert.match(err, /keyless rate/);
-  assert.match(err, /no contact address.*PROPAGATE_DISCOVER_CONTACT/);
+  assert.match(err, /no contact address.*PROPAGATE_KB_CONTACT/);
   assert.ok(!/mailto=/.test(f.calls[0].url));
   assert.ok(!("Authorization" in f.calls[0].headers));
 });
 
-test("the contact comes from PROPAGATE_DISCOVER_CONTACT and the no-contact line goes away", async () => {
+test("the contact comes from PROPAGATE_KB_CONTACT and the no-contact line goes away", async () => {
   const dir = tmp();
   const f = stub({ "api.openalex.org": [ok(fx("openalex.json"))] });
-  const b = base({ fetch: f, env: { PROPAGATE_DISCOVER_CONTACT: "lit@example.org", OPENALEX_API_KEY: "k" } });
+  const b = base({ fetch: f, env: { PROPAGATE_KB_CONTACT: "lit@example.org", OPENALEX_API_KEY: "k" } });
   await discoverCmd([dir, "agents", "--engine", "openalex"], b);
   assert.match(f.calls[0].url, /mailto=lit%40example\.org/);
   assert.ok(!/no contact address/.test(b.io.err.join("\n")));
@@ -258,10 +270,10 @@ test("an unreadable store is refused rather than overwritten", async () => {
   assert.ok(!existsSync(path.join(dir, "searches.json")));
 });
 
-test("kb discover is reachable through kbCmd and reads discoverContact from integrations", async () => {
+test("kb discover is reachable through kbCmd and reads kbContact from integrations", async () => {
   const dir = tmp();
   const f = stub({ "api.openalex.org": [ok(fx("openalex.json"))] });
-  const code = await kbCmd(["discover", dir, "agents", "--engine", "openalex"], { io: io(), fetch: f, env: {}, sleep: async () => {}, integrations: { discoverContact: "cfg@example.org" }, workspaces: [] });
+  const code = await kbCmd(["discover", dir, "agents", "--engine", "openalex"], { io: io(), fetch: f, env: {}, sleep: async () => {}, integrations: { kbContact: "cfg@example.org" }, workspaces: [] });
   assert.equal(code, 0);
   assert.match(f.calls[0].url, /mailto=cfg%40example\.org/);
 });
