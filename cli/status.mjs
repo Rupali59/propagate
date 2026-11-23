@@ -52,6 +52,7 @@ import {
   openCount,
 } from "../lib/edges/ledger.mjs";
 import { reconcile } from "../lib/edges/reconcile.mjs";
+import { findRejectedSidecars, rejectedSidecarLine } from "../lib/edges/edges.mjs";
 import { ACTIONS, actionOf } from "../lib/edges/states.mjs";
 import { buildGraph, blockedBy } from "../lib/graph/graph.mjs";
 
@@ -407,6 +408,8 @@ async function statusJson() {
     ...cov,
     // Additive (propagate#122): which moved edges were last verified on another branch than the one checked out.
     branch_attribution,
+    // #355: sidecars the loader rejected (their edges are not in the counts above). Additive.
+    rejectedSidecars: await findRejectedSidecars(WORKSPACES),
   };
 }
 
@@ -444,6 +447,11 @@ export async function status() {
     const scopeTag =
       !showAll && cur ? `  ${DIM}(this project — --all for every workspace)${RESET}` : "";
     console.log(`${BOLD}# ${ws.name}${RESET}${scopeTag}`);
+    // #355: before the ledger check, because a rejected sidecar can leave a workspace with no
+    // edges and therefore no ledger, which printed "(no ledger file yet)" and nothing else.
+    for (const r of await findRejectedSidecars([ws], { roots: WORKSPACES.map((w) => w.root) })) {
+      console.log(`  ${RED}✗ ${rejectedSidecarLine(r, relToWs(ws, r.path))}${RESET}`);
+    }
     if (!existsSync(ws.ledgerJsonl)) {
       console.log(`  ${DIM}(no ledger file yet)${RESET}\n`);
       continue;

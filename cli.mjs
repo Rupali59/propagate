@@ -161,7 +161,7 @@ import {
 } from "./lib/edges/ledger.mjs";
 import { findLedgersUnder } from "./lib/edges/refs.mjs";
 import { loadSidecar, SidecarError, downstreamsFor } from "./lib/edges/frontmatter.mjs";
-import { buildEdgeMap, findAllSidecarsRecursive } from "./lib/edges/edges.mjs";
+import { buildEdgeMap, findAllSidecarsRecursive, findRejectedSidecars, rejectedSidecarLine } from "./lib/edges/edges.mjs";
 import { reconcile, STATES, groupRows, inboundRows, edgeIdFor, isGlobPattern, expandDownstream } from "./lib/edges/reconcile.mjs";
 import { ACTIONABLE, ACTIONS, DISPLAY_ORDER, actionOf } from "./lib/edges/states.mjs";
 import { appendEvent, edgeEventIndex, VERIFY_DISPOSITIONS, edgeId, dryValidateEvent } from "./lib/edges/events.mjs";
@@ -2817,12 +2817,16 @@ export async function runCheck(
   const loaded = edgeStates ?? (await loadEdgeStates(workspaces, reconcileFn));
   const statesUnknown = loaded.error;
   const couplings = await computeCouplings(changedFiles, repoRoot, workspaces, { rows: loaded.rows });
-  const exitCode = couplings.length === 0 ? 0 : strict ? 1 : 0;
+  // #355: a rejected sidecar in this repo's scope loads zero edges, so a clean result would be
+  // "looked at nothing". Always fails the gate, strict or not.
+  const rejected = await findRejectedSidecars(workspaces, { within: repoRoot });
+  const exitCode = rejected.length > 0 ? 1 : couplings.length === 0 ? 0 : strict ? 1 : 0;
   if (json) {
     // Printing is check()'s job when --json is set (it wraps couplings in an
     // envelope with generatedAt/repoRoot/etc, matching statusJson's shape).
-    return { exitCode, couplings, statesUnknown };
+    return { exitCode, couplings, statesUnknown, rejectedSidecars: rejected };
   }
+  for (const r of rejected) console.log(`${RED}✗ ${rejectedSidecarLine(r, path.relative(repoRoot, r.path) || r.path)}${RESET}`);
   if (couplings.length > 0) {
     console.log(
       `${YELLOW}⚠ ${couplings.length} coupled file${couplings.length === 1 ? "" : "s"} in this change:${RESET}`,
@@ -2838,7 +2842,7 @@ export async function runCheck(
   if (statesUnknown) {
     console.log(`${YELLOW}  edge states unknown — reconcile failed: ${statesUnknown}${RESET}`);
   }
-  return { exitCode, couplings, statesUnknown };
+  return { exitCode, couplings, statesUnknown, rejectedSidecars: rejected };
 }
 
 /**
@@ -2992,7 +2996,7 @@ async function check() {
     process.exit(2);
   }
   const edgeStates = await loadEdgeStates(resolvedWs.workspaces);
-  const { exitCode, couplings, statesUnknown } = await runCheck(
+  const { exitCode, couplings, statesUnknown, rejectedSidecars } = await runCheck(
     { changedFiles, repoRoot, strict, json, edgeStates },
     resolvedWs.workspaces,
   );
@@ -3008,6 +3012,7 @@ async function check() {
         exitCode,
         couplings,
         statesUnknown, // null when reconcile ran; the reason when it did not
+        rejectedSidecars, // #355: sidecars the loader rejected in this repo's scope; any makes exitCode 1
         inbound, // advisory only — never affects exitCode, see inboundAdvisory()
       }),
     );
