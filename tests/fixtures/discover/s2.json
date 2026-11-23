@@ -1,0 +1,32 @@
+{
+ "total": 2,
+ "offset": 0,
+ "data": [
+  {
+   "paperId": "abc123",
+   "title": "Agents for reviews",
+   "year": 2023,
+   "venue": "ACL",
+   "abstract": "We study agents.",
+   "externalIds": {
+    "DOI": "10.2000/BETA"
+   },
+   "openAccessPdf": {
+    "url": "https://example.org/beta.pdf"
+   },
+   "publicationTypes": [
+    "Conference"
+   ]
+  },
+  {
+   "paperId": "def456",
+   "title": "Another",
+   "year": null,
+   "venue": "",
+   "abstract": null,
+   "externalIds": {},
+   "openAccessPdf": null,
+   "publicationTypes": null
+  }
+ ]
+}

@@ -1,0 +1,18 @@
+{
+ "status": "ok",
+ "message-type": "work",
+ "message": {
+  "DOI": "10.4000/delta",
+  "title": [
+   "Metadata for reviews"
+  ],
+  "type": "journal-article",
+  "issued": {
+   "date-parts": [
+    [
+     2022
+    ]
+   ]
+  }
+ }
+}
