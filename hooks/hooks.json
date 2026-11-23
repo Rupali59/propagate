@@ -129,9 +129,11 @@
           "agent-guard, added 2026-11-12 (#251). Denies writes to propagate's READ-ONLY subagents",
           "(edge-settler, doc-curator, adversarial-reviewer), keyed on the payload's agent_type. Plugin",
           "agents cannot carry their own hooks or permissionMode (docs), so this is the only enforcement.",
-          "Silent and allowing for the main session and every other agent."
+          "Silent and allowing for the main session and every other agent. #327 widened the matcher with Read|Grep|Glob|",
+          "WebFetch|WebSearch for literature-researcher (Read confined to the saved-source store, every other tool denied):",
+          "a matcher narrower than the policy is a policy that loads and can never fire."
         ],
-        "matcher": "Bash|Write|Edit|NotebookEdit",
+        "matcher": "Bash|Write|Edit|NotebookEdit|Read|Grep|Glob|WebFetch|WebSearch",
         "hooks": [
           {
             "type": "command",
