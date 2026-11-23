@@ -10,12 +10,14 @@
  * Exit: open 0 enough, 1 short or over, 2 cannot judge; close 0 proposed/applied, 1 read-back mismatch, 2 could not compute.
  */
 
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
 import { INTEGRATIONS } from "../lib/core/config.mjs";
 import { readCosts, samplesPath } from "../lib/core/costs.mjs";
 import { parseSamples } from "../lib/report/sprint-plan.mjs";
-import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose } from "../lib/report/day.mjs";
+import { buildDayOpen, buildDayClose, renderDayOpen, renderDayClose, readBoardRead } from "../lib/report/day.mjs";
+import { closeTextPath, lastCloseRecord, readLastClose, releaseLock, writeLastClose, ymd } from "../lib/report/day-close-auto.mjs";
 import { parseGoalsFile } from "../lib/report/goals.mjs";
 import { discoverBacklogFiles } from "../lib/report/backlog.mjs";
 import { ghFetcher, loadWidget } from "./sprint.mjs";
@@ -70,7 +72,7 @@ function glanceStep(r, { now, inject }) {
   }
 }
 
-const USAGE = "day: usage: day open [--json] | day close [--apply] [--json]";
+const USAGE = "day: usage: day open [--json] | day close [--apply] [--fresh] [--json]";
 
 /**
  * @param {string[]} args argv after the command name (starts with `open` or `close`)
@@ -86,7 +88,7 @@ export async function dayCmd(args, inject = {}) {
     return 2;
   }
   const rest = args.slice(1);
-  const known = new Set(sub === "close" ? ["--apply", "--json"] : ["--json"]);
+  const known = new Set(sub === "close" ? ["--apply", "--json", "--fresh"] : ["--json"]);
   for (const a of rest) {
     if (!known.has(a)) {
       err(`day ${sub}: unknown argument ${a}`);
@@ -133,22 +135,56 @@ export async function dayCmd(args, inject = {}) {
     return r.exit;
   }
   const goalFiles = inject.goalFiles ?? (discoverBacklogFiles().goalsMd ?? []).map(parseGoalsFile);
-  const r = await buildDayClose({
-    goalFiles,
-    sampleRows: rows,
-    now,
-    widget,
-    fetcher,
-    apply,
-    // Printed before the first write, so what is about to change is on screen first.
-    beforeWrite: (res, mutations) => {
-      if (json) return;
-      out(`--apply: about to write ${res.operations.length} field value(s):`);
-      for (const o of res.operations) out(`  ${o}`);
-      for (const m of mutations) out(`  mutation: ${m}`);
-    },
-  });
-  if (json) out(JSON.stringify(r, null, 2));
-  else for (const line of renderDayClose(r, { apply })) out(line);
+  const dir = inject.stateDirPath ?? stateDir();
+  // propagate#339: today's day-open board read is reused unless --fresh; the run's output says so.
+  const boardRead = rest.includes("--fresh") ? null : readBoardRead(dir, now);
+  let r;
+  try {
+    r = await buildDayClose({
+      goalFiles,
+      sampleRows: rows,
+      now,
+      widget,
+      fetcher,
+      apply,
+      boardRead,
+      sleep: inject.sleep ?? null,
+      // Printed before the first write, so what is about to change is on screen first.
+      beforeWrite: (res, mutations) => {
+        if (json) return;
+        out(`--apply: about to write ${res.operations.length} field value(s):`);
+        for (const o of res.operations) out(`  ${o}`);
+        for (const m of mutations) out(`  mutation: ${m}`);
+      },
+    });
+  } catch (e) {
+    // A crash is still an outcome the next session must see (propagate#339): record it, then say so.
+    r = { command: "day close", exit: 2, graphqlCalls: 0, notes: [], reason: `day close crashed: ${e?.message ?? e}` };
+  }
+  const lines = json ? [JSON.stringify(r, null, 2)] : renderDayClose(r, { apply });
+  for (const line of lines) out(line);
+  leaveRecord({ dir, r, apply, now, text: lines.join("\n"), err });
   return r.exit;
+}
+
+/**
+ * What the next session reads (propagate#339): last-close.json and the run's output, written for EVERY close run, then
+ * the catch-up lock released if this process holds it. A failure to write is said on stderr, never swallowed.
+ */
+function leaveRecord({ dir, r, apply, now, text, err }) {
+  try {
+    mkdirSync(path.join(dir, "day"), { recursive: true });
+    writeFileSync(closeTextPath(dir, ymd(now), apply), `${text}\n`);
+    let prev = null;
+    try {
+      prev = readLastClose(dir);
+    } catch {
+      // an unreadable previous record only loses its caught-up date
+    }
+    writeLastClose(dir, lastCloseRecord(r, { apply, now, prev }));
+  } catch (e) {
+    err(`day close: could not write last-close.json (${e.message}); the next session will not see this run`);
+  } finally {
+    releaseLock(dir, process.pid);
+  }
 }

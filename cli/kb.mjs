@@ -16,12 +16,13 @@ import { collectUnits, MIN_UNITS } from "../lib/report/services.mjs";
 import { APPROVAL_UNAVAILABLE, applyPlan, planAdopt, readAdoptions } from "../lib/kb/standards/adopt.mjs";
 import { applyMigrate, planMigrate } from "../lib/kb/migrate.mjs";
 import { loadReferences } from "../lib/kb/references.mjs";
+import { collectEntries, rankEntries } from "../lib/kb/search.mjs";
 import { loadStandards } from "../lib/kb/standards/registry.mjs";
 import { readSidecars, serviceDetectsFor } from "../lib/kb/standards/sidecars.mjs";
 import { buildStandardsReport } from "../lib/kb/standards/status.mjs";
 import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/kb/standards/versions.mjs";
 
-const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb migrate [--apply] [--json]";
+const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb search <terms> [--kind standard|reference] [--json] | kb migrate [--apply] [--json]";
 
 /** The exact line `propagate standards …` writes to stderr, once per run. */
 export const STANDARDS_DEPRECATION = "propagate standards is now propagate kb standards; the old name is removed in the release after 0.21.0";
@@ -74,6 +75,7 @@ export async function kbCmd(argv = [], inject = {}) {
   const asJson = argv.includes("--json");
   if (argv[0] === "standards") return standardsBody(argv.slice(1), inject);
   if (argv[0] === "references") return referencesCmd(argv.slice(1), inject, io, asJson);
+  if (argv[0] === "search") return searchCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "migrate") return migrateCmd(argv.slice(1), inject, io, asJson);
   return emitFailure(fail("KB_USAGE", argv[0] === undefined ? "kb needs a subcommand" : `unknown kb subcommand ${JSON.stringify(argv[0])}`, USAGE), asJson, io);
 }
@@ -112,6 +114,48 @@ async function migrateCmd(rest, inject, io, asJson) {
     for (const x of conflicts) io.log(`  ${x}`);
   }
   return code;
+}
+
+/**
+ * `kb search <terms> [--kind standard|reference] [--json]`: one derived search over standards rows, references and
+ * evaluator's registers (registersDir). EXIT CODES. 0 searched (no hits is 0); 2 usage, or KB_BLIND when no entry
+ * at all parsed ("the scan has gone blind"), which is never reported as an empty result.
+ */
+async function searchCmd(rest, inject, io, asJson) {
+  const terms = [];
+  let kind = null;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a === "--json") continue;
+    if (a === "--kind") {
+      const v = rest[i + 1];
+      if (v === undefined || v.startsWith("--")) return emitFailure(fail("KB_USAGE", "--kind needs a value", USAGE), asJson, io);
+      if (v !== "standard" && v !== "reference") return emitFailure(fail("KB_USAGE", `--kind must be standard or reference, got ${JSON.stringify(v)}`, USAGE), asJson, io);
+      kind = v;
+      i++;
+    } else if (a.startsWith("--")) return emitFailure(fail("KB_USAGE", `unknown argument ${a}`, USAGE), asJson, io);
+    else terms.push(a);
+  }
+  if (terms.length === 0) return emitFailure(fail("KB_USAGE", "kb search needs at least one term", USAGE), asJson, io);
+  const { integrations } = await env(inject);
+  const found = collectEntries({
+    standardsFile: integrations.kbStandardsFile,
+    standardsDir: integrations.kbStandardsDir,
+    referencesFile: integrations.kbReferencesFile,
+    registersDir: integrations.registersDir,
+  });
+  if (found.blind) {
+    return emitFailure(fail("KB_BLIND", `0 entries parsed from the standards, references and registers, so the scan has gone blind, it has not found nothing${found.problems.length ? ` (${found.problems.join("; ")})` : ""}`, "check kbStandardsFile, kbStandardsDir, kbReferencesFile and registersDir (PROPAGATE_KB_*, PROPAGATE_REGISTERS_DIR)"), asJson, io);
+  }
+  const hits = rankEntries(found.entries, terms, { kind });
+  if (asJson) {
+    io.log(JSON.stringify({ ok: true, terms, kind, scanned: found.entries.length, hits, problems: found.problems }, null, 2));
+    return 0;
+  }
+  io.log(`# kb search ${terms.join(" ")}  (${hits.length} hit(s) of ${found.entries.length} entries; derived, no index)`);
+  for (const h of hits) io.log(`  ${h.id}  ${h.title}\n    ${h.path}${h.line ? `:${h.line}` : ""}  ${h.checked ? `checked ${h.checked}` : "checked: never"}`);
+  for (const x of found.problems) io.log(`  problem: ${x}`);
+  return 0;
 }
 
 /** `kb references [--json]`: the registry's entries, ids shown as `ref:<key>` (the file keeps the bare key). */

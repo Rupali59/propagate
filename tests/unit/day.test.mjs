@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -789,7 +789,7 @@ test("day open writes <stateDir>/day/items.json from the read it already did: no
   assert.equal(snap.items["o/r#201"].status, "Backlog");
   assert.equal(snap.items["o/r#201"].model, null, "an unset Model is null, not a guess");
   assert.ok(snap.items["o/r#901"], "Done items are covered too");
-  assert.deepEqual(readdirSync(path.join(dir, "day")), ["items.json"], "the temp file was renamed away");
+  assert.deepEqual(readdirSync(path.join(dir, "day")).sort(), ["board-read.json", "items.json"], "the temp files were renamed away");
   process.env.PROPAGATE_STATE_DIR = mkdtempSync(path.join(tmpdir(), "day-test-state-"));
 });
 
@@ -977,4 +977,304 @@ test("T-O1 dayCmd open: a glance that throws leaves the exit code and output unc
   const extra = bad.filter((l) => !ok.includes(l));
   assert.equal(extra.length, 1, extra.join("\n"));
   assert.match(extra[0], /glance not written \(synthetic glance failure\)/);
+});
+
+// ═══ propagate#339: day close survives refusals, reuses day open's read, and falls back to REST ══════════════════
+// One fixture per failure class: rate-limited, a 5xx, a timeout. Each is transient once (retried, succeeds) and
+// persistent (recorded, never silenced). `sleep` is injected so no test waits.
+
+import { readBoardRead, writeBoardRead, buildBoardRead } from "../../lib/report/day.mjs";
+import { readLastClose, lockPath, acquireLock, closeTextPath } from "../../lib/report/day-close-auto.mjs";
+
+const FAIL_CLASSES = [
+  { name: "rate-limited", msg: "You have exceeded a secondary rate limit", kind: "rate-limited", label: "rate-limited" },
+  { name: "5xx", msg: "gh: HTTP 504", kind: "unavailable", label: "github unavailable (HTTP 504)" },
+  { name: "timeout", msg: "gh: ETIMEDOUT", kind: "unavailable", label: "github unavailable (ETIMEDOUT)" },
+];
+const closedN = (k, from = 500) => Array.from({ length: k }, (_, i) => item(from + i, { status: "Ready", state: "CLOSED", closedAt: TODAY_CLOSE }));
+const sleeps = () => {
+  const log = [];
+  return { log, fn: async (ms) => void log.push(ms) };
+};
+const closeWith = (f, over = {}) => {
+  const s = sleeps();
+  return buildDayClose({ goalFiles: GOALS, sampleRows: goodRows(), now: NOW, widget: widget(), fetcher: f, apply: true, sleep: s.fn, ...over }).then((r) => ({ r, s }));
+};
+/** Fail calls `at` .. `at + times - 1` (1-based) of `method` with `msg`, otherwise behave. */
+const failing = (f, method, { at = 1, times = 1, msg }) => {
+  const orig = f[method];
+  let n = 0;
+  f[method] = async (...a) => {
+    n++;
+    if (n >= at && n < at + times) throw new Error(msg);
+    return orig(...a);
+  };
+  return f;
+};
+
+for (const c of FAIL_CLASSES) {
+  test(`339 close [${c.name}]: a refusal while reading boards waits and retries once, then succeeds`, async () => {
+    const f = failing(fetcher(closeStore()), "graphql", { at: 1, times: 1, msg: c.msg });
+    const { r, s } = await closeWith(f);
+    assert.equal(r.exit, 0, r.reason);
+    assert.equal(s.log.length, 1, "exactly one wait");
+    assert.equal(r.retried, 1);
+    assert.match(r.reason, /MATCH 2\/2/);
+  });
+  test(`339 close [${c.name}]: still refused after the retry is recorded as ${c.kind}, nothing written`, async () => {
+    const f = failing(fetcher(closeStore()), "graphql", { at: 1, times: 99, msg: c.msg });
+    const { r, s } = await closeWith(f);
+    assert.equal(r.exit, 2);
+    assert.equal(s.log.length, 1, "retried once, not forever");
+    assert.deepEqual(r.failure, { kind: c.kind, label: c.label });
+    assert.equal(f.writes.length, 0);
+    assert.equal(r.partial, undefined);
+  });
+  test(`339 close [${c.name}]: a write that fails once is retried and the batch completes`, async () => {
+    const store = { boards: [boardNode(7, { items: closedN(25) })] };
+    const f = failing(fetcher(store), "write", { at: 2, times: 1, msg: c.msg });
+    const { r, s } = await closeWith(f);
+    assert.equal(r.exit, 0, r.reason);
+    assert.equal(s.log.length, 1);
+    assert.deepEqual(r.readBack, { matched: 25, total: 25, mismatches: [] });
+  });
+  test(`339 close [${c.name}]: a write that keeps failing records how many were written, and the next run finishes the rest`, async () => {
+    const store = { boards: [boardNode(7, { items: closedN(25) })] };
+    const f = failing(fetcher(store), "write", { at: 2, times: 99, msg: c.msg });
+    const { r } = await closeWith(f);
+    assert.equal(r.exit, 2);
+    assert.deepEqual(r.partial, { written: 20, total: 50 });
+    assert.equal(r.failure.kind, c.kind);
+    assert.match(r.reason, /after 20 of 50 write\(s\)/);
+    // the next run: idempotent. Written items no longer qualify, so it writes only what is left.
+    const f2 = fetcher(store);
+    const { r: r2 } = await closeWith(f2);
+    assert.equal(r2.exit, 0, r2.reason);
+    assert.equal(r2.writes.length, 30, "50 ops minus the 20 already written");
+    assert.deepEqual(r2.readBack, { matched: 15, total: 15, mismatches: [] });
+    assert.equal(store.boards[0].items.filter((i) => stat(i) === "Done").length, 25);
+  });
+}
+
+test("339 close: a non-transient failure is not retried and has no failure class", async () => {
+  const f = failing(fetcher(closeStore()), "graphql", { at: 1, times: 99, msg: "Could not resolve to a User" });
+  const { r, s } = await closeWith(f);
+  assert.equal(r.exit, 2);
+  assert.equal(s.log.length, 0);
+  assert.equal(r.failure, undefined);
+});
+
+test("339 close: a dry run never sleeps or writes", async () => {
+  const f = fetcher(closeStore());
+  const { r, s } = await closeWith(f, { apply: false });
+  assert.equal(r.exit, 0);
+  assert.equal(s.log.length, 0);
+  assert.equal(f.writes.length, 0);
+});
+
+// ── board reads are reused from today's day open ─────────────────────────────────────────────────────────────────
+
+test("339 reuse: close with today's day-open board read makes no board-reading GraphQL call, only writes and read-back", async () => {
+  const store = closeStore();
+  const dir = mkdtempSync(path.join(tmpdir(), "day-reuse-"));
+  const f1 = fetcher(store);
+  const read = await readBoards({ fetcher: f1, now: NOW, count: () => {} });
+  writeBoardRead(buildBoardRead(read, NOW), dir);
+  const boardRead = readBoardRead(dir, NOW);
+  assert.ok(boardRead, "a snapshot from the same local day is usable");
+  const f2 = fetcher(store);
+  const { r } = await closeWith(f2, { boardRead });
+  assert.equal(r.exit, 0, r.reason);
+  assert.equal(r.readSource, "snapshot");
+  assert.deepEqual(r.promote.map((p) => p.ref), ["o/r#1"], "the same plan as a live read");
+  assert.equal(f2.graphqlCalls, 1, "one read-back call; no listing, no detail, no paging");
+  assert.equal(f2.writes.length, 1);
+  assert.match(r.reason, /MATCH 2\/2/);
+  assert.ok(r.notes.some((n) => /today's day open board read/.test(n)), JSON.stringify(r.notes));
+});
+test("339 reuse: yesterday's board read is not used; an absent or unreadable one is not used either", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "day-reuse-"));
+  assert.equal(readBoardRead(dir, NOW), null, "absent");
+  const read = { listing: { boards: [], skipped: [] }, byBoard: new Map(), truncated: [], notes: [] };
+  writeBoardRead(buildBoardRead(read, NOW - 26 * 3600e3), dir);
+  assert.equal(readBoardRead(dir, NOW), null, "dated before today");
+  writeFileSync(path.join(dir, "day", "board-read.json"), "{nope");
+  assert.equal(readBoardRead(dir, NOW), null, "malformed");
+});
+test("339 reuse: day open writes board-read.json beside items.json", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "day-test-state-"));
+  process.env.PROPAGATE_STATE_DIR = dir;
+  await open(openStore(readyN(3)));
+  assert.ok(readBoardRead(dir, NOW), "day open left a board read for day close");
+  process.env.PROPAGATE_STATE_DIR = mkdtempSync(path.join(tmpdir(), "day-test-state-"));
+});
+
+// ── the Projects REST API fallback ───────────────────────────────────────────────────────────────────────────────
+
+/** A REST view of the same store: numeric ids derived from the GraphQL ones, and PATCH applied to the store. */
+function restFake(store) {
+  const rid = (it) => Number(it.id.slice(1)) + 9000;
+  const sid = (n) => n * 100 + 1;
+  const fid = (n) => n * 100 + 2;
+  const itemsOf = (n) => store.boards.find((b) => b.number === n).items;
+  const asRest = (it) => ({
+    id: rid(it),
+    node_id: it.id,
+    content: { number: it.content.number, title: it.content.title, body: it.content.body, state: it.content.state.toLowerCase(), closed_at: it.content.closedAt, repository_url: "https://api.github.com/repos/o/r", labels: [], milestone: null },
+    fields: it.fieldValues.nodes.map((v) =>
+      v.date !== undefined ? { id: 1, name: v.field.name, data_type: "date", value: `${v.date}T00:00:00+00:00` }
+        : v.number !== undefined ? { id: 2, name: v.field.name, data_type: "number", value: v.number }
+        : { id: v.field.name === "Status" ? 0 : 3, name: v.field.name, data_type: "single_select", value: { id: v.field.name === "Status" ? OPT[v.name] : "x", name: { raw: v.name, html: v.name } } }),
+  });
+  const f = {
+    calls: [],
+    patches: [],
+    get: async (p) => {
+      f.calls.push(p);
+      if (p === "user") return { login: "me" };
+      if (/^users\/me\/projectsV2\?/.test(p)) return store.boards.map((b) => ({ id: b.number, number: b.number, title: b.title, closed: false }));
+      let m;
+      if ((m = /projectsV2\/(\d+)\/fields/.exec(p))) {
+        const n = Number(m[1]);
+        return [
+          { id: sid(n), name: "Status", data_type: "single_select", options: Object.entries(OPT).map(([name, id]) => ({ id, name: { raw: name, html: name } })) },
+          { id: fid(n), name: "Finished", data_type: "date" },
+          { id: n * 100 + 3, name: "Goal", data_type: "single_select", options: [{ id: "x", name: { raw: "G1" } }] },
+        ];
+      }
+      if ((m = /projectsV2\/(\d+)\/items\/(\d+)/.exec(p))) return asRest(itemsOf(Number(m[1])).find((i) => rid(i) === Number(m[2])));
+      if ((m = /projectsV2\/(\d+)\/items\?/.exec(p))) return itemsOf(Number(m[1])).map(asRest);
+      throw new Error(`restFake: unexpected GET ${p}`);
+    },
+    patch: async (p, body) => {
+      f.patches.push({ p, body });
+      const m = /projectsV2\/(\d+)\/items\/(\d+)$/.exec(p);
+      const it = itemsOf(Number(m[1])).find((i) => rid(i) === Number(m[2]));
+      for (const { id, value } of body.fields) {
+        if (id === sid(Number(m[1]))) it.fieldValues.nodes.find((v) => v.field?.name === "Status").name = Object.keys(OPT).find((k) => OPT[k] === value);
+        else if (id === fid(Number(m[1]))) {
+          const cur = it.fieldValues.nodes.find((v) => v.field?.name === "Finished");
+          if (cur) cur.date = value;
+          else it.fieldValues.nodes.push({ date: value, field: { name: "Finished" } });
+        } else throw new Error(`restFake: unexpected field ${id}`);
+      }
+      return {};
+    },
+  };
+  return f;
+}
+
+test("339 REST: when GraphQL refuses the board read, close reads and writes through the Projects REST API and reads back", async () => {
+  const store = closeStore();
+  const f = failing(fetcher(store), "graphql", { at: 1, times: 99, msg: "You have exceeded a secondary rate limit" });
+  f.rest = restFake(store);
+  const { r } = await closeWith(f);
+  assert.equal(r.exit, 0, r.reason);
+  assert.equal(r.readSource, "rest");
+  assert.ok(r.notes.some((n) => /Projects REST API/.test(n)), JSON.stringify(r.notes));
+  assert.deepEqual(r.promote.map((p) => p.ref), ["o/r#1"]);
+  assert.deepEqual(r.closeFix.map((p) => [p.ref, p.finished]), [["o/r#4", "2026-11-12"]]);
+  assert.equal(f.writes.length, 0, "no GraphQL mutation was sent");
+  assert.deepEqual(f.rest.patches.map((x) => x.body.fields[0].value).sort(), ["2026-11-12", "o-d", "o-r"]);
+  assert.ok(f.rest.patches.every((x) => /^users\/me\/projectsV2\/7\/items\/\d+$/.test(x.p)), JSON.stringify(f.rest.patches));
+  assert.deepEqual(r.readBack, { matched: 2, total: 2, mismatches: [] });
+  assert.equal(stat(store.boards[0].items.find((i) => i.content.number === 1)), "Ready");
+});
+test("339 REST: a read-back that disagrees on the REST path is exit 1, naming the item", async () => {
+  const store = closeStore();
+  const f = failing(fetcher(store), "graphql", { at: 1, times: 99, msg: "gh: HTTP 504" });
+  f.rest = restFake(store);
+  const patch = f.rest.patch;
+  f.rest.patch = async (p, b) => (/\/items\/9004$/.test(p) ? {} : patch(p, b)); // the fake drops writes for item 4
+  const { r } = await closeWith(f);
+  assert.equal(r.exit, 1);
+  assert.deepEqual(r.readBack.mismatches.map((m) => m.ref), ["o/r#4"]);
+});
+test("339 REST: a write that GraphQL refuses after the read switches to REST for the rest of the run", async () => {
+  const store = closeStore();
+  const f = failing(fetcher(store), "write", { at: 1, times: 99, msg: "gh: HTTP 502" });
+  f.rest = restFake(store);
+  const { r } = await closeWith(f);
+  assert.equal(r.exit, 0, r.reason);
+  assert.equal(r.readSource, "rest");
+  assert.equal(f.rest.patches.length, 3);
+  assert.ok(r.notes.some((n) => /GraphQL refused the writes/.test(n)), JSON.stringify(r.notes));
+});
+test("339 REST: with no rest client the refusal is recorded, not hidden", async () => {
+  const f = failing(fetcher(closeStore()), "graphql", { at: 1, times: 99, msg: "gh: HTTP 504" });
+  const { r } = await closeWith(f);
+  assert.equal(r.exit, 2);
+  assert.equal(r.failure.label, "github unavailable (HTTP 504)");
+});
+test("339 REST: a REST failure too is reported with both causes", async () => {
+  const store = closeStore();
+  const f = failing(fetcher(store), "graphql", { at: 1, times: 99, msg: "gh: HTTP 504" });
+  f.rest = { get: async () => { throw new Error("gh: ETIMEDOUT"); }, patch: async () => ({}) };
+  const { r } = await closeWith(f);
+  assert.equal(r.exit, 2);
+  assert.match(r.reason, /HTTP 504/);
+  assert.match(r.reason, /REST fallback also failed: .*ETIMEDOUT/);
+  assert.equal(r.failure.kind, "unavailable");
+});
+
+// ── the CLI leaves the next session its record ───────────────────────────────────────────────────────────────────
+
+const cliClose = async (args, over = {}) => {
+  const dir = over.stateDirPath ?? mkdtempSync(path.join(tmpdir(), "day-cli-"));
+  const o = out();
+  const code = await dayCmd(args, { goalFiles: GOALS, out: o.fn, now: NOW, samplesRaw: goodRows().map((x) => JSON.stringify(x)).join("\n"), widget: widget(), laneRows: [], stateDirPath: dir, sleep: async () => {}, ...over });
+  return { dir, code, lines: o.lines };
+};
+
+test("339 cli: every close run, apply or not, writes last-close.json and its output file", async () => {
+  const a = await cliClose(["close", "--apply"], { fetcher: fetcher(closeStore()) });
+  assert.equal(a.code, 0);
+  const rec = readLastClose(a.dir);
+  assert.deepEqual([rec.date, rec.mode, rec.promoted, rec.closedToDone, rec.inProgress, rec.exit, rec.status], ["2026-11-12", "apply", 1, 1, 1, 0, "ok"]);
+  assert.equal(rec.caughtUpDate, "2026-11-12");
+  assert.match(readFileSync(closeTextPath(a.dir, "2026-11-12"), "utf8"), /read-back by node id: MATCH 2\/2/);
+  const d = await cliClose(["close"], { fetcher: fetcher(closeStore()), stateDirPath: a.dir });
+  assert.equal(readLastClose(d.dir).mode, "dry-run");
+  assert.equal(readLastClose(d.dir).caughtUpDate, "2026-11-12", "a dry run keeps the apply's caught-up date");
+  assert.ok(readFileSync(closeTextPath(d.dir, "2026-11-12", false), "utf8").includes("dry-run"));
+  assert.match(readFileSync(closeTextPath(a.dir, "2026-11-12"), "utf8"), /--apply/, "the dry run did not overwrite the apply output");
+});
+test("339 cli: a failed run still leaves a record (failed, exit 2) and a 5xx one names its status", async () => {
+  const bad = await cliClose(["close", "--apply"], { fetcher: failing(fetcher(closeStore()), "graphql", { at: 1, times: 99, msg: "board listing broke" }) });
+  assert.equal(bad.code, 2);
+  assert.deepEqual([readLastClose(bad.dir).status, readLastClose(bad.dir).exit], ["failed", 2]);
+  const rl = await cliClose(["close", "--apply"], { fetcher: failing(fetcher(closeStore()), "graphql", { at: 1, times: 99, msg: "gh: HTTP 504" }) });
+  assert.equal(readLastClose(rl.dir).status, "unavailable");
+  assert.equal(readLastClose(rl.dir).failureLabel, "github unavailable (HTTP 504)");
+});
+test("339 cli: a crash inside the run is recorded as failed, then the lock is released", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "day-cli-"));
+  acquireLock(dir, { now: NOW, pid: process.pid });
+  // an entries getter that throws: a crash inside buildDayClose itself, past every error handler it has
+  const boom = [{ get entries() { throw new TypeError("synthetic crash"); } }];
+  const x = await cliClose(["close", "--apply"], { fetcher: fetcher(closeStore()), stateDirPath: dir, goalFiles: boom });
+  assert.equal(x.code, 2);
+  assert.match(x.lines.join("\n"), /day close crashed: synthetic crash/);
+  assert.equal(readLastClose(dir).status, "failed");
+  assert.match(readLastClose(dir).reason, /synthetic crash/);
+  assert.equal(existsSync(lockPath(dir)), false, "the run released its lock");
+});
+test("339 cli: the lock is left alone when another process holds it", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "day-cli-"));
+  acquireLock(dir, { now: NOW, pid: 1 }); // someone else's
+  await cliClose(["close"], { fetcher: fetcher(closeStore()), stateDirPath: dir });
+  assert.equal(existsSync(lockPath(dir)), true);
+});
+test("339 cli: close reads today's day-open board read unless --fresh", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "day-cli-"));
+  const read = await readBoards({ fetcher: fetcher(closeStore()), now: NOW, count: () => {} });
+  writeBoardRead(buildBoardRead(read, NOW), dir);
+  const fa = fetcher(closeStore());
+  const a = await cliClose(["close", "--apply"], { fetcher: fa, stateDirPath: dir });
+  assert.match(a.lines.join("\n"), /today's day open board read/);
+  assert.equal(fa.graphqlCalls, 1, "read-back only");
+  const f = fetcher(closeStore());
+  const b = await cliClose(["close", "--apply", "--fresh"], { fetcher: f, stateDirPath: dir });
+  assert.doesNotMatch(b.lines.join("\n"), /today's day open board read/);
+  assert.ok(f.graphqlCalls >= 3, `a fresh read lists, details and reads back: ${f.graphqlCalls}`);
 });
