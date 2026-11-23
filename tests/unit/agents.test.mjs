@@ -80,5 +80,8 @@ test("literature-researcher: exists, one tool (Read), sonnet, 'Use when', and st
   assert.match(researcher.src, /6-15 words/, "the body must state the 6-15 word quote rule");
   assert.match(researcher.src, /injected-instruction/, "the body must name the injected-instruction tag");
   assert.match(researcher.src, /exactly one JSON object/i);
+  // #368: a file is identified from its own text, never from the order of parallel reads.
+  assert.match(researcher.src, /identified_as/, "the body must require identified_as per screened source");
+  assert.match(researcher.src, /never[^.]*from the order/i, "the body must forbid mapping files to papers from the order of reads");
   assert.ok(RESEARCH_READ_ONLY.includes("literature-researcher"), "the guard must list the researcher");
 });

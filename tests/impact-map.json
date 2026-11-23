@@ -1,7 +1,7 @@
 {
  "header": {
-  "recordedAt": "2026-11-23T05:44:51.659Z",
-  "commit": "00f5ded2e3450fd029c356cfb787964bd1e08a10",
+  "recordedAt": "2026-11-23T07:49:02.715Z",
+  "commit": "ff2c3e03d559b448eb7908d2bdfa4b02b34f2851",
   "node": "v26.13.0",
   "tests": 356,
   "withStaticDeps": 288,
@@ -9,11 +9,11 @@
   "partial": 6,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2276,
+  "recordedProcesses": 2272,
   "unresolvedStaticSpecifiers": 117,
   "suite": {
-   "pass": 4689,
-   "fail": 1
+   "pass": 4699,
+   "fail": 0
   }
  },
  "tests": {
@@ -20733,6 +20733,7 @@
     "agents/adversarial-reviewer.md",
     "agents/doc-curator.md",
     "agents/edge-settler.md",
+    "agents/literature-researcher.md",
     "cli",
     "cli.mjs",
     "cli/ansi.mjs",
@@ -21192,6 +21193,13 @@
     "skills/design-workflow/sections/flutter.md",
     "skills/design-workflow/sections/web.md",
     "skills/design-workflow/sections/workflow.md",
+    "skills/literature-review",
+    "skills/literature-review/SKILL.md",
+    "skills/literature-review/sections",
+    "skills/literature-review/sections/gate.md",
+    "skills/literature-review/sections/lanes.md",
+    "skills/literature-review/sections/protocol.md",
+    "skills/literature-review/sections/snowball.md",
     "skills/propagate",
     "skills/propagate/SKILL.md",
     "skills/propagate/sections",
