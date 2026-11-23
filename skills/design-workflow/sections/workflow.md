@@ -6,7 +6,7 @@
 
 | # | Step | Artefact | Check |
 |---|---|---|---|
-| 1 | **Understand the docs and audit** what exists | the product DESIGN.md read; an inventory of existing components | `propagate design deps` lists what the change touches (not built yet: #243); reuse before build |
+| 1 | **Understand the docs and audit** what exists | the product DESIGN.md read; an inventory of existing components; the references whose `applies_to` names this project or `design-web` (`propagate kb references --json`) | `propagate design deps` lists what the change touches (not built yet: #243); reuse before build; each applicable reference's verdict named in the plan |
 | 2 | **Proposal / need** | one paragraph: what, why, and why no existing component fits | named in the plan; plan-approval check (#244) |
 | 3 | **Foundations as tokens** | colour, type, spacing, elevation and motion tokens in the token source | schema and drift check between spec and code |
 | 4 | **Motion and imagery spec** | DESIGN.md Motion (easing and duration tokens; each moment's trigger and reduced-motion fallback) and Imagery | motion tokens validated like any token; the reduced-motion path exists |
