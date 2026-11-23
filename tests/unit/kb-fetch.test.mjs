@@ -92,7 +92,7 @@ async function run(urls, o = {}) {
   const err = [];
   const io = { log: (s) => out.push(String(s)), error: (s) => err.push(String(s)) };
   const code = await kbCmd(["fetch", dir, ...urls, "--json"], {
-    io, stateDirPath: state, unpaywallEmail: null, timeoutMs: 8000,
+    io, stateDirPath: state, contact: null, timeoutMs: 8000,
     endpoints: { wayback: `${base}/wayback/available`, unpaywall: `${base}/unpaywall` },
     ...o.inject,
   });
@@ -258,14 +258,14 @@ test("an arXiv abstract URL is fetched as its PDF (host mapped to the stub), and
 });
 
 test("a DOI goes through Unpaywall to the open-access PDF", async () => {
-  const r = await run(["https://doi.org/10.1000/open"], { inject: { unpaywallEmail: "contact@example.com", run: () => "Open access paper body text for quoting purposes." } });
+  const r = await run(["https://doi.org/10.1000/open"], { inject: { contact: "contact@example.com", run: () => "Open access paper body text for quoting purposes." } });
   assert.equal(r.j.records[0].classification, "ok");
   assert.equal(r.j.records[0].resolved_from, "unpaywall");
   assert.equal(r.j.records[0].final_url, `${base}/doc.pdf`);
 });
 
 test("a bare DOI is accepted, and a closed-access DOI is not_retrieved with no other route tried", async () => {
-  const r = await run(["10.1000/closed"], { inject: { unpaywallEmail: "contact@example.com" } });
+  const r = await run(["10.1000/closed"], { inject: { contact: "contact@example.com" } });
   assert.equal(r.j.records[0].url, "https://doi.org/10.1000/closed");
   assert.equal(r.j.records[0].classification, "not_retrieved");
   assert.match(r.j.records[0].note, /no open-access copy/);
@@ -275,9 +275,9 @@ test("a bare DOI is accepted, and a closed-access DOI is not_retrieved with no o
 test("with no Unpaywall email the run says so, and never invents one", async () => {
   let asked = false;
   const fetchImpl = (u, init) => { if (String(u).includes("unpaywall")) asked = true; return fetch(String(u).replace(/^https?:\/\/doi\.org/, base), init); };
-  const r = await run(["https://doi.org/10.1000/open"], { inject: { fetchImpl, unpaywallEmail: null } });
+  const r = await run(["https://doi.org/10.1000/open"], { inject: { fetchImpl, contact: null } });
   assert.equal(asked, false, "Unpaywall must not be called without a contact email");
-  assert.match(r.j.records[0].note, /Unpaywall skipped: no contact email set/);
+  assert.match(r.j.records[0].note, /Unpaywall skipped: no contact set/);
 });
 
 test("GitHub URLs go through gh api; a repo URL is read from its README endpoint", async () => {
@@ -387,4 +387,21 @@ test("an unreadable existing fetched.json stops the run rather than being overwr
   assert.equal(r.code, 2);
   assert.equal(r.j.code, "FETCH_FILE_UNREADABLE");
   assert.equal(readFileSync(path.join(dir, "fetched.json"), "utf8"), "{not json");
+});
+
+test("the contact comes from PROPAGATE_KB_CONTACT, else integrations.kbContact, and is the address Unpaywall is asked with", async () => {
+  const seen = [];
+  const fetchImpl = (u, init) => { seen.push(String(u)); return fetch(String(u).replace(/^https?:\/\/doi\.org/, base), init); };
+  const saved = process.env.PROPAGATE_KB_CONTACT;
+  try {
+    delete process.env.PROPAGATE_KB_CONTACT;
+    await run(["https://doi.org/10.1000/closed"], { inject: { contact: undefined, integrations: { kbContact: "cfg@example.com" }, workspaces: [], fetchImpl } });
+    assert.ok(seen.some((u) => u.includes("/unpaywall/10.1000/closed?email=cfg%40example.com")), `integrations.kbContact was not used: ${seen.join(", ")}`);
+    seen.length = 0;
+    process.env.PROPAGATE_KB_CONTACT = "env@example.com";
+    await run(["https://doi.org/10.1000/closed"], { inject: { contact: undefined, integrations: { kbContact: "cfg@example.com" }, workspaces: [], fetchImpl } });
+    assert.ok(seen.some((u) => u.includes("email=env%40example.com")), `the env var must win: ${seen.join(", ")}`);
+  } finally {
+    if (saved === undefined) delete process.env.PROPAGATE_KB_CONTACT; else process.env.PROPAGATE_KB_CONTACT = saved;
+  }
 });

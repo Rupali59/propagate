@@ -93,7 +93,7 @@ export async function standardsCmd(argv = [], inject = {}) {
  * `$STATE/kb/fetched/<sha256>`. EXIT CODES. 0 every URL ok; 1 at least one was not_retrieved, stale or hallucinated
  * (the records say which); 2 could not run: usage, pdftotext missing when a PDF turned up, gh missing or logged out
  * when a GitHub URL turned up, a body store that would land inside the repo or `<dir>`. Nothing is written on a 2.
- * The Unpaywall contact email is PROPAGATE_UNPAYWALL_EMAIL, or `unpaywallEmail` under `integrations:`; never guessed.
+ * The contact address Unpaywall asks for is PROPAGATE_KB_CONTACT, or `kbContact` under `integrations:`; never guessed.
  */
 async function fetchCmd(rest, inject, io, asJson) {
   const pos = rest.filter((a) => a !== "--json");
@@ -104,19 +104,16 @@ async function fetchCmd(rest, inject, io, asJson) {
   const bareHost = urls.find((u) => !/^https?:\/\//i.test(u) && !/^10\.\d{4,9}\//.test(u));
   if (bareHost) return emitFailure(fail("KB_USAGE", `${JSON.stringify(bareHost)} is not an http(s) URL or a DOI`, USAGE), asJson, io);
   const norm = urls.map((u) => (/^10\./.test(u) ? `https://doi.org/${u}` : u));
-  let email = inject.unpaywallEmail;
+  let email = inject.contact;
   if (email === undefined) {
-    email = process.env.PROPAGATE_UNPAYWALL_EMAIL;
-    if (!email) {
-      const cfg = await import("../lib/core/config.mjs");
-      email = cfg.CONFIG?.integrations?.unpaywallEmail;
-    }
+    email = process.env.PROPAGATE_KB_CONTACT;
+    if (!email) email = (await env(inject)).integrations?.kbContact;
   }
   let out;
   try {
     out = await fetchAll({
       dir, urls: norm, stateDirPath: inject.stateDirPath ?? stateDir(), now: inject.now, fetchImpl: inject.fetchImpl, run: inject.run,
-      pdftotextBin: inject.pdftotextBin, ghBin: inject.ghBin, unpaywallEmail: typeof email === "string" && email.trim() ? email.trim() : null,
+      pdftotextBin: inject.pdftotextBin, ghBin: inject.ghBin, contact: typeof email === "string" && email.trim() ? email.trim() : null,
       endpoints: inject.endpoints, timeoutMs: inject.timeoutMs,
     });
   } catch (e) {
