@@ -16349,6 +16349,38 @@
    ],
    "size": "small"
   },
+  "tests/unit/kb-search.test.mjs": {
+   "deps": [
+    "SKILL.md",
+    "cli/kb.mjs",
+    "lib/core/config.mjs",
+    "lib/core/discovery.mjs",
+    "lib/core/git-context.mjs",
+    "lib/core/git-env.mjs",
+    "lib/core/paths.mjs",
+    "lib/core/v3-layout.mjs",
+    "lib/core/worktrees.mjs",
+    "lib/edges/refs.mjs",
+    "lib/gotchas/parse.mjs",
+    "lib/kb/migrate.mjs",
+    "lib/kb/references.mjs",
+    "lib/kb/search.mjs",
+    "lib/kb/standards/adopt.mjs",
+    "lib/kb/standards/parse.mjs",
+    "lib/kb/standards/registry.mjs",
+    "lib/kb/standards/sidecars.mjs",
+    "lib/kb/standards/status.mjs",
+    "lib/kb/standards/versions.mjs",
+    "lib/migrate/workspace.mjs",
+    "lib/refs/active-lines.mjs",
+    "lib/refs/snapshot.mjs",
+    "lib/report/manifest.mjs",
+    "lib/report/services.mjs",
+    "package.json",
+    "tests/unit/kb-search.test.mjs"
+   ],
+   "size": "small"
+  },
   "tests/unit/kb-standards-adopt.test.mjs": {
    "deps": [
     "SKILL.md",
