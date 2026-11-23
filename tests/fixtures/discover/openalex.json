@@ -1,0 +1,54 @@
+{
+ "meta": {
+  "count": 2
+ },
+ "results": [
+  {
+   "id": "https://openalex.org/W111",
+   "doi": "https://doi.org/10.1000/Alpha.1",
+   "display_name": "Screening with agents",
+   "publication_year": 2024,
+   "type": "article",
+   "primary_location": {
+    "source": {
+     "display_name": "Journal of Review Methods",
+     "type": "journal"
+    }
+   },
+   "open_access": {
+    "oa_url": "https://example.org/alpha.pdf"
+   },
+   "abstract_inverted_index": {
+    "Agents": [
+     0
+    ],
+    "screen": [
+     1
+    ],
+    "papers": [
+     2
+    ],
+    "well": [
+     3
+    ]
+   }
+  },
+  {
+   "id": "https://openalex.org/W222",
+   "doi": null,
+   "display_name": "A preprint",
+   "publication_year": 2025,
+   "type": "preprint",
+   "primary_location": {
+    "source": {
+     "display_name": "A Repository",
+     "type": "repository"
+    }
+   },
+   "open_access": {
+    "oa_url": null
+   },
+   "abstract_inverted_index": null
+  }
+ ]
+}
