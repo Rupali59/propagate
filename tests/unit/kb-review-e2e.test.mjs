@@ -94,12 +94,12 @@ const writeLanes = (ctx, quoteA = QUOTE_A) => {
   mkdirSync(path.join(ctx.dir, "lanes"), { recursive: true });
   const put = (l) => writeFileSync(path.join(ctx.dir, "lanes", `${l.lane}.json`), JSON.stringify(l, null, 2));
   put(lane("L1", {
-    handed: [ctx.shaA], screened: [{ sha256: ctx.shaA, decision: "included", reason: "meets inclusion: an evaluation against human reviewers" }],
+    handed: [ctx.shaA], screened: [{ sha256: ctx.shaA, decision: "included", reason: "meets inclusion: an evaluation against human reviewers", identified_as: { title: "Agent screening against human reviewers", authors: ["A. Author"] } }],
     claims: [{ text: "agent screening matches humans on clear cases", quotes: [quoteA], sha256s: [ctx.shaA] }],
     proposals: [{ target: "reference", claims: [0], text: "a page on automated screening", ref_id: "screening-page" }],
   }));
   put(lane("L2", {
-    handed: [ctx.shaB], screened: [{ sha256: ctx.shaB, decision: "included", reason: "meets inclusion: a guide to sampling agent decisions" }],
+    handed: [ctx.shaB], screened: [{ sha256: ctx.shaB, decision: "included", reason: "meets inclusion: a guide to sampling agent decisions", identified_as: { title: "Sampling agent decisions: a guide" } }],
     claims: [{ text: "agent decisions should be sampled by a second reviewer", quotes: [QUOTE_B], sha256s: [ctx.shaB] }],
   }));
 };

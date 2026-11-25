@@ -1,10 +1,10 @@
 {
  "header": {
-  "recordedAt": "2026-11-23T06:40:40.945Z",
+  "recordedAt": "2026-11-23T07:49:02.715Z",
   "commit": "ff2c3e03d559b448eb7908d2bdfa4b02b34f2851",
   "node": "v26.13.0",
-  "tests": 357,
-  "withStaticDeps": 289,
+  "tests": 356,
+  "withStaticDeps": 288,
   "withRecordedSpawnDeps": 122,
   "partial": 6,
   "unattributedProcesses": 0,
@@ -12,8 +12,8 @@
   "recordedProcesses": 2272,
   "unresolvedStaticSpecifiers": 117,
   "suite": {
-   "pass": 4694,
-   "fail": 1
+   "pass": 4699,
+   "fail": 0
   }
  },
  "tests": {
@@ -2008,7 +2008,6 @@
     "tests/unit/journal.test.mjs",
     "tests/unit/kb-cli.test.mjs",
     "tests/unit/kb-discover.test.mjs",
-    "tests/unit/kb-fetch.regression-1.test.mjs",
     "tests/unit/kb-fetch.test.mjs",
     "tests/unit/kb-migrate.test.mjs",
     "tests/unit/kb-references.test.mjs",
@@ -11650,7 +11649,6 @@
     "tests/unit/journal.test.mjs",
     "tests/unit/kb-cli.test.mjs",
     "tests/unit/kb-discover.test.mjs",
-    "tests/unit/kb-fetch.regression-1.test.mjs",
     "tests/unit/kb-fetch.test.mjs",
     "tests/unit/kb-migrate.test.mjs",
     "tests/unit/kb-references.test.mjs",
@@ -12466,7 +12464,6 @@
     "tests/unit/journal.test.mjs",
     "tests/unit/kb-cli.test.mjs",
     "tests/unit/kb-discover.test.mjs",
-    "tests/unit/kb-fetch.regression-1.test.mjs",
     "tests/unit/kb-fetch.test.mjs",
     "tests/unit/kb-migrate.test.mjs",
     "tests/unit/kb-references.test.mjs",
@@ -13292,7 +13289,6 @@
     "tests/unit/journal.test.mjs",
     "tests/unit/kb-cli.test.mjs",
     "tests/unit/kb-discover.test.mjs",
-    "tests/unit/kb-fetch.regression-1.test.mjs",
     "tests/unit/kb-fetch.test.mjs",
     "tests/unit/kb-migrate.test.mjs",
     "tests/unit/kb-references.test.mjs",
@@ -21519,7 +21515,6 @@
     "tests/unit/journal.test.mjs",
     "tests/unit/kb-cli.test.mjs",
     "tests/unit/kb-discover.test.mjs",
-    "tests/unit/kb-fetch.regression-1.test.mjs",
     "tests/unit/kb-fetch.test.mjs",
     "tests/unit/kb-migrate.test.mjs",
     "tests/unit/kb-references.test.mjs",
