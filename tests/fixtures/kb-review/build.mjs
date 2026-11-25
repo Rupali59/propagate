@@ -92,7 +92,7 @@ export function buildReview(o = {}) {
       { url: "https://example.com/a", decision: "included", reason: "", lane: "L1" },
       { url: "https://docs.example.org/guide", decision: "included", reason: "", lane: "L1" },
       { url: "https://example.com/b", decision: "excluded", reason: "off topic", lane: "L1" },
-      { url: "https://example.com/c", decision: "not_retrieved", reason: "404", lane: "L1" },
+      { url: "https://example.com/c", decision: "not_retrieved", reason: "404", retrieval_reason: "http_404", lane: "L1" },
       { url: "http://www.example.com/a/?utm_source=x#frag", decision: "included", reason: "", lane: "L1" },
     ],
     sources: [
