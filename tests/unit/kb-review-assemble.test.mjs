@@ -10,6 +10,7 @@ import { kbCmd } from "../../cli/kb.mjs";
 import { COMMANDS } from "../../lib/core/commands.mjs";
 import { assembleBrief } from "../../lib/kb/review/assemble.mjs";
 import { validateLane } from "../../lib/kb/review/lane-schema.mjs";
+import { renderBrief } from "../../lib/kb/review/render.mjs";
 import { validateBrief } from "../../lib/kb/review/schema.mjs";
 import { checkReview } from "../../lib/kb/review/check.mjs";
 import { BODY1, BODY2, QUOTE1, QUOTE2, SEARCH_DATE, buildReview, snapshot } from "../fixtures/kb-review/build.mjs";
@@ -27,7 +28,7 @@ async function kb(argv, fx) {
   return { code, out: out.join("\n"), err: err.join("\n") };
 }
 const lane = (id, o) => ({ lane: id, model: "example-model", round: 1, rq: "RQ1", handed: [], screened: [], claims: [], gaps: [], suggestions: [], ...o });
-const included = (s, reason = "meets inclusion 1") => ({ sha256: s, decision: "included", reason });
+const included = (s, reason = "meets inclusion 1") => ({ sha256: s, decision: "included", reason, identified_as: { title: `Paper ${s.slice(0, 8)}`, authors: ["A. Author"] } });
 const writeLane = (fx, l, id = l.lane) => {
   mkdirSync(path.join(fx.dir, "lanes"), { recursive: true });
   writeFileSync(path.join(fx.dir, "lanes", `${id}.json`), typeof l === "string" ? l : JSON.stringify(l, null, 2));
@@ -260,4 +261,58 @@ test("validateLane: the shape problems are malformed, the rule problems are not"
 test("the command table and docs/REFERENCE.md both carry the subcommand", () => {
   assert.ok(COMMANDS["kb review assemble"], "kb review assemble is not in the command table");
   assert.match(readFileSync(path.join(import.meta.dirname, "..", "..", "docs", "REFERENCE.md"), "utf8"), /\| `kb review assemble <dir>/);
+});
+
+// ---- file identity (#368): literal lane objects, never the shared builder, so the violation is expressible ----------
+const row = (s, extra = {}) => ({ sha256: s, decision: "included", reason: "meets inclusion 1", ...extra });
+const idLane = (screened, handed) => lane("L1", { handed, screened, claims: [{ text: "foxes jump", quotes: [QUOTE1], sha256s: [S1] }] });
+
+test("an included source with no identified_as is refused with LANE_IDENTITY_MISSING and nothing is written", async () => {
+  const fx = buildReview();
+  writeLane(fx, idLane([row(S1), row(S2, { decision: "excluded", reason: "off topic" })], [S1, S2]));
+  const before = snapshot(fx.dir);
+  const r = await kb(["review", "assemble", fx.dir, "--json"], fx);
+  assert.equal(r.code, 1, r.err || r.out);
+  assert.match(r.out + r.err, /LANE_IDENTITY_MISSING/);
+  assert.equal(snapshot(fx.dir), before, "a refusal writes nothing");
+});
+
+test("an excluded row may omit identified_as, and a lane with identified_as only where included is valid", () => {
+  const l = idLane([row(S1, { identified_as: { title: "The Fox Paper" } }), row(S2, { decision: "excluded", reason: "off topic" })], [S1, S2]);
+  const v = validateLane(l, new Set([S1, S2]));
+  assert.deepEqual(v.problems, []);
+});
+
+test("two different shas with one normalised title in a lane are refused with LANE_IDENTITY_COLLISION", async () => {
+  const fx = buildReview();
+  writeLane(fx, idLane([
+    row(S1, { identified_as: { title: "Screening With LLMs: A Study" } }),
+    row(S2, { identified_as: { title: "screening with llms - a study!" } }),
+  ], [S1, S2]));
+  const before = snapshot(fx.dir);
+  const r = await kb(["review", "assemble", fx.dir, "--json"], fx);
+  assert.equal(r.code, 1, r.err || r.out);
+  assert.match(r.out + r.err, /LANE_IDENTITY_COLLISION/);
+  assert.equal(snapshot(fx.dir), before);
+});
+
+test("a malformed identified_as (no title) is a shape error, not a lane with zero identity", () => {
+  const v = validateLane(idLane([row(S1, { identified_as: { authors: ["x"] } }), row(S2, { decision: "excluded", reason: "r" })], [S1, S2]), new Set([S1, S2]));
+  assert.equal(v.malformed, true);
+});
+
+test("a valid lane carries identified_as onto brief.sources[] and brief.md shows it", async () => {
+  const fx = buildReview();
+  writeLane(fx, lane("L1", {
+    handed: [S1, S2],
+    screened: [row(S1, { identified_as: { title: "The Fox Paper", authors: ["A. Author", "B. Writer"] } }), row(S2, { identified_as: { title: "A Guide to Testing" } })],
+    claims: [{ text: "foxes jump", quotes: [QUOTE1], sha256s: [S1] }, { text: "tests cover paths", quotes: [QUOTE2], sha256s: [S2] }],
+  }));
+  const r = await kb(["review", "assemble", fx.dir], fx);
+  assert.equal(r.code, 0, r.err);
+  const brief = JSON.parse(readFileSync(path.join(fx.dir, "brief.json"), "utf8"));
+  assert.deepEqual(brief.sources.map((s) => s.identified_as), [{ title: "The Fox Paper", authors: ["A. Author", "B. Writer"] }, { title: "A Guide to Testing" }]);
+  assert.deepEqual(validateBrief(brief), { ok: true, problems: [] });
+  const md = renderBrief({ review: "r", decision: "d", decider: "o", questions: [{ id: "RQ1", text: "q" }] }, brief, { derived: { tiers: {} }, counts: {} }, null);
+  assert.match(md, /read as "The Fox Paper" by A\. Author, B\. Writer/, "brief.md names which paper each source is");
 });
