@@ -101,7 +101,7 @@ sources:
         why: "cross-repo pairing"
 `,
   );
-  await writeFile(path.join(downstream, ".propagates.yml"), `workspace: true\n`);
+  await writeFile(path.join(downstream, ".propagates.yml"), `workspace: true\nsources: {}\n`);
   await commitAll(upstream, "initial upstream");
   await commitAll(downstream, "initial downstream");
 
