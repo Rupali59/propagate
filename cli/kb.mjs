@@ -85,7 +85,7 @@ export async function kbCmd(argv = [], inject = {}) {
   if (argv[0] === "standards") return standardsBody(argv.slice(1), inject);
   if (argv[0] === "references") return referencesCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "search") return searchCmd(argv.slice(1), inject, io, asJson);
-  if (argv[0] === "discover") return discoverCmd(argv.slice(1), { ...inject, io, contact: inject.contact ?? (await kbContact(inject)) });
+  if (argv[0] === "discover") return discoverCmd(argv.slice(1), { ...inject, io, stateDirPath: inject.stateDirPath ?? stateDir(), contact: inject.contact ?? (await kbContact(inject)) });
   if (argv[0] === "fetch") return fetchCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "review") return reviewCmd(argv.slice(1), { io, integrations: (await env(inject)).integrations, inject });
   if (argv[0] === "migrate") return migrateCmd(argv.slice(1), inject, io, asJson);
