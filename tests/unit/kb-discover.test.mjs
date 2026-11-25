@@ -4,7 +4,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { discoverCmd, redact } from "../../lib/research/discover.mjs";
@@ -39,7 +39,7 @@ function stub(routes) {
 }
 
 const ok = (body) => ({ status: 200, body });
-const base = (extra = {}) => ({ io: io(), env: {}, sleep: async () => {}, now: () => Date.parse("2026-11-23T10:00:00Z"), ...extra });
+const base = (extra = {}) => ({ io: io(), env: {}, stateDirPath: tmp(), sleep: async () => {}, now: () => Date.parse("2026-11-23T10:00:00Z"), ...extra });
 
 test("openalex: parses the works shape, strips ids, rebuilds the abstract, sets the peer-review hint", async () => {
   const dir = tmp();
@@ -273,7 +273,139 @@ test("an unreadable store is refused rather than overwritten", async () => {
 test("kb discover is reachable through kbCmd and reads kbContact from integrations", async () => {
   const dir = tmp();
   const f = stub({ "api.openalex.org": [ok(fx("openalex.json"))] });
-  const code = await kbCmd(["discover", dir, "agents", "--engine", "openalex"], { io: io(), fetch: f, env: {}, sleep: async () => {}, integrations: { kbContact: "cfg@example.org" }, workspaces: [] });
+  const code = await kbCmd(["discover", dir, "agents", "--engine", "openalex"], { io: io(), fetch: f, env: {}, stateDirPath: tmp(), sleep: async () => {}, integrations: { kbContact: "cfg@example.org" }, workspaces: [] });
   assert.equal(code, 0);
   assert.match(f.calls[0].url, /mailto=cfg%40example\.org/);
+});
+
+// ---- #364: spacing across separate invocations, and every exit-2 line naming its engine and reason ----
+
+/** A virtual clock: `sleep` advances it, so the suite never waits and request times are exact. */
+function clock(start = Date.parse("2026-11-23T10:00:00Z")) {
+  const c = { t: start, now: () => c.t, sleep: async (ms) => { c.t += ms; }, advance: (ms) => { c.t += ms; } };
+  return c;
+}
+/** Wraps a stub so each call also records the virtual time it was made at. */
+function timed(f, c) {
+  const times = [];
+  const g = async (url, o) => { times.push(c.t); return f(url, o); };
+  g.calls = f.calls;
+  g.times = times;
+  return g;
+}
+const lastFile = (st) => path.join(st, "kb", "discover-last-request.json");
+
+test("arxiv: two invocations back to back are at least 3 s apart by the clock, because the last-request time is kept in state", async () => {
+  const st = tmp();
+  const c = clock();
+  const f = timed(stub({ "export.arxiv.org": [ok(fx("arxiv.xml"))] }), c);
+  for (const q of ["one", "two"]) assert.equal(await discoverCmd([tmp(), q, "--engine", "arxiv"], base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep })), 0);
+  assert.equal(f.times.length, 2);
+  assert.ok(f.times[1] - f.times[0] >= 3000, `gap was ${f.times[1] - f.times[0]} ms`);
+  // elapsed real time between runs counts toward the spacing: 2 s later, wait only the remaining 1 s
+  c.advance(2000);
+  const before = c.t;
+  await discoverCmd([tmp(), "three", "--engine", "arxiv"], base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep }));
+  assert.equal(f.times[2] - before, 1000);
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(lastFile(st), "utf8"))), ["arxiv"]);
+});
+
+test("a gap already longer than the spacing waits nothing; other engines keep their own interval across runs", async () => {
+  const st = tmp();
+  const c = clock();
+  const f = timed(stub({ "export.arxiv.org": [ok(fx("arxiv.xml"))], "api.crossref.org": [ok(fx("crossref.json"))] }), c);
+  await discoverCmd([tmp(), "a", "--engine", "arxiv"], base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep }));
+  c.advance(10000);
+  const t0 = c.t;
+  await discoverCmd([tmp(), "b", "--engine", "arxiv"], base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep }));
+  assert.equal(f.times[1], t0, "10 s gap: no wait");
+  await discoverCmd([tmp(), "c", "--engine", "crossref"], base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep }));
+  const t1 = c.t;
+  await discoverCmd([tmp(), "d", "--engine", "crossref"], base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep }));
+  assert.equal(f.times[3] - t1, 1000, "crossref's own 1 s spacing holds across runs");
+});
+
+test("a missing timestamp file means no wait and one stated note, not a crash", async () => {
+  const st = tmp();
+  const c = clock();
+  const f = timed(stub({ "export.arxiv.org": [ok(fx("arxiv.xml"))] }), c);
+  const b = base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep });
+  const t0 = c.t;
+  assert.equal(await discoverCmd([tmp(), "q", "--engine", "arxiv"], b), 0);
+  assert.equal(f.times[0], t0, "no wait");
+  const lines = b.io.err.filter((l) => /does not exist yet/.test(l));
+  assert.equal(lines.length, 1);
+  assert.ok(existsSync(lastFile(st)), "the file is created for the next run");
+});
+
+test("a corrupt timestamp file gives a warning and no wait, and is repaired", async () => {
+  for (const junk of ["{broken", "[1,2]", '"text"']) {
+    const st = tmp();
+    mkdirSync(path.join(st, "kb"));
+    writeFileSync(lastFile(st), junk);
+    const c = clock();
+    const f = timed(stub({ "export.arxiv.org": [ok(fx("arxiv.xml"))] }), c);
+    const b = base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep });
+    const t0 = c.t;
+    assert.equal(await discoverCmd([tmp(), "q", "--engine", "arxiv"], b), 0, junk);
+    assert.equal(f.times[0], t0, `${junk}: no wait`);
+    assert.equal(b.io.err.filter((l) => /unreadable/.test(l)).length, 1, junk);
+    assert.equal(typeof JSON.parse(readFileSync(lastFile(st), "utf8")).arxiv, "number");
+  }
+});
+
+test("an unwritable state dir is a stated note, never a crash", async () => {
+  const st = tmp();
+  writeFileSync(path.join(st, "kb"), "a file where the directory should be");
+  const b = base({ fetch: stub({ "export.arxiv.org": [ok(fx("arxiv.xml"))] }), stateDirPath: st });
+  assert.equal(await discoverCmd([tmp(), "q", "--engine", "arxiv"], b), 0);
+  assert.match(b.io.err.join("\n"), /could not record the last-request time/);
+});
+
+test("a timestamp from the future cannot stall the run for more than one interval", async () => {
+  const st = tmp();
+  const c = clock();
+  mkdirSync(path.join(st, "kb"));
+  writeFileSync(lastFile(st), JSON.stringify({ arxiv: c.t + 3600000 }));
+  const f = timed(stub({ "export.arxiv.org": [ok(fx("arxiv.xml"))] }), c);
+  const t0 = c.t;
+  await discoverCmd([tmp(), "q", "--engine", "arxiv"], base({ fetch: f, stateDirPath: st, now: c.now, sleep: c.sleep }));
+  assert.equal(f.times[0] - t0, 3000);
+});
+
+test("every exit-2 line is one line, names its engine and a reason, and carries a word a coordinator filters on", async () => {
+  const FILTER = /hit|error|429|budget|could/i;
+  const engineCases = [
+    ["openalex", "api.openalex.org", { status: 429, body: fx("openalex-429-daily.json") }, /openalex: .*budget/],
+    ["openalex", "api.openalex.org", { status: 429, body: fx("openalex-429-persecond.json") }, /openalex: .*429/],
+    ["arxiv", "export.arxiv.org", { status: 503, body: "busy" }, /arxiv: error: HTTP 503/],
+    ["s2", "api.semanticscholar.org", { status: 500, body: "x" }, /s2: error: HTTP 500/],
+    ["crossref", "api.crossref.org", ok("not json"), /crossref: error: could not understand/],
+  ];
+  for (const [engine, host, resp, re] of engineCases) {
+    const b = base({ fetch: stub({ [host]: [resp] }) });
+    assert.equal(await discoverCmd([tmp(), "q", "--engine", engine], b), 2, `${engine} ${resp.status}`);
+    const lines = b.io.err.filter((l) => /^DISCOVER_/.test(l));
+    assert.equal(lines.length, 1, `exactly one failure line: ${lines}`);
+    assert.match(lines[0], re);
+    assert.match(lines[0], FILTER);
+    assert.ok(!lines[0].includes("\n"));
+  }
+  // a network error (fetch throws)
+  const bn = base({ fetch: async () => { throw new Error("ECONNRESET"); } });
+  assert.equal(await discoverCmd([tmp(), "q", "--engine", "arxiv"], bn), 2);
+  const ln = bn.io.err.filter((l) => /^DISCOVER_NETWORK/.test(l));
+  assert.equal(ln.length, 1);
+  assert.match(ln[0], /arxiv: error: request failed \(ECONNRESET\)/);
+  // paths where no engine ran: usage, missing dir, unreadable store
+  const bad = tmp();
+  writeFileSync(path.join(bad, "discovered.json"), "{broken");
+  for (const argv of [[], [tmp(), "q", "--engine", "bing"], ["/no/such/dir-xyz", "q"], [bad, "q"]]) {
+    const b = base({ fetch: stub({}) });
+    assert.equal(await discoverCmd(argv, b), 2, JSON.stringify(argv));
+    const lines = b.io.err.filter((l) => /^DISCOVER_/.test(l));
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /error: kb discover \(no engine ran\): .+Next:/);
+    assert.match(lines[0], FILTER);
+  }
 });
