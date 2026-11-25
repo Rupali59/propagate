@@ -110,3 +110,36 @@ test("three-level nest: each sidecar is attributed to its NEAREST ancestor works
     "child sweep, rooted at itself, claims its own sidecar",
   );
 });
+
+// #373: a git submodule's working tree is another repo vendored at a pin. Its sidecar belongs to that repo's own
+// sweep; read from the parent, its relative paths resolve against the wrong root. Mutation (2026-11-23): removing
+// the isSubmoduleWorkingTree check in findAllSidecarsRecursive makes the first test fail with core's sidecar claimed.
+test("a submodule's working tree is not swept; its sidecar belongs to the submodule's own repo (#373)", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "edges-submodule-"));
+  await makeSidecar(parent);
+  const core = path.join(parent, "core");
+  await makeSidecar(core);
+  await writeFile(path.join(core, ".git"), "gitdir: ../.git/modules/core\n", "utf8");
+
+  const found = await findAllSidecarsRecursive(parent, [parent]);
+  const rel = found.map((f) => path.relative(parent, f)).sort();
+  assert.deepEqual(rel, [".propagates.yml"], "core's sidecar is not claimed by the parent");
+});
+
+test("an ordinary nested repo (a .git directory) and a linked worktree's .git file are still swept (#373 controls)", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "edges-submodule-"));
+  await makeSidecar(parent);
+  const repo = path.join(parent, "nested-repo");
+  await makeSidecar(repo);
+  await mkdir(path.join(repo, ".git"), { recursive: true });
+  const linked = path.join(parent, "linked");
+  await makeSidecar(linked);
+  await writeFile(path.join(linked, ".git"), "gitdir: /x/repo/.git/worktrees/linked\n", "utf8");
+
+  const found = await findAllSidecarsRecursive(parent, [parent]);
+  const rel = found.map((f) => path.relative(parent, f)).sort();
+  assert.deepEqual(
+    rel,
+    [".propagates.yml", path.join("linked", ".propagates.yml"), path.join("nested-repo", ".propagates.yml")].sort(),
+  );
+});
