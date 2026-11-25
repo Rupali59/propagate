@@ -4207,6 +4207,25 @@ async function verifyCmd() {
     }
   }
 
+  // ── cited-commit guard (#354) ─────────────────────────────────────────────
+  // Runs for dry run and --apply alike; only --apply is the write, and a refusal
+  // exits before either path touches the store or a sidecar.
+  {
+    const { checkCitedCommits, repoRootsOf } = await import("./lib/edges/cited-commits.mjs");
+    const roots = repoRootsOf(selected.flatMap((r) => [r.source.path, r.downstream.path]));
+    const { problems, warnings } = checkCitedCommits(opts.reason, roots);
+    for (const w of warnings) console.error(`${YELLOW}! warning:${RESET} ${w.message}`);
+    if (problems.length) {
+      if (opts.json) {
+        console.log(JSON.stringify({ error: "cited-commit", apply: Boolean(opts.apply), problems, warnings }, null, 2));
+      } else {
+        for (const p of problems) console.error(`${RED}error:${RESET} ${p.message}`);
+        console.error(`  ${DIM}nothing was written${RESET}`);
+      }
+      process.exit(1);
+    }
+  }
+
   if (opts.disposition === "decoupled") {
     await runDecoupled(selected, workspaces, opts);
   } else {
