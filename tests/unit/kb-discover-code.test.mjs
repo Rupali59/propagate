@@ -9,7 +9,7 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { discoverCmd } from "../../lib/research/discover.mjs";
-import { ALL_ENGINES, Malformed } from "../../lib/research/discover-engines.mjs";
+import { ALL_ENGINES, Malformed, searchTerms } from "../../lib/research/discover-engines.mjs";
 
 const FIX = path.join(import.meta.dirname, "..", "fixtures", "discover");
 const fx = (n) => readFileSync(path.join(FIX, n), "utf8");
@@ -44,11 +44,11 @@ const ghStub = (body) => {
 const base = (extra = {}) => ({ io: io(), env: {}, stateDirPath: tmp(), sleep: async () => {}, now: () => Date.parse("2026-11-26T10:00:00Z"), ...extra });
 
 test("github: parses a repo search response; key is gh:<lower-case owner/repo>, updated is pushed_at", () => {
-  const rows = engine("github").parse(fx("github.json"));
+  const rows = engine("github").parse(fx("github.json"), { query: "widget" });
   assert.deepEqual(rows[0], {
     engine: "github", id: "Example-Org/Widget-Kit", doi: null, title: "Example-Org/Widget-Kit", year: null, venue: "GitHub",
     is_peer_reviewed_hint: false, oa_url: null, url: "https://github.com/Example-Org/Widget-Kit", abstract: "A kit of widgets",
-    kind: "repo", key: "gh:example-org/widget-kit", updated: "2026-11-20",
+    kind: "repo", key: "gh:example-org/widget-kit", updated: "2026-11-20", matched_query: "widget in:name,description,topics",
   });
   assert.equal("abstract" in rows[1], false, "a null description is no abstract");
   assert.equal(engine("github").minIntervalMs(false), 2100);
@@ -62,7 +62,7 @@ test("npm: parses a package search response; updated prefers package.date", () =
   assert.equal(rows[0].abstract, "Widgets for tests");
   assert.equal(rows[1].updated, "2026-09-02", "falls back to the object's `updated`");
   assert.equal(rows[1].url, "https://www.npmjs.com/package/@sample/gizmo");
-  assert.match(engine("npm").request({ query: "a b", limit: 7 }).url, /text=a\+b&size=7/);
+  assert.match(engine("npm").request({ query: "a b", limit: 7 }).url, /text=b&size=28$/);
 });
 
 test("skills: parses {skills:[...]}; key and url come from source and skillId, limit caps the list", () => {
@@ -166,7 +166,7 @@ test("--sources rejects an unknown group; --engine still works for a new engine"
 test("the github request goes through gh api with the query encoded and the limit as per_page", async () => {
   const g = ghStub(fx("github.json"));
   await discoverCmd([tmp(), "agent skills", "--engine", "github", "--limit", "5"], base({ gh: g }));
-  assert.deepEqual(g.calls, ["search/repositories?q=agent%20skills&per_page=5"]);
+  assert.deepEqual(g.calls, ["search/repositories?q=" + encodeURIComponent("agent skills in:name,description,topics") + "&sort=stars&order=desc&per_page=5"]);
 });
 
 test("the real gh transport runs the PROPAGATE_GH_BIN binary, and a missing binary is a named failure", async () => {
@@ -179,4 +179,59 @@ test("the real gh transport runs the PROPAGATE_GH_BIN binary, and a missing bina
   const t = base({ env: { PROPAGATE_GH_BIN: path.join(tmp(), "no-such-gh") } });
   assert.equal(await discoverCmd([tmp(), "widget", "--engine", "github"], t), 2);
   assert.match(t.io.err.join("\n"), /DISCOVER_NETWORK: github: error: request failed \(.*is not installed\)/);
+});
+
+test("searchTerms: lower-cases, drops the stopwords, keeps at most 5 terms in their original order", () => {
+  assert.deepEqual(searchTerms("The CLI of a Tool for Literature search on multiple sources"), ["cli", "literature", "search", "multiple", "sources"]);
+  assert.deepEqual(searchTerms("cli watch github releases new since last check"), ["cli", "watch", "github", "releases"]);
+  assert.deepEqual(searchTerms("alpha beta gamma delta epsilon zeta eta").length, 5);
+  assert.deepEqual(searchTerms("zeta alpha beta"), ["zeta", "alpha", "beta"]);
+  assert.deepEqual(searchTerms("find any existing tools"), []);
+});
+
+test("github: the query is the terms plus in:name,description,topics, sorted by stars", () => {
+  const url = decodeURIComponent(engine("github").request({ query: "Find a CLI for literature search", limit: 5 }).gh);
+  assert.equal(url, "search/repositories?q=cli literature search in:name,description,topics&sort=stars&order=desc&per_page=5");
+});
+
+test("github: 0 items triggers exactly one fallback with the first 2 terms, and rows record the query that ran", async () => {
+  const calls = [];
+  const empty = JSON.stringify({ total_count: 0, items: [] });
+  const gh = async (endpoint) => {
+    calls.push(decodeURIComponent(endpoint));
+    return { status: 200, text: async () => (calls.length === 1 ? empty : fx("github.json")), headers: { get: () => null } };
+  };
+  const dir = tmp();
+  assert.equal(await discoverCmd([dir, "cli literature search multiple sources", "--engine", "github"], base({ gh })), 0);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0], /q=cli literature search multiple sources in:name,description,topics&/);
+  assert.match(calls[1], /q=cli literature in:name,description,topics&/);
+  assert.equal(readDiscovered(dir)[0].matched_query, "cli literature in:name,description,topics");
+  // A second empty answer is not retried again, and a query of at most 2 terms has no fallback.
+  const g2 = ghStub(empty);
+  assert.equal(await discoverCmd([tmp(), "alpha beta gamma", "--engine", "github"], base({ gh: g2 })), 1);
+  assert.equal(g2.calls.length, 2);
+  const g3 = ghStub(empty);
+  await discoverCmd([tmp(), "alpha beta", "--engine", "github"], base({ gh: g3 }));
+  assert.equal(g3.calls.length, 1);
+});
+
+const npmBody = (objs) => JSON.stringify({ objects: objs, total: objs.length });
+const pkg = (name, description, searchScore, keywords) => ({ searchScore, package: { name, description, ...(keywords ? { keywords } : {}) } });
+
+test("npm: a popular package matching no term is filtered out, the rest rank by score, and limit applies after the filter", () => {
+  const body = npmBody([
+    pkg("offtopic-popular", "Fuzzy matching in the browser", 900),
+    pkg("literature-low", "Search a literature index", 1),
+    pkg("tool-high", "Command line", 50, ["Literature"]),
+    pkg("sources-mid", "Merge many sources", 10),
+    pkg("literature-extra", "More literature", 5),
+    pkg("xliteraturex-pkg", "xliteraturex is not a whole word", 999),
+  ]);
+  const all = engine("npm").parse(body, { query: "cli literature search sources", limit: 10 });
+  assert.deepEqual(all.map((r) => r.id), ["tool-high", "sources-mid", "literature-extra", "literature-low"]);
+  const two = engine("npm").parse(body, { query: "cli literature search sources", limit: 2 });
+  assert.deepEqual(two.map((r) => r.id), ["tool-high", "sources-mid"], "limit counts matching packages, not fetched ones");
+  assert.equal(engine("npm").request({ query: "cli literature search sources", limit: 5 }).url.match(/size=(\d+)/)[1], "20");
+  assert.equal(engine("npm").request({ query: "x", limit: 50 }).url.match(/size=(\d+)/)[1], "100");
 });
