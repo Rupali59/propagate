@@ -552,10 +552,22 @@ approved one.
 decision. An edit to the command changes the hash, so the goal is untrusted again (the `direnv allow` pattern).
 Exit 2 when the goal does not exist or names no command.
 
+**A `Derived by:` command must exit non-zero while the goal is unmet, and exit 2 below a floor** (a scan that read
+too little is "could not run", never "met"). `check-done` reads exit 0 as met, so a command that cannot fail closes
+its goal on a report (#383). `lib/report/goals-run.mjs` `failurePath(command)` is a conservative static lint for the
+definite no-failure shapes: a last statement after `;` or `&&` that is `echo`, `printf` or `true`; a trailing
+`|| true`, `|| :` or `|| echo`; a pipeline ending in `tail`, `head`, `cat`, `sort`, `wc`, `tee` or `grep -c`; an inline
+`node -e` with no `process.exit` of a computed code, `exitCode` or `throw`; an `awk` program whose only exits are bare,
+0 or 2. It cannot prove a command honest (plain `grep` is left alone). `goals allow` **refuses** a flagged command
+with exit 3; `--force --reason '<text>'` overrides it and the reason is stored on the trust entry as `override`.
+`goals check` lists each flagged open goal as a `derived-by-cannot-fail` violation (its only grade is violation, exit 1).
+
 `propagate goals check-done [--apply] [--timeout <s>] [--json]` reads every GOALS.md under the search roots.
 - **A trusted command runs** with `bash -c`, cwd = the GOALS.md's git root, a 120 s timeout (`--timeout <s>` for a long suite). On a timeout the whole process
   group is killed, so a suite's children never outlive it. Exit 0 is **met**;
-  anything else is **unmet**, with the exit code and the last output lines. A timeout is unmet and says so.
+  anything else is **unmet**, with the exit code and the last output lines. Every verdict carries the last 3 lines of
+  output (`output_tail` in `--json`); the text output prints them under each `met` row, so a person can see what was
+  read as a pass. A timeout is unmet and says so.
 - **Never run:** an untrusted or edited command (reported with the `goals allow` line to approve it), a
   `Judgement, not derivable` goal (it needs a person), a parked goal, a closed goal.
 - **`--apply`** writes one line per met goal, directly under its heading:

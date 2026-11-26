@@ -108,7 +108,7 @@ Regenerate it with `npm run readme:commands`.
 - `propagate surface` — edges, registers and machinery health as one payload
 - `propagate backlog` — open work recorded across STATE, TODOS and handovers
 - `propagate goals` — arrival conditions declared across the tree
-- `propagate goals allow` — approve one goal's exact Derived by: command so check-done may run it
+- `propagate goals allow` — approve one goal's exact Derived by: command so check-done may run it; refused (exit 3) when the command cannot fail
 - `propagate goals check` — standing check: active-goal limit, appetite and retro, board items carry an active goal and their fields; exit 0 pass, 1 violations, 2 could not check
 - `propagate goals check-done` — run the approved Derived by: commands; exit 0 = met; writes Resolved only with --apply
 - `propagate services` — which units use which external service, and what is wrong with how each is described (offline)
