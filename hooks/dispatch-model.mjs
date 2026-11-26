@@ -11,6 +11,11 @@
  * dispatch costs no read. A missing, unreadable or not-from-today snapshot, an unnamed issue, or an item not on a
  * board is ALLOWED and SAID so ("not checked"), never passed silently (rule:discernment-checks §2).
  *
+ * THE SERVED ISSUE (#346, #273). A prompt may cite many issues as reading material; only the one the dispatch serves is
+ * checked, moved, overridden or associated. It comes from a marker line first: `issue: owner/repo#N`, or `issue: #N`
+ * resolved against the one repo the prompt names. Without a marker the text is used only when it names exactly one
+ * issue; with several the dispatch is refused and the marker asked for. Cited issues are never touched.
+ *
  * AN OMITTED `model` IS A MISMATCH: the subagent would inherit the parent's model. It is an absent key in
  * tool_input (verified live 2026-08-28, see hooks/hooks.json rule-guard).
  *
@@ -24,7 +29,7 @@
  * `propagate sessions` and `day open` show it without anyone running `assoc`. A session that already has an
  * association keeps it: this never overwrites one, it says it skipped. The hook cannot read `claude agents` (nothing
  * outside lib/sessions/live.mjs runs claude), which is why the key is the session id and not a row key; the sessions
- * view joins on `row.sessionId`. With several items in one prompt the first one with a goal is used.
+ * view joins on `row.sessionId`.
  *
  * FAILS OPEN ON ITS OWN BUGS, LOUDLY: any exception allows the dispatch and says so in additionalContext.
  * Exit code is always 0.
@@ -67,6 +72,20 @@ export function extractRefs(prompt) {
   return refs;
 }
 
+/**
+ * The explicit served-issue marker: a line `issue: owner/repo#N`, or `issue: #N` resolved against the one repo the
+ * prompt names. @returns {{ref: string|null, problem?: string}|null} null when the prompt has no marker line.
+ */
+export function extractMarker(prompt) {
+  const m = new RegExp(`^[ \\t]*issue:[ \\t]*(?:(${REPO})#(\\d+)|#(\\d+))[ \\t]*$`, "im").exec(String(prompt ?? ""));
+  if (!m) return null;
+  if (m[1]) return { ref: `${m[1]}#${m[2]}` };
+  const repos = new Set(extractRefs(prompt).map((r) => r.slice(0, r.lastIndexOf("#"))));
+  for (const u of String(prompt).matchAll(new RegExp(`github\\.com/(${REPO})(?![A-Za-z0-9_.-])`, "g"))) repos.add(u[1].replace(/\.git$/, ""));
+  if (repos.size === 1) return { ref: `${[...repos][0]}#${m[3]}` };
+  return { ref: null, problem: `\`issue: #${m[3]}\` has no repo: the prompt names ${repos.size} repositories, so write \`issue: owner/repo#${m[3]}\`` };
+}
+
 const actualModel = (input) => {
   const m = input?.tool_input?.model;
   return typeof m === "string" && m.trim() ? m.trim().toLowerCase() : null;
@@ -84,7 +103,22 @@ export function decide(input, snapshot, now = new Date()) {
   const out = { refs: [], notes: [], overrides: [], moves: [], assoc: null };
   if (input?.tool_name !== "Agent" && input?.tool_name !== "Task") return out;
   const prompt = String(input?.tool_input?.prompt ?? "");
-  out.refs = extractRefs(prompt);
+  const marker = extractMarker(prompt);
+  if (marker) {
+    if (!marker.ref) {
+      out.notes.push(`model not checked: ${marker.problem}`);
+      return out;
+    }
+    out.refs = [marker.ref]; // the served issue; every other cited issue is reading material
+  } else {
+    out.refs = extractRefs(prompt);
+    if (out.refs.length > 1) {
+      out.deny =
+        `this prompt names several issues (${out.refs.join(", ")}) and no served issue, so the hook will not guess which one it serves. ` +
+        `Add a line \`issue: owner/repo#N\` naming the issue this dispatch serves.`;
+      return out; // a deny moves nothing and records nothing
+    }
+  }
   if (!out.refs.length) return out;
 
   const gen = snapshot && typeof snapshot.generatedAt === "string" ? new Date(snapshot.generatedAt) : null;

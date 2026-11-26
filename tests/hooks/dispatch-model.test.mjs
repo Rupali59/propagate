@@ -128,14 +128,18 @@ test("an empty model_reason does not count as a reason", () => {
   assert.equal(sb.writes().length, 0);
 });
 
-test("with several refs, one mismatch refuses the dispatch and nothing is written", () => {
+test("with several refs and no marker, the dispatch is refused asking for `issue:`, and nothing is written", () => {
   const snapshot = { generatedAt: todayIso(), items: { "o/r#7": item("Sonnet", "Ready"), "o/r#8": item("Opus", "Ready") } };
   const sb = sandbox({ snapshot });
-  const r = sb.run(dispatch("Do o/r#7 and o/r#8.", "sonnet"));
+  const before = JSON.stringify(sb.snapshot());
+  const r = sb.run(dispatch("Do o/r#7 and read o/r#8.", "sonnet"));
   assert.equal(r.deny, true);
+  assert.match(r.reason, /issue: owner\/repo#N/);
+  assert.match(r.reason, /o\/r#7/);
   assert.match(r.reason, /o\/r#8/);
-  assert.doesNotMatch(r.reason, /o\/r#7's/);
   assert.equal(sb.writes().length, 0);
+  assert.equal(sb.overrides().length, 0);
+  assert.equal(JSON.stringify(sb.snapshot()), before, "snapshot untouched");
 });
 
 test("a stale snapshot is allowed with 'not checked' and 0 writes", () => {
@@ -321,4 +325,101 @@ test("a second dispatch by the same session appends nothing", () => {
   const once = assocLog(sb);
   sb.run(withSession(dispatch("Do o/r#7 again.", "sonnet"), "sess-dddd"));
   assert.equal(assocLog(sb), once);
+});
+
+// ── the served issue (propagate#346, #273) ─────────────────────────────────
+// A prompt cites other issues as reading material; only the `issue:` marker's issue is checked, moved, overridden or
+// associated. Tested by EFFECT: the calls the fake gh received, the override rows and the snapshot bytes.
+
+const TWO = () => ({
+  generatedAt: todayIso(),
+  items: { "acme/app#272": item("Sonnet", "Ready"), "acme/app#267": item("Opus", "Backlog"), "acme/other#232": item("Opus", "Backlog") },
+});
+
+test("the marker wins over a cited issue: the cited Opus item is neither checked, moved nor overridden", () => {
+  const sb = sandbox({ snapshot: TWO() });
+  const r = sb.run(dispatch("issue: acme/app#272\nRead the '#267 phase 2' section of acme/app#267's plan.", "sonnet"));
+  assert.equal(r.deny, false, r.reason);
+  assert.equal(sb.writes().length, 1, "one write, for the served issue");
+  assert.match(sb.writes()[0], /PVTI_1/);
+  assert.equal(sb.snapshot().items["acme/app#272"].status, "In progress");
+  assert.equal(sb.snapshot().items["acme/app#267"].status, "Backlog", "cited item untouched");
+  assert.equal(sb.overrides().length, 0);
+});
+
+test("an override is recorded against the served issue, never the cited one", () => {
+  const sb = sandbox({ snapshot: TWO() });
+  const r = sb.run(dispatch("issue: acme/app#267\nSee acme/app#272.\nmodel_reason: undecided\n", "haiku"));
+  assert.equal(r.deny, false, r.reason);
+  const rows = sb.overrides();
+  assert.deepEqual(rows.map((o) => o.ref), ["acme/app#267"]);
+  assert.equal(sb.snapshot().items["acme/app#272"].status, "Ready", "cited item untouched");
+});
+
+test("a brief citing another repo's numbers changes no status: gh calls and snapshot bytes are identical", () => {
+  const sb = sandbox({ snapshot: TWO() });
+  const before = readFileSync(path.join(sb.state, "day", "items.json"), "utf8");
+  const r = sb.run(dispatch("issue: acme/app#272\nExamples from acme/other#232 and acme/other#211, and #5.", "sonnet"));
+  assert.equal(r.deny, false, r.reason);
+  assert.equal(sb.writes().length, 1, "only the served issue is written");
+  const after = sb.snapshot();
+  assert.equal(after.items["acme/other#232"].status, "Backlog");
+  assert.equal(JSON.stringify(after.items["acme/other#232"]), JSON.stringify(JSON.parse(before).items["acme/other#232"]));
+  assert.doesNotMatch(r.ctx, /other#232/);
+});
+
+test("a served issue already In progress makes 0 writes even when the brief cites Backlog items", () => {
+  const snap = TWO();
+  snap.items["acme/app#272"].status = "In progress";
+  const sb = sandbox({ snapshot: snap });
+  const before = readFileSync(path.join(sb.state, "day", "items.json"), "utf8");
+  sb.run(dispatch("issue: acme/app#272\nSee acme/app#267 and acme/other#232.", "sonnet"));
+  assert.equal(sb.writes().length, 0);
+  assert.equal(readFileSync(path.join(sb.state, "day", "items.json"), "utf8"), before, "snapshot bytes unchanged");
+});
+
+test("`issue: #N` resolves against the one repo the prompt names", () => {
+  const sb = sandbox({ snapshot: TWO() });
+  const r = sb.run(dispatch("issue: #272\nWork in github.com/acme/app, and read #267.", "sonnet"));
+  assert.equal(r.deny, false, r.reason);
+  assert.equal(sb.writes().length, 1);
+  assert.equal(sb.snapshot().items["acme/app#272"].status, "In progress");
+  assert.equal(sb.snapshot().items["acme/app#267"].status, "Backlog");
+});
+
+test("`issue: #N` with no repo to resolve against is allowed, said, and writes nothing", () => {
+  const sb = sandbox({ snapshot: TWO() });
+  const r = sb.run(dispatch("issue: #272\nDo it.", "haiku"));
+  assert.equal(r.deny, false);
+  assert.match(r.ctx, /model not checked: `issue: #272` has no repo/);
+  assert.equal(sb.writes().length, 0);
+});
+
+test("the marker is case-insensitive and must start a line", () => {
+  const sb = sandbox({ snapshot: TWO() });
+  assert.equal(sb.run(dispatch("ISSUE: acme/app#272\nSee acme/app#267.", "sonnet")).deny, false);
+  assert.equal(sb.writes().length, 1);
+  const sb2 = sandbox({ snapshot: TWO() });
+  const r = sb2.run(dispatch("note issue: acme/app#272 and acme/app#267.", "sonnet"));
+  assert.equal(r.deny, true, "mid-line text is not a marker, so two issues and no marker is refused");
+  assert.equal(sb2.writes().length, 0);
+});
+
+test("a single issue with no marker is still served by the text, as before", () => {
+  const sb = sandbox({ snapshot: TWO() });
+  assert.equal(sb.run(dispatch("Do acme/app#272 now.", "sonnet")).deny, false);
+  assert.equal(sb.writes().length, 1);
+});
+
+test("a dispatch with a marker associates the session with the served issue only", () => {
+  const sb = sandbox({ snapshot: TWO() });
+  sb.run(withSession(dispatch("issue: acme/app#272\nSee acme/app#267.", "sonnet"), "sess-eeee"));
+  const lines = assocLog(sb).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.deepEqual(lines.map((l) => l.item), ["acme/app#272"]);
+});
+
+test("decide (pure): the marker beats text refs", () => {
+  const d = decide(dispatch("issue: acme/app#272\nacme/app#267", "sonnet"), TWO(), new Date());
+  assert.deepEqual(d.refs, ["acme/app#272"]);
+  assert.deepEqual(d.moves.map((m) => m.ref), ["acme/app#272"]);
 });
