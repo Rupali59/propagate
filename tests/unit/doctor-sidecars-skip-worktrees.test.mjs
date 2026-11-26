@@ -16,7 +16,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { findSidecars } from "../../cli.mjs";
+import { findSidecars } from "../../cli/doctor.mjs";
 
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "doctor-wt-sidecars-"));

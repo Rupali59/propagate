@@ -112,7 +112,7 @@ test("an entry's action is rendered by the REAL renderer and parsed back into th
   // entry would be dropped at exactly the seam this module guards. Driven through
   // cli.mjs's renderDoctorEntries rather than a hand-written line: a test that
   // writes the marker itself proves the parser and not the pipeline.
-  const { renderDoctorEntries } = await import("../../cli.mjs");
+  const { renderDoctorEntries } = await import("../../cli/doctor.mjs");
   const { Reporter } = await import("../../lib/report/doctor/reporter.mjs");
   const r = new Reporter();
   r.header("Rules");
@@ -156,7 +156,7 @@ test("a doctor check built outside the Reporter (cli.mjs checkWithAction) keeps 
   // doctor() has its own bare-text check(); the instruction-budget red goes through
   // checkWithAction so its action crosses the text boundary like a Reporter entry's. Driven
   // through the REAL function and the REAL parser, not a hand-written marker line.
-  const { checkWithAction } = await import("../../cli.mjs");
+  const { checkWithAction } = await import("../../cli/doctor.mjs");
   const out = [];
   const real = console.log;
   console.log = (...a) => { out.push(a.join(" ")); };
@@ -181,6 +181,6 @@ test("doctor() hands the violation's action to its check (the one call no unit t
   // side of it is tested (evaluateExpectations carries the action; checkWithAction renders it);
   // this asserts the hand-off itself exists, by source, and says so rather than implying more.
   const { readFileSync } = await import("node:fs");
-  const src = readFileSync(new URL("../../cli.mjs", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../cli/doctor.mjs", import.meta.url), "utf8");
   assert.match(src, /check\(v\.describe, false, `[^`]*`, v\.action\)/, "the violation loop no longer passes v.action to check()");
 });

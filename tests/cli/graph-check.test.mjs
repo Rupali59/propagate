@@ -28,7 +28,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkGraphMcpStatus } from "../../cli.mjs";
+import { checkGraphMcpStatus } from "../../cli/doctor.mjs";
 
 const SKILL_DIR = fileURLToPath(new URL("../../", import.meta.url));
 const CLI_PATH = path.join(SKILL_DIR, "cli.mjs");

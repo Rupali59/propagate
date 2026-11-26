@@ -15,7 +15,7 @@ import { classifyLine, toSections, marksSuffix, MARK } from "../../lib/report/do
 import { Reporter } from "../../lib/report/doctor/reporter.mjs";
 
 async function rendered(build) {
-  const { renderDoctorEntries } = await import("../../cli.mjs");
+  const { renderDoctorEntries } = await import("../../cli/doctor.mjs");
   const r = new Reporter();
   r.header("Checks");
   build(r);

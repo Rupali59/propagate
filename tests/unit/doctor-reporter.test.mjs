@@ -229,7 +229,7 @@ test("EVERY entry kind has an explicit branch in the renderer — no kind falls 
   // kind silently renders as `info`. For `inconclusive` that is the whole bug
   // arriving through the fix: "could not look" would look like a tally.
   const { readFileSync } = await import("node:fs");
-  const src = readFileSync(new URL("../../cli.mjs", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../cli/doctor.mjs", import.meta.url), "utf8");
   const missing = ENTRY_KINDS.filter((k) => !src.includes(`e.kind === "${k}"`));
   assert.deepEqual(missing, [], `renderDoctorEntries has no explicit branch for: ${missing.join(", ")}`);
 });
