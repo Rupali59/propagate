@@ -43,6 +43,7 @@ test("no line says verified without the quote_ prefix", () => {
 test("the agreement and AI-use disclosure are present; an unsampled review says so", () => {
   const { brief } = rendered();
   assert.match(brief, /## Screening agreement[\s\S]*Verdict: reliable/);
+  assert.match(brief, /- Rated by: fixture rater \(human\)/, "brief.md says who rated and of what kind");
   assert.match(brief, /## AI use[\s\S]*example-model 1 \(lane L1\)/);
   assert.match(rendered({}).brief, /## Screening agreement\n\nNot sampled\./);
 });

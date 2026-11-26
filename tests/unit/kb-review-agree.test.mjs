@@ -26,7 +26,7 @@ test("changing protocol_sha changes the choice", () => {
   assert.notDeepEqual(drawSample(mk(SHA)), drawSample(mk("deadbeef".padEnd(40, "0"))));
 });
 
-test("the screening sample is every excluded entry plus 20% (rounded up) of the rest; support is 20% of claims", () => {
+test("the screening sample is every excluded entry plus 20% (rounded up) of the included rows; support is 20% of claims", () => {
   const s = drawSample(mk(SHA));
   const urls = s.screening.map((x) => x.url);
   for (const u of ["p00", "p01", "p02"]) assert.ok(urls.includes(`https://example.com/${u}`), u);
@@ -74,23 +74,63 @@ test("po 0.85, pe 0.5 gives kappa 0.7: unreliable", () => {
   assert.equal(r.verdict, "unreliable");
 });
 
-test("all one class with full agreement: kappa undefined, reliable, and it says why", () => {
+test("all one class: kappa is null with a reason, never 0, and the verdict is not a pass", () => {
   const brief = { screened: [{ url: "a", decision: "excluded", reason: "r", lane: "L" }, { url: "b", decision: "excluded", reason: "r", lane: "L" }], claims: [] };
-  const r = scoreAgreement(brief, { screening: { a: "exclude", b: "exclude" }, support: {} });
-  assert.equal(r.kappa_defined, false);
-  assert.equal(r.verdict, "reliable");
-  assert.match(r.note, /κ undefined: every decision was the same class/);
-  const r2 = scoreAgreement(brief, { screening: { a: "exclude", b: "include" }, support: {} });
-  assert.equal(r2.verdict, "unreliable");
+  for (const screening of [{ a: "exclude", b: "exclude" }, { a: "exclude", b: "include" }]) {
+    const r = scoreAgreement(brief, { screening, support: {} });
+    assert.equal(r.kappa, null);
+    assert.equal(r.kappa_defined, false);
+    assert.equal(r.verdict, "undefined");
+    assert.match(r.reason, /same label/);
+  }
+  // the second rater all one class while the agent mixed is undefined too
+  const mixed = { screened: [{ url: "a", decision: "excluded", reason: "r", lane: "L" }, { url: "b", decision: "included", reason: "", lane: "L" }], claims: [] };
+  const r = scoreAgreement(mixed, { screening: { a: "include", b: "include" }, support: {} });
+  assert.equal(r.kappa, null);
+  assert.match(r.reason, /the second rater/);
+});
+
+test("#377 regression: 27 excluded, 12 included, 34 not_retrieved samples included rows and never a not_retrieved one", () => {
+  const screened = [
+    ...Array.from({ length: 27 }, (_, i) => ({ url: `https://e.example/x${i}`, decision: "excluded", reason: "r", lane: "L" })),
+    ...Array.from({ length: 12 }, (_, i) => ({ url: `https://e.example/i${i}`, decision: "included", reason: "", lane: "L" })),
+    ...Array.from({ length: 34 }, (_, i) => ({ url: `https://e.example/n${i}`, decision: "not_retrieved", reason: "404", retrieval_reason: "http_404", lane: "L" })),
+  ];
+  const s = drawSample({ protocol_sha: SHA, screened, claims: [], sources: [] });
+  const urls = s.screening.map((x) => x.url);
+  assert.equal(urls.filter((u) => u.includes("/x")).length, 27, "every exclusion");
+  assert.equal(urls.filter((u) => u.includes("/i")).length, Math.ceil(12 * 0.2), "20% of included, rounded up");
+  assert.equal(urls.filter((u) => u.includes("/n")).length, 0, "no not_retrieved row is ever drawn");
+  assert.equal(s.not_retrieved, 34, "reported as a count");
+  // and a not_retrieved answer in a record is not scored
+  const r = scoreAgreement({ protocol_sha: SHA, screened, claims: [] }, { screening: { "https://e.example/n0": "exclude", "https://e.example/x0": "exclude", "https://e.example/i0": "include" }, support: {} });
+  assert.equal(r.n, 2);
+});
+
+test("recordAgreement requires a rater and a kind, and writes both", () => {
+  const dir = tmp();
+  const brief = mk(SHA);
+  writeFileSync(path.join(dir, "brief.json"), JSON.stringify(brief));
+  for (const o of [{ rater: undefined, raterKind: "human" }, { rater: "x", raterKind: undefined }, { rater: "x", raterKind: "robot" }]) {
+    const r = recordAgreement(dir, answers(brief), { apply: true, ...o });
+    assert.equal(r.ok, false, JSON.stringify(o));
+  }
+  assert.equal(existsSync(path.join(dir, "agreement.json")), false);
+  const ok = recordAgreement(dir, answers(brief), { apply: true, rater: "a second model", raterKind: "model", now: Date.UTC(2026, 10, 26) });
+  const rec = JSON.parse(readFileSync(ok.wrote[0], "utf8"));
+  assert.equal(rec.rater, "a second model");
+  assert.equal(rec.rater_kind, "model");
+  assert.equal(rec.date, "2026-11-26");
 });
 
 test("support failures are counted, never a verdict by themselves", () => {
-  const brief = { screened: [{ url: "a", decision: "excluded", reason: "r", lane: "L" }], claims: [{ id: "C1" }, { id: "C2" }] };
-  const r = scoreAgreement(brief, { screening: { a: "exclude" }, support: { C1: "does-not-support", C2: "supports" } });
+  const brief = { screened: [{ url: "a", decision: "excluded", reason: "r", lane: "L" }, { url: "b", decision: "included", reason: "", lane: "L" }], claims: [{ id: "C1" }, { id: "C2" }] };
+  const r = scoreAgreement(brief, { screening: { a: "exclude", b: "include" }, support: { C1: "does-not-support", C2: "supports" } });
   assert.equal(r.support_failures, 1);
   assert.equal(r.verdict, "reliable");
 });
 
+const R = { rater: "second reviewer", raterKind: "human", now: Date.UTC(2026, 10, 26) };
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), "kb-agree-"));
 const snap = (d) => readdirSync(d, { recursive: true }).sort().map((f) => `${f}\0${readFileSync(path.join(d, f), "utf8")}`).join("\n");
 function answers(brief, flip = false) {
@@ -107,7 +147,7 @@ test("recordAgreement without apply leaves the directory byte-identical", () => 
   const brief = mk(SHA);
   writeFileSync(path.join(dir, "brief.json"), JSON.stringify(brief));
   const before = snap(dir);
-  const r = recordAgreement(dir, answers(brief), { apply: false });
+  const r = recordAgreement(dir, answers(brief), { apply: false, ...R });
   assert.equal(r.ok, true);
   assert.deepEqual(r.wrote, []);
   assert.equal(snap(dir), before);
@@ -118,7 +158,7 @@ test("recordAgreement with apply writes agreement.json, stamped with the protoco
   const dir = tmp();
   const brief = mk(SHA);
   writeFileSync(path.join(dir, "brief.json"), JSON.stringify(brief));
-  const r = recordAgreement(dir, answers(brief), { apply: true });
+  const r = recordAgreement(dir, answers(brief), { apply: true, ...R });
   assert.deepEqual(r.wrote, [path.join(dir, "agreement.json")]);
   assert.equal(JSON.parse(readFileSync(r.wrote[0], "utf8")).protocol_sha, SHA);
 });
@@ -136,7 +176,7 @@ test("recordAgreement refuses an incomplete, foreign or malformed answer and wri
     "nonsense",
   ];
   for (const c of cases) {
-    const r = recordAgreement(dir, c, { apply: true });
+    const r = recordAgreement(dir, c, { apply: true, ...R });
     assert.equal(r.ok, false);
     assert.ok(r.problems.length);
   }

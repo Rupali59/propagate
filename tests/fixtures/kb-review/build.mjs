@@ -36,7 +36,7 @@ export const snapshot = (dir) => {
 
 /**
  * @param {object} o {into (a fixture to add a second review to, sharing its hub and state), slug, supersedes, approved, searchDate, tweakBrief(brief), tweakProtocol(text), editProtocolAfter,
- *   leaveUncommitted, agreement: "reliable"|"unreliable"|null, referencesYaml, tiersYaml, omitBody, tweakFetched(records)}
+ *   leaveUncommitted, agreement: "reliable"|"unreliable"|null, raterKind: "human"|"model"|null (default human; null writes a record with no rater, like a pre-#376 one), referencesYaml, tiersYaml, omitBody, tweakFetched(records)}
  * @returns {{root, reviews, dir, state, refs, tiers, protocolSha, brief, integrations}}
  */
 export function buildReview(o = {}) {
@@ -124,8 +124,9 @@ export function buildReview(o = {}) {
     const agent = new Map(final.screened.map((x) => [x.url, x.decision === "included" ? "include" : "exclude"]));
     const flip = o.agreement === "unreliable";
     writeFileSync(path.join(dir, "agreement.json"), JSON.stringify({
-      schema_version: 1,
+      schema_version: 2,
       protocol_sha: final.protocol_sha,
+      ...(o.raterKind === null ? {} : { rater: "fixture rater", rater_kind: o.raterKind ?? "human" }),
       screening: Object.fromEntries(s.screening.map((x) => [x.url, flip ? (agent.get(x.url) === "include" ? "exclude" : "include") : agent.get(x.url)])),
       support: Object.fromEntries(s.support.map((x) => [x.claim_id, "supports"])),
     }, null, 2));

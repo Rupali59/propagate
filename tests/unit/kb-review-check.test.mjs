@@ -27,7 +27,11 @@ test("with a reliable agreement.json the sample warning goes and the score is de
   assert.equal(r.derived.screening.verdict, "reliable");
 });
 
+const MODEL_PROTOCOL = (t) => t.replace("How a source's trustworthiness is judged: its tier, its venue, and whether a second reviewer checks it.", "Second reviewer: a model screens the sample.");
+
 const REFUSALS = {
+  SCREENING_RATER_NOT_HUMAN: { agreement: "reliable", raterKind: "model" },
+  SCREENING_RATER_UNKNOWN: { agreement: "reliable", raterKind: null },
   PROTOCOL_UNAPPROVED: { approved: false },
   PROTOCOL_SHA_MISMATCH: { editProtocolAfter: true },
   PROTOCOL_UNCOMMITTED: { leaveUncommitted: true, loose: true },
@@ -53,6 +57,38 @@ for (const [code, opts] of Object.entries(REFUSALS)) {
     assert.ok(r.refusals.every((x) => x.what && x.code), "each refusal says what");
   });
 }
+
+test("#376: a human rater passes, and its record is not refused", () => {
+  const r = run(buildReview({ agreement: "reliable", raterKind: "human" }));
+  assert.equal(r.ok, true, r.refusals.map((x) => x.what).join(" | "));
+});
+
+test("#376: a model rater passes only where the protocol itself declares a model second reviewer", () => {
+  const fx = buildReview({ agreement: "reliable", raterKind: "model", tweakProtocol: MODEL_PROTOCOL });
+  assert.match(readFileSync(path.join(fx.dir, "protocol.md"), "utf8"), /Second reviewer: a model/, "the tweak applied");
+  const r = run(fx);
+  assert.equal(r.ok, true, r.refusals.map((x) => x.what).join(" | "));
+});
+
+test("#376: the not-human refusal names the rater, and the unknown-rater one never assumes human", () => {
+  const m = run(buildReview({ agreement: "reliable", raterKind: "model" }));
+  assert.match(m.refusals.find((x) => x.code === "SCREENING_RATER_NOT_HUMAN").what, /fixture rater/);
+  const u = run(buildReview({ agreement: "reliable", raterKind: null }));
+  assert.ok(codes(u).includes("SCREENING_RATER_UNKNOWN"));
+  assert.ok(!codes(u).includes("SCREENING_RATER_NOT_HUMAN"));
+});
+
+test("#377: an undefined kappa is refused under its own code, distinct from a low kappa", () => {
+  // the agent excluded one row and included one; the rater answers include for both: the rater is all one class
+  const fx = buildReview({ agreement: "reliable" });
+  const file = path.join(fx.dir, "agreement.json");
+  const rec = JSON.parse(readFileSync(file, "utf8"));
+  for (const u of Object.keys(rec.screening)) rec.screening[u] = "include";
+  writeFileSync(file, JSON.stringify(rec));
+  const r = run(fx);
+  assert.deepEqual([...new Set(codes(r))], ["SCREENING_KAPPA_UNDEFINED"], r.refusals.map((x) => x.what).join(" | "));
+  assert.match(r.refusals[0].what, /same label/);
+});
 
 test("a quote outside 6-15 words is QUOTE_NOT_FOUND carrying findQuote's reason", () => {
   const r = run(buildReview({ tweakBrief: (b) => { b.claims[0].quotes[0].text = "quick brown fox"; } }));

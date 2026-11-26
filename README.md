@@ -125,7 +125,7 @@ Regenerate it with `npm run readme:commands`.
 - `propagate kb review new` — start a literature review: write protocol.md from the template into the reviews folder (refuses an existing review)
 - `propagate kb review assemble` — merge lanes/*.json with searches.json and fetched.json into brief.json (the only file it writes; exit 0 written, 1 refused with nothing written, 2 a lane or log could not be understood)
 - `propagate kb review check` — the gate: decide whether a review's brief may reach the knowledge base (offline, writes nothing; exit 0 ok, 1 refused, 2 could not run; --refetch warns on source drift)
-- `propagate kb review agree` — draw the blind screening and support sample a person checks, record her answers (--apply), and score Cohen's kappa against 0.8
+- `propagate kb review agree` — draw the blind screening and support sample a person checks, record the second rater's answers with who rated and of what kind (--rater, --rater-kind, --apply), and score Cohen's kappa against 0.8
 - `propagate kb review apply` — re-run the gate, then write brief.md, new reference entries (verdict evaluate) and candidates.md; refuses and writes nothing on any refusal
 - `propagate standards` — deprecated: which standards apply, which rows need re-verifying against the tool version in use (offline; status is derived, never written)
 - `propagate standards versions` — deprecated: the cached tool versions; --refresh runs each registry probe and writes them (the only command that spawns a tool)
