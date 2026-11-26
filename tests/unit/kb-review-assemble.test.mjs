@@ -13,6 +13,7 @@ import { validateLane } from "../../lib/kb/review/lane-schema.mjs";
 import { renderBrief } from "../../lib/kb/review/render.mjs";
 import { validateBrief } from "../../lib/kb/review/schema.mjs";
 import { checkReview } from "../../lib/kb/review/check.mjs";
+import { drawSample } from "../../lib/kb/review/agree.mjs";
 import { BODY1, BODY2, QUOTE1, QUOTE2, SEARCH_DATE, buildReview, snapshot } from "../fixtures/kb-review/build.mjs";
 
 const sha = (t) => createHash("sha256").update(t).digest("hex");
@@ -315,4 +316,41 @@ test("a valid lane carries identified_as onto brief.sources[] and brief.md shows
   assert.deepEqual(validateBrief(brief), { ok: true, problems: [] });
   const md = renderBrief({ review: "r", decision: "d", decider: "o", questions: [{ id: "RQ1", text: "q" }] }, brief, { derived: { tiers: {} }, counts: {} }, null);
   assert.match(md, /read as "The Fox Paper" by A\. Author, B\. Writer/, "brief.md names which paper each source is");
+});
+
+test("#388: a lane's not_retrieved is accepted, counted under its lane reason, not excluded, and never sampled", async () => {
+  const fx = buildReview();
+  const S3 = addBody(fx, "Smith J. (2024). A citation line only.", "https://example.com/stub");
+  writeLane(fx, lane("L1", { handed: [S1, S3], screened: [included(S1), { sha256: S3, decision: "not_retrieved", reason: "E7: citation line only" }], claims: [{ text: "foxes jump", quotes: [QUOTE1], sha256s: [S1] }] }));
+  writeLane(fx, lane("L2", { handed: [S2], screened: [included(S2)], claims: [{ text: "tests cover paths", quotes: [QUOTE2], sha256s: [S2] }] }));
+  const r = await kb(["review", "assemble", fx.dir, "--json"], fx);
+  assert.equal(r.code, 0, r.err || r.out);
+  const brief = JSON.parse(readFileSync(path.join(fx.dir, "brief.json"), "utf8"));
+  const rows = brief.screened.filter((s) => s.url === "https://example.com/stub");
+  assert.equal(rows.length, 1);
+  assert.deepEqual([rows[0].decision, rows[0].retrieval_reason, rows[0].lane], ["not_retrieved", "lane: E7", "L1"]);
+  const gate = checkReview(fx.dir, { stateDirPath: fx.state, integrations: fx.integrations });
+  assert.deepEqual(gate.refusals, []);
+  assert.equal(gate.counts.excluded, 0, "a lane not_retrieved is not an exclusion");
+  assert.equal(gate.derived.not_retrieved_by_reason["lane: E7"], 1);
+  // the sample: a fixture where it would otherwise be drawn (it is the only non-included row besides the fetch failure)
+  const s = drawSample(brief);
+  assert.ok(!s.screening.some((x) => x.url === "https://example.com/stub"), "never drawn");
+  assert.equal(s.not_retrieved, 2, "reported as a count: the lane row and the fetch failure");
+});
+
+test("#388: a lane's not_retrieved with no reason is refused (REASON_MISSING), and an unlabelled reason gets lane: unspecified", async () => {
+  const fx = buildReview();
+  const S3 = addBody(fx, "Stub text only.", "https://example.com/stub");
+  const mk = (reason) => lane("L1", { handed: [S1, S3], screened: [included(S1), { sha256: S3, decision: "not_retrieved", reason }], claims: [{ text: "foxes jump", quotes: [QUOTE1], sha256s: [S1] }] });
+  writeLane(fx, mk("  "));
+  writeLane(fx, lane("L2", { handed: [S2], screened: [included(S2)], claims: [{ text: "tests cover paths", quotes: [QUOTE2], sha256s: [S2] }] }));
+  const before = snapshot(fx.dir);
+  const r = await kb(["review", "assemble", fx.dir, "--json"], fx);
+  assert.notEqual(r.code, 0);
+  assert.ok(JSON.parse(r.out).problems.some((p) => p.code === "REASON_MISSING"));
+  assert.equal(snapshot(fx.dir), before, "nothing written");
+  writeLane(fx, mk("12 stub"));
+  assert.equal((await kb(["review", "assemble", fx.dir, "--json"], fx)).code, 0);
+  assert.equal(JSON.parse(readFileSync(path.join(fx.dir, "brief.json"), "utf8")).screened.find((x) => x.url === "https://example.com/stub").retrieval_reason, "lane: unspecified");
 });

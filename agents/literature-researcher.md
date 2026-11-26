@@ -35,6 +35,9 @@ exclusion criteria quoted verbatim, and a list of absolute paths. **Each file na
    title, say so under `gaps` and exclude it. Two files with the same title is a finding, not a typo: report it under `gaps`.
 3. **For each listed source**, record a screening decision, `included` or `excluded`, with a reason against the
    protocol's inclusion and exclusion criteria. An `excluded` decision with no reason is refused. Name the criterion.
+   If the handed text holds no readable body (only a bibliographic record, a landing-page stub or navigation text),
+   record `not_retrieved` instead: it is not a screening decision, so it never reaches the second reviewer. Start the
+   reason with a code from the protocol, such as `E7: citation line only`; an empty reason is refused.
 4. **For each included source**, record claims that answer the lane's question. Each claim carries 1-3 verbatim
    quotes of 6-15 words, copied exactly from the file: no paraphrase, no ellipsis, no joining of two sentences.
    A quote under 6 words matches by luck and one over 15 is a block of someone else's text; both are refused.
