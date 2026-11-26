@@ -145,7 +145,8 @@ test("init never touches the plist (N14) — no plist file appears under the sco
 });
 
 test("source wiring: init's body never calls regeneratePlist/reloadLaunchd; reload's body calls both", async () => {
-  const src = await readFile(CLI_PATH, "utf8");
+  // init and reload moved out of cli.mjs to cli/ledger.mjs (#163).
+  const src = await readFile(fileURLToPath(new URL("../../cli/ledger.mjs", import.meta.url)), "utf8");
 
   const initMatch = src.match(/async function init\(targetDir[\s\S]*?\n}\n\n\/\*\*/);
   assert.ok(initMatch, "could not locate init() body for source inspection");
