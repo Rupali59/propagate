@@ -19,6 +19,10 @@ with these fields added by you, and no other change:
 - `brief`: the brief text you sent, so `ai_use.prompt_sha` covers it.
 - `from` (round 2 only): the round-1 included sources the lane was started from.
 
+A lane may return `decision: "not_retrieved"` for a handed file with no readable body (a citation line, a landing-page stub,
+navigation text). `assemble` records it as not retrieved with `retrieval_reason` `lane: <the first token of its reason>`, so
+it is never counted as excluded and never drawn into the agreement sample.
+
 If a researcher returns prose or a broken object, re-dispatch that lane once with the correction. If it fails again,
 report the lane as failed. Do not repair its claims, quotes or decisions by hand: a hand edit is a model-free claim
 the gate cannot tell from the researcher's.
