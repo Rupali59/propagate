@@ -103,18 +103,18 @@ test("BOTH migrate and migrate-refs resolve their argument through this function
   // `propagate/<name>/propagation` and reported 0 moves — which is why that
   // workspace was still half-migrated.
   //
-  // Source-level, because both resolutions live in cli.mjs's command wrappers
+  // Source-level, because both resolutions live in cli/ledger.mjs's command wrappers
   // and the alternative is a subprocess per case. The BEHAVIOUR is covered by
   // tests/unit/refs-migrate.test.mjs's stray-tree case.
   const { readFileSync } = await import("node:fs");
   const path = (await import("node:path")).default;
-  const cli = readFileSync(path.join(import.meta.dirname, "../../cli.mjs"), "utf8");
+  const cli = readFileSync(path.join(import.meta.dirname, "../../cli/ledger.mjs"), "utf8");
 
   for (const fn of ["migrateRefsCmd", "migrateCmd"]) {
     const i = cli.indexOf(`async function ${fn}(`);
     assert.ok(i > 0, `${fn} not found — this check has gone blind`);
     // The next function boundary, so each body is read in isolation.
-    const next = cli.indexOf("\nasync function ", i + 10);
+    const next = cli.indexOf("\nexport async function ", i + 10);
     const body = cli.slice(i, next > 0 ? next : i + 4000);
     assert.match(body, /resolveWorkspace\(/,
       `${fn} does not resolve its <workspace> argument — a bare name will hit the CWD`);
