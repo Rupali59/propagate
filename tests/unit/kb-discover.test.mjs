@@ -8,6 +8,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, exist
 import os from "node:os";
 import path from "node:path";
 import { discoverCmd, redact } from "../../lib/research/discover.mjs";
+import { recordKey } from "../../lib/research/discover-engines.mjs";
 import { kbCmd } from "../../cli/kb.mjs";
 
 const FIX = path.join(import.meta.dirname, "..", "fixtures", "discover");
@@ -50,6 +51,7 @@ test("openalex: parses the works shape, strips ids, rebuilds the abstract, sets 
   assert.deepEqual(d[0], {
     engine: "openalex", id: "W111", doi: "10.1000/alpha.1", title: "Screening with agents", year: 2024,
     venue: "Journal of Review Methods", is_peer_reviewed_hint: true, oa_url: "https://example.org/alpha.pdf", abstract: "Agents screen papers well",
+    engines: ["openalex"], kind: "paper", key: "doi:10.1000/alpha.1", updated: null,
   });
   assert.equal(d[1].is_peer_reviewed_hint, false);
   assert.equal(d[1].doi, null);
@@ -408,4 +410,110 @@ test("every exit-2 line is one line, names its engine and a reason, and carries 
     assert.match(lines[0], /error: kb discover \(no engine ran\): .+Next:/);
     assert.match(lines[0], FILTER);
   }
+});
+
+// ---- #399: kind / key / updated, and de-duplication across engines on `key` ----
+
+const oaBody = (works) => JSON.stringify({ results: works });
+const oaWork = (id, doi, extra = {}) => ({ id: `https://openalex.org/${id}`, doi, display_name: "Shared paper", publication_year: 2024, primary_location: null, open_access: {}, ...extra });
+const crBody = (items) => JSON.stringify({ status: "ok", "message-type": "work-list", message: { items } });
+const crItem = (doi, extra = {}) => ({ DOI: doi, title: ["Shared paper"], issued: { "date-parts": [[2024]] }, type: "journal-article", ...extra });
+const readDiscovered = (dir) => JSON.parse(readFileSync(path.join(dir, "discovered.json"), "utf8"));
+
+test("one DOI from openalex and crossref is ONE row, engines in first-seen order, hit counts stay per engine", async () => {
+  const dir = tmp();
+  const f = stub({
+    "api.openalex.org": [ok(oaBody([oaWork("W9", "https://doi.org/10.5555/Shared.1"), oaWork("W10", null)]))],
+    "api.crossref.org": [ok(crBody([crItem("10.5555/SHARED.1")]))],
+  });
+  assert.equal(await discoverCmd([dir, "q", "--engine", "openalex"], base({ fetch: f })), 0);
+  assert.equal(await discoverCmd([dir, "q", "--engine", "crossref"], base({ fetch: f })), 0);
+  const d = readDiscovered(dir);
+  assert.equal(d.length, 2, "the shared DOI is one row; the DOI-less work is the other");
+  assert.equal(d[0].key, "doi:10.5555/shared.1");
+  assert.deepEqual(d[0].engines, ["openalex", "crossref"]);
+  assert.equal(d[0].engine, "openalex", "`engine` stays the first engine, for readers of the old shape");
+  assert.equal(d[0].id, "W9");
+  assert.deepEqual(d[1].engines, ["openalex"]);
+  const s = JSON.parse(readFileSync(path.join(dir, "searches.json"), "utf8"));
+  assert.deepEqual(s.map((r) => [r.engine, r.hits]), [["openalex", 2], ["crossref", 1]], "hits count what each engine returned");
+});
+
+test("the same DOI in one multi-engine run is one row too", async () => {
+  const dir = tmp();
+  const f = stub({
+    "api.openalex.org": [ok(oaBody([oaWork("W9", "10.5555/x.1")]))],
+    "api.semanticscholar.org": [ok(JSON.stringify({ data: [] , total: 0 }))],
+    "export.arxiv.org": [ok(fx("arxiv-empty.xml"))],
+    "api.crossref.org": [ok(crBody([crItem("10.5555/x.1")]))],
+  });
+  assert.equal(await discoverCmd([dir, "q"], base({ fetch: f })), 0);
+  const d = readDiscovered(dir);
+  assert.equal(d.length, 1);
+  assert.deepEqual(d[0].engines, ["openalex", "crossref"]);
+});
+
+test("a later engine fills a null or missing field but never overwrites a value", async () => {
+  const dir = tmp();
+  const f = stub({
+    "api.openalex.org": [ok(oaBody([oaWork("W9", "10.5555/fill.1", { display_name: "First title", primary_location: { source: { display_name: "Venue One", type: "journal" } } })]))],
+    "api.crossref.org": [ok(crBody([crItem("10.5555/fill.1", { title: ["Second title"], "container-title": ["Venue Two"], abstract: "<jats:p>Only crossref has this.</jats:p>" })]))],
+  });
+  await discoverCmd([dir, "q", "--engine", "openalex"], base({ fetch: f }));
+  assert.equal("abstract" in readDiscovered(dir)[0], false, "precondition: the first engine has no abstract");
+  await discoverCmd([dir, "q", "--engine", "crossref"], base({ fetch: f }));
+  const [row] = readDiscovered(dir);
+  assert.equal(row.abstract, "Only crossref has this.", "missing field filled");
+  assert.equal(row.title, "First title", "a value is never overwritten");
+  assert.equal(row.venue, "Venue One");
+});
+
+test("an old discovered.json with no key, engines or kind merges without duplicates", async () => {
+  const dir = tmp();
+  const old = [
+    { engine: "openalex", id: "W111", doi: "10.1000/alpha.1", title: "Screening with agents", year: 2024, venue: "Journal of Review Methods", is_peer_reviewed_hint: true, oa_url: "https://example.org/alpha.pdf" },
+    { engine: "arxiv", id: "2401.00001v1", doi: null, title: "Old arxiv", year: 2024, venue: "arXiv", is_peer_reviewed_hint: false, oa_url: null },
+  ];
+  writeFileSync(path.join(dir, "discovered.json"), JSON.stringify(old));
+  const f = stub({ "api.openalex.org": [ok(fx("openalex.json"))], "export.arxiv.org": [ok(`<feed><entry><id>http://arxiv.org/abs/2401.00001v2</id><title>Old arxiv</title><summary>S</summary></entry></feed>`)] });
+  assert.equal(await discoverCmd([dir, "q", "--engine", "openalex"], base({ fetch: f })), 0);
+  assert.equal(await discoverCmd([dir, "q", "--engine", "arxiv"], base({ fetch: f })), 0);
+  const d = readDiscovered(dir);
+  assert.equal(d.length, 3, "openalex.json's two works plus the old arXiv row; nothing twice");
+  assert.deepEqual(d[0].engines, ["openalex"]);
+  assert.equal(d[0].key, "doi:10.1000/alpha.1");
+  assert.equal(d[1].key, "arxiv:2401.00001", "an old arXiv row is keyed without its version");
+  assert.deepEqual(d[1].engines, ["arxiv"], "the v2 re-find folds into the v1 row");
+  assert.equal(d[1].abstract, "S");
+});
+
+test("key normalisation: DOI case, URL prefix, doi: prefix, arXiv version suffix, engine fallback", () => {
+  assert.equal(recordKey({ engine: "openalex", id: "W1", doi: "10.1000/ABC.1" }), "doi:10.1000/abc.1");
+  assert.equal(recordKey({ engine: "s2", id: "p", doi: "https://doi.org/10.1000/ABC.1" }), "doi:10.1000/abc.1");
+  assert.equal(recordKey({ engine: "s2", id: "p", doi: "https://dx.doi.org/10.1000/abc.1" }), "doi:10.1000/abc.1");
+  assert.equal(recordKey({ engine: "s2", id: "p", doi: "doi:10.1000/abc.1" }), "doi:10.1000/abc.1");
+  assert.equal(recordKey({ engine: "arxiv", id: "2301.00001v3", doi: null }), "arxiv:2301.00001");
+  assert.equal(recordKey({ engine: "arxiv", id: "hep-th/9901001v1", doi: null }), "arxiv:hep-th/9901001");
+  assert.equal(recordKey({ engine: "s2", id: "abc123", doi: null }), "s2:abc123");
+  assert.equal(recordKey({ engine: "openalex", id: "W2", doi: "" }), "openalex:W2");
+});
+
+test("every engine's rows carry kind, key and updated (an ISO date, or null)", async () => {
+  const dir = tmp();
+  const f = stub({
+    "api.openalex.org": [ok(oaBody([oaWork("W1", null, { updated_date: "2025-03-04T05:06:07.000000" })]))],
+    "api.semanticscholar.org": [ok(fx("s2.json"))], "export.arxiv.org": [ok(fx("arxiv.xml"))],
+    "api.crossref.org": [ok(crBody([crItem("10.7777/k.1", { deposited: { "date-time": "2024-02-03T00:00:00Z" } })]))],
+  });
+  assert.equal(await discoverCmd([dir, "q"], base({ fetch: f })), 0);
+  const d = readDiscovered(dir);
+  for (const r of d) {
+    assert.equal(r.kind, "paper");
+    assert.match(r.key, /^(doi|arxiv|openalex|s2):/);
+    assert.ok(r.updated === null || /^\d{4}-\d{2}-\d{2}$/.test(r.updated), `${r.key}: ${r.updated}`);
+  }
+  assert.equal(d.find((r) => r.id === "W1").updated, "2025-03-04");
+  assert.equal(d.find((r) => r.engine === "crossref").updated, "2024-02-03");
+  assert.equal(d.find((r) => r.engine === "s2").updated, null);
+  assert.equal(d.find((r) => r.engine === "arxiv").key, "doi:10.3000/gamma", "an arXiv entry that states a DOI is keyed by it");
 });
