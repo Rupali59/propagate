@@ -8,6 +8,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, exist
 import os from "node:os";
 import path from "node:path";
 import { discoverCmd, redact } from "../../lib/research/discover.mjs";
+import { findDiscovered } from "../../lib/kb/review/tier.mjs";
 import { recordKey } from "../../lib/research/discover-engines.mjs";
 import { kbCmd } from "../../cli/kb.mjs";
 
@@ -51,7 +52,7 @@ test("openalex: parses the works shape, strips ids, rebuilds the abstract, sets 
   assert.deepEqual(d[0], {
     engine: "openalex", id: "W111", doi: "10.1000/alpha.1", title: "Screening with agents", year: 2024,
     venue: "Journal of Review Methods", is_peer_reviewed_hint: true, oa_url: "https://example.org/alpha.pdf", abstract: "Agents screen papers well",
-    engines: ["openalex"], kind: "paper", key: "doi:10.1000/alpha.1", updated: null,
+    engines: ["openalex"], ids: { openalex: "W111" }, kind: "paper", key: "doi:10.1000/alpha.1", updated: null,
   });
   assert.equal(d[1].is_peer_reviewed_hint, false);
   assert.equal(d[1].doi, null);
@@ -516,4 +517,26 @@ test("every engine's rows carry kind, key and updated (an ISO date, or null)", a
   assert.equal(d.find((r) => r.engine === "crossref").updated, "2024-02-03");
   assert.equal(d.find((r) => r.engine === "s2").updated, null);
   assert.equal(d.find((r) => r.engine === "arxiv").key, "doi:10.3000/gamma", "an arXiv entry that states a DOI is keyed by it");
+});
+
+test("an arXiv hit folded into a DOI row is still found by its arXiv URL, through ids.arxiv", async () => {
+  const dir = tmp();
+  const feed = `<feed><entry><id>http://arxiv.org/abs/2401.00009v1</id><title>Shared paper</title><summary>S</summary>
+<arxiv:doi>10.5555/Fold.1</arxiv:doi><link title="pdf" href="http://arxiv.org/pdf/2401.00009v1"/></entry></feed>`;
+  const f = stub({
+    "api.openalex.org": [ok(oaBody([oaWork("W9", "10.5555/fold.1", { open_access: { oa_url: "https://example.org/fold.pdf" } })]))],
+    "export.arxiv.org": [ok(feed)],
+  });
+  await discoverCmd([dir, "q", "--engine", "openalex"], base({ fetch: f }));
+  await discoverCmd([dir, "q", "--engine", "arxiv"], base({ fetch: f }));
+  const d = readDiscovered(dir);
+  assert.equal(d.length, 1);
+  assert.deepEqual(d[0].engines, ["openalex", "arxiv"]);
+  assert.deepEqual(d[0].ids, { openalex: "W9", arxiv: "2401.00009v1" });
+  assert.equal(d[0].oa_url, "https://example.org/fold.pdf", "the first oa_url stays, so only ids.arxiv can match the arXiv URL");
+  assert.equal(findDiscovered(["https://arxiv.org/pdf/2401.00009v2"], d), d[0]);
+  const oldRow = { engine: "openalex", id: "W1", doi: "10.1/x", oa_url: null };
+  writeFileSync(path.join(dir, "discovered.json"), JSON.stringify([oldRow]));
+  await discoverCmd([dir, "q", "--engine", "openalex"], base({ fetch: f }));
+  assert.deepEqual(readDiscovered(dir)[0].ids, { openalex: "W1" }, "an old row gets ids on read");
 });
