@@ -38,7 +38,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { undiscoverableLedgersReport } from "../../cli.mjs";
+import { undiscoverableLedgersReport } from "../../cli/doctor.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
 

@@ -38,6 +38,7 @@ const DOCTOR_MODULES = existsSync(DOCTOR_DIR)
   : [];
 const CLI = [
   readFileSync(path.join(REPO, "cli.mjs"), "utf8"),
+  readFileSync(path.join(REPO, "cli", "doctor.mjs"), "utf8"), // doctor moved out of cli.mjs (#162)
   ...DOCTOR_MODULES.map((f) => readFileSync(path.join(DOCTOR_DIR, f), "utf8")),
 ].join("\n");
 // RECURSIVE. tests/ gained subdirectories on 2026-08-20, and a non-recursive read

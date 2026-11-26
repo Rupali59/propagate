@@ -222,9 +222,6 @@ export { decisionsAttributionReport } from "./lib/report/decisions.mjs";
 // file would throw ReferenceError at runtime, which node --check cannot see.
 export { classifyDownstreamPath } from "./lib/edges/edges.mjs";
 
-// re-export: moved to cli/doctor.mjs (#162)
-export { renderDoctorEntries, checkWithAction, undiscoverableLedgersReport, assignSidecarsToWorkspaces, findSidecars, checkGraphMcpStatus } from "./cli/doctor.mjs";
-
 /**
  * `rules <list|check|selftest|promote>` — the canonical-rules lifecycle (Phase 5).
  *

@@ -21,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assignSidecarsToWorkspaces } from "../../cli.mjs";
+import { assignSidecarsToWorkspaces } from "../../cli/doctor.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("../../cli.mjs", import.meta.url));
 
