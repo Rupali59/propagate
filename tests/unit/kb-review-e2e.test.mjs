@@ -30,6 +30,7 @@ before(async () => {
     const send = (code, body) => { res.writeHead(code, { "content-type": "text/html; charset=utf-8" }); res.end(body); };
     if (req.url === "/robots.txt") return send(200, "User-agent: *\nDisallow:\n");
     if (req.url === "/a") return send(200, page(`Intro. ${SENTENCE_A}. More text.`));
+    if (req.url === "/c") return send(200, page("An unrelated note about gardening, with no screening content at all."));
     if (req.url === "/b") return send(200, page(`Guide. ${SENTENCE_B}. End.`));
     return send(403, "no");
   });
@@ -80,11 +81,12 @@ async function setUp() {
   const fetchStub = async () => ({ status: 200, text: async () => OPENALEX, headers: { get: () => null } });
   assert.equal((await kb(["discover", dir, "automated screening", "--engine", "openalex", "--lane", "L1"], ctx, { fetch: fetchStub })).code, 0);
   // 4. fetch, through the stub page host; the third URL is refused (403), which is counted, not hidden
-  const f = await kb(["fetch", dir, `${base}/a`, `${base}/b`, `${base}/denied`, "--json"], ctx, { endpoints: { wayback: `${base}/wayback`, unpaywall: `${base}/unpaywall` } });
+  const f = await kb(["fetch", dir, `${base}/a`, `${base}/b`, `${base}/c`, `${base}/denied`, "--json"], ctx, { endpoints: { wayback: `${base}/wayback`, unpaywall: `${base}/unpaywall` } });
   assert.equal(f.code, 1, f.err || f.out);
   const records = JSON.parse(readFileSync(path.join(dir, "fetched.json"), "utf8")).records;
   ctx.shaA = records.find((r) => r.url === `${base}/a`).sha256;
   ctx.shaB = records.find((r) => r.url === `${base}/b`).sha256;
+  ctx.shaC = records.find((r) => r.url === `${base}/c`).sha256;
   assert.equal(records.find((r) => r.url === `${base}/denied`).classification, "not_retrieved");
   return ctx;
 }
@@ -99,7 +101,7 @@ const writeLanes = (ctx, quoteA = QUOTE_A) => {
     proposals: [{ target: "reference", claims: [0], text: "a page on automated screening", ref_id: "screening-page" }],
   }));
   put(lane("L2", {
-    handed: [ctx.shaB], screened: [{ sha256: ctx.shaB, decision: "included", reason: "meets inclusion: a guide to sampling agent decisions", identified_as: { title: "Sampling agent decisions: a guide" } }],
+    handed: [ctx.shaB, ctx.shaC], screened: [{ sha256: ctx.shaB, decision: "included", reason: "meets inclusion: a guide to sampling agent decisions", identified_as: { title: "Sampling agent decisions: a guide" } }, { sha256: ctx.shaC, decision: "excluded", reason: "off topic: a note about gardening", identified_as: { title: "A note about gardening" } }],
     claims: [{ text: "agent decisions should be sampled by a second reviewer", quotes: [QUOTE_B], sha256s: [ctx.shaB] }],
   }));
 };
@@ -121,7 +123,7 @@ test("the whole loop: new, approve, discover, fetch, assemble, check 0, agree, a
   const decisions = path.join(ctx.root, "decisions.json");
   writeFileSync(decisions, JSON.stringify({ screening: Object.fromEntries(sample.screening.map((x) => [x.url, agent.get(x.url)])), support: Object.fromEntries(sample.support.map((x) => [x.claim_id, "supports"])) }));
   assert.equal((await kb(["review", "agree", ctx.dir], ctx)).code, 0);
-  const rec = await kb(["review", "agree", ctx.dir, "--record", decisions, "--apply"], ctx);
+  const rec = await kb(["review", "agree", ctx.dir, "--record", decisions, "--rater", "second reviewer", "--rater-kind", "human", "--apply"], ctx);
   assert.equal(rec.code, 0, rec.err || rec.out);
   assert.equal((await kb(["review", "agree", ctx.dir], ctx)).code, 0, "the recorded sample scores reliable");
   // 9. apply
@@ -137,7 +139,7 @@ test("the whole loop: new, approve, discover, fetch, assemble, check 0, agree, a
 
   const md = readFileSync(path.join(ctx.dir, "brief.md"), "utf8");
   assert.match(md, /## Limitations/);
-  assert.match(md, /- Identified: 3\n- Duplicates removed: 0\n- Screened: 3\n- Excluded: 0\n- Not retrieved: 1\n- Included: 2/);
+  assert.match(md, /- Identified: 4\n- Duplicates removed: 0\n- Screened: 4\n- Excluded: 1\n- Not retrieved: 1\n- Included: 2/);
 
   const again = await kb(["review", "check", ctx.dir, "--json"], ctx);
   assert.equal(again.code, 0, again.out);

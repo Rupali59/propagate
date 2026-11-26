@@ -69,6 +69,8 @@ test("new: creates the protocol (0), refuses to overwrite (1), and is 2 when not
   assert.equal((await kb(["review", "new", "Bad Slug", "--decision", "d", "--decider", "p"], fx)).code, 2);
 });
 
+const RATER = ["--rater", "second reviewer", "--rater-kind", "human"];
+
 test("agree: prints the sample (0), records only with --apply (0), then scores (0 reliable, 1 unreliable)", async () => {
   const fx = buildReview();
   const sample = await kb(["review", "agree", fx.dir, "--json"], fx);
@@ -82,15 +84,22 @@ test("agree: prints the sample (0), records only with --apply (0), then scores (
   });
   const f = path.join(mkdtempSync(path.join(os.tmpdir(), "kb-ans-")), "a.json");
   writeFileSync(f, JSON.stringify(answers(false)));
-  assert.equal((await kb(["review", "agree", fx.dir, "--record", f], fx)).code, 0);
+  assert.equal((await kb(["review", "agree", fx.dir, "--record", f, ...RATER], fx)).code, 0);
   assert.equal(existsSync(path.join(fx.dir, "agreement.json")), false, "dry run writes nothing");
-  assert.equal((await kb(["review", "agree", fx.dir, "--record", f, "--apply"], fx)).code, 0);
+  assert.equal((await kb(["review", "agree", fx.dir, "--record", f, ...RATER, "--apply"], fx)).code, 0);
   assert.equal((await kb(["review", "agree", fx.dir], fx)).code, 0);
   const bad = buildReview({ agreement: "unreliable" });
   assert.equal((await kb(["review", "agree", bad.dir], bad)).code, 1);
   writeFileSync(f, JSON.stringify({ screening: {}, support: {} }));
-  const inc = await kb(["review", "agree", fx.dir, "--record", f, "--apply", "--json"], buildReview());
+  const inc = await kb(["review", "agree", fx.dir, "--record", f, ...RATER, "--apply", "--json"], buildReview());
   assert.equal(inc.code, 1);
+  // #376: no --rater / --rater-kind is refused, and writes nothing
+  const noRater = buildReview();
+  writeFileSync(f, JSON.stringify(answers(false)));
+  const nr = await kb(["review", "agree", noRater.dir, "--record", f, "--apply", "--json"], noRater);
+  assert.equal(nr.code, 1);
+  assert.match(nr.out, /--rater/);
+  assert.equal(existsSync(path.join(noRater.dir, "agreement.json")), false);
 });
 
 test("apply: exit 0 and the three files on the valid fixture, 1 with nothing written on a refusal", async () => {
