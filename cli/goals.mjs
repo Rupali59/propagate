@@ -11,7 +11,9 @@
  * Two subcommands run commands, and only APPROVED ones (propagate#55; this
  * supersedes the earlier "no --apply and no --run", DECISIONS 2026-11-13):
  *
- *   goals allow <GOALS.md> <goal-id>   the owner approves one goal's exact command text.
+ *   goals allow <GOALS.md> <goal-id> [--force --reason <t>]
+ *                                      the owner approves one goal's exact command text. Refused (exit 3) when the
+ *                                      command cannot fail (#383) unless --force with a reason.
  *                                      Its SHA-256 goes to $PROPAGATE_STATE_DIR/goals/trusted.json.
  *   goals check [--json]               read-only standing check (propagate#264): active-goal limit, appetite, board items
  *                                      carry a declared active goal and the fields that make them startable. Exit 0 / 1 / 2.
@@ -37,7 +39,7 @@ import { stateDir } from "../lib/core/paths.mjs";
 import { checkGoals } from "../lib/report/goals-check.mjs";
 import { readBoards, boardsForGoals } from "../lib/report/day.mjs";
 import { ghFetcher } from "./sprint.mjs";
-import { RUN_TIMEOUT_MS, allow, readTrust, planChecks, runDerived, repoRoot, writeResolved, trustPath } from "../lib/report/goals-run.mjs";
+import { RUN_TIMEOUT_MS, failurePath, allow, readTrust, planChecks, runDerived, repoRoot, writeResolved, trustPath } from "../lib/report/goals-run.mjs";
 
 function short(file, cwd) {
   const home = process.env.HOME ?? "";
@@ -47,11 +49,22 @@ function short(file, cwd) {
 
 const STATUS_COLOUR = { open: YELLOW, closed: GREEN, parked: DIM, unknown: RED };
 
-/** `goals allow <file> <goal-id>`: approve one command. Exit 0 approved, 2 not found or no command. */
+/**
+ * `goals allow <file> <goal-id> [--force --reason <text>]`: approve one command. Exit 0 approved, 2 not found, no
+ * command or bad usage, 3 refused because the command cannot fail (propagate#383; `failurePath` names why).
+ */
 export function allowCmd(argv, { now = new Date() } = {}) {
-  const [file, id] = argv.filter((a) => !a.startsWith("--"));
+  const force = argv.includes("--force");
+  const ri = argv.indexOf("--reason");
+  const reason = ri === -1 ? null : String(argv[ri + 1] ?? "").trim();
+  const positional = argv.filter((a, i) => !a.startsWith("--") && !(ri !== -1 && i === ri + 1));
+  const [file, id] = positional;
   if (!file || id == null) {
-    console.error("usage: propagate goals allow <GOALS.md> <goal-id>");
+    console.error("usage: propagate goals allow <GOALS.md> <goal-id> [--force --reason <text>]");
+    return 2;
+  }
+  if (force && !reason) {
+    console.error("goals allow: --force needs --reason <text>, which is recorded in the trust store");
     return 2;
   }
   const abs = path.resolve(file);
@@ -69,7 +82,15 @@ export function allowCmd(argv, { now = new Date() } = {}) {
     console.error(`goal ${id} names no Derived by: command (${e.derivation}); nothing to approve`);
     return 2;
   }
-  const h = allow({ file: abs, goal: id, cmd: e.command, now });
+  const fp = failurePath(e.command);
+  if (!fp.ok && !force) {
+    console.error(`goal ${id} not approved: its Derived by: command cannot fail, because ${fp.reason}.`);
+    console.error("  check-done reads exit 0 as met, so this would close the goal on a report. Make it exit non-zero while the goal is unmet");
+    console.error("  (and exit 2 below a floor), or override with: propagate goals allow <GOALS.md> <goal-id> --force --reason '<why it is honest>'");
+    return 3;
+  }
+  const h = allow({ file: abs, goal: id, cmd: e.command, now, override: !fp.ok ? { reason, lint: fp.reason } : null });
+  if (!fp.ok) console.log(`  ${YELLOW}forced past the no-failure-path check${RESET} (${fp.reason}); reason recorded`);
   console.log(`approved goal ${id} in ${abs}`);
   console.log(`  command: ${e.command.split("\n").join("\n           ")}`);
   console.log(`  sha256 ${h.slice(0, 12)} in ${trustPath()}. An edit to the command makes it untrusted again.`);
@@ -145,6 +166,7 @@ export function checkDoneCmd(argv, { files, now = new Date(), run = runDerived, 
       const col = r.outcome === "met" ? GREEN : YELLOW;
       const w = r.written === true ? " · Resolved written" : r.written === false ? ` ${RED}· section not found, nothing written${RESET}` : "";
       console.log(`  ${col}${r.outcome.padEnd(9)}${RESET} ${r.n} · ${r.title}  ${DIM}${short(r.file, process.cwd())}: ${r.reason}${RESET}${w}`);
+      if (r.outcome === "met") for (const l of r.output_tail ?? []) console.log(`            ${DIM}read as a pass: ${l}${RESET}`);
     } else if (r.outcome === "untrusted") {
       console.log(`  ${YELLOW}untrusted${RESET} ${r.n} · ${r.title}  ${DIM}not run; approve with: propagate goals allow ${r.file} ${r.n}${RESET}`);
     }
