@@ -130,14 +130,14 @@ test("a github repo and a marketplace for the same repo dedupe to one row", asyn
   assert.equal(d.length, 2, "Widget-Kit plus sample-user/gizmo (gizmo appears in both sources too)");
 });
 
-test("--sources skills runs exactly skills, plugins and mcp", async () => {
+test("--sources skills runs exactly skills, plugins, mcp and clihub", async () => {
   const dir = tmp();
-  const f = stub({ "skills.sh": { body: fx("skills.json") }, "claudemarketplaces.com": { body: fx("plugins.json") }, "registry.modelcontextprotocol.io": { body: fx("mcp.json") } });
+  const f = stub({ "skills.sh": { body: fx("skills.json") }, "claudemarketplaces.com": { body: fx("plugins.json") }, "registry.modelcontextprotocol.io": { body: fx("mcp.json") }, "raw.githubusercontent.com": { body: fx("clihub-registry.json") } });
   const gh = ghStub(fx("github.json"));
   assert.equal(await discoverCmd([dir, "widget", "--sources", "skills"], base({ fetch: f, gh })), 0);
-  assert.deepEqual([...f.calls].sort(), ["claudemarketplaces.com", "registry.modelcontextprotocol.io", "skills.sh"]);
+  assert.deepEqual([...new Set(f.calls)].sort(), ["claudemarketplaces.com", "raw.githubusercontent.com", "registry.modelcontextprotocol.io", "skills.sh"]);
   assert.equal(gh.calls.length, 0);
-  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "searches.json"), "utf8")).map((s) => s.engine), ["skills", "plugins", "mcp"]);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "searches.json"), "utf8")).map((s) => s.engine), ["skills", "plugins", "mcp", "clihub"]);
 });
 
 test("with no --sources or --engine only the academic engines run; --sources code,skills and all pick the groups", async () => {
@@ -148,9 +148,9 @@ test("with no --sources or --engine only the academic engines run; --sources cod
   assert.deepEqual(f.calls, ["api.openalex.org", "api.semanticscholar.org", "export.arxiv.org", "api.crossref.org"]);
   assert.equal(gh0.calls.length, 0, "github is not in the academic group");
   const g = ghStub(fx("github.json"));
-  const f2 = stub({ "registry.npmjs.org": { body: fx("npm.json") }, "skills.sh": { body: fx("skills.json") }, "claudemarketplaces.com": { body: fx("plugins.json") }, "registry.modelcontextprotocol.io": { body: fx("mcp.json") } });
+  const f2 = stub({ "registry.npmjs.org": { body: fx("npm.json") }, "skills.sh": { body: fx("skills.json") }, "claudemarketplaces.com": { body: fx("plugins.json") }, "registry.modelcontextprotocol.io": { body: fx("mcp.json") }, "raw.githubusercontent.com": { body: fx("clihub-registry.json") } });
   assert.equal(await discoverCmd([tmp(), "widget", "--sources", "code,skills"], base({ fetch: f2, gh: g })), 0);
-  assert.deepEqual([...f2.calls].sort(), ["claudemarketplaces.com", "registry.modelcontextprotocol.io", "registry.npmjs.org", "skills.sh"]);
+  assert.deepEqual([...new Set(f2.calls)].sort(), ["claudemarketplaces.com", "raw.githubusercontent.com", "registry.modelcontextprotocol.io", "registry.npmjs.org", "skills.sh"]);
   assert.equal(g.calls.length, 1);
 });
 
@@ -234,4 +234,54 @@ test("npm: a popular package matching no term is filtered out, the rest rank by 
   assert.deepEqual(two.map((r) => r.id), ["tool-high", "sources-mid"], "limit counts matching packages, not fetched ones");
   assert.equal(engine("npm").request({ query: "cli literature search sources", limit: 5 }).url.match(/size=(\d+)/)[1], "20");
   assert.equal(engine("npm").request({ query: "x", limit: 50 }).url.match(/size=(\d+)/)[1], "100");
+});
+
+const CLIHUB_A = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main/registry.json";
+const CLIHUB_B = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main/public_registry.json";
+const clihubBodies = () => [fx("clihub-registry.json"), fx("clihub-public.json")];
+const byUrl = (map) => {
+  const calls = [];
+  const fn = async (url) => {
+    calls.push(url);
+    const r = map[url];
+    if (!r) throw new Error(`stub: no route for ${url}`);
+    return { status: r.status ?? 200, text: async () => r.body, headers: { get: () => null } };
+  };
+  fn.calls = calls;
+  return fn;
+};
+
+test("clihub: merges both files, ranks by terms matched, de-dupes on name, and records kind, key, url, install", () => {
+  const rows = engine("clihub").parse(clihubBodies(), { query: "find a research reference manager", limit: 10 });
+  assert.deepEqual(rows.map((r) => r.key), ["clihub:refmgr", "clihub:notekeeper"], "refmgr matches 3 terms, notekeeper 2, imgtool and plain none");
+  assert.deepEqual(
+    { kind: rows[0].kind, url: rows[0].url, install: rows[0].install, updated: rows[0].updated, abstract: rows[0].abstract, title: rows[0].title },
+    { kind: "cli", url: "https://example.test/refmgr", install: "pip install refmgr", updated: null, abstract: "Manage a reference library from the shell", title: "Reference Manager" },
+  );
+  assert.equal(rows[1].url, "https://hkuds.github.io/CLI-Anything/", "no homepage and no source_url falls back to the hub page");
+  assert.equal("install" in rows[1], false);
+  assert.equal(engine("clihub").parse(clihubBodies(), { query: "reference manager research", limit: 1 }).length, 1);
+  assert.deepEqual(engine("clihub").request().urls, [CLIHUB_A, CLIHUB_B]);
+});
+
+test("clihub: a body that is not a registry, or an entry without a name, is Malformed", () => {
+  const good = clihubBodies();
+  for (const bad of ["not json", "{}", '{"clis":[{"display_name":"x"}]}']) {
+    assert.throws(() => engine("clihub").parse([bad, good[1]], { query: "x" }), Malformed, `file 1: ${bad}`);
+    assert.throws(() => engine("clihub").parse([good[0], bad], { query: "x" }), Malformed, `file 2: ${bad}`);
+  }
+});
+
+test("clihub: both files are fetched; if either fails the engine fails with exit 2 and writes nothing", async () => {
+  const ok = byUrl({ [CLIHUB_A]: { body: fx("clihub-registry.json") }, [CLIHUB_B]: { body: fx("clihub-public.json") } });
+  const dir = tmp();
+  assert.equal(await discoverCmd([dir, "reference manager", "--engine", "clihub"], base({ fetch: ok })), 0);
+  assert.deepEqual(ok.calls, [CLIHUB_A, CLIHUB_B]);
+  assert.equal(readDiscovered(dir)[0].key, "clihub:refmgr");
+  const half = byUrl({ [CLIHUB_A]: { body: fx("clihub-registry.json") }, [CLIHUB_B]: { status: 404, body: "" } });
+  const t = base({ fetch: half });
+  const d2 = tmp();
+  assert.equal(await discoverCmd([d2, "reference manager", "--engine", "clihub"], t), 2);
+  assert.ok(t.io.err.some((l) => /^DISCOVER_HTTP: clihub: error: HTTP 404/.test(l)), t.io.err.join("\n"));
+  assert.throws(() => readFileSync(path.join(d2, "discovered.json")), "no partial rows are written");
 });

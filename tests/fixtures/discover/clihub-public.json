@@ -1,0 +1,4 @@
+{"meta":{"description":"synthetic fixture"},"clis":[
+{"name":"refmgr","display_name":"Reference Manager (dup)","description":"duplicate of the first file's entry"},
+{"name":"notekeeper","display_name":"Note Keeper","description":"Notes and reference snippets","category":"research"},
+{"name":"plain","description":"Nothing relevant"}]}
