@@ -18,6 +18,7 @@ import { applyMigrate, planMigrate } from "../lib/kb/migrate.mjs";
 import { loadReferences } from "../lib/kb/references.mjs";
 import { reviewCmd } from "../lib/kb/review/cmd.mjs";
 import { discoverCmd } from "../lib/research/discover.mjs";
+import { surveyCmd } from "../lib/research/survey.mjs";
 import { FetchFatal, fetchAll } from "../lib/research/fetch.mjs";
 import { collectEntries, rankEntries } from "../lib/kb/search.mjs";
 import { loadStandards } from "../lib/kb/standards/registry.mjs";
@@ -25,7 +26,7 @@ import { readSidecars, serviceDetectsFor } from "../lib/kb/standards/sidecars.mj
 import { buildStandardsReport } from "../lib/kb/standards/status.mjs";
 import { cacheAge, readVersions, refreshVersions, writeVersions } from "../lib/kb/standards/versions.mjs";
 
-const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb search <terms> [--kind standard|reference] [--json] | kb migrate [--apply] [--json] | kb discover <dir> \"<query>\" [--sources academic|code|skills|all] [--engine <id>] [--limit n] [--lane <name>] [--json] | kb fetch <dir> <url...> [--json] | kb review new <slug> --decision <text> --decider <name> | kb review assemble <dir> [--json] | kb review check <dir> [--refetch] [--json] | kb review agree <dir> [--record <file>] [--apply] [--json] | kb review apply <dir> [--json]";
+const USAGE = "usage: propagate kb standards [--json] [--std <id>] [--project <p>] | kb standards versions [--refresh] [--json] | kb standards adopt <std> <project|workspace/project> [--units a,b] [--evidence <text>] [--apply] | kb standards decline|remove <std> <project|workspace/project> --reason <r> [--apply] | kb references [--json] | kb search <terms> [--kind standard|reference] [--json] | kb migrate [--apply] [--json] | kb discover <dir> \"<query>\" [--sources academic|code|skills|all] [--engine <id>] [--limit n] [--lane <name>] [--json] | kb fetch <dir> <url...> [--json] | kb survey \"<question>\" [--sources academic|code|skills|all] [--engine <id>] [--limit n] [--fetch] [--json] [--dir <d>] [--timeout <s>] | kb survey verify <claims.json> [--json] | kb review new <slug> --decision <text> --decider <name> | kb review assemble <dir> [--json] | kb review check <dir> [--refetch] [--json] | kb review agree <dir> [--record <file> --rater <name> --rater-kind human|model|model-referenced [--override <decision-id>]|--rater-brief|--disagreements|--adjudicate <file>] [--apply] [--json] | kb review apply <dir> [--json]";
 
 /** The exact line `propagate standards …` writes to stderr, once per run. */
 export const STANDARDS_DEPRECATION = "propagate standards is now propagate kb standards; the old name is removed in the release after 0.21.0";
@@ -86,6 +87,7 @@ export async function kbCmd(argv = [], inject = {}) {
   if (argv[0] === "references") return referencesCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "search") return searchCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "discover") return discoverCmd(argv.slice(1), { ...inject, io, stateDirPath: inject.stateDirPath ?? stateDir(), contact: inject.contact ?? (await kbContact(inject)) });
+  if (argv[0] === "survey") return surveyCmd(argv.slice(1), { ...inject, io, stateDirPath: inject.stateDirPath ?? stateDir(), contact: inject.contact ?? (await kbContact(inject)), fetchImpl: inject.fetchImpl ?? inject.fetch });
   if (argv[0] === "fetch") return fetchCmd(argv.slice(1), inject, io, asJson);
   if (argv[0] === "review") return reviewCmd(argv.slice(1), { io, integrations: (await env(inject)).integrations, inject });
   if (argv[0] === "migrate") return migrateCmd(argv.slice(1), inject, io, asJson);
