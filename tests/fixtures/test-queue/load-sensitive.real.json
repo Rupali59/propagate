@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "updated_at": "2026-11-27T07:10:33.174Z",
+  "tests": {
+    "widgets\u0000s.test.mjs\u0000load flaky": {
+      "project": "widgets",
+      "file": "s.test.mjs",
+      "name": "load flaky",
+      "first_seen": "2026-11-27T07:10:32.063Z",
+      "last_seen": "2026-11-27T07:10:32.063Z",
+      "count": 1,
+      "first_line": "timed out waiting",
+      "runs": [
+        "20261127T071032063Z-42746"
+      ],
+      "failures": [
+        {
+          "run": "20261127T071032063Z-42746",
+          "at": "2026-11-27T07:10:32.063Z",
+          "cpu_busy": 95,
+          "load1": 15.234375,
+          "rerun": [
+            "20261127T071032690Z-42831"
+          ]
+        }
+      ]
+    }
+  }
+}
