@@ -77,9 +77,13 @@ export const networkFrom = (commands) => Object.freeze(
       const off = (c.offline ?? []).map(escapeRe);
       const guard = off.length ? String.raw`(?!.*(?:${off.join("|")})(?:\s|$))` : "";
       const words = name.split(" ").map(escapeRe).join(String.raw`\s+`);
+      // propagate#434: the LONGEST registered name wins. A longer registered command that extends this one (`waiting gate-pass`
+      // under `waiting`) is its own entry, so its class comes from that entry; a pattern matching only the parent made it network.
+      const longer = Object.keys(commands).filter((k) => k.startsWith(name + " ")).map((k) => k.slice(name.length + 1).split(" ").map(escapeRe).join(String.raw`\s+`));
+      const ext = longer.length ? String.raw`(?!\s+(?:${longer.join("|")})(?:\s|$))` : "";
       return {
         label: `${name} (reaches GitHub)`,
-        re: new RegExp(START + PROPAGATE + words + String.raw`(?=\s|$)` + guard),
+        re: new RegExp(START + PROPAGATE + words + String.raw`(?=\s|$)` + ext + guard),
         example: `propagate ${name}`,
       };
     }),

@@ -46,6 +46,20 @@ test("the derivation has a floor, and every network command is denied in the for
   assert.equal((await decide(main("propagate goals check-done"))).deny, false, "goals check-done is not goals check");
 });
 
+// propagate#434: the longest registered command name decides the class, not its network parent.
+test("a registered multi-word command is classed by its own entry, not by its network parent", async () => {
+  for (const c of ["node /x/propagate/cli.mjs waiting gate-pass abc --suite s --no-run-evidence y", "propagate waiting gate-pass abc --suite s --run r1", "propagate kb survey verify x"]) {
+    assert.equal((await decide(main(c))).deny, false, `non-network child must pass in the foreground: ${c}`);
+  }
+  for (const c of ["node /x/propagate/cli.mjs waiting", "propagate waiting --json", "propagate kb survey"]) {
+    assert.equal((await decide(main(c))).deny, true, `network parent must stay denied: ${c}`);
+  }
+  const fake = async () => ({ a: { network: true }, "a b": { network: true }, "a c": {} });
+  assert.equal((await decide(main("propagate a b"), fake)).deny, true);
+  assert.equal((await decide(main("propagate a c"), fake)).deny, false);
+  assert.equal((await decide(main("propagate a"), fake)).deny, true);
+});
+
 test("a command that cannot name propagate never loads COMMANDS (the hook runs on every Bash call)", async () => {
   let loads = 0;
   const load = async () => { loads++; return COMMANDS; };
