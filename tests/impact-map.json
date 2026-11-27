@@ -1,19 +1,19 @@
 {
  "header": {
-  "recordedAt": "2026-11-27T09:12:42.677Z",
-  "commit": "da8088e2e5da7b9a6c6a780f2a7ccecc9a568782",
+  "recordedAt": "2026-11-27T10:16:13.170Z",
+  "commit": "684be348f5ee88f0fc1073b0fefe58e11de59ffe",
   "node": "v26.13.0",
-  "tests": 371,
+  "tests": 372,
   "withStaticDeps": 301,
   "withRecordedSpawnDeps": 126,
-  "partial": 6,
+  "partial": 7,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
   "recordedProcesses": 2361,
   "unresolvedStaticSpecifiers": 116,
   "suite": {
-   "pass": 5010,
-   "fail": 0
+   "pass": 5014,
+   "fail": 2
   }
  },
  "tests": {
@@ -2116,6 +2116,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/queued-test.test.mjs",
     "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
@@ -11055,6 +11056,7 @@
     ".github/workflows/test.yml",
     ".gitignore",
     ".propagates.yml",
+    ".test-queue",
     "CHANGELOG.md",
     "DESIGN.md",
     "LICENSE",
@@ -11404,6 +11406,7 @@
     "scripts/costs-backfill.mjs",
     "scripts/make-public.mjs",
     "scripts/propagate-update-check",
+    "scripts/queued-test.sh",
     "scripts/readme-commands.mjs",
     "scripts/release-publish.mjs",
     "scripts/release-tag-aliases.mjs",
@@ -11797,6 +11800,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/queued-test.test.mjs",
     "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
@@ -11907,6 +11911,7 @@
     ".github/workflows/test.yml",
     ".gitignore",
     ".propagates.yml",
+    ".test-queue",
     "CHANGELOG.md",
     "DESIGN.md",
     "LICENSE",
@@ -12259,6 +12264,7 @@
     "scripts/costs-backfill.mjs",
     "scripts/make-public.mjs",
     "scripts/propagate-update-check",
+    "scripts/queued-test.sh",
     "scripts/readme-commands.mjs",
     "scripts/release-publish.mjs",
     "scripts/release-tag-aliases.mjs",
@@ -12652,6 +12658,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/queued-test.test.mjs",
     "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
@@ -13505,6 +13512,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/queued-test.test.mjs",
     "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
@@ -19007,6 +19015,14 @@
    ],
    "size": "small"
   },
+  "tests/unit/queued-test.test.mjs": {
+   "deps": [
+    "scripts/queued-test.sh",
+    "tests/unit/queued-test.test.mjs"
+   ],
+   "size": "small",
+   "partial": true
+  },
   "tests/unit/readme-commands.test.mjs": {
    "deps": [
     "README.md",
@@ -21030,6 +21046,7 @@
     "scripts/costs-backfill.mjs",
     "scripts/make-public.mjs",
     "scripts/propagate-update-check",
+    "scripts/queued-test.sh",
     "scripts/readme-commands.mjs",
     "scripts/release-publish.mjs",
     "scripts/release-tag-aliases.mjs",
@@ -21881,6 +21898,8 @@
     "skills/propagate/sections/reconcile.md",
     "skills/propagate/sections/routing.md",
     "skills/propagate/sections/settle.md",
+    "skills/survey",
+    "skills/survey/SKILL.md",
     "tests",
     "tests/**",
     "tests/cli",
@@ -22210,6 +22229,7 @@
     "tests/unit/plist-digest-reminders.test.mjs",
     "tests/unit/provenance.test.mjs",
     "tests/unit/queue-order.test.mjs",
+    "tests/unit/queued-test.test.mjs",
     "tests/unit/readme-commands.test.mjs",
     "tests/unit/ref-batching.test.mjs",
     "tests/unit/refs-active-lines.test.mjs",
