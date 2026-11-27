@@ -54,7 +54,7 @@ export async function registersCmd(argv = []) {
   // counts is how the two genuinely broken gotchas files nearly went unread on
   // 2026-08-27 (N54).
   if (result.unread.length > 0) {
-    console.log(`\n  ${RED}unread (${result.unread.length})${RESET} ${DIM}— a reader that failed, not an empty file${RESET}`);
+    console.log(`\n  ${RED}unread${RESET} ${RED}(${result.unread.length})${RESET} ${DIM}— a reader that failed, not an empty file${RESET}`);
     for (const r of result.unread) {
       console.log(`    ${short(r.file, cwd)}`);
       console.log(`      ${DIM}${r.reason}${RESET}`);
