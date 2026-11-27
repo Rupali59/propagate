@@ -9,6 +9,8 @@ You are the coordinator. Researchers screen and quote; commands search, fetch, a
 twice. `P` below is `node ${CLAUDE_PLUGIN_ROOT}/cli.mjs`. Every command exits 0 ok, 1 refused, 2 could not run:
 read the code and the `Next:` line, never guess past a refusal.
 
+A `propagate:survey` run (`P kb survey`) is the cheap first pass; this gated review is the only path into the knowledge base.
+
 ## The loop
 
 1. `P kb review new <slug> --decision "<text>" --decider "<name>"`, then fill `protocol.md` (`sections/protocol.md`).

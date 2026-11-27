@@ -90,3 +90,52 @@ test("sections carry no frontmatter and say when they apply", () => {
     assert.match(t, /When this applies:/, `${f} states no "When this applies:" line`);
   }
 });
+
+// ---- the survey skill (propagate#403), kept here so the committed impact map needs no new entry ----
+// kb watch landed with #402: every subcommand the skill names must be registered (floor: all five).
+const SURVEY = readFileSync(path.join(ROOT, "skills", "survey", "SKILL.md"), "utf8");
+const LIT_SKILL = readFileSync(path.join(ROOT, "skills", "literature-review", "SKILL.md"), "utf8");
+const REF = readFileSync(path.join(ROOT, "docs", "REFERENCE.md"), "utf8");
+const sFront = /^---\n([\s\S]*?)\n---\n/.exec(SURVEY);
+const WATCH = ["add", "list", "check", "mark", "rm"];
+
+test("survey skill: sFrontmatter: name and a 'Use when' description with the matching phrases", () => {
+  assert.ok(sFront, "no sFrontmatter");
+  assert.match(sFront[1], /^name: survey$/m);
+  const d = /^description:\s*(.+)$/m.exec(sFront[1]);
+  assert.ok(d, "no description");
+  assert.match(d[1], /^Use when /);
+  for (const t of ["find papers", "is there already a tool for X"]) assert.ok(d[1].includes(t), `description lacks "${t}"`);
+});
+
+test("survey skill: the survey commands it names exist in the command table, and the loop names both", () => {
+  assert.ok(Object.keys(COMMANDS).length > 10, "the command table parsed to almost nothing: the scan has gone blind");
+  for (const c of ["kb survey", "kb survey verify"]) {
+    assert.ok(COMMANDS[c], `${c} is not in the command table`);
+    assert.ok(SURVEY.includes(c), `SURVEY.md never names ${c}`);
+  }
+  assert.match(SURVEY, /node \$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs/);
+  assert.match(SURVEY, /--json/);
+  assert.match(SURVEY, /body_path/);
+});
+
+test("survey skill: every kb watch subcommand is named, nothing else is, and registered ones exist", () => {
+  const named = new Set([...SURVEY.matchAll(/\bkb watch (\w+)/g)].map((m) => m[1]));
+  for (const s of WATCH) assert.ok(named.has(s), `SURVEY.md never names kb watch ${s}`);
+  for (const s of named) assert.ok(WATCH.includes(s), `kb watch ${s} is not one of ${WATCH.join("|")}`);
+  const registered = Object.keys(COMMANDS).filter((k) => k.startsWith("kb watch"));
+  assert.ok(registered.length >= WATCH.length, `only ${registered.length} kb watch commands registered: the registry check has gone blind`);
+  for (const s of WATCH) assert.ok(COMMANDS[`kb watch ${s}`], `kb watch ${s} is not registered`);
+});
+
+test("survey skill: no WebSearch or WebFetch instruction: every mention is a prohibition", () => {
+  const lines = SURVEY.split("\n").filter((l) => /WebSearch|WebFetch/.test(l));
+  assert.ok(lines.length >= 1, "the prohibition must be stated");
+  for (const l of lines) assert.match(l, /\b(never|no|not)\b/i);
+});
+
+test("survey skill: literature-review links the survey, and REFERENCE names each excluded registry", () => {
+  assert.match(LIT_SKILL, /propagate:survey/);
+  for (const r of ["PyPI", "Smithery", "Glama", "MCP Market", "GitHub code search"]) assert.ok(REF.includes(r), `REFERENCE.md never names the excluded registry ${r}`);
+  assert.match(REF, /kb watch add/);
+});
