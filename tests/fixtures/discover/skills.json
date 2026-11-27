@@ -1,0 +1,4 @@
+{"query":"widget","searchType":"fuzzy","skills":[
+{"id":"example-org/widget-kit/widget-skill","source":"example-org/widget-kit","skillId":"widget-skill","name":"widget-skill","installs":120},
+{"id":"sample-user/gizmo/gizmo-helper","source":"sample-user/gizmo","skillId":"gizmo-helper","name":"gizmo-helper","installs":7},
+{"id":"third-org/third/third-skill","source":"third-org/third","skillId":"third-skill","name":"third-skill","installs":1}]}

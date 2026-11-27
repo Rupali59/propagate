@@ -1,0 +1,5 @@
+[
+{"categories":["development"],"description":"Widget tools for agents","lastUpdated":"2026-11-24T05:00:00.000Z","pluginCount":1,"pluginKeywords":["widget","agents"],"repo":"Example-Org/Widget-Kit","slug":"example-org-widget-kit","source":"auto","stars":500},
+{"categories":["development"],"description":"Gizmo widget collection","lastUpdated":"2026-11-10T05:00:00.000Z","pluginCount":3,"pluginKeywords":["gizmo"],"repo":"sample-user/gizmo","slug":"sample-user-gizmo","source":"auto","stars":900},
+{"categories":["other"],"description":"Unrelated thing","lastUpdated":"2026-01-01T00:00:00.000Z","pluginCount":1,"pluginKeywords":["other"],"repo":"nobody/other","slug":"nobody-other","source":"auto","stars":9999}
+]
