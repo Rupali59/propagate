@@ -31,8 +31,9 @@
  * Sources, nearest first: every `docs/GOTCHAS.md` / `GOTCHAS.md` from cwd up to
  * $HOME, plus the cross-cutting `~/.claude/gotchas-global.md`.
  *
- * NEVER BLOCKS. A gotcha is information, not a veto — it prints to stderr and
- * exits 0. `doc-authority.mjs` blocks (exit 2) because counsel-owned wording is
+ * NEVER BLOCKS (one exception, below). A gotcha is information, not a veto — it prints to stderr and
+ * exits 0. G56 and G72 were warnings that were read and ignored (propagate#410), so they are ENFORCED as denies in
+ * hooks/background-guard.mjs and this guard stays silent on them (ENFORCED_ELSEWHERE). `doc-authority.mjs` blocks (exit 2) because counsel-owned wording is
  * genuinely not the editor's to change; a hazard note has no such standing, and
  * a guard that blocks on a regex would be trained around within a week.
  *
@@ -61,6 +62,9 @@ import {
   partitionStubs,
   sourcesFor,
 } from "../lib/gotchas/parse.mjs";
+
+/** Gotchas enforced as a deny in hooks/background-guard.mjs (propagate#410): printing them here too would double-warn. */
+const ENFORCED_ELSEWHERE = ["G56", "G72"];
 
 /** Cap on entries shown at once. Noise is a hiding place (propagate GOTCHAS G23). */
 const MAX_SHOWN = 3;
@@ -191,7 +195,7 @@ function main() {
   const badCount = parsedAll.reduce((n, r) => n + r.bad.length, 0);
   // A superseded or retired entry delivers nothing (propagate#216): triage removes context. A resolved
   // one still delivers, because a resolved hazard can regress; an absent or unknown Status delivers too.
-  const hits = entries.filter((e) => e.trigger.test(subject) && !SILENT_STATES.includes(statusOf(e)?.state));
+  const hits = entries.filter((e) => e.trigger.test(subject) && !SILENT_STATES.includes(statusOf(e)?.state) && !ENFORCED_ELSEWHERE.includes(e.id));
 
   logLine(`tool=${payload?.tool_name || "?"} sources=${sources.length} entries=${entries.length} bad=${badCount} hits=${hits.length}`);
 
