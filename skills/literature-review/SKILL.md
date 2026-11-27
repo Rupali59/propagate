@@ -24,8 +24,11 @@ read the code and the `Next:` line, never guess past a refusal.
 7. `P kb review assemble <dir>`: the merge that writes `brief.json`.
 8. `P kb review check <dir>` (`sections/gate.md`). On a refusal fix the inputs (re-fetch, re-run a lane), then
    assemble again.
-9. `P kb review agree <dir>` prints the blind sample. **Stop for the maintainer's decisions on the sample**, then
-   record them with `P kb review agree <dir> --record <file> --apply`.
+9. The second rater is a model (`sections/gate.md`). Hand `P kb review agree <dir> --rater-brief` to one
+   `propagate:literature-rater`, nothing else, and record its answers with `--rater-kind model-referenced --apply`.
+   Then `P kb review agree <dir> --disagreements`: none, go to 10; within the tolerable count, file the lines as ONE
+   issue labelled `needs:<maintainer>` and **Stop for the maintainer's answers on the listed disagreements**, then `--adjudicate`;
+   over it or stuck, follow the section.
 10. `P kb review apply <dir>`. Report `brief.md` and `candidates.md`, the counts, and every `not_retrieved`.
 
 ## Hard rules

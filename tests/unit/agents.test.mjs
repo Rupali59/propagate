@@ -52,7 +52,7 @@ for (const { file, src } of agents) {
   test(`${file}: names a deterministic gate that exists`, () => {
     const ROOT = path.join(DIR, "..");
     assert.doesNotMatch(src, /(?<!\/)scripts\/check-|`propagate (settle|graph|check)/, `${file} names a gate by a repo-relative path or a bare \`propagate\`, which a session in another workspace cannot run (#253)`);
-    const gates = [...src.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs (check-curator|check-review|settle <file> --check|kb review (?:assemble|check))/g)].map((m) => m[1]);
+    const gates = [...src.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/cli\.mjs (check-curator|check-review|settle <file> --check|kb review (?:assemble|check|agree))/g)].map((m) => m[1]);
     assert.ok(gates.length, `${file} names no gate: an agent without a deterministic check is not shipped`);
     const cli = readFileSync(path.join(ROOT, "cli.mjs"), "utf8");
     for (const g of gates) {
@@ -84,4 +84,19 @@ test("literature-researcher: exists, one tool (Read), sonnet, 'Use when', and st
   assert.match(researcher.src, /identified_as/, "the body must require identified_as per screened source");
   assert.match(researcher.src, /never[^.]*from the order/i, "the body must forbid mapping files to papers from the order of reads");
   assert.ok(RESEARCH_READ_ONLY.includes("literature-researcher"), "the guard must list the researcher");
+});
+
+// literature-rater (#412): the model second rater. One tool, Read, opus, and it never sees the lanes' decisions.
+const rater = agents.find((a) => a.file === "literature-rater.md");
+test("literature-rater: exists, one tool (Read), opus, 'Use when', per-criterion quotes, and no access to the lanes' decisions", () => {
+  assert.ok(rater, "agents/literature-rater.md is missing");
+  const fm = frontmatter(rater.src);
+  assert.match(fm.description, /^Use when /);
+  assert.equal(fm.tools, "Read", "the rater's only tool is Read: anything more is an exfiltration path");
+  assert.equal(fm.model, "opus");
+  assert.match(rater.src, /6-15 words/, "the body must state the 6-15 word quote rule");
+  assert.match(rater.src, /each criterion separately|EVERY criterion/i, "the body must require an answer per criterion");
+  assert.match(rater.src, /never[^.]*first reviewer's decision/i, "the body must forbid using the first reviewer's decision");
+  assert.ok(RESEARCH_READ_ONLY.includes("literature-rater"), "the guard must list the rater");
+  assert.doesNotMatch(rater.src, /Rupali/, "the repo is public: say the maintainer");
 });

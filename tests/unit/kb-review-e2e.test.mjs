@@ -73,6 +73,8 @@ async function setUp() {
   // 2. approve and commit the protocol, the day before the first search
   const proto = readFileSync(path.join(dir, "protocol.md"), "utf8")
     .replace("questions: []", 'questions: [{id: RQ1, text: "can an agent screen sources reliably?"}]')
+    .replace("inclusion: []", 'inclusion: ["I1: an evaluation of automated screening or a guide to sampling its decisions"]')
+    .replace("exclusion: []", 'exclusion: ["E1: off topic"]')
     .replace("approved: {by: null, date: null}", "approved: {by: owner, date: 2026-11-22}");
   writeFileSync(path.join(dir, "protocol.md"), proto);
   git(hub, ["add", "."], "2026-11-22T10:00:00Z");
@@ -164,4 +166,35 @@ test("a lane that quotes text its body does not hold: assemble passes it through
   assert.ok(JSON.parse(ap.out).refusals.some((r) => r.code === "QUOTE_NOT_FOUND"));
   assert.equal(snapshot(ctx.dir), dirBefore, "apply wrote into the review directory");
   assert.equal(readFileSync(ctx.refs, "utf8"), refsBefore, "apply wrote to kb-references.yml");
+});
+
+test("the whole loop with a model second rater and no human answers: rater brief, record, disagreements, apply (#412)", async () => {
+  const ctx = await setUp();
+  writeLanes(ctx);
+  assert.equal((await kb(["review", "assemble", ctx.dir], ctx)).code, 0);
+  assert.equal((await kb(["review", "check", ctx.dir], ctx)).code, 0);
+  const rb = await kb(["review", "agree", ctx.dir, "--rater-brief"], ctx);
+  assert.equal(rb.code, 0, rb.err);
+  const handed = JSON.parse(rb.out);
+  assert.deepEqual(handed.criteria.inclusion.map((c) => c.id), ["I1"]);
+  // the rater (stood in for here) reads each listed body and answers each criterion with a quote
+  const body = (u) => readFileSync(u.body_path, "utf8");
+  const answers = {};
+  for (const it of handed.items) {
+    const t = body(it);
+    const quote = t.includes(SENTENCE_A) ? QUOTE_A : t.includes(SENTENCE_B) ? QUOTE_B : "An unrelated note about gardening, with no screening content at all";
+    const off = quote.startsWith("An unrelated");
+    answers[it.url] = { criteria: [{ id: "I1", met: !off, quote: off ? "" : quote, reason: "i1" }, { id: "E1", met: off, quote: off ? quote : "", reason: "e1" }], reason: off ? "off topic" : "on topic" };
+  }
+  const file = path.join(ctx.root, "rater-answers.json");
+  writeFileSync(file, JSON.stringify({ model: "example-rater", screening: answers, support: Object.fromEntries(drawSample(JSON.parse(readFileSync(path.join(ctx.dir, "brief.json"), "utf8"))).support.map((s) => [s.claim_id, "supports"])) }));
+  const rec = await kb(["review", "agree", ctx.dir, "--record", file, "--rater", "example-rater", "--rater-kind", "model-referenced", "--apply"], ctx);
+  assert.equal(rec.code, 0, rec.err || rec.out);
+  assert.equal((await kb(["review", "agree", ctx.dir], ctx)).code, 0, "the derived labels score reliable");
+  const dis = await kb(["review", "agree", ctx.dir, "--disagreements"], ctx);
+  assert.equal(dis.code, 0, dis.out + dis.err);
+  assert.match(dis.out, /no disagreements: kb review apply/);
+  const chk = JSON.parse((await kb(["review", "check", ctx.dir, "--json"], ctx)).out);
+  assert.deepEqual(chk.refusals, [], "a model rater passes where the protocol says second reviewer: model");
+  assert.equal((await kb(["review", "apply", ctx.dir], ctx)).code, 0);
 });

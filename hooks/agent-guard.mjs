@@ -31,7 +31,7 @@ export const READ_ONLY = Object.freeze(["edge-settler", "doc-curator", "adversar
  * carrying injected instructions cannot send hub text anywhere: the agent has no way to move a byte out of the
  * store, and no way to read anything outside it. Every other tool is denied.
  */
-export const RESEARCH_READ_ONLY = Object.freeze(["literature-researcher"]);
+export const RESEARCH_READ_ONLY = Object.freeze(["literature-researcher", "literature-rater"]);
 const isResearchAgent = (t) => typeof t === "string" && RESEARCH_READ_ONLY.includes(t.replace(/^propagate:/, ""));
 
 /** FAILS CLOSED: any path that cannot be resolved inside the store is denied. realpath, so a symlink out is followed

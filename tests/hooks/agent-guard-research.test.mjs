@@ -41,12 +41,13 @@ after(() => {
 // Explicit arity: a default parameter would turn read(p, undefined) back into the researcher.
 const read = (...a) => ({ agent_type: a.length > 1 ? a[1] : "literature-researcher", tool_name: "Read", tool_input: { file_path: a[0] } });
 
-test("RESEARCH_READ_ONLY names the researcher, and is not the READ_ONLY list", () => {
-  assert.deepEqual([...RESEARCH_READ_ONLY], ["literature-researcher"]);
+test("RESEARCH_READ_ONLY names the researcher and the rater (#412), and is not the READ_ONLY list", () => {
+  assert.deepEqual([...RESEARCH_READ_ONLY], ["literature-researcher", "literature-rater"]);
   assert.ok(!READ_ONLY.includes("literature-researcher"), "the researcher has its own policy, not the Bash allowlist");
+  assert.ok(!READ_ONLY.includes("literature-rater"), "the rater has its own policy, not the Bash allowlist");
 });
 
-for (const t of ["literature-researcher", "propagate:literature-researcher"]) {
+for (const t of ["literature-researcher", "propagate:literature-researcher", "literature-rater", "propagate:literature-rater"]) {
   test(`${t}: Read of a saved source is allowed`, () => {
     assert.equal(decide(read(body, t)).deny, false);
   });

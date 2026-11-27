@@ -27,10 +27,12 @@ test("with a reliable agreement.json the sample warning goes and the score is de
   assert.equal(r.derived.screening.verdict, "reliable");
 });
 
-const MODEL_PROTOCOL = (t) => t.replace("How a source's trustworthiness is judged: its tier, its venue, and whether a second reviewer checks it.", "Second reviewer: a model screens the sample.");
+const MODEL_PROTOCOL = (t) => t.replace(/second reviewer: model[^\n]*/, "Second reviewer: a model screens the sample.");
+// new protocols say `second reviewer: model` (#412); a protocol that still names a person is made explicit here
+const HUMAN_PROTOCOL = (t) => t.replace(/second reviewer: model[^\n]*/, "The second reviewer is a person.");
 
 const REFUSALS = {
-  SCREENING_RATER_NOT_HUMAN: { agreement: "reliable", raterKind: "model" },
+  SCREENING_RATER_NOT_HUMAN: { agreement: "reliable", raterKind: "model", tweakProtocol: HUMAN_PROTOCOL },
   SCREENING_RATER_UNKNOWN: { agreement: "reliable", raterKind: null },
   PROTOCOL_UNAPPROVED: { approved: false },
   PROTOCOL_SHA_MISMATCH: { editProtocolAfter: true },
@@ -71,7 +73,7 @@ test("#376: a model rater passes only where the protocol itself declares a model
 });
 
 test("#376: the not-human refusal names the rater, and the unknown-rater one never assumes human", () => {
-  const m = run(buildReview({ agreement: "reliable", raterKind: "model" }));
+  const m = run(buildReview({ agreement: "reliable", raterKind: "model", tweakProtocol: HUMAN_PROTOCOL }));
   assert.match(m.refusals.find((x) => x.code === "SCREENING_RATER_NOT_HUMAN").what, /fixture rater/);
   const u = run(buildReview({ agreement: "reliable", raterKind: null }));
   assert.ok(codes(u).includes("SCREENING_RATER_UNKNOWN"));
