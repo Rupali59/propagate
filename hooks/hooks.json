@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "THIRTEEN registrations, not ten hooks. gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
+    "FOURTEEN registrations, not eleven hooks (close-guard added 2026-11-27, #280). gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
     "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
@@ -152,6 +152,22 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/background-guard.mjs\""
+          }
+        ]
+      },
+      {
+        "_comment": [
+          "close-guard, added 2026-11-27 (#280). rule:record-completion-cost made mechanical: denies `gh issue close`, a",
+          "`gh project item-edit` to Done and the GraphQL Done write while the board item lacks Size, Finished, Minutes or",
+          "Tokens. Narrowed by an `if` so it runs only for commands that mention gh. A failed board read allows with a",
+          "WARNING, never silently. Escape: a `# close-ok: <why>` comment."
+        ],
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(*gh *)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/close-guard.mjs\""
           }
         ]
       }
