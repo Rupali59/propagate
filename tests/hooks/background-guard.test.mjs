@@ -98,6 +98,9 @@ const DENY = [
   [main("npm run build &"), /shell `&`/],
   [main("npm test > log 2>&1 &", { run_in_background: true }), /shell `&`/],
   [main("a & b"), /shell `&`/],
+  [main("sleep 5 &"), /shell `&`/],
+  [main("cmd & other"), /shell `&`/],
+  [main("cat > f <<'EOF'\nplain\nEOF\nsleep 5 &"), /shell `&`/], // a real & after a heredoc still denies
   [sub("npm run build &"), /shell `&`/],
   [main("nohup node server.mjs"), /nohup/],
   [sub("nohup node server.mjs"), /nohup/],
@@ -110,6 +113,11 @@ const ALLOW = [
   [main("cmd 2>&1 | head"), "2>&1 is a redirection"],
   [main("echo x >&2"), ">&2 is a redirection"],
   [main("cmd &> out.log"), "&> is a redirection"],
+  // propagate#420: an ampersand that is data, not a background
+  [main("python3 - <<'PY'\nprint(\"x\")\n# Elevation & shape\nPY"), "an & in a python3 heredoc body"],
+  [main("node -e 's.replace(/x/g,\"$&\")'"), "$& inside a quoted node -e argument"],
+  [main("cat > f <<'EOF'\nprice is $&\nEOF\nls"), "$& in a heredoc body, then a command"],
+  [main("echo $& done"), "an unquoted $& is a match reference, not a background"],
   [main("npm test", { run_in_background: true }), "main session heavy command, backgrounded"],
   [main("npm run lint", { timeout: 119999 }), "timeout under the limit"],
   [main("npm run lint", { timeout: 600000, run_in_background: true }), "long timeout, backgrounded"],
@@ -403,6 +411,7 @@ const G72_DENY = [
   ["set -o pipefail; npm test | tail; git push", "pipefail alone does not stop a ';' push"],
   ["git commit -m x || echo no && git push", "an || fallback that does not exit"],
   [`${CC_HEREDOC}\ngit push`, "the Claude Code heredoc commit, then a newline push"],
+  ["bash -c 'git commit -m x; git push'", "bash -c whose script has no set -e (the script is judged as a script)"],
 ];
 for (const [command, why] of G72_DENY) {
   test(`G72 denies: ${why}`, async () => {
@@ -425,6 +434,9 @@ const G72_ALLOW = [
   ["git commit -F - <<'EOF' && git push\nit's done; really\ngit push\nEOF", "a -F - body with an apostrophe and a push-looking line"],
   ["git commit -m x; git push # G72-ok: the commit is best-effort here", "the escape comment"],
   ["git add f; git status; git push", "no commit or test before the push"],
+  // propagate#420: set -e at the start of a bash -c script, with a '"'"'EOF'"'"' heredoc inside it
+  ["bash -c 'set -euo pipefail; git commit -m x\ncat > f <<'\"'\"'EOF'\"'\"'\nbody; with semicolon\nEOF\ngit push'", "bash -c with set -euo pipefail, the quoted-idiom heredoc, then a later push"],
+  ["bash -c 'set -e; git commit -m x; git push'", "bash -c whose own script starts with set -e"],
 ];
 for (const [command, why] of G72_ALLOW) {
   // run_in_background keeps the unrelated heavy rule (npm test) out of the way: only G72 is under test

@@ -112,7 +112,11 @@ const stripQuotes = (s) => s.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, " ");
 
 /** A shell `&` that backgrounds, or nohup. Quotes, `&&`, `2>&1`, `>&2` and `&>` are removed first. */
 function shellBackground(command) {
-  const bare = stripQuotes(command)
+  // A heredoc body is ONE literal argument, so an `&` in it ("Elevation & shape") backgrounds nothing (propagate#420).
+  // `$&` is a regex or sed match reference, never a background: a background `&` follows whitespace, `;`, `)` or the
+  // end of a command word, never a `$`. Unquoted `$&` is stripped for that reason; a quoted one is already gone.
+  const bare = stripQuotes(dropHeredocs(command))
+    .replace(/\$&/g, " ")
     .replace(/&&/g, " ")
     .replace(/\d*>&\d*-?/g, " ")
     .replace(/&>>?/g, " ");
@@ -129,7 +133,8 @@ export function dropHeredocs(command) {
   const lines = String(command).split("\n");
   const out = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = [...lines[i].matchAll(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/g)].map((x) => x[2]);
+    // the delimiter may be written plain, 'EOF', "EOF", or with the idiom `'"'"'EOF'"'"'` (a quoted delimiter inside bash -c '...')
+    const m = [...lines[i].matchAll(/<<-?\s*(?:'"'"'|['"])?([A-Za-z_][A-Za-z0-9_]*)(?:'"'"'|['"])?/g)].map((x) => x[1]);
     out.push(lines[i]);
     if (!m.length) continue;
     for (const id of m) {
@@ -216,13 +221,24 @@ function g56(raw, bare, cwd) {
   return null;
 }
 
+/** The script of a whole-command `bash|sh|zsh -c '...'`, with the `'"'"'` idiom turned back into `'`; else null. */
+function bashDashC(command) {
+  const m = /^\s*(?:bash|sh|zsh)\s+-[A-Za-z]*c\s+'([\s\S]*)'\s*$/.exec(command);
+  return m ? m[1].replace(/'"'"'/g, "'") : null;
+}
+
 /** The two enforced gotchas. FAILS OPEN: any exception allows. @returns {{rule: string, reason: string}|null} */
 export function gotchaDeny(input) {
   try {
     const raw = dropHeredocs(String(input?.tool_input?.command ?? ""));
     const bare = stripQuotes(raw);
+    const inner = bashDashC(raw);
     const cwd = typeof input?.cwd === "string" && input.cwd ? input.cwd : process.cwd();
-    if (!escapeOk(raw, "G72")) { const r = g72(bare); if (r) return { rule: "g72", reason: r }; }
+    if (!escapeOk(raw, "G72")) {
+      // the script of `bash -c '...'` is judged as a script: its own `set -e` guards its own push (propagate#420)
+      const r = g72(bare) ?? (inner === null ? null : g72(stripQuotes(dropHeredocs(inner))));
+      if (r) return { rule: "g72", reason: r };
+    }
     if (!escapeOk(raw, "G56")) { const r = g56(raw, bare, cwd); if (r) return { rule: "g56", reason: r }; }
   } catch {
     // fail open: not ours to judge
