@@ -34,10 +34,10 @@
  * FAILS OPEN ON ITS OWN BUGS, LOUDLY: any exception allows the dispatch and says so in additionalContext.
  * Exit code is always 0.
  */
-import { readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, renameSync, mkdirSync, appendFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
 export const MOVE_FROM = Object.freeze(["Backlog", "Ready"]);
 const REPO = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
@@ -86,6 +86,50 @@ export function extractMarker(prompt) {
   return { ref: null, problem: `\`issue: #${m[3]}\` has no repo: the prompt names ${repos.size} repositories, so write \`issue: owner/repo#${m[3]}\`` };
 }
 
+/**
+ * LIVE SMOKE (#409). A code lane on the propagate repo must carry `live-smoke: <real-data command>` or
+ * `live_smoke_reason: <why not>` in its brief, so its report pastes real output instead of a claim.
+ * READ-ONLY agent types cannot write code and are exempt. Derived from agents/*.md: an agent whose `tools:`
+ * frontmatter lists none of Edit, Write or NotebookEdit (Bash is allowed: a reviewer may run commands, not edit).
+ * The built-ins below have no agent file here, so they are an explicit list; the harness defines them as read-only.
+ */
+const BUILTIN_READ_ONLY = Object.freeze(["Explore", "Plan"]);
+const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
+const AGENTS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agents");
+
+export function readOnlyAgentTypes(dir = AGENTS_DIR) {
+  const names = new Set(BUILTIN_READ_ONLY);
+  let files = [];
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+  } catch {
+    return names; // no agents dir: only the built-ins are known read-only
+  }
+  for (const f of files) {
+    try {
+      const fm = /^---\n([\s\S]*?)\n---/.exec(readFileSync(path.join(dir, f), "utf8"))?.[1] ?? "";
+      const name = /^name:[ \t]*(\S+)/m.exec(fm)?.[1];
+      const tools = /^tools:[ \t]*(.+)$/m.exec(fm)?.[1];
+      if (name && tools && !WRITE_TOOLS.some((t) => new RegExp(`\\b${t}\\b`).test(tools))) names.add(name);
+    } catch {
+      /* an unreadable agent file is not exempt */
+    }
+  }
+  return names;
+}
+
+function liveSmokeDeny(input, prompt, ref) {
+  if (!/\/propagate#\d+$/.test(ref)) return null;
+  const type = String(input?.tool_input?.subagent_type ?? "general-purpose").replace(/^propagate:/, "");
+  if (readOnlyAgentTypes().has(type)) return null;
+  if (/^[ \t]*live-smoke:[ \t]*\S/im.test(prompt) || /^[ \t]*live_smoke_reason:[ \t]*\S/im.test(prompt)) return null;
+  return (
+    `${ref} is a propagate issue and this dispatch (${type}) can write code, but the brief has no live smoke (#409). ` +
+    `Add a line \`live-smoke: <command that runs the change against real data>\` (the lane's report must paste its output), ` +
+    `or \`live_smoke_reason: <why there is nothing to smoke>\`.`
+  );
+}
+
 const actualModel = (input) => {
   const m = input?.tool_input?.model;
   return typeof m === "string" && m.trim() ? m.trim().toLowerCase() : null;
@@ -110,6 +154,11 @@ export function decide(input, snapshot, now = new Date()) {
       return out;
     }
     out.refs = [marker.ref]; // the served issue; every other cited issue is reading material
+    const smoke = liveSmokeDeny(input, prompt, marker.ref);
+    if (smoke) {
+      out.deny = smoke;
+      return out;
+    }
   } else {
     out.refs = extractRefs(prompt);
     if (out.refs.length > 1) {

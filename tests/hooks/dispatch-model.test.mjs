@@ -423,3 +423,39 @@ test("decide (pure): the marker beats text refs", () => {
   assert.deepEqual(d.refs, ["acme/app#272"]);
   assert.deepEqual(d.moves.map((m) => m.ref), ["acme/app#272"]);
 });
+
+// live smoke (#409): a propagate code lane needs `live-smoke:` or `live_smoke_reason:`; read-only agents are exempt.
+const smokeInput = (prompt, subagent_type = "general-purpose") => ({ tool_name: "Agent", tool_input: { subagent_type, model: "sonnet", prompt } });
+const P = "issue: Rupali59/propagate#409\nbuild it";
+
+test("live smoke: deny a code lane with no line, naming #409 and both forms", () => {
+  const d = decide(smokeInput(P), null).deny;
+  assert.match(d, /#409/);
+  assert.match(d, /live-smoke:/);
+  assert.match(d, /live_smoke_reason:/);
+});
+test("live smoke: allow with a live-smoke line", () => {
+  assert.equal(decide(smokeInput(`${P}\nlive-smoke: node hooks/x.mjs`), null).deny, undefined);
+});
+test("live smoke: allow with live_smoke_reason", () => {
+  assert.equal(decide(smokeInput(`${P}\nlive_smoke_reason: docs only`), null).deny, undefined);
+});
+test("live smoke: deny an empty reason", () => {
+  assert.match(decide(smokeInput(`${P}\nlive_smoke_reason:   `), null).deny, /#409/);
+  assert.match(decide(smokeInput(`${P}\nlive-smoke:`), null).deny, /#409/);
+});
+for (const t of ["propagate:literature-researcher", "propagate:literature-rater", "propagate:doc-curator", "propagate:adversarial-reviewer", "Explore", "Plan"]) {
+  test(`live smoke: read-only agent ${t} is exempt`, () => {
+    assert.equal(decide(smokeInput(P, t), null).deny, undefined);
+  });
+}
+test("live smoke: a different repo is not checked", () => {
+  assert.equal(decide(smokeInput("issue: Rupali59/other#5\nbuild it"), null).deny, undefined);
+});
+test("live smoke: a malformed payload is allowed", () => {
+  const r = spawnSync("node", [HOOK], { input: "{not json", encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
+  assert.equal(decide({ tool_name: "Agent" }, null).deny, undefined);
+  assert.equal(decide(null, null).deny, undefined);
+});
