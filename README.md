@@ -118,7 +118,7 @@ Regenerate it with `npm run readme:commands`.
 - `propagate kb standards decline` — record that a detected standard does not apply to a project, with a reason (dry run; --apply needs approvals, slice S4)
 - `propagate kb standards remove` — record the removal of an adopted standard, with a reason (dry run; --apply needs approvals, slice S4)
 - `propagate kb migrate` — rename each sidecar's legacy standards: key to kb: (dry run unless --apply; a sidecar with both keys is a conflict and is never rewritten)
-- `propagate kb discover` — deterministic scholarly search: OpenAlex, Semantic Scholar, arXiv, Crossref; writes discovered.json and appends searches.json in <dir> (keys from OPENALEX_API_KEY / S2_API_KEY, never printed)
+- `propagate kb discover` — deterministic search: OpenAlex, Semantic Scholar, arXiv, Crossref by default, or --sources code|skills|all (GitHub, npm, skills.sh, Claude marketplaces, MCP registry); writes discovered.json and appends searches.json in <dir> (keys from OPENALEX_API_KEY / S2_API_KEY, never printed)
 - `propagate kb references` — the knowledge base's outside sources, ids shown as ref:<id> (offline)
 - `propagate kb search` — search the standards rows, references and evaluator's registers in one derived pass (no index); hits are std:/ref:/reg: with path:line and checked date
 - `propagate kb fetch` — read each URL's raw source (Node fetch, a fixed HTML-to-text step, pdftotext, gh api; arXiv, OpenReview, ACL Anthology and DOI resolve to open PDFs) into <dir>/fetched.json, classifying each ok, not_retrieved, stale or hallucinated (robots.txt respected; bodies stay under $STATE/kb/fetched)
