@@ -118,7 +118,8 @@ const ALLOW = [
   [main("git commit -m 'fix a && b & c'"), "ampersands inside quotes"],
   [main('echo "nohup & friends"'), "nohup and & inside quotes"],
   [main('git commit -m "npm test and doctor"'), "a heavy command named inside quotes"],
-  [main("node --test tests/hooks/x.test.mjs"), "one test file"],
+  // propagate#410: a bare `node --test` in this checkout is a G56 deny, so the allowed form carries a scoped state dir
+  [main("PROPAGATE_STATE_DIR=$(mktemp -d) node --test tests/hooks/x.test.mjs"), "one test file"],
   [{ tool_name: "Edit", tool_input: { file_path: "a" } }, "not Bash"],
   [{}, "empty payload"],
 ];
@@ -386,4 +387,93 @@ test("T-G6/T-G7 the hook never prunes and imports only node builtins and lib/cor
   for (const s of specs) assert.ok(s.startsWith("node:") || s === "../lib/core/paths.mjs", `background-guard imports ${s}`);
   const dynamic = [...src.matchAll(/import\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1]);
   assert.deepEqual(dynamic, ["../lib/core/commands.mjs"]);
+});
+
+// ── propagate#410: G72 and G56 are denies. Literal payloads, no machine paths ───────────────────────────────────────
+// A fake propagate checkout: a temp dir whose package.json carries the real name field.
+const fakeTree = (name) => { const d = mkdtempSync(path.join(tmpdir(), "g56-tree-")); writeFileSync(path.join(d, "package.json"), JSON.stringify({ name })); return d; };
+const propTree = fakeTree("claude-propagate");
+const otherTree = fakeTree("something-else");
+const CC_HEREDOC = 'git commit -m "$(cat <<\'EOF\'\nfix: x; y\n\nbody line && more\nCo-Authored-By: A <a@b.c>\nEOF\n)"';
+
+const G72_DENY = [
+  ["git commit -m x; git push", "a semicolon after the commit"],
+  ["npm test | tail -3 && git push", "&& after a pipe without pipefail"],
+  ["git commit -m x\ngit push", "a newline after the commit"],
+  ["set -o pipefail; npm test | tail; git push", "pipefail alone does not stop a ';' push"],
+  ["git commit -m x || echo no && git push", "an || fallback that does not exit"],
+  [`${CC_HEREDOC}\ngit push`, "the Claude Code heredoc commit, then a newline push"],
+];
+for (const [command, why] of G72_DENY) {
+  test(`G72 denies: ${why}`, async () => {
+    const d = await decide(main(command));
+    assert.equal(d.deny, true, command);
+    assert.match(d.reason, /G72/);
+  });
+}
+const G72_ALLOW = [
+  ["git commit -m x && git push", "a plain && chain"],
+  ["set -e; git commit -m x; git push", "set -e before the commit"],
+  ["set -euo pipefail; npm test | tail; git push", "set -euo pipefail before the test"],
+  ["set -o errexit\ngit commit -m x\ngit push", "set -o errexit"],
+  ["git commit -m x || exit 1; git push", "|| exit on the step"],
+  [`${CC_HEREDOC} && git push`, "the Claude Code heredoc commit, then && push"],
+  ["git commit -F - <<'EOF' && git push\nmsg; with semicolon\nsecond line\nEOF", "-F - heredoc, && on the opener line"],
+  ["git commit -F - <<'EOF'\nmsg; with semicolon\nsecond line\nEOF\n&& git push", "-F - heredoc, && after the terminator"],
+  ["git commit -m 'a; b\nc' && git push", "a quoted message with ; and a newline"],
+  ['git commit -m "$(cat <<\'EOF\'\nsay "hi; there\nthen\ngit push soon\nEOF\n)" && git push', "a heredoc body with an odd quote, a ; and a push-looking line"],
+  ["git commit -F - <<'EOF' && git push\nit's done; really\ngit push\nEOF", "a -F - body with an apostrophe and a push-looking line"],
+  ["git commit -m x; git push # G72-ok: the commit is best-effort here", "the escape comment"],
+  ["git add f; git status; git push", "no commit or test before the push"],
+];
+for (const [command, why] of G72_ALLOW) {
+  // run_in_background keeps the unrelated heavy rule (npm test) out of the way: only G72 is under test
+  test(`G72 allows: ${why}`, async () => assert.deepEqual(await decide(main(command, { run_in_background: true })), { deny: false }, command));
+}
+test("G72 escape needs a reason: a bare `# G72-ok:` still denies", async () => {
+  assert.equal((await decide(main("git commit -m x; git push # G72-ok:"))).deny, true);
+});
+test("G72 also applies in a subagent", async () => {
+  assert.equal((await decide(sub("git commit -m x; git push", { timeout: 60000 }))).deny, true);
+});
+
+test("G56 denies node --test with cwd in a propagate checkout and no state dir", async () => {
+  const d = await decide({ ...main("node --test tests/unit/a.test.mjs"), cwd: propTree });
+  assert.equal(d.deny, true);
+  assert.match(d.reason, /G56/);
+});
+test("G56 denies when only the target path is inside the checkout", async () => {
+  const d = await decide({ ...main(`node --test ${propTree}/tests/a.test.mjs`), cwd: otherTree });
+  assert.equal(d.deny, true);
+});
+test("G56 denies an EMPTY PROPAGATE_STATE_DIR (it falls back to production)", async () => {
+  for (const c of ["PROPAGATE_STATE_DIR= node --test tests/a.test.mjs", 'PROPAGATE_STATE_DIR="" node --test tests/a.test.mjs']) {
+    assert.equal((await decide({ ...main(c), cwd: propTree })).deny, true, c);
+  }
+});
+const G56_ALLOW = [
+  ["PROPAGATE_STATE_DIR=$(mktemp -d) node --test tests/a.test.mjs", propTree, "a non-empty state dir"],
+  ["npm test", propTree, "npm test is scoped by its script"],
+  ["npm run test:propagate", propTree, "npm run test:* is scoped by its script"],
+  ["node --test tests/a.test.mjs", otherTree, "a tree that is not propagate"],
+  ["node --test tests/a.test.mjs # G56-ok: reads nothing from the ledger", propTree, "the escape comment"],
+];
+for (const [command, cwd, why] of G56_ALLOW) {
+  test(`G56 allows: ${why}`, async () => {
+    const d = await decide({ ...main(command, command === "npm test" || command.startsWith("npm run") ? { run_in_background: true } : {}), cwd });
+    assert.equal(d.deny, false, command);
+  });
+}
+
+test("real process: G72 and G56 deny and allow through the hook binary", () => {
+  const out = (p) => (p.stdout ? JSON.parse(p.stdout).hookSpecificOutput.permissionDecision : "allow");
+  assert.equal(out(run(JSON.stringify(main("git commit -m x; git push")))), "deny");
+  assert.equal(out(run(JSON.stringify(main(`${CC_HEREDOC} && git push`)))), "allow");
+  assert.equal(out(run(JSON.stringify({ ...main("node --test tests/a.test.mjs"), cwd: propTree }))), "deny");
+  assert.equal(out(run(JSON.stringify({ ...main("PROPAGATE_STATE_DIR=$(mktemp -d) node --test tests/a.test.mjs"), cwd: propTree }))), "allow");
+});
+test("fail-open: a malformed payload allows, and a payload with a non-string command does not throw", async () => {
+  assert.equal(run("not json{").stdout, "");
+  assert.deepEqual(await decide({ tool_name: "Bash", tool_input: { command: { x: 1 } } }), { deny: false });
+  assert.deepEqual(await decide({ tool_name: "Bash", tool_input: null }), { deny: false });
 });
