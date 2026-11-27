@@ -219,19 +219,24 @@ test("github: 0 items triggers exactly one fallback with the first 2 terms, and 
 const npmBody = (objs) => JSON.stringify({ objects: objs, total: objs.length });
 const pkg = (name, description, searchScore, keywords) => ({ searchScore, package: { name, description, ...(keywords ? { keywords } : {}) } });
 
-test("npm: a popular package matching no term is filtered out, the rest rank by score, and limit applies after the filter", () => {
+test("npm: with 3+ terms a package must match at least 2 (one generic term is not relevance); ranked by score; limit after the filter", () => {
+  // Built as literals on purpose (rule:mutate-behind-the-fixture-builder): each row sits on one side of the 2-term line.
   const body = npmBody([
-    pkg("offtopic-popular", "Fuzzy matching in the browser", 900),
-    pkg("literature-low", "Search a literature index", 1),
-    pkg("tool-high", "Command line", 50, ["Literature"]),
-    pkg("sources-mid", "Merge many sources", 10),
-    pkg("literature-extra", "More literature", 5),
-    pkg("xliteraturex-pkg", "xliteraturex is not a whole word", 999),
+    pkg("offtopic-popular", "Fuzzy matching in the browser", 900), // 0 terms
+    pkg("generic-cli", "A CLI for building apps", 800), // 1 term ("cli"): the live failure, e.g. @angular/cli
+    pkg("sources-only", "Merge many sources", 700), // 1 term
+    pkg("literature-low", "Search a literature index", 1), // 2 terms
+    pkg("tool-high", "Command line", 50, ["Literature", "cli"]), // 2 terms, via keywords
+    pkg("lit-sources", "Literature sources merged", 10), // 2 terms
+    pkg("xliteraturex-pkg", "xliteraturex search is not a whole word", 999), // 1 term ("search"); xliteraturex is not literature
   ]);
   const all = engine("npm").parse(body, { query: "cli literature search sources", limit: 10 });
-  assert.deepEqual(all.map((r) => r.id), ["tool-high", "sources-mid", "literature-extra", "literature-low"]);
+  assert.deepEqual(all.map((r) => r.id), ["tool-high", "lit-sources", "literature-low"]);
   const two = engine("npm").parse(body, { query: "cli literature search sources", limit: 2 });
-  assert.deepEqual(two.map((r) => r.id), ["tool-high", "sources-mid"], "limit counts matching packages, not fetched ones");
+  assert.deepEqual(two.map((r) => r.id), ["tool-high", "lit-sources"], "limit counts matching packages, not fetched ones");
+  // With 1-2 terms every term must match.
+  const short = engine("npm").parse(body, { query: "literature sources", limit: 10 });
+  assert.deepEqual(short.map((r) => r.id), ["lit-sources"]);
   assert.equal(engine("npm").request({ query: "cli literature search sources", limit: 5 }).url.match(/size=(\d+)/)[1], "20");
   assert.equal(engine("npm").request({ query: "x", limit: 50 }).url.match(/size=(\d+)/)[1], "100");
 });
