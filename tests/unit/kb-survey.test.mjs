@@ -34,7 +34,19 @@ function stub(routes) {
 }
 const ghStub = (body) => async () => ({ status: 200, text: async () => body, headers: { get: () => null } });
 
-const NPM_OK = { "registry.npmjs.org": { body: fx("npm.json") } };
+// Both packages mention the query term, so npm's relevance filter (2 of 3+ terms, or all of 1-2) keeps both; these
+// tests are about survey's exit codes and --fetch, not npm ranking, which kb-discover-code.test.mjs covers.
+const NPM_OK = {
+  "registry.npmjs.org": {
+    body: JSON.stringify({
+      objects: [
+        { searchScore: 2, updated: "2026-11-25T10:00:00.000Z", package: { name: "widget-kit", description: "Widgets for tests", date: "2026-11-01T00:00:00.000Z", links: { npm: "https://www.npmjs.com/package/widget-kit" } } },
+        { searchScore: 1, updated: "2026-09-02T10:00:00.000Z", package: { name: "@sample/gizmo", description: "A widget gizmo", date: null } },
+      ],
+      total: 2,
+    }),
+  },
+};
 const NPM_EMPTY = { "registry.npmjs.org": { body: '{"objects":[]}' } };
 const NPM_DOWN = { "registry.npmjs.org": { status: 500, body: "" } };
 
@@ -50,11 +62,11 @@ const jsonOf = (r) => JSON.parse(r.out);
 test("survey --json: every field of the documented shape is present", async () => {
   const dir = tmp();
   const inj = base({ fetch: stub(NPM_OK), gh: ghStub(fx("github.json")) });
-  const r = await survey(["agents for widgets", "--sources", "code", "--json", "--dir", dir], inj);
+  const r = await survey(["widget", "--sources", "code", "--json", "--dir", dir], inj);
   assert.equal(r.code, 0);
   const j = jsonOf(r);
   assert.deepEqual(Object.keys(j), ["question", "dir", "sources_run", "sources_failed", "items", "counts"]);
-  assert.equal(j.question, "agents for widgets");
+  assert.equal(j.question, "widget");
   assert.equal(j.dir, dir);
   assert.deepEqual(j.sources_run, ["github", "npm"]);
   assert.deepEqual(j.sources_failed, []);
@@ -89,21 +101,21 @@ test("survey: the default is --sources all, broader than discover's academic def
   const hosts = [];
   const f = async (url) => (hosts.push(new URL(url).host), { status: 200, text: async () => "{}", headers: { get: () => null } });
   const inj = base({ fetch: f, gh: ghStub("{}") });
-  const r = await survey(["q", "--json", "--dir", tmp()], inj);
+  const r = await survey(["widget", "--json", "--dir", tmp()], inj);
   const j = jsonOf(r);
-  assert.equal(j.sources_failed.length + j.sources_run.length, 9, "all nine engines were asked");
+  assert.equal(j.sources_failed.length + j.sources_run.length, 10, "all ten engines were asked (academic 4, code 2, skills 4 with clihub)");
   assert.ok(hosts.includes("registry.npmjs.org") && hosts.includes("api.openalex.org"));
 });
 
 test("exit 0: at least one item and no source failed", async () => {
-  const r = await survey(["q", "--engine", "npm", "--dir", tmp()], base({ fetch: stub(NPM_OK) }));
+  const r = await survey(["widget", "--engine", "npm", "--dir", tmp()], base({ fetch: stub(NPM_OK) }));
   assert.equal(r.code, 0);
   assert.match(r.out, /^package {2}npm:widget-kit {2}widget-kit/m);
   assert.match(r.out, /2 item\(s\) \(package 2\) from 1 source\(s\)/);
 });
 
 test("exit 1: no item and no source failed, stated as 0 items from the sources asked", async () => {
-  const r = await survey(["q", "--engine", "npm", "--json", "--dir", tmp()], base({ fetch: stub(NPM_EMPTY) }));
+  const r = await survey(["widget", "--engine", "npm", "--json", "--dir", tmp()], base({ fetch: stub(NPM_EMPTY) }));
   assert.equal(r.code, 1);
   const j = jsonOf(r);
   assert.deepEqual(j.sources_failed, []);
@@ -113,7 +125,7 @@ test("exit 1: no item and no source failed, stated as 0 items from the sources a
 
 test("exit 2: a failed source is named in sources_failed and the other source's items are still printed", async () => {
   const inj = base({ fetch: stub(NPM_DOWN), gh: ghStub(fx("github.json")) });
-  const r = await survey(["q", "--sources", "code", "--json", "--dir", tmp()], inj);
+  const r = await survey(["widget", "--sources", "code", "--json", "--dir", tmp()], inj);
   assert.equal(r.code, 2, "a failed source must exit 2");
   const j = jsonOf(r);
   assert.equal(j.sources_failed.length, 1);
@@ -126,7 +138,7 @@ test("exit 2: a failed source is named in sources_failed and the other source's 
 });
 
 test("exit 2: a failure alone is never 0 items (exit 2, not 1)", async () => {
-  const r = await survey(["q", "--engine", "npm", "--json", "--dir", tmp()], base({ fetch: stub(NPM_DOWN) }));
+  const r = await survey(["widget", "--engine", "npm", "--json", "--dir", tmp()], base({ fetch: stub(NPM_DOWN) }));
   assert.equal(r.code, 2);
   const j = jsonOf(r);
   assert.equal(j.counts.items, 0);
@@ -134,30 +146,30 @@ test("exit 2: a failure alone is never 0 items (exit 2, not 1)", async () => {
 });
 
 test("exit 2: text mode names the failure on stderr", async () => {
-  const r = await survey(["q", "--engine", "npm", "--dir", tmp()], base({ fetch: stub(NPM_DOWN) }));
+  const r = await survey(["widget", "--engine", "npm", "--dir", tmp()], base({ fetch: stub(NPM_DOWN) }));
   assert.equal(r.code, 2);
   assert.match(r.err, /DISCOVER_HTTP: error: npm: npm: error: HTTP 500/);
 });
 
 test("exit 2: usage errors, an unwritable folder, a bad engine", async () => {
-  for (const args of [[], ["a", "b"], ["q", "--bogus"], ["q", "--limit"], ["q", "--timeout", "0"]]) {
+  for (const args of [[], ["a", "b"], ["widget", "--bogus"], ["widget", "--limit"], ["widget", "--timeout", "0"]]) {
     const r = await survey([...args, "--json"], base());
     assert.equal(r.code, 2, JSON.stringify(args));
     assert.equal(jsonOf(r).code, "SURVEY_USAGE");
   }
   const file = path.join(tmp(), "afile");
   writeFileSync(file, "x");
-  const r = await survey(["q", "--engine", "npm", "--dir", file, "--json"], base({ fetch: stub(NPM_OK) }));
+  const r = await survey(["widget", "--engine", "npm", "--dir", file, "--json"], base({ fetch: stub(NPM_OK) }));
   assert.equal(r.code, 2);
   assert.equal(jsonOf(r).code, "SURVEY_STORE");
-  const e = await survey(["q", "--engine", "nope", "--json", "--dir", tmp()], base());
+  const e = await survey(["widget", "--engine", "nope", "--json", "--dir", tmp()], base());
   assert.equal(e.code, 2);
   assert.equal(jsonOf(e).sources_failed[0].code, "DISCOVER_USAGE");
 });
 
 test("--timeout: sources that never finish are reported failed as SURVEY_TIMEOUT, exit 2", async () => {
   const never = () => new Promise(() => {});
-  const r = await survey(["q", "--engine", "npm", "--timeout", "0.05", "--json", "--dir", tmp()], base({ fetch: never }));
+  const r = await survey(["widget", "--engine", "npm", "--timeout", "0.05", "--json", "--dir", tmp()], base({ fetch: never }));
   assert.equal(r.code, 2);
   const j = jsonOf(r);
   assert.deepEqual(j.sources_failed.map((f) => [f.engine, f.code]), [["npm", "SURVEY_TIMEOUT"]]);
@@ -175,7 +187,7 @@ test("--fetch: body_path only on ok items; the rest say not_retrieved with a rea
       return send(403, "text/plain", "no");
     },
   });
-  const r = await survey(["q", "--engine", "npm", "--fetch", "--json", "--dir", tmp()], inj);
+  const r = await survey(["widget", "--engine", "npm", "--fetch", "--json", "--dir", tmp()], inj);
   assert.equal(r.code, 0);
   const j = jsonOf(r);
   const ok = j.items.find((i) => i.key === "npm:widget-kit");
