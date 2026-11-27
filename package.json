@@ -16,6 +16,7 @@
     "setup": "node cli.mjs setup",
     "doctor": "node cli.mjs doctor",
     "test:propagate": "PROPAGATE_GH_BIN=\"$PWD/scripts/test-gh-stub.sh\" PROPAGATE_STATE_DIR=\"${TMPDIR:-/tmp}/propagate-test-state\" node --test 'tests/**/*.test.mjs' 'hooks/**/*.test.mjs'",
+    "test:queued": "bash scripts/queued-test.sh",
     "test:curate-docs": "npm test --prefix skills/curate-docs",
     "readme:commands": "node scripts/readme-commands.mjs",
     "test:affected": "node scripts/test-impact/affected.mjs",
