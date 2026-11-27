@@ -104,6 +104,8 @@ meant only that nobody had copy-pasted.
 
 A brief for a lane that writes code on propagate carries `live-smoke: <real-data command>` (or `live_smoke_reason: <why not>`); `hooks/dispatch-model.mjs` refuses the dispatch without one (#409). The lane's report pastes that command's output. The coordinator re-runs only the live smoke, plus any test the next story touches, rather than the whole suite. Read-only agent types are exempt.
 
+Lanes run their suite with `npm run test:queued` (profile lane, foreground, timeout at most 590000), which goes through `test-queue` when it is installed and says `lock: unavailable` when not. Coordinator merge gates run `npm run test:queued -- --profile gate`, then `waiting gate-pass --run <id>`. The queue tool's location is found with `test-queue where`, never written into a brief.
+
 ## Out of scope here
 
 Building or changing UI, tokens, motion or a DESIGN.md is the `design-workflow` skill, not a command here.
