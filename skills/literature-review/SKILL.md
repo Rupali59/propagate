@@ -27,7 +27,7 @@ read the code and the `Next:` line, never guess past a refusal.
 9. The second rater is a model (`sections/gate.md`). Hand `P kb review agree <dir> --rater-brief` to one
    `propagate:literature-rater`, nothing else, and record its answers with `--rater-kind model-referenced --apply`.
    Then `P kb review agree <dir> --disagreements`: none, go to 10; within the tolerable count, file the lines as ONE
-   `needs:rupali` issue and **Stop for the maintainer's answers on the listed disagreements**, then `--adjudicate`;
+   issue labelled `needs:<maintainer>` and **Stop for the maintainer's answers on the listed disagreements**, then `--adjudicate`;
    over it or stuck, follow the section.
 10. `P kb review apply <dir>`. Report `brief.md` and `candidates.md`, the counts, and every `not_retrieved`.
 

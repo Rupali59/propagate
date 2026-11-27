@@ -25,7 +25,7 @@ has not read:
    warns `SCREENING_RATER_MODEL_OVERRIDE` instead of refusing.
 3. `--disagreements` lists each lane-vs-rater disagreement and the tolerable count.
    - **0 disagreements:** apply.
-   - **Within the count:** file the lines as one `needs:rupali` issue, one word each (`lane` or `rater`); after the
+   - **Within the count:** file the lines as one issue labelled `needs:<maintainer>`, one word each (`lane` or `rater`); after the
      maintainer answers, save `{<url>: lane|rater}` and run `--adjudicate <file> --apply`.
    - **Over the count (exit 1):** re-run the lanes with a changed brief, assemble, and agree again; the sample widens
      (T7). After 2 re-runs it says `stuck`: put it in the waiting digest with a recommendation.
