@@ -100,6 +100,10 @@ not a pass. That reading is now stronger than it was: `restated 0` means the
 detector was shown to fire on paraphrase and found nothing, where before it
 meant only that nobody had copy-pasted.
 
+## Lane briefs: live smoke
+
+A brief for a lane that writes code on propagate carries `live-smoke: <real-data command>` (or `live_smoke_reason: <why not>`); `hooks/dispatch-model.mjs` refuses the dispatch without one (#409). The lane's report pastes that command's output. The coordinator re-runs only the live smoke, plus any test the next story touches, rather than the whole suite. Read-only agent types are exempt.
+
 ## Out of scope here
 
 Building or changing UI, tokens, motion or a DESIGN.md is the `design-workflow` skill, not a command here.
