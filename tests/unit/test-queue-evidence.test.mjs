@@ -267,3 +267,66 @@ test("waiting reads the queue only when asked: collectWaiting without queueDirPa
   const r = collectWaiting({ gh: ghFake, repos: ["acme/widgets"], reviewsRoot: null, stateDirPath: tmp() });
   assert.ok(!r.sources.some((s) => /test-queue/.test(s)));
 });
+
+// ── outcome: exit 0 is not a pass when the run recorded failures (#428 E7) ─────────────────────────────────────
+
+test("evidence: a masked run (exit 0, outcome fail, exit_masked) is refused, and the reason names the cause", () => {
+  const g = repo();
+  const q = queue({ runs: [run({ id: "m", head: g.second, exit: 0, outcome: "fail", exit_masked: true, failures: [{ name: "a" }, { name: "b" }] })] });
+  const c = checkRunEvidence({ dir: q, runId: "m", sha: g.first, repoDir: g.dir });
+  assert.equal(c.ok, false);
+  assert.match(c.reasons.join("\n"), /exit 0 is masked: 2 failures recorded/);
+});
+
+test("evidence: a recorded failure with exit 0 is refused even without outcome or exit_masked", () => {
+  const g = repo();
+  const q = queue({ runs: [run({ id: "f", head: g.second, exit: 0, failures: [{ name: "a" }] })] });
+  assert.match(checkRunEvidence({ dir: q, runId: "f", sha: g.first, repoDir: g.dir }).reasons.join("\n"), /masked: 1 failure recorded/);
+});
+
+test("evidence: outcome fail alone, and exit_masked alone, are each refused", () => {
+  const g = repo();
+  const q = queue({ runs: [run({ id: "o", head: g.second, outcome: "fail" }), run({ id: "x", head: g.second, exit_masked: true })] });
+  assert.match(checkRunEvidence({ dir: q, runId: "o", sha: g.first, repoDir: g.dir }).reasons.join("\n"), /masked: outcome "fail"/);
+  assert.match(checkRunEvidence({ dir: q, runId: "x", sha: g.first, repoDir: g.dir }).reasons.join("\n"), /flagged its exit code as masked/);
+});
+
+test("evidence: an old record without outcome passes on exit 0; outcome pass with empty failures passes", () => {
+  const g = repo();
+  const q = queue({ runs: [run({ id: "old", head: g.second }), run({ id: "new", head: g.second, outcome: "pass", exit_masked: false, failures: [] })] });
+  for (const id of ["old", "new"]) assert.equal(checkRunEvidence({ dir: q, runId: id, sha: g.first, repoDir: g.dir }).ok, true, id);
+});
+
+// ── load-sensitive.json rows ────────────────────────────────────────────────────────────────────────────────────
+
+const lsEntry = (project, daysAgo) => ({ project, file: "t.test.mjs", name: "waits", first_seen: NOW - 30 * 86400000, last_seen: NOW - daysAgo * 86400000, count: 3, loads: [90], line: 4, runs: ["r1"] });
+const lsRows = (q) => collectWaiting({ gh: ghFake, repos: ["acme/widgets"], reviewsRoot: null, stateDirPath: tmp(), queueDirPath: q, now: NOW });
+
+test("load-sensitive: a project with recent entries gets one lane row with the count", () => {
+  const q = queue();
+  writeFileSync(path.join(q, "load-sensitive.json"), JSON.stringify({ entries: [lsEntry("widgets", 1), lsEntry("widgets", 13), lsEntry("gadgets", 2)] }));
+  const r = lsRows(q);
+  const rows = r.rows.filter((x) => /load-sensitive/.test(x.what));
+  assert.deepEqual(rows.map((x) => x.what), [
+    "gadgets: 1 load-sensitive test; tag them in the project's test vocabulary and file one fix issue (usually a wall-clock wait)",
+    "widgets: 2 load-sensitive tests; tag them in the project's test vocabulary and file one fix issue (usually a wall-clock wait)",
+  ]);
+  assert.ok(rows.every((x) => x.answer === "lane"));
+  assert.deepEqual(r.errors, []);
+});
+
+test("load-sensitive: an entry last seen more than 14 days ago gives no row; a missing file gives none", () => {
+  const q = queue();
+  writeFileSync(path.join(q, "load-sensitive.json"), JSON.stringify({ entries: [lsEntry("widgets", 15)] }));
+  assert.deepEqual(lsRows(q).rows.filter((x) => /load-sensitive/.test(x.what)), []);
+  assert.deepEqual(lsRows(queue()).rows, []);
+});
+
+test("load-sensitive: an unreadable file is an unread row naming the file, never silence", () => {
+  const q = queue();
+  writeFileSync(path.join(q, "load-sensitive.json"), "not json {");
+  const rows = lsRows(q).rows.filter((x) => /load-sensitive/.test(x.what));
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].what, /unread/);
+  assert.ok(rows[0].what.includes(path.join(q, "load-sensitive.json")));
+});
