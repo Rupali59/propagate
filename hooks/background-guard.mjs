@@ -19,7 +19,11 @@
  *   3. Subagent with run_in_background true. Deny: a backgrounded subagent has ended, not paused.
  *   1. Main session, not run_in_background, and timeout >= 120000 or the command matches HEAVY. Deny: re-run in the
  *      background.
+ *   5. Subagent running `test-queue run --profile gate|full`. Deny: gates run only in the main session (#428).
  *   4. Subagents are exempt from rule 1 (they must stay foreground, with a timeout).
+ * TEST QUEUE (#428): `test-queue run --profile gate|full` and `scripts/test.sh|tool/test.sh gate|full` are HEAVY; lane
+ * profiles are not. A bare vitest / `node --test` / `flutter test` outside `test-queue run`, in a project with a
+ * `.test-queue` file at its git root, is allowed with an additionalContext warning (see `optedIn`). G56 still fires first.
  * Not a background `&`: `&&`, `2>&1`, `>&2`, `&>`, and anything inside quotes.
  *
  * THE TWO ENFORCED GOTCHAS (propagate#410). G56 and G72 used to be warnings in gotcha-guard.mjs; a warning was read and
@@ -93,6 +97,12 @@ export async function networkPatterns(load = defaultLoad) {
   return networkFrom(await load());
 }
 
+// propagate#428 (E3). A GATE run is `test-queue run --profile gate|full` (the profile may sit anywhere after `run`, as
+// `--profile gate` or `--profile=gate`) or a project's wrapper `scripts/test.sh gate|full` / `tool/test.sh gate|full`.
+// Lane profiles are NOT heavy: they stay foreground, in a main session and in a subagent.
+const TEST_QUEUE_GATE = String.raw`(?:${PROPAGATE})?(?:\S*/)?test-queue\s+run\b(?=.*--profile[=\s]+(?:gate|full)\b)`;
+const gateRunRe = new RegExp(START + TEST_QUEUE_GATE);
+
 /**
  * The EXPLICIT EXCEPTIONS: heavy commands that are not a network `propagate` subcommand, so COMMANDS cannot express
  * them. `example` is a command that must match, so a test can iterate the list and assert the floor.
@@ -102,6 +112,8 @@ const EXCEPTIONS = [
   { label: "npm run test:record", re: new RegExp(START + String.raw`npm\s+run\s+test:record\b`), example: "npm run test:record" },
   { label: "release --check", re: new RegExp(START + PROPAGATE + String.raw`release\b.*--check\b`), example: "node cli.mjs release --check" },
   { label: "doctor (without --quick)", re: new RegExp(START + PROPAGATE + String.raw`doctor\b(?!.*--quick)`), example: "propagate doctor" },
+  { label: "test-queue run (gate/full profile)", re: gateRunRe, example: "test-queue run --profile gate -- npm test", gate: true },
+  { label: "test.sh gate/full wrapper", re: new RegExp(START + String.raw`(?:(?:bash|sh)\s+)?(?:\S*/)?(?:scripts|tool)/test\.sh\s+(?:gate|full)\b`), example: "scripts/test.sh gate" },
   { label: "make-public --check", re: new RegExp(START + String.raw`.*\bmake-public\b.*--check\b`), example: "node cli.mjs make-public repo --check" },
 ];
 
@@ -246,8 +258,37 @@ export function gotchaDeny(input) {
   return null;
 }
 
+// propagate#428: a bare test runner that is not wrapped in `test-queue run`. A WARNING, never a deny (the deny is decided
+// after a week of records, plan E finding 4).
+const BARE_RUNNER = new RegExp(START + String.raw`(?:npx\s+)?(?:vitest(?:\s|$)|node\s+(?:\S+\s+)*?--test\b|flutter\s+test\b)`);
+export const TEST_QUEUE_WARNING = "run tests through test-queue (#428); unwrapped runs collide with gates";
+
+/**
+ * OPT-IN MARKER (propagate#428): a project has opted in when the root of the git checkout that holds the cwd (the
+ * nearest ancestor with a `.git` entry, a directory or a worktree's file) contains a file named `.test-queue`. Derived
+ * from the cwd each call; no path is hard-coded. A `package.json` key was the other candidate: it needs a JSON read on
+ * every Bash call, and a Flutter or Go project has no package.json to carry it.
+ */
+export function optedIn(cwd) {
+  let d = path.resolve(cwd);
+  for (let n = 0; n < 40; n++) {
+    if (existsSync(path.join(d, ".git"))) return existsSync(path.join(d, ".test-queue"));
+    const up = path.dirname(d);
+    if (up === d) return false;
+    d = up;
+  }
+  return false;
+}
+
+const bareRunnerWarning = (command, cwd) => {
+  const segs = stripQuotes(dropHeredocs(command)).split(/&&|\|\||;|\||\n/).map((s) => s.trim());
+  if (!segs.some((s) => BARE_RUNNER.test(s) && !/\btest-queue\b/.test(s))) return null;
+  return optedIn(cwd) ? TEST_QUEUE_WARNING : null;
+};
+
+const segmentsOf = (command) => stripQuotes(command).split(/&&|\|\||;|\||\n/).map((s) => s.trim());
 const heavyMatch = async (command, load) => {
-  const segs = stripQuotes(command).split(/&&|\|\||;|\||\n/).map((s) => s.trim());
+  const segs = segmentsOf(command);
   const hit = (list) => list.find((h) => segs.some((s) => h.re.test(s)));
   return hit(HEAVY) ?? (NAMES_PROPAGATE.test(command) ? hit(await networkPatterns(load)) : undefined);
 };
@@ -270,6 +311,9 @@ export async function judge(input, load = defaultLoad) {
   const gd = gotchaDeny(input);
   if (gd) return { deny: true, event: "deny", rule: gd.rule, label: null, reason: gd.reason };
 
+  // propagate#428: gates run in the coordinator's main session only, so two subagents never queue for the same lock
+  if (isSub && segmentsOf(command).some((x) => gateRunRe.test(x))) return { deny: true, event: "deny", rule: "sub-gate", label: null, reason: "gates run only in the coordinator's main session (#428); a subagent runs a lane profile" };
+
   if (isSub && bg) return { deny: true, event: "deny", rule: "sub-bg", label: null, reason: "a subagent runs long commands in the FOREGROUND with an explicit timeout; a backgrounded subagent command has ended, not paused, because its completion notice routes to the parent (rule:delegation-criteria §3)" };
 
   if (!isSub) {
@@ -286,7 +330,13 @@ export async function judge(input, load = defaultLoad) {
       return bg ? { deny: false, ...r } : { deny: true, ...r, reason: `\`${h.label}\` takes minutes: re-run with run_in_background: true and keep working; the harness re-invokes you on exit (rule:background-long-runs)` };
     }
   }
-  return { deny: false, event: null };
+  let warn = null;
+  try {
+    warn = bareRunnerWarning(command, typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd());
+  } catch {
+    // fail open: a warning is optional
+  }
+  return warn ? { deny: false, event: null, warn } : { deny: false, event: null };
 }
 
 /** @returns {Promise<{deny: boolean, reason?: string}>} the decision only, the shape this hook has always returned. */
@@ -346,6 +396,7 @@ const denyJson = (reason) => JSON.stringify({
 export async function respond(input, { load = defaultLoad, write = (s) => process.stdout.write(s), append = appendGuardRow, stateDir, now = () => new Date() } = {}) {
   const j = await judge(input, load);
   if (j.deny) write(denyJson(j.reason));
+  else if (j.warn) write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: `propagate background-guard: ${j.warn}.` } }));
   if (j.event) {
     try {
       append(guardRow(input, j, now()), stateDir ?? defaultStateDir());
