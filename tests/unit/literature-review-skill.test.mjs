@@ -54,9 +54,12 @@ test("every section file the body links exists, and there is at least one", () =
 });
 
 test("the two approval stops are present, and the gate's own sample is not skipped", () => {
-  assert.equal((SKILL.match(/\bStop for the maintainer/g) ?? []).length, 2, "SKILL.md needs exactly two 'Stop for the maintainer' points: the protocol, and the sample decisions");
+  assert.equal((SKILL.match(/\bStop for the maintainer/g) ?? []).length, 2, "SKILL.md needs exactly two 'Stop for the maintainer' points: the protocol, and the listed disagreements");
   assert.match(SKILL, /Stop for the maintainer's approval of `?protocol\.md/);
-  assert.match(SKILL, /Stop for the maintainer's decisions on the sample/);
+  assert.match(SKILL, /Stop for the maintainer's answers on the listed disagreements/);
+  assert.match(SKILL, /--rater-brief/);
+  assert.match(SKILL, /propagate:literature-rater/);
+  assert.match(SKILL, /--disagreements/);
 });
 
 test("the body never instructs WebSearch (or WebFetch) for sources: every mention is a prohibition", () => {
