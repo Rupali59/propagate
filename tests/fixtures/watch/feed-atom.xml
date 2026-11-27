@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Example changelog</title>
+<entry><title>Release &amp; notes 5</title><id>tag:example.test,2026:5</id><link href="https://example.test/posts/5"/><updated>2026-11-22T09:00:00Z</updated></entry>
+<entry><title><![CDATA[Release notes 4]]></title><id>tag:example.test,2026:4</id><link href="https://example.test/posts/4"/><updated>2026-10-02T09:00:00Z</updated></entry>
+</feed>
