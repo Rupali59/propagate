@@ -169,6 +169,8 @@ Regenerate it with `npm run readme:commands`.
 - `propagate costs window` — tokens and minutes for a window of a main-session transcript, between two anchors (read-only)
 - `propagate day open` — is there enough Ready work for today's budget, across every board (read-only)
 - `propagate day close` — groom the boards for tomorrow: promotions, refusals, closed-not-Done, cost gaps (writes only with --apply)
+- `propagate waiting` — every merge, approval and decision waiting on the maintainer, each with a recommendation and a one-word answer (merge|approve|defer|lane|rater); exit 2 when a source could not be read
+- `propagate waiting gate-pass` — record that the suite passed on a PR's exact head sha (the only write; dry run unless --apply); a merge is recommended only against such a record
 - `propagate sprint plan` — does the Ready work fit the usage left until the sprint ends: budget in week-% points, uncalibrated Sizes counted not summed (read-only)
 - `propagate sprint review` — done against planned per board for the last ended Sprint, calibration gain, missing cost fields; carry-over moves only with --apply (read-only by default)
 - `propagate rules` — canonical-rules lifecycle: list, check, selftest, promote

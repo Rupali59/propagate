@@ -22,6 +22,7 @@ import { parseGoalsFile } from "../lib/report/goals.mjs";
 import { discoverBacklogFiles } from "../lib/report/backlog.mjs";
 import { ghFetcher, loadWidget } from "./sprint.mjs";
 import { hubOwnerOf } from "./broadcast.mjs";
+import { readWaiting } from "./waiting.mjs";
 import { refreshIndex, writeIndex } from "../lib/broadcast/index.mjs";
 import { stateDir } from "../lib/core/paths.mjs";
 import { runGlance } from "../lib/glance/compute.mjs";
@@ -130,6 +131,8 @@ export async function dayCmd(args, inject = {}) {
     const r = await buildDayOpen({ sessions, sampleRows: rows, now, widget, widgetMissing, fetcher, goalFiles, laneRows: inject.laneRows ?? readCosts({ lanesOnly: true }).rows });
     if (r.exit !== 2) await refreshBroadcastIndex(r, { fetcher, now, inject });
     glanceStep(r, { now, inject });
+    // #411: the same waiting rows `propagate waiting` prints. A source that failed is a line, never "nothing waiting"; it never moves the verdict.
+    r.waiting = inject.waiting ?? readWaiting({ stateDirPath: inject.stateDirPath });
     if (json) out(JSON.stringify(r, null, 2));
     else for (const line of renderDayOpen(r)) out(line);
     return r.exit;
