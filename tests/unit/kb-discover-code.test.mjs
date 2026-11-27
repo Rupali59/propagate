@@ -1,0 +1,292 @@
+/**
+ * `kb discover` code and skill engines and `--sources` (#400, epic #321 S2). Fixtures use the real field names of each
+ * endpoint (confirmed live 2026-11-26) with invented values. No network: `inject.fetch` and `inject.gh` are stubs, and
+ * one test runs the real gh transport against a fake `PROPAGATE_GH_BIN` script.
+ */
+import test from "node:test";
+import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { discoverCmd } from "../../lib/research/discover.mjs";
+import { ALL_ENGINES, Malformed, searchTerms } from "../../lib/research/discover-engines.mjs";
+
+const FIX = path.join(import.meta.dirname, "..", "fixtures", "discover");
+const fx = (n) => readFileSync(path.join(FIX, n), "utf8");
+const tmp = () => mkdtempSync(path.join(os.tmpdir(), "discover-code-"));
+const engine = (id) => ALL_ENGINES.find((e) => e.id === id);
+const readDiscovered = (dir) => JSON.parse(readFileSync(path.join(dir, "discovered.json"), "utf8"));
+
+function io() {
+  const out = [];
+  const err = [];
+  return { out, err, log: (...a) => out.push(a.join(" ")), error: (...a) => err.push(a.join(" ")) };
+}
+
+function stub(routes) {
+  const calls = [];
+  const fn = async (url) => {
+    const host = new URL(url).host;
+    calls.push(host);
+    const r = routes[host];
+    if (!r) throw new Error(`stub: no route for ${host}`);
+    return { status: r.status ?? 200, text: async () => r.body, headers: { get: () => null } };
+  };
+  fn.calls = calls;
+  return fn;
+}
+const ghStub = (body) => {
+  const calls = [];
+  const fn = async (endpoint) => (calls.push(endpoint), { status: 200, text: async () => body, headers: { get: () => null } });
+  fn.calls = calls;
+  return fn;
+};
+const base = (extra = {}) => ({ io: io(), env: {}, stateDirPath: tmp(), sleep: async () => {}, now: () => Date.parse("2026-11-26T10:00:00Z"), ...extra });
+
+test("github: parses a repo search response; key is gh:<lower-case owner/repo>, updated is pushed_at", () => {
+  const rows = engine("github").parse(fx("github.json"), { query: "widget" });
+  assert.deepEqual(rows[0], {
+    engine: "github", id: "Example-Org/Widget-Kit", doi: null, title: "Example-Org/Widget-Kit", year: null, venue: "GitHub",
+    is_peer_reviewed_hint: false, oa_url: null, url: "https://github.com/Example-Org/Widget-Kit", abstract: "A kit of widgets",
+    kind: "repo", key: "gh:example-org/widget-kit", updated: "2026-11-20", matched_query: "widget in:name,description,topics",
+  });
+  assert.equal("abstract" in rows[1], false, "a null description is no abstract");
+  assert.equal(engine("github").minIntervalMs(false), 2100);
+});
+
+test("npm: parses a package search response; updated prefers package.date", () => {
+  const rows = engine("npm").parse(fx("npm.json"));
+  assert.equal(rows[0].key, "npm:widget-kit");
+  assert.equal(rows[0].kind, "package");
+  assert.equal(rows[0].updated, "2026-11-01");
+  assert.equal(rows[0].abstract, "Widgets for tests");
+  assert.equal(rows[1].updated, "2026-09-02", "falls back to the object's `updated`");
+  assert.equal(rows[1].url, "https://www.npmjs.com/package/@sample/gizmo");
+  assert.match(engine("npm").request({ query: "a b", limit: 7 }).url, /text=b&size=28$/);
+});
+
+test("skills: parses {skills:[...]}; key and url come from source and skillId, limit caps the list", () => {
+  const rows = engine("skills").parse(fx("skills.json"), { limit: 2 });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].key, "skill:example-org/widget-kit/widget-skill");
+  assert.equal(rows[0].url, "https://skills.sh/example-org/widget-kit/widget-skill");
+  assert.equal(rows[0].kind, "skill");
+  assert.equal(rows[0].updated, null);
+});
+
+test("plugins: filters client-side on repo, description and keywords, ranks by stars, keys by repo", () => {
+  const rows = engine("plugins").parse(fx("plugins.json"), { query: "widget", limit: 10 });
+  assert.deepEqual(rows.map((r) => r.id), ["sample-user/gizmo", "Example-Org/Widget-Kit"], "unrelated repo dropped, higher stars first");
+  assert.equal(rows[1].key, "gh:example-org/widget-kit");
+  assert.equal(rows[1].kind, "plugin-marketplace");
+  assert.equal(rows[1].updated, "2026-11-24");
+  assert.equal(engine("plugins").parse(fx("plugins.json"), { query: "widget", limit: 1 }).length, 1);
+  assert.deepEqual(engine("plugins").parse(fx("plugins.json"), { query: "nomatchatall" }), [], "no match is an empty list, not an error");
+});
+
+test("mcp: parses servers[].server; updated comes from _meta when present", () => {
+  const rows = engine("mcp").parse(fx("mcp.json"));
+  assert.equal(rows[0].key, "mcp:example.test/widget-server");
+  assert.equal(rows[0].title, "Widget Server");
+  assert.equal(rows[0].kind, "mcp-server");
+  assert.equal(rows[0].updated, "2026-11-06");
+  assert.equal(rows[0].url, "https://example.test/widget");
+  assert.equal(rows[1].updated, null);
+  assert.equal(rows[1].title, "example.test/bare");
+});
+
+test("every new engine throws Malformed on a body that is not its shape, and on a row without its identity", () => {
+  const bad = {
+    github: ["not json", "{}", '{"items":[{"html_url":"x"}]}'],
+    npm: ["not json", "{}", '{"objects":[{"package":{}}]}'],
+    skills: ["not json", "{}", '{"skills":[{"source":"a/b"}]}'],
+    plugins: ["not json", "{}", '[{"stars":1}]'],
+    mcp: ["not json", "{}", '{"servers":[{"server":{}}]}'],
+  };
+  for (const [id, bodies] of Object.entries(bad)) {
+    for (const b of bodies) assert.throws(() => engine(id).parse(b, { query: "q", limit: 5 }), Malformed, `${id}: ${b}`);
+  }
+});
+
+test("a malformed body from one engine gives exit 2, names the engine, and the others' rows are still written", async () => {
+  const dir = tmp();
+  const t = base({ fetch: stub({ "registry.npmjs.org": { body: '{"nope":1}' } }), gh: ghStub(fx("github.json")) });
+  const code = await discoverCmd([dir, "widget", "--sources", "code"], t);
+  assert.equal(code, 2);
+  assert.ok(t.io.err.some((l) => /^DISCOVER_MALFORMED: npm: error: could not understand the response/.test(l)), t.io.err.join("\n"));
+  assert.deepEqual(readDiscovered(dir).map((r) => r.engine), ["github", "github"]);
+});
+
+test("a github repo and a marketplace for the same repo dedupe to one row", async () => {
+  const dir = tmp();
+  const t = base({ gh: ghStub(fx("github.json")), fetch: stub({ "claudemarketplaces.com": { body: fx("plugins.json") } }) });
+  assert.equal(await discoverCmd([dir, "widget", "--engine", "github"], t), 0);
+  assert.equal(await discoverCmd([dir, "widget", "--engine", "plugins"], t), 0);
+  const d = readDiscovered(dir);
+  const rows = d.filter((r) => r.key === "gh:example-org/widget-kit");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].engines, ["github", "plugins"]);
+  assert.equal(rows[0].kind, "repo", "the first engine's kind wins");
+  assert.equal(d.length, 2, "Widget-Kit plus sample-user/gizmo (gizmo appears in both sources too)");
+});
+
+test("--sources skills runs exactly skills, plugins, mcp and clihub", async () => {
+  const dir = tmp();
+  const f = stub({ "skills.sh": { body: fx("skills.json") }, "claudemarketplaces.com": { body: fx("plugins.json") }, "registry.modelcontextprotocol.io": { body: fx("mcp.json") }, "raw.githubusercontent.com": { body: fx("clihub-registry.json") } });
+  const gh = ghStub(fx("github.json"));
+  assert.equal(await discoverCmd([dir, "widget", "--sources", "skills"], base({ fetch: f, gh })), 0);
+  assert.deepEqual([...new Set(f.calls)].sort(), ["claudemarketplaces.com", "raw.githubusercontent.com", "registry.modelcontextprotocol.io", "skills.sh"]);
+  assert.equal(gh.calls.length, 0);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "searches.json"), "utf8")).map((s) => s.engine), ["skills", "plugins", "mcp", "clihub"]);
+});
+
+test("with no --sources or --engine only the academic engines run; --sources code,skills and all pick the groups", async () => {
+  const f = stub({});
+  const gh0 = ghStub("{}");
+  const t = base({ fetch: f, gh: gh0 });
+  assert.equal(await discoverCmd([tmp(), "q"], t), 2);
+  assert.deepEqual(f.calls, ["api.openalex.org", "api.semanticscholar.org", "export.arxiv.org", "api.crossref.org"]);
+  assert.equal(gh0.calls.length, 0, "github is not in the academic group");
+  const g = ghStub(fx("github.json"));
+  const f2 = stub({ "registry.npmjs.org": { body: fx("npm.json") }, "skills.sh": { body: fx("skills.json") }, "claudemarketplaces.com": { body: fx("plugins.json") }, "registry.modelcontextprotocol.io": { body: fx("mcp.json") }, "raw.githubusercontent.com": { body: fx("clihub-registry.json") } });
+  assert.equal(await discoverCmd([tmp(), "widget", "--sources", "code,skills"], base({ fetch: f2, gh: g })), 0);
+  assert.deepEqual([...new Set(f2.calls)].sort(), ["claudemarketplaces.com", "raw.githubusercontent.com", "registry.modelcontextprotocol.io", "registry.npmjs.org", "skills.sh"]);
+  assert.equal(g.calls.length, 1);
+});
+
+test("--sources rejects an unknown group; --engine still works for a new engine", async () => {
+  const t = base();
+  assert.equal(await discoverCmd([tmp(), "q", "--sources", "code,bogus"], t), 2);
+  assert.match(t.io.err.join("\n"), /--sources must be a comma list of academic, code, skills, all, got "bogus"/);
+  const dir = tmp();
+  assert.equal(await discoverCmd([dir, "widget", "--engine", "npm"], base({ fetch: stub({ "registry.npmjs.org": { body: fx("npm.json") } }) })), 0);
+  assert.equal(readDiscovered(dir)[0].engine, "npm");
+});
+
+test("the github request goes through gh api with the query encoded and the limit as per_page", async () => {
+  const g = ghStub(fx("github.json"));
+  await discoverCmd([tmp(), "agent skills", "--engine", "github", "--limit", "5"], base({ gh: g }));
+  assert.deepEqual(g.calls, ["search/repositories?q=" + encodeURIComponent("agent skills in:name,description,topics") + "&sort=stars&order=desc&per_page=5"]);
+});
+
+test("the real gh transport runs the PROPAGATE_GH_BIN binary, and a missing binary is a named failure", async () => {
+  const dir = tmp();
+  const bin = path.join(tmp(), "fake-gh.sh");
+  writeFileSync(bin, `#!/bin/sh\n[ "$1" = api ] || exit 9\ncat <<'EOF'\n${fx("github.json")}\nEOF\n`);
+  chmodSync(bin, 0o755);
+  assert.equal(await discoverCmd([dir, "widget", "--engine", "github"], base({ env: { PROPAGATE_GH_BIN: bin } })), 0);
+  assert.equal(readDiscovered(dir)[0].key, "gh:example-org/widget-kit");
+  const t = base({ env: { PROPAGATE_GH_BIN: path.join(tmp(), "no-such-gh") } });
+  assert.equal(await discoverCmd([tmp(), "widget", "--engine", "github"], t), 2);
+  assert.match(t.io.err.join("\n"), /DISCOVER_NETWORK: github: error: request failed \(.*is not installed\)/);
+});
+
+test("searchTerms: lower-cases, drops the stopwords, keeps at most 5 terms in their original order", () => {
+  assert.deepEqual(searchTerms("The CLI of a Tool for Literature search on multiple sources"), ["cli", "literature", "search", "multiple", "sources"]);
+  assert.deepEqual(searchTerms("cli watch github releases new since last check"), ["cli", "watch", "github", "releases"]);
+  assert.deepEqual(searchTerms("alpha beta gamma delta epsilon zeta eta").length, 5);
+  assert.deepEqual(searchTerms("zeta alpha beta"), ["zeta", "alpha", "beta"]);
+  assert.deepEqual(searchTerms("find any existing tools"), []);
+});
+
+test("github: the query is the terms plus in:name,description,topics, sorted by stars", () => {
+  const url = decodeURIComponent(engine("github").request({ query: "Find a CLI for literature search", limit: 5 }).gh);
+  assert.equal(url, "search/repositories?q=cli literature search in:name,description,topics&sort=stars&order=desc&per_page=5");
+});
+
+test("github: 0 items triggers exactly one fallback with the first 2 terms, and rows record the query that ran", async () => {
+  const calls = [];
+  const empty = JSON.stringify({ total_count: 0, items: [] });
+  const gh = async (endpoint) => {
+    calls.push(decodeURIComponent(endpoint));
+    return { status: 200, text: async () => (calls.length === 1 ? empty : fx("github.json")), headers: { get: () => null } };
+  };
+  const dir = tmp();
+  assert.equal(await discoverCmd([dir, "cli literature search multiple sources", "--engine", "github"], base({ gh })), 0);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0], /q=cli literature search multiple sources in:name,description,topics&/);
+  assert.match(calls[1], /q=cli literature in:name,description,topics&/);
+  assert.equal(readDiscovered(dir)[0].matched_query, "cli literature in:name,description,topics");
+  // A second empty answer is not retried again, and a query of at most 2 terms has no fallback.
+  const g2 = ghStub(empty);
+  assert.equal(await discoverCmd([tmp(), "alpha beta gamma", "--engine", "github"], base({ gh: g2 })), 1);
+  assert.equal(g2.calls.length, 2);
+  const g3 = ghStub(empty);
+  await discoverCmd([tmp(), "alpha beta", "--engine", "github"], base({ gh: g3 }));
+  assert.equal(g3.calls.length, 1);
+});
+
+const npmBody = (objs) => JSON.stringify({ objects: objs, total: objs.length });
+const pkg = (name, description, searchScore, keywords) => ({ searchScore, package: { name, description, ...(keywords ? { keywords } : {}) } });
+
+test("npm: with 3+ terms a package must match at least 2 (one generic term is not relevance); ranked by score; limit after the filter", () => {
+  // Built as literals on purpose (rule:mutate-behind-the-fixture-builder): each row sits on one side of the 2-term line.
+  const body = npmBody([
+    pkg("offtopic-popular", "Fuzzy matching in the browser", 900), // 0 terms
+    pkg("generic-cli", "A CLI for building apps", 800), // 1 term ("cli"): the live failure, e.g. @angular/cli
+    pkg("sources-only", "Merge many sources", 700), // 1 term
+    pkg("literature-low", "Search a literature index", 1), // 2 terms
+    pkg("tool-high", "Command line", 50, ["Literature", "cli"]), // 2 terms, via keywords
+    pkg("lit-sources", "Literature sources merged", 10), // 2 terms
+    pkg("xliteraturex-pkg", "xliteraturex search is not a whole word", 999), // 1 term ("search"); xliteraturex is not literature
+  ]);
+  const all = engine("npm").parse(body, { query: "cli literature search sources", limit: 10 });
+  assert.deepEqual(all.map((r) => r.id), ["tool-high", "lit-sources", "literature-low"]);
+  const two = engine("npm").parse(body, { query: "cli literature search sources", limit: 2 });
+  assert.deepEqual(two.map((r) => r.id), ["tool-high", "lit-sources"], "limit counts matching packages, not fetched ones");
+  // With 1-2 terms every term must match.
+  const short = engine("npm").parse(body, { query: "literature sources", limit: 10 });
+  assert.deepEqual(short.map((r) => r.id), ["lit-sources"]);
+  assert.equal(engine("npm").request({ query: "cli literature search sources", limit: 5 }).url.match(/size=(\d+)/)[1], "20");
+  assert.equal(engine("npm").request({ query: "x", limit: 50 }).url.match(/size=(\d+)/)[1], "100");
+});
+
+const CLIHUB_A = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main/registry.json";
+const CLIHUB_B = "https://raw.githubusercontent.com/HKUDS/CLI-Anything/main/public_registry.json";
+const clihubBodies = () => [fx("clihub-registry.json"), fx("clihub-public.json")];
+const byUrl = (map) => {
+  const calls = [];
+  const fn = async (url) => {
+    calls.push(url);
+    const r = map[url];
+    if (!r) throw new Error(`stub: no route for ${url}`);
+    return { status: r.status ?? 200, text: async () => r.body, headers: { get: () => null } };
+  };
+  fn.calls = calls;
+  return fn;
+};
+
+test("clihub: merges both files, ranks by terms matched, de-dupes on name, and records kind, key, url, install", () => {
+  const rows = engine("clihub").parse(clihubBodies(), { query: "find a research reference manager", limit: 10 });
+  assert.deepEqual(rows.map((r) => r.key), ["clihub:refmgr", "clihub:notekeeper"], "refmgr matches 3 terms, notekeeper 2, imgtool and plain none");
+  assert.deepEqual(
+    { kind: rows[0].kind, url: rows[0].url, install: rows[0].install, updated: rows[0].updated, abstract: rows[0].abstract, title: rows[0].title },
+    { kind: "cli", url: "https://example.test/refmgr", install: "pip install refmgr", updated: null, abstract: "Manage a reference library from the shell", title: "Reference Manager" },
+  );
+  assert.equal(rows[1].url, "https://hkuds.github.io/CLI-Anything/", "no homepage and no source_url falls back to the hub page");
+  assert.equal("install" in rows[1], false);
+  assert.equal(engine("clihub").parse(clihubBodies(), { query: "reference manager research", limit: 1 }).length, 1);
+  assert.deepEqual(engine("clihub").request().urls, [CLIHUB_A, CLIHUB_B]);
+});
+
+test("clihub: a body that is not a registry, or an entry without a name, is Malformed", () => {
+  const good = clihubBodies();
+  for (const bad of ["not json", "{}", '{"clis":[{"display_name":"x"}]}']) {
+    assert.throws(() => engine("clihub").parse([bad, good[1]], { query: "x" }), Malformed, `file 1: ${bad}`);
+    assert.throws(() => engine("clihub").parse([good[0], bad], { query: "x" }), Malformed, `file 2: ${bad}`);
+  }
+});
+
+test("clihub: both files are fetched; if either fails the engine fails with exit 2 and writes nothing", async () => {
+  const ok = byUrl({ [CLIHUB_A]: { body: fx("clihub-registry.json") }, [CLIHUB_B]: { body: fx("clihub-public.json") } });
+  const dir = tmp();
+  assert.equal(await discoverCmd([dir, "reference manager", "--engine", "clihub"], base({ fetch: ok })), 0);
+  assert.deepEqual(ok.calls, [CLIHUB_A, CLIHUB_B]);
+  assert.equal(readDiscovered(dir)[0].key, "clihub:refmgr");
+  const half = byUrl({ [CLIHUB_A]: { body: fx("clihub-registry.json") }, [CLIHUB_B]: { status: 404, body: "" } });
+  const t = base({ fetch: half });
+  const d2 = tmp();
+  assert.equal(await discoverCmd([d2, "reference manager", "--engine", "clihub"], t), 2);
+  assert.ok(t.io.err.some((l) => /^DISCOVER_HTTP: clihub: error: HTTP 404/.test(l)), t.io.err.join("\n"));
+  assert.throws(() => readFileSync(path.join(d2, "discovered.json")), "no partial rows are written");
+});

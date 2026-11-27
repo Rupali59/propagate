@@ -1,0 +1,4 @@
+{"servers":[
+{"server":{"$schema":"https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json","name":"example.test/widget-server","description":"Serves  widgets","title":"Widget Server","version":"1.0.0","websiteUrl":"https://example.test/widget"},"_meta":{"io.modelcontextprotocol.registry/official":{"status":"active","updatedAt":"2026-11-06T23:47:15.643596Z","isLatest":true}}},
+{"server":{"name":"example.test/bare","description":"No meta","version":"0.1.0"}}],
+"metadata":{"nextCursor":"x","count":2}}

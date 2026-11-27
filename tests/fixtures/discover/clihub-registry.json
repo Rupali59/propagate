@@ -1,0 +1,3 @@
+{"meta":{"repo":"example-org/cli-registry","description":"synthetic fixture"},"clis":[
+{"name":"refmgr","display_name":"Reference Manager","version":"1.0.0","description":"Manage a reference library from the shell","homepage":"https://example.test/refmgr","source_url":"https://example.test/src/refmgr","install_cmd":"pip install refmgr","category":"research"},
+{"name":"imgtool","display_name":"Image Tool","version":"0.2.0","description":"Resize pictures","source_url":"https://example.test/src/imgtool","install_cmd":"npm i -g imgtool","category":"media"}]}
