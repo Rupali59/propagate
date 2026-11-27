@@ -1,19 +1,19 @@
 {
  "header": {
-  "recordedAt": "2026-11-27T10:16:13.170Z",
-  "commit": "684be348f5ee88f0fc1073b0fefe58e11de59ffe",
+  "recordedAt": "2026-11-27T12:01:40.124Z",
+  "commit": "e1affba2d382e23392f7ebab972f98fe5b20393c",
   "node": "v26.13.0",
-  "tests": 372,
-  "withStaticDeps": 301,
-  "withRecordedSpawnDeps": 126,
+  "tests": 373,
+  "withStaticDeps": 302,
+  "withRecordedSpawnDeps": 127,
   "partial": 7,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2361,
+  "recordedProcesses": 2376,
   "unresolvedStaticSpecifiers": 116,
   "suite": {
-   "pass": 5014,
-   "fail": 2
+   "pass": 5045,
+   "fail": 1
   }
  },
  "tests": {
@@ -1938,6 +1938,7 @@
     "tests/hooks/agent-guard.test.mjs",
     "tests/hooks/agent-nudge.test.mjs",
     "tests/hooks/background-guard.test.mjs",
+    "tests/hooks/close-guard.test.mjs",
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
@@ -10136,6 +10137,16 @@
    ],
    "size": "small"
   },
+  "tests/hooks/close-guard.test.mjs": {
+   "deps": [
+    "hooks/background-guard.mjs",
+    "hooks/close-guard.mjs",
+    "lib/core/commands.mjs",
+    "lib/core/paths.mjs",
+    "tests/hooks/close-guard.test.mjs"
+   ],
+   "size": "small"
+  },
   "tests/hooks/dispatch-model.test.mjs": {
    "deps": [
     "agents/",
@@ -10195,6 +10206,7 @@
     "hooks/agent-guard.mjs",
     "hooks/agent-nudge.mjs",
     "hooks/background-guard.mjs",
+    "hooks/close-guard.mjs",
     "hooks/dispatch-model.mjs",
     "hooks/doc-authority.mjs",
     "hooks/gotcha-guard.mjs",
@@ -11154,6 +11166,7 @@
     "hooks/agent-guard.mjs",
     "hooks/agent-nudge.mjs",
     "hooks/background-guard.mjs",
+    "hooks/close-guard.mjs",
     "hooks/dispatch-model.mjs",
     "hooks/doc-authority.mjs",
     "hooks/gotcha-guard.mjs",
@@ -11622,6 +11635,7 @@
     "tests/hooks/agent-guard.test.mjs",
     "tests/hooks/agent-nudge.test.mjs",
     "tests/hooks/background-guard.test.mjs",
+    "tests/hooks/close-guard.test.mjs",
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
@@ -12012,6 +12026,7 @@
     "hooks/agent-guard.mjs",
     "hooks/agent-nudge.mjs",
     "hooks/background-guard.mjs",
+    "hooks/close-guard.mjs",
     "hooks/dispatch-model.mjs",
     "hooks/doc-authority.mjs",
     "hooks/gotcha-guard.mjs",
@@ -12480,6 +12495,7 @@
     "tests/hooks/agent-guard.test.mjs",
     "tests/hooks/agent-nudge.test.mjs",
     "tests/hooks/background-guard.test.mjs",
+    "tests/hooks/close-guard.test.mjs",
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
@@ -12797,6 +12813,7 @@
     "hooks/agent-guard.mjs",
     "hooks/agent-nudge.mjs",
     "hooks/background-guard.mjs",
+    "hooks/close-guard.mjs",
     "hooks/dispatch-model.mjs",
     "hooks/doc-authority.mjs",
     "hooks/gotcha-guard.mjs",
@@ -13334,6 +13351,7 @@
     "tests/hooks/agent-guard.test.mjs",
     "tests/hooks/agent-nudge.test.mjs",
     "tests/hooks/background-guard.test.mjs",
+    "tests/hooks/close-guard.test.mjs",
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
@@ -20765,6 +20783,7 @@
     "hooks/agent-guard.mjs",
     "hooks/agent-nudge.mjs",
     "hooks/background-guard.mjs",
+    "hooks/close-guard.mjs",
     "hooks/dispatch-model.mjs",
     "hooks/doc-authority.mjs",
     "hooks/gotcha-guard.mjs",
@@ -21402,6 +21421,7 @@
     ".github/workflows/test.yml",
     ".gitignore",
     ".propagates.yml",
+    ".test-queue",
     "CHANGELOG.md",
     "DESIGN.md",
     "LICENSE",
@@ -21530,6 +21550,7 @@
     "hooks/agent-guard.mjs",
     "hooks/agent-nudge.mjs",
     "hooks/background-guard.mjs",
+    "hooks/close-guard.mjs",
     "hooks/dispatch-model.mjs",
     "hooks/doc-authority.mjs",
     "hooks/gotcha-guard.mjs",
@@ -21813,6 +21834,7 @@
     "scripts/costs-backfill.mjs",
     "scripts/make-public.mjs",
     "scripts/propagate-update-check",
+    "scripts/queued-test.sh",
     "scripts/readme-commands.mjs",
     "scripts/release-publish.mjs",
     "scripts/release-tag-aliases.mjs",
@@ -22049,6 +22071,7 @@
     "tests/hooks/agent-guard.test.mjs",
     "tests/hooks/agent-nudge.test.mjs",
     "tests/hooks/background-guard.test.mjs",
+    "tests/hooks/close-guard.test.mjs",
     "tests/hooks/dispatch-model.test.mjs",
     "tests/hooks/hook-imports.test.mjs",
     "tests/hooks/load-rules-drift.test.mjs",
