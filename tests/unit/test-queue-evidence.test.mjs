@@ -299,12 +299,13 @@ test("evidence: an old record without outcome passes on exit 0; outcome pass wit
 
 // ── load-sensitive.json rows ────────────────────────────────────────────────────────────────────────────────────
 
-const lsEntry = (project, daysAgo) => ({ project, file: "t.test.mjs", name: "waits", first_seen: NOW - 30 * 86400000, last_seen: NOW - daysAgo * 86400000, count: 3, loads: [90], line: 4, runs: ["r1"] });
+const lsEntry = (project, daysAgo, name = "waits") => ({ project, file: "t.test.mjs", name, first_seen: new Date(NOW - 30 * 86400000).toISOString(), last_seen: new Date(NOW - daysAgo * 86400000).toISOString(), count: 3, first_line: "timed out waiting", runs: ["r1"], failures: [] });
+const lsFile = (...es) => JSON.stringify({ schema: 1, updated_at: new Date(NOW).toISOString(), tests: Object.fromEntries(es.map((e, i) => [`${e.project}\0${e.file}\0${e.name}${i}`, e])) });
 const lsRows = (q) => collectWaiting({ gh: ghFake, repos: ["acme/widgets"], reviewsRoot: null, stateDirPath: tmp(), queueDirPath: q, now: NOW });
 
 test("load-sensitive: a project with recent entries gets one lane row with the count", () => {
   const q = queue();
-  writeFileSync(path.join(q, "load-sensitive.json"), JSON.stringify({ entries: [lsEntry("widgets", 1), lsEntry("widgets", 13), lsEntry("gadgets", 2)] }));
+  writeFileSync(path.join(q, "load-sensitive.json"), lsFile(lsEntry("widgets", 1), lsEntry("widgets", 13, "b"), lsEntry("gadgets", 2)));
   const r = lsRows(q);
   const rows = r.rows.filter((x) => /load-sensitive/.test(x.what));
   assert.deepEqual(rows.map((x) => x.what), [
@@ -317,7 +318,7 @@ test("load-sensitive: a project with recent entries gets one lane row with the c
 
 test("load-sensitive: an entry last seen more than 14 days ago gives no row; a missing file gives none", () => {
   const q = queue();
-  writeFileSync(path.join(q, "load-sensitive.json"), JSON.stringify({ entries: [lsEntry("widgets", 15)] }));
+  writeFileSync(path.join(q, "load-sensitive.json"), lsFile(lsEntry("widgets", 15)));
   assert.deepEqual(lsRows(q).rows.filter((x) => /load-sensitive/.test(x.what)), []);
   assert.deepEqual(lsRows(queue()).rows, []);
 });
@@ -329,4 +330,18 @@ test("load-sensitive: an unreadable file is an unread row naming the file, never
   assert.equal(rows.length, 1);
   assert.match(rows[0].what, /unread/);
   assert.ok(rows[0].what.includes(path.join(q, "load-sensitive.json")));
+});
+
+test("load-sensitive: the real file the queue wrote (contract fixture) gives one row; the old entries shape and a wrong schema are unread", () => {
+  const q = queue();
+  writeFileSync(path.join(q, "load-sensitive.json"), readFileSync(new URL("../fixtures/test-queue/load-sensitive.real.json", import.meta.url), "utf8"));
+  const rows = lsRows(q).rows.filter((x) => /load-sensitive/.test(x.what));
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].what, /^widgets: 1 load-sensitive test;/);
+  for (const bad of [{ entries: [lsEntry("widgets", 1)] }, { schema: 2, tests: {} }, { schema: 1 }]) {
+    writeFileSync(path.join(q, "load-sensitive.json"), JSON.stringify(bad));
+    const r = lsRows(q).rows.filter((x) => /load-sensitive/.test(x.what));
+    assert.match(r[0].what, /unread/, JSON.stringify(bad));
+    assert.ok(r[0].what.includes("load-sensitive.json"));
+  }
 });
