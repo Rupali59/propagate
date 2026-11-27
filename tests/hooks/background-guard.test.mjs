@@ -22,7 +22,8 @@ test("the heavy list has a floor, and every entry matches its own example (a bli
     assert.equal(d.deny, true, `heavy entry "${h.label}" does not deny its own example "${h.example}"`);
     assert.match(d.reason, /run_in_background: true/);
     assert.equal((await decide(main(h.example, { run_in_background: true }))).deny, false, `"${h.label}" must pass when backgrounded`);
-    assert.equal((await decide(sub(h.example, { timeout: 600000 }))).deny, false, `"${h.label}" must pass in a subagent foreground (rule 4)`);
+    // a gate run is the one heavy command a subagent may NOT run at all (#428): see the test-queue tests below
+    assert.equal((await decide(sub(h.example, { timeout: 600000 }))).deny, h.gate === true, `"${h.label}" in a subagent foreground (rule 4; gates are denied, #428)`);
   }
 });
 
@@ -488,4 +489,72 @@ test("fail-open: a malformed payload allows, and a payload with a non-string com
   assert.equal(run("not json{").stdout, "");
   assert.deepEqual(await decide({ tool_name: "Bash", tool_input: { command: { x: 1 } } }), { deny: false });
   assert.deepEqual(await decide({ tool_name: "Bash", tool_input: null }), { deny: false });
+});
+
+// ── propagate#428 (E3): test-queue gates are HEAVY, lanes are not, bare runners get a warning ────────────────────────
+import { mkdirSync as mkdirSyncE3 } from "node:fs";
+const optIn = (marker) => { const d = mkdtempSync(path.join(tmpdir(), "tq-proj-")); mkdirSyncE3(path.join(d, ".git")); if (marker) writeFileSync(path.join(d, ".test-queue"), ""); return d; };
+const at = (cwd, payload) => ({ ...payload, cwd });
+const hookOut = (payload) => { const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(payload), encoding: "utf8", env: { ...process.env, PROPAGATE_STATE_DIR: mkdtempSync(path.join(tmpdir(), "tq-state-")) } }); return r.stdout ? JSON.parse(r.stdout) : null; };
+
+for (const c of ["test-queue run --profile gate -- npm test", "test-queue run --profile=full -- npm test", "test-queue run -- npm test --profile gate", "propagate test-queue run --profile gate -- x", "scripts/test.sh gate", "bash tool/test.sh full", "./scripts/test.sh full"]) {
+  test(`E3: main-session foreground gate is denied, backgrounded is allowed: ${c}`, async () => {
+    const d = await decide(main(c));
+    assert.equal(d.deny, true);
+    assert.match(d.reason, /run_in_background: true/);
+    assert.equal((await decide(main(c, { run_in_background: true }))).deny, false);
+  });
+}
+
+for (const c of ["test-queue run --profile lane -- node --test x # G56-ok: fixture", "test-queue run --profile lane -- npx vitest run", "scripts/test.sh lane", "scripts/test.sh"]) {
+  test(`E3: a lane stays foreground-allowed, main and subagent: ${c}`, async () => {
+    assert.equal((await decide(main(c))).deny, false);
+    assert.equal((await decide(sub(c, { timeout: 300000 }))).deny, false);
+  });
+}
+
+test("E3: a subagent running a gate profile is denied, backgrounded or not", async () => {
+  for (const c of ["test-queue run --profile gate -- npm test", "test-queue run --profile full -- x"]) {
+    for (const extra of [{}, { timeout: 300000 }, { run_in_background: true }]) {
+      const d = await decide(sub(c, extra));
+      assert.equal(d.deny, true, c);
+      assert.match(d.reason, /gates run only in the coordinator's main session \(#428\)/);
+    }
+  }
+});
+
+test("E3: a bare runner in an opted-in project warns (additionalContext), never denies; run through the real hook", () => {
+  const proj = optIn(true);
+  for (const c of ["npx vitest run", "vitest run", "flutter test", "node --test tests/x.test.mjs"]) {
+    const out = hookOut(at(proj, main(c)));
+    assert.ok(out, `no output for ${c}`);
+    assert.equal(out.hookSpecificOutput.permissionDecision, undefined, `${c} must not deny`);
+    assert.match(out.hookSpecificOutput.additionalContext, /run tests through test-queue \(#428\); unwrapped runs collide with gates/);
+  }
+});
+
+test("E3: wrapped in test-queue, or a project that has not opted in, gets no warning", () => {
+  const proj = optIn(true), plain = optIn(false);
+  assert.equal(hookOut(at(proj, main("test-queue run --profile lane -- npx vitest run"))), null);
+  assert.equal(hookOut(at(proj, main("npm run lint"))), null);
+  assert.equal(hookOut(at(plain, main("npx vitest run"))), null, "no .test-queue marker: no warning");
+  assert.equal(hookOut(at(tmpdir(), main("flutter test"))), null, "no git root at all: no warning");
+});
+
+test("E3: the marker is found from a subdirectory of the git root", () => {
+  const proj = optIn(true); const sdir = path.join(proj, "a", "b"); mkdirSyncE3(sdir, { recursive: true });
+  assert.ok(hookOut(at(sdir, main("vitest run"))));
+});
+
+test("E3: the live-smoke verdict on the hook binary, gate foreground and bg", () => {
+  const deny = hookOut(main("test-queue run --profile gate -- npm test"));
+  assert.equal(deny.hookSpecificOutput.permissionDecision, "deny");
+  assert.equal(hookOut(main("test-queue run --profile gate -- npm test", { run_in_background: true })), null);
+});
+
+test("E3: G56 still denies a bare node --test in a propagate checkout, ahead of the warning, even when opted in", async () => {
+  const d = mkdtempSync(path.join(tmpdir(), "tq-prop-")); mkdirSyncE3(path.join(d, ".git")); writeFileSync(path.join(d, ".test-queue"), ""); writeFileSync(path.join(d, "package.json"), JSON.stringify({ name: "claude-propagate" }));
+  const r = await decide(at(d, main("node --test tests/x.test.mjs")));
+  assert.equal(r.deny, true);
+  assert.match(r.reason, /G56/);
 });
