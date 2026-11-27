@@ -92,7 +92,7 @@ test("sections carry no frontmatter and say when they apply", () => {
 });
 
 // ---- the survey skill (propagate#403), kept here so the committed impact map needs no new entry ----
-// kb watch lands with #402; until it is registered only its subcommand names are pinned, and once registered each is checked.
+// kb watch landed with #402: every subcommand the skill names must be registered (floor: all five).
 const SURVEY = readFileSync(path.join(ROOT, "skills", "survey", "SKILL.md"), "utf8");
 const LIT_SKILL = readFileSync(path.join(ROOT, "skills", "literature-review", "SKILL.md"), "utf8");
 const REF = readFileSync(path.join(ROOT, "docs", "REFERENCE.md"), "utf8");
@@ -124,7 +124,8 @@ test("survey skill: every kb watch subcommand is named, nothing else is, and reg
   for (const s of WATCH) assert.ok(named.has(s), `SURVEY.md never names kb watch ${s}`);
   for (const s of named) assert.ok(WATCH.includes(s), `kb watch ${s} is not one of ${WATCH.join("|")}`);
   const registered = Object.keys(COMMANDS).filter((k) => k.startsWith("kb watch"));
-  for (const s of WATCH) if (registered.length) assert.ok(COMMANDS[`kb watch ${s}`], `kb watch ${s} is not registered`);
+  assert.ok(registered.length >= WATCH.length, `only ${registered.length} kb watch commands registered: the registry check has gone blind`);
+  for (const s of WATCH) assert.ok(COMMANDS[`kb watch ${s}`], `kb watch ${s} is not registered`);
 });
 
 test("survey skill: no WebSearch or WebFetch instruction: every mention is a prohibition", () => {
