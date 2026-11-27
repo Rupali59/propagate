@@ -1,7 +1,7 @@
 {
  "header": {
-  "recordedAt": "2026-11-27T08:59:46.792Z",
-  "commit": "55b7499bcbdcaf5f800677d9ae0234dd11df31d0",
+  "recordedAt": "2026-11-27T09:12:42.677Z",
+  "commit": "da8088e2e5da7b9a6c6a780f2a7ccecc9a568782",
   "node": "v26.13.0",
   "tests": 371,
   "withStaticDeps": 301,
@@ -9,11 +9,11 @@
   "partial": 6,
   "unattributedProcesses": 0,
   "malformedRecords": 0,
-  "recordedProcesses": 2363,
+  "recordedProcesses": 2361,
   "unresolvedStaticSpecifiers": 116,
   "suite": {
-   "pass": 5002,
-   "fail": 1
+   "pass": 5010,
+   "fail": 0
   }
  },
  "tests": {
@@ -4670,6 +4670,8 @@
     "skills/propagate/sections/reconcile.md",
     "skills/propagate/sections/routing.md",
     "skills/propagate/sections/settle.md",
+    "skills/survey/",
+    "skills/survey/SKILL.md",
     "tests/",
     "tests/cli/",
     "tests/cli/plans-roots.test.mjs",
@@ -9987,6 +9989,7 @@
     "skills/propagate/sections/reconcile.md",
     "skills/propagate/sections/routing.md",
     "skills/propagate/sections/settle.md",
+    "skills/survey/SKILL.md",
     "tests/docs/skill-word-budget.test.mjs"
    ],
    "size": "small"
@@ -11473,6 +11476,7 @@
     "skills/propagate/sections/reconcile.md",
     "skills/propagate/sections/routing.md",
     "skills/propagate/sections/settle.md",
+    "skills/survey/SKILL.md",
     "tests/cli/allowed-parity.test.mjs",
     "tests/cli/backlog-trackers.test.mjs",
     "tests/cli/backlog.test.mjs",
@@ -12327,6 +12331,7 @@
     "skills/propagate/sections/reconcile.md",
     "skills/propagate/sections/routing.md",
     "skills/propagate/sections/settle.md",
+    "skills/survey/SKILL.md",
     "tests/cli/allowed-parity.test.mjs",
     "tests/cli/backlog-trackers.test.mjs",
     "tests/cli/backlog.test.mjs",
@@ -18393,6 +18398,7 @@
   "tests/unit/literature-review-skill.test.mjs": {
    "deps": [
     "agents/literature-researcher.md",
+    "docs/REFERENCE.md",
     "lib/core/commands.mjs",
     "skills/literature-review/SKILL.md",
     "skills/literature-review/sections",
@@ -18401,6 +18407,7 @@
     "skills/literature-review/sections/lanes.md",
     "skills/literature-review/sections/protocol.md",
     "skills/literature-review/sections/snowball.md",
+    "skills/survey/SKILL.md",
     "tests/unit/literature-review-skill.test.mjs"
    ],
    "size": "small"
@@ -21091,6 +21098,9 @@
     "skills/propagate/sections/reconcile.md",
     "skills/propagate/sections/routing.md",
     "skills/propagate/sections/settle.md",
+    "skills/survey",
+    "skills/survey/",
+    "skills/survey/SKILL.md",
     "tests/unit/state-vocabulary-floor.test.mjs",
     "widget/",
     "widget/collect.sh",
@@ -21999,6 +22009,10 @@
     "tests/fixtures/kb-upgrade/hub-old/scripts/execution/references.yml",
     "tests/fixtures/kb-upgrade/hub-old/scripts/execution/standards.yml",
     "tests/fixtures/kb-upgrade/hub-old/standards/tool/example.md",
+    "tests/fixtures/test-queue/load-sensitive.real.json",
+    "tests/fixtures/watch/feed-atom.xml",
+    "tests/fixtures/watch/gh-releases.json",
+    "tests/fixtures/watch/pypi-releases.xml",
     "tests/helpers",
     "tests/helpers/full-state-snapshot.mjs",
     "tests/helpers/impact-fixture.mjs",
