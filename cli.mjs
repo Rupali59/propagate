@@ -4006,6 +4006,9 @@ if (_invokedDirectly) {
   } else if (mode === "day") {
     const { dayCmd } = await import("./cli/day.mjs");
     process.exitCode = await dayCmd(process.argv.slice(3));
+  } else if (mode === "waiting") {
+    const { waitingCmd } = await import("./cli/waiting.mjs");
+    process.exitCode = await waitingCmd(process.argv.slice(3));
   } else if (mode === "queue") {
     const { queueCmd } = await import("./cli/queue.mjs");
     process.exitCode = await queueCmd(process.argv.slice(3));
