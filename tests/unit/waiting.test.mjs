@@ -209,7 +209,7 @@ test("gate-pass WITHOUT --apply writes nothing (snapshot of the state dir), acro
   const dir = tmp();
   writeFileSync(path.join(dir, "keep.txt"), "x");
   const before = snapshot(dir);
-  for (const argv of [["gate-pass", sha("a"), "--suite", "unit 1/1"], ["gate-pass", sha("a"), "--suite", "unit 1/1", "--json"], ["gate-pass", "abc", "--suite", "s"], ["gate-pass", sha("a")]]) {
+  for (const argv of [["gate-pass", sha("a"), "--suite", "unit 1/1", "--no-run-evidence", "why"], ["gate-pass", sha("a"), "--suite", "unit 1/1", "--no-run-evidence", "why", "--json"], ["gate-pass", "abc", "--suite", "s"], ["gate-pass", sha("a")]]) {
     await waitingCmd(argv, { stateDirPath: dir, out: () => {}, err: () => {} });
     assert.equal(snapshot(dir), before, `${argv.join(" ")} must not touch the state dir`);
   }
@@ -217,11 +217,11 @@ test("gate-pass WITHOUT --apply writes nothing (snapshot of the state dir), acro
 
 test("gate-pass --apply writes gates/<sha>.json {schema_version, sha, suite, passed_at}; a prefix is refused", async () => {
   const dir = tmp();
-  assert.equal(await waitingCmd(["gate-pass", "abc1234", "--suite", "s", "--apply"], { stateDirPath: dir, out: () => {}, err: () => {} }), 2);
+  assert.equal(await waitingCmd(["gate-pass", "abc1234", "--suite", "s", "--no-run-evidence", "why", "--apply"], { stateDirPath: dir, out: () => {}, err: () => {} }), 2);
   assert.throws(() => readdirSync(path.join(dir, "gates")));
-  assert.equal(await waitingCmd(["gate-pass", sha("a"), "--suite", "unit 5/5", "--apply"], { stateDirPath: dir, now: Date.UTC(2026, 10, 27), out: () => {}, err: () => {} }), 0);
+  assert.equal(await waitingCmd(["gate-pass", sha("a"), "--suite", "unit 5/5", "--no-run-evidence", "docs-only change", "--apply"], { stateDirPath: dir, now: Date.UTC(2026, 10, 27), out: () => {}, err: () => {} }), 0);
   const g = readGate(dir, sha("a"));
-  assert.deepEqual(g.gate, { schema_version: 1, sha: sha("a"), suite: "unit 5/5", passed_at: "2026-11-27T00:00:00.000Z" });
+  assert.deepEqual(g.gate, { schema_version: 1, sha: sha("a"), suite: "unit 5/5", passed_at: "2026-11-27T00:00:00.000Z", no_run_evidence: "docs-only change" });
 });
 
 test("day open prints the same rows with a count, and a failed source as a line, never as nothing waiting", async () => {

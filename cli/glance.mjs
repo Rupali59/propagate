@@ -8,6 +8,8 @@
  * `--no-write`, which writes and deletes nothing. Badges are coloured on a TTY; `NO_COLOR` or `--no-color` prints
  * them as plain `[BROKEN]` words, and piped output is never coloured.
  *
+ * A text run ends with one `test-queue:` line read from the machine-wide queue (lib/report/test-queue.mjs; files only).
+ *
  * Exit: 0 working, 1 broken or needs-you, 2 nothing could be read (a blind glance) or a usage error.
  *
  * `propagate glance ack <id>... [--until <date|date-time|Nh|Nd>] [--json]` (propagate#296) acknowledges items, or
@@ -17,6 +19,7 @@
 import { stateDir } from "../lib/core/paths.mjs";
 import { runGlance, exitCodeOf } from "../lib/glance/compute.mjs";
 import { renderLines, shouldColor } from "../lib/glance/render.mjs";
+import { glanceLine, queueDir, readStatus } from "../lib/report/test-queue.mjs";
 import { setAcks, clearAcks, parseUntil } from "../lib/glance/acks.mjs";
 
 /** The env overrides the monitor and doctor honour for their own files, so a glance reads what they wrote. */
@@ -58,6 +61,11 @@ export async function glanceCmd(args, inject = {}) {
     // Badges are coloured only on a TTY without NO_COLOR or --no-color (render.mjs shouldColor); tests inject `color`.
     const color = inject.color ?? shouldColor({ argv: args });
     for (const l of renderLines(r.glance, { color })) out(l);
+    // The test-queue line (#428) is information, not a verdict: it is not a glance signal, so it never changes the exit
+    // code or glance.json, and --json stays exactly the glance.json object. A caller that injected a state dir and no
+    // queueDir reads no queue, the way it reads no env-override paths.
+    const qd = inject.queueDir !== undefined ? inject.queueDir : inject.stateDirPath ? null : queueDir();
+    if (qd) out(glanceLine(readStatus({ dir: qd, now }), now));
     if (r.pruned.length) out(`note: guard log: removed ${r.pruned.length} month file(s) older than 90 days (${r.pruned.join(", ")})`);
   }
   return exitCodeOf(r.glance);
