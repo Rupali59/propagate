@@ -17,6 +17,7 @@
  * is shown as acked and not notified; its verdict is unchanged (lib/glance/acks.mjs). Exit 0 written, 2 usage error.
  */
 import { stateDir } from "../lib/core/paths.mjs";
+import { INTEGRATIONS } from "../lib/core/config.mjs";
 import { runGlance, exitCodeOf } from "../lib/glance/compute.mjs";
 import { renderLines, shouldColor } from "../lib/glance/render.mjs";
 import { glanceLine, queueDir, readStatus } from "../lib/report/test-queue.mjs";
@@ -27,6 +28,9 @@ export function envPaths(env = process.env) {
   const p = {};
   if (env.PROPAGATE_DOCTOR_SNAPSHOT) p.snapshot = env.PROPAGATE_DOCTOR_SNAPSHOT;
   if (env.PROPAGATE_MONITOR_LOG) p.monitor = env.PROPAGATE_MONITOR_LOG;
+  // The cleaner checkout for the cleaner row (#446): env, else integrations.cleanerDir, else null (the row is skipped).
+  const cleanerDir = env.PROPAGATE_CLEANER_DIR || INTEGRATIONS.cleanerDir;
+  if (cleanerDir) p.cleanerDir = cleanerDir;
   return p;
 }
 
@@ -51,7 +55,9 @@ export async function glanceCmd(args, inject = {}) {
   const now = inject.now ?? Date.now();
   let r;
   try {
-    r = runGlance({ dir, now, write, paths: inject.stateDirPath ? {} : envPaths() });
+    const paths = inject.stateDirPath ? {} : envPaths();
+    if (inject.cleanerDir) paths.cleanerDir = inject.cleanerDir;
+    r = runGlance({ dir, now, write, paths });
   } catch (e) {
     err(`glance: could not compute (${e.message})`);
     return 2;
@@ -66,6 +72,10 @@ export async function glanceCmd(args, inject = {}) {
     // queueDir reads no queue, the way it reads no env-override paths.
     const qd = inject.queueDir !== undefined ? inject.queueDir : inject.stateDirPath ? null : queueDir();
     if (qd) out(glanceLine(readStatus({ dir: qd, now }), now));
+    // The cleaner's counts (#446) are too long for the 80-character verdict line, so a working cleaner row is printed whole
+    // beside the test-queue line: information, not a verdict. A cleaner that is unknown already has its own verdict line.
+    const cl = r.glance.items.find((i) => i.signal === "cleaner" && i.verdict === "working");
+    if (cl) out(`cleaner: ${cl.what}`);
     if (r.pruned.length) out(`note: guard log: removed ${r.pruned.length} month file(s) older than 90 days (${r.pruned.join(", ")})`);
   }
   return exitCodeOf(r.glance);

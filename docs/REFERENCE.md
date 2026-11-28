@@ -301,6 +301,20 @@ Refusal codes: `REFS_PRUNE_HEAD_MISMATCH` (the head differs), `REFS_PRUNE_UNKNOW
 - the delete failed: the branch is still present at the same head, so one `prune-incomplete` event is emitted, carrying the record's `evidence`, `recorded_by` and `recorded_at`. It is deduped by project, ref and head, and the record is never silently cleared. `doctor` warns `prune incomplete` while the branch is still there at that head; a delete that lands later closes it, because the state is derived from the snapshot;
 - the branch was re-created at a different head: nothing is added here; the diff's own events say so.
 
+## `propagate worktrees`: run the cleaner over lane worktrees, and its glance row (propagate#274, #446)
+
+```
+propagate worktrees [<repo-or-worktree>...] [--apply] [--json]
+```
+
+propagate calls the cleaner's worktree collector (contract C1) and passes its verdict through; it never classifies a worktree itself. Set the cleaner checkout with `PROPAGATE_CLEANER_DIR`, or `integrations.cleanerDir` in `~/.propagate/config.yml` (no default: it is a separate repo). With no paths it hands the cleaner the git root of every discovered workspace, deduplicated by git common dir.
+
+- **Dry run unless `--apply`.** The cleaner is called with `--json` and, only when `--apply` was given, `--apply`. Routes (below) are listed as `would-post` and nothing is posted. `tests/unit/worktrees-cleaner.test.mjs` proves both on the argv a stub cleaner and a stub `gh` record.
+- **Routes (C4).** A route `{kind: "issue-comment", repo, issue, body}` in the cleaner's result is posted with `gh issue comment` (`PROPAGATE_GH_BIN` overrides the binary), only under `--apply`, and once per `<repo>#<issue>@<head>`: the ledger is `$STATE/cleaner/routes-posted.jsonl`. A route with no `head` is keyed by a hash of its body. A malformed route is reported as `invalid`; a failed `gh` call is named and counted, is not written to the ledger, and is retried on the next `--apply`.
+- **Exit.** The cleaner's `0` (clean or applied) and `1` (findings, or refused) pass through; a clean `0` with a failed route comment becomes `1`. `2` is could not run, and is the answer for: no cleaner configured (`cleaner not configured`), no `worktree-gc.sh`, an exit outside 0/1/2, output that is not JSON, or no repository to hand over (discovery found none: a blind scan, not a clean one).
+
+**The glance row.** `propagate glance` carries one `cleaner` signal read from `<cleanerDir>/logs/last-audit.json` (C3) and never recomputes it: `disk <free> free · worktrees: awaiting-merge <n> · Tier B <n> · stale-lock <n> (audit <age>)`. Each domain is dated by its own `at`; the `worktrees` domain older than 24 h reads `worktrees audit stale (<age> old)`. The three absences are three texts and none is 0: an unset cleanerDir is skipped with `cleaner not configured` (in `skipped`), a missing file reads `cleaner never run`, a `null` count reads `not built`. Free disk is `free_kb`, else `statfs` of the cleaner directory.
+
 ## Ledger resolution
 
 ⚠️ **Resolve the ledger path from the workspace the row belongs to — do NOT

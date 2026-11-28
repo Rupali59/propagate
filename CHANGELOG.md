@@ -8,6 +8,7 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ### Added
 
+- worktrees: `propagate worktrees [<repo>...] [--apply]` runs the cleaner's worktree collector (dry run unless `--apply`), passes its exit through, and posts the issue comments it routes once per head; `glance` gains a `cleaner` row from the cleaner's `last-audit.json` ("not built", "never run" and "not configured" are never 0); new `cleanerDir` integration (`PROPAGATE_CLEANER_DIR`) (#274, #446).
 - refs: `propagate refs record-pruned` records a branch an outside tool prunes, validated (`detected_by` allowlist, evidence JSON, head equal to the snapshot's), dry run unless `--apply`; the next `migrate-refs` drops the duplicate `pruned` or emits one `prune-incomplete`, which `doctor` warns on (#448).
 - attention: `propagate attention next|list|clear` and a `Notification` hook queue the Claude Code sessions that need you, and `next` focuses the Ghostty tab of the one that has waited longest (skipping closed tabs, exit 1 when none wait); bind it to a global hotkey (#445). Needs `/reload-plugins`.
 - sessions: a session's board item is derived from the work it does (`gh issue close|comment|edit`, `gh pr create|merge`, a `<type>/<n>-<slug>` branch start) by the PostToolUse hook, and the newest association wins, dispatch included; the new `session-title` UserPromptSubmit hook prefixes the session title with `owner/repo#n` (#442). Needs `/reload-plugins`.
