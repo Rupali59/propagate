@@ -108,6 +108,9 @@ test("every tagged reader answers an input it must not recognise with unread or 
 // individually mutated: moving one into READER is the way to put it under test. The per-function audit of the
 // own-state group (does a CORRUPT file read as empty?) is the follow-up the issue names.
 const EXEMPT = [
+  ["reads propagate's own day snapshot for a hook; null (missing or unreadable) is never a count: the caller writes goal null with goal_source stating why (#442)", [
+    "sessions/assoc-write.mjs::readSnapshot",
+  ]],
   ["returns an explicit verdict (ok/violations/problems) over its own checks, not a count read out of foreign input; a blind scan is named by its own floor where it has one", [
     "research/quotes.mjs::checkQuoteLength",
     "core/release-kind.mjs::checkBump",
