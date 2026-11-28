@@ -208,6 +208,9 @@ Regenerate it with `npm run readme:commands`.
 - `propagate sessions new` — start a background Claude Code session on a board item: folder, goal and name derived (dry run unless --apply; --apply runs claude --bg, never with a bypass flag)
 - `propagate sessions stop` — stop a background session (claude stop); --force sends SIGTERM to an interactive session by its pid, re-verified first (dry run unless --apply)
 - `propagate sessions rm` — remove a stopped or done background session (claude rm; dry run unless --apply)
+- `propagate attention next` — focus the Ghostty tab of the session that has waited longest for you; exit 0 focused, 1 nothing waiting, 2 could not run
+- `propagate attention list` — the sessions waiting for you, oldest first (read-only)
+- `propagate attention clear` — mark every waiting session handled (dry run unless --apply)
 - `propagate work list` — the work event queue: items by kind and state; never prints a claim token (propagate#150)
 - `propagate work sync` — make the queue match the open labelled issues of the hub repo (reads GitHub; writes only the local queue)
 - `propagate work claim` — take the oldest pending item of a kind for this session; prints the token ack and release need

@@ -100,7 +100,7 @@ test("doc-authority distinguishes ABSENT from BROKEN", () => {
  * silently stop guarding every shell command while the check still passed. That is the
  * doc-authority failure shape reproduced inside the verification written to catch it.
  */
-test("hooks.json declares exactly 15 registrations, and every command resolves", () => {
+test("hooks.json declares exactly 16 registrations, and every command resolves", () => {
   const manifest = JSON.parse(readFileSync(path.join(HOOKS, "hooks.json"), "utf8"));
   const seen = [];
   for (const [event, groups] of Object.entries(manifest.hooks)) {
@@ -113,9 +113,12 @@ test("hooks.json declares exactly 15 registrations, and every command resolves",
 
   // 13 -> 14: close-guard (#280) is a new Bash registration, narrowed by an `if`.
   // 14 -> 15: session-title (#442) is the first UserPromptSubmit registration.
-  assert.equal(seen.length, 15,
-    `expected 15 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
+  assert.equal(seen.length, 16,
+    `expected 16 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
       `design (Edit|Write and Bash); collapsing it to one silently stops guarding Bash.`);
+  // 15 -> 16: attention-queue (#445) is the first Notification registration; its script lives under scripts/, not hooks/.
+  assert.ok(seen.some((s) => s.event === "Notification" && /scripts\/attention-queue\/hook\.mjs/.test(s.command)),
+    "Notification must run scripts/attention-queue/hook.mjs (#445)");
   // #272: session-guide is a SessionStart registration with NO matcher, so it fires on every source (compaction included).
   const guideReg = seen.find((s) => s.event === "SessionStart" && /session-guide\.mjs/.test(s.command));
   assert.ok(guideReg, "SessionStart must run hooks/session-guide.mjs (#272)");

@@ -35,8 +35,6 @@ const ALLOWLIST = [
     why: "`verified` is the CLEAN count and `forced` is counted within it; DECOUPLED is `done` but not `verified`" },
   { file: "cli/ui.client.js", needle: 'd.state === "DIVERGED"',
     why: "chart datum routing in the browser (no import path): a DIVERGED bar opens the pick-a-side chip" },
-  { file: "widget/propagate-queue.jsx", needle: "k === 'DIVERGED'",
-    why: "Ubersicht widget (sandboxed, no import path): a DIVERGED legend row opens the pick-a-side chip" },
 ];
 
 const STATES = EDGE_STATES.join("|");
