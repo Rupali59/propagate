@@ -3935,6 +3935,9 @@ if (_invokedDirectly) {
   } else if (mode === "worktrees") {
     const { worktreesCmd } = await import("./cli/worktrees.mjs");
     process.exitCode = await worktreesCmd(process.argv.slice(3));
+  } else if (mode === "lane-checks") {
+    const { laneChecksCmd } = await import("./cli/lanes.mjs");
+    process.exitCode = await laneChecksCmd(process.argv.slice(3));
   } else if (mode === "refs") {
     const { refsCmd } = await import("./cli/refs.mjs");
     process.exitCode = await refsCmd(process.argv.slice(3));

@@ -40,6 +40,7 @@ import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 import { associateSession, existingAssociation, readSnapshot } from "../lib/sessions/assoc-write.mjs";
+import { gitRootOf, readLaneChecks, LANE_CHECKS_FILE } from "../lib/lanes/lane-checks.mjs";
 
 // Re-exported: tests and callers import these from here (they moved to lib/sessions/assoc-write.mjs, #442).
 export { associateSession, existingAssociation };
@@ -135,6 +136,27 @@ function liveSmokeDeny(input, prompt, ref) {
   );
 }
 
+/**
+ * LANE CHECKS (#453). When the repo the dispatch runs in (the git root above the payload's `cwd`) has a `.lane-checks`
+ * file, a code lane must carry `lane-checks: <command it will run>` or `lane_checks_reason: <why not>`, so its report
+ * proves it ran the repo's pre-report checks. Read-only agent types are exempt, as with live smoke. No `.lane-checks`,
+ * no payload `cwd` or no served issue means there is nothing to enforce, and that is not an error. Gates never read the file.
+ */
+function laneChecksDeny(input, prompt, ref) {
+  const cwd = input?.cwd;
+  if (typeof cwd !== "string" || !cwd) return null;
+  const root = gitRootOf(cwd);
+  if (!root || readLaneChecks(root) === null) return null;
+  const type = String(input?.tool_input?.subagent_type ?? "general-purpose").replace(/^propagate:/, "");
+  if (readOnlyAgentTypes().has(type)) return null;
+  if (/^[ \t]*lane-checks:[ \t]*\S/im.test(prompt) || /^[ \t]*lane_checks_reason:[ \t]*\S/im.test(prompt)) return null;
+  return (
+    `${ref} is served from a repo with a ${LANE_CHECKS_FILE} file and this dispatch (${type}) can write code, but the brief has no lane checks (#453). ` +
+    `Add a line \`lane-checks: <the command the lane runs before it reports, e.g. propagate lane-checks>\` (the report must paste its output), ` +
+    `or \`lane_checks_reason: <why there is nothing to check>\`.`
+  );
+}
+
 const actualModel = (input) => {
   const m = input?.tool_input?.model;
   return typeof m === "string" && m.trim() ? m.trim().toLowerCase() : null;
@@ -162,6 +184,11 @@ export function decide(input, snapshot, now = new Date()) {
     const smoke = liveSmokeDeny(input, prompt, marker.ref);
     if (smoke) {
       out.deny = smoke;
+      return out;
+    }
+    const laneChecks = laneChecksDeny(input, prompt, marker.ref);
+    if (laneChecks) {
+      out.deny = laneChecks;
       return out;
     }
   } else {

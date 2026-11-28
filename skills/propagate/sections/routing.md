@@ -104,6 +104,8 @@ meant only that nobody had copy-pasted.
 
 A brief for a lane that writes code on propagate carries `live-smoke: <real-data command>` (or `live_smoke_reason: <why not>`); `hooks/dispatch-model.mjs` refuses the dispatch without one (#409). The lane's report pastes that command's output. The coordinator re-runs only the live smoke, plus any test the next story touches, rather than the whole suite. Read-only agent types are exempt.
 
+A repo with a `.lane-checks` file at its git root (propagate's own has one) also needs `lane-checks: <command>` (or `lane_checks_reason: <why not>`) in the brief, and the lane's report pastes the output of `propagate lane-checks`; the same hook refuses the dispatch without it (#453). The file is the lane's own check: gates never read it.
+
 Lanes run their suite with `npm run test:queued` (profile lane, foreground, timeout at most 590000), which goes through `test-queue` when it is installed and says `lock: unavailable` when not. Coordinator merge gates run `npm run test:queued -- --profile gate`, then `waiting gate-pass --run <id>`. The queue tool's location is found with `test-queue where`, never written into a brief.
 
 A lane ends with **push + report**, never a merge. The coordinator opens the PR, merges on the maintainer's word, and unlocks the lane's worktree in the same step as the merge. After a merge the coordinator runs `propagate worktrees --apply <repo>` so the cleaner removes the landed worktree and its comments are routed (#274).
