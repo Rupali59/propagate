@@ -3,7 +3,7 @@
   "recordedAt": "2026-11-28T04:44:56.068Z",
   "commit": "d9faeca9c05dce79e03d05920bd5279431c928a7",
   "node": "v26.13.0",
-  "tests": 376,
+  "tests": 374,
   "withStaticDeps": 304,
   "withRecordedSpawnDeps": 128,
   "partial": 7,
@@ -2196,9 +2196,6 @@
     "tests/unit/verify-cadence.test.mjs",
     "tests/unit/waiting.test.mjs",
     "tests/unit/whole-project-ledger.test.mjs",
-    "tests/unit/widget-charts.test.mjs",
-    "tests/unit/widget-contract.test.mjs",
-    "tests/unit/widget-icons.test.mjs",
     "tests/unit/work-claim-race.test.mjs",
     "tests/unit/work-cli.test.mjs",
     "tests/unit/work-sync.test.mjs",
@@ -7039,7 +7036,6 @@
   "tests/cli/widget-scripts.test.mjs": {
    "deps": [
     "tests/cli/widget-scripts.test.mjs",
-    "widget/collect.sh",
     "widget/open-ui.sh"
    ],
    "size": "medium",
@@ -11450,7 +11446,6 @@
     "scripts/test-impact/lib.mjs",
     "scripts/test-impact/map.mjs",
     "scripts/test-impact/static.mjs",
-    "scripts/vendor-lucide-icons.mjs",
     "skills/curate-docs/.claude-plugin/marketplace.json",
     "skills/curate-docs/.claude-plugin/plugin.json",
     "skills/curate-docs/.gitignore",
@@ -11915,9 +11910,6 @@
     "tests/unit/verify-cadence.test.mjs",
     "tests/unit/waiting.test.mjs",
     "tests/unit/whole-project-ledger.test.mjs",
-    "tests/unit/widget-charts.test.mjs",
-    "tests/unit/widget-contract.test.mjs",
-    "tests/unit/widget-icons.test.mjs",
     "tests/unit/work-claim-race.test.mjs",
     "tests/unit/work-cli.test.mjs",
     "tests/unit/work-sync.test.mjs",
@@ -11931,9 +11923,7 @@
     "tests/watcher/events.test.mjs",
     "tests/watcher/watcher-id-race.test.mjs",
     "tests/watcher/watcher.regression.test.mjs",
-    "widget/collect.sh",
-    "widget/open-ui.sh",
-    "widget/propagate-queue.jsx"
+    "widget/open-ui.sh"
    ],
    "size": "medium",
    "tree": true
@@ -12316,7 +12306,6 @@
     "scripts/test-impact/lib.mjs",
     "scripts/test-impact/map.mjs",
     "scripts/test-impact/static.mjs",
-    "scripts/vendor-lucide-icons.mjs",
     "skills/curate-docs/.claude-plugin/marketplace.json",
     "skills/curate-docs/.claude-plugin/plugin.json",
     "skills/curate-docs/.gitignore",
@@ -12781,9 +12770,6 @@
     "tests/unit/verify-cadence.test.mjs",
     "tests/unit/waiting.test.mjs",
     "tests/unit/whole-project-ledger.test.mjs",
-    "tests/unit/widget-charts.test.mjs",
-    "tests/unit/widget-contract.test.mjs",
-    "tests/unit/widget-icons.test.mjs",
     "tests/unit/work-claim-race.test.mjs",
     "tests/unit/work-cli.test.mjs",
     "tests/unit/work-sync.test.mjs",
@@ -12797,9 +12783,7 @@
     "tests/watcher/events.test.mjs",
     "tests/watcher/watcher-id-race.test.mjs",
     "tests/watcher/watcher.regression.test.mjs",
-    "widget/collect.sh",
-    "widget/open-ui.sh",
-    "widget/propagate-queue.jsx"
+    "widget/open-ui.sh"
    ],
    "size": "small",
    "tree": true
@@ -13643,9 +13627,6 @@
     "tests/unit/verify-cadence.test.mjs",
     "tests/unit/waiting.test.mjs",
     "tests/unit/whole-project-ledger.test.mjs",
-    "tests/unit/widget-charts.test.mjs",
-    "tests/unit/widget-contract.test.mjs",
-    "tests/unit/widget-icons.test.mjs",
     "tests/unit/work-claim-race.test.mjs",
     "tests/unit/work-cli.test.mjs",
     "tests/unit/work-sync.test.mjs",
@@ -21161,7 +21142,6 @@
     "scripts/test-impact/lib.mjs",
     "scripts/test-impact/map.mjs",
     "scripts/test-impact/static.mjs",
-    "scripts/vendor-lucide-icons.mjs",
     "skills/",
     "skills/curate-docs",
     "skills/curate-docs/",
@@ -21224,9 +21204,7 @@
     "skills/survey/SKILL.md",
     "tests/unit/state-vocabulary-floor.test.mjs",
     "widget/",
-    "widget/collect.sh",
-    "widget/open-ui.sh",
-    "widget/propagate-queue.jsx"
+    "widget/open-ui.sh"
    ],
    "size": "small"
   },
@@ -21357,6 +21335,51 @@
     "package.json",
     "propagates.schema.json",
     "tests/unit/surface-cmd.test.mjs"
+   ],
+   "size": "small"
+  },
+  "tests/unit/surface-payload-contract.test.mjs": {
+   "deps": [
+    "SKILL.md",
+    "cli/ui.client.js",
+    "lib/core/config.mjs",
+    "lib/core/discovery.mjs",
+    "lib/core/git-context.mjs",
+    "lib/core/git-env.mjs",
+    "lib/core/lock.mjs",
+    "lib/core/paths.mjs",
+    "lib/core/runs.mjs",
+    "lib/core/unread.mjs",
+    "lib/core/v3-layout.mjs",
+    "lib/core/worktrees.mjs",
+    "lib/docs/tokens.mjs",
+    "lib/edges/content-id.mjs",
+    "lib/edges/disposition.mjs",
+    "lib/edges/edges.mjs",
+    "lib/edges/events.mjs",
+    "lib/edges/frontmatter.mjs",
+    "lib/edges/provenance.mjs",
+    "lib/edges/reconcile.mjs",
+    "lib/edges/refs.mjs",
+    "lib/edges/states.mjs",
+    "lib/gotchas/parse.mjs",
+    "lib/graph/graph.mjs",
+    "lib/migrate/workspace.mjs",
+    "lib/refs/active-lines.mjs",
+    "lib/refs/snapshot.mjs",
+    "lib/report/analytics.mjs",
+    "lib/report/backlog.mjs",
+    "lib/report/doctor/snapshot.mjs",
+    "lib/report/handovers.mjs",
+    "lib/report/queue.mjs",
+    "lib/report/registers.mjs",
+    "lib/report/stream.mjs",
+    "lib/report/surface.mjs",
+    "lib/report/usage.mjs",
+    "lib/tasks/tracker-cache.mjs",
+    "package.json",
+    "tests/unit/surface-payload-contract.test.mjs",
+    "tests/unit/surface.test.mjs"
    ],
    "size": "small"
   },
@@ -21931,7 +21954,6 @@
     "scripts/test-impact/lib.mjs",
     "scripts/test-impact/map.mjs",
     "scripts/test-impact/static.mjs",
-    "scripts/vendor-lucide-icons.mjs",
     "skills",
     "skills/curate-docs",
     "skills/curate-docs/.claude-plugin",
@@ -22418,9 +22440,6 @@
     "tests/unit/verify-cadence.test.mjs",
     "tests/unit/waiting.test.mjs",
     "tests/unit/whole-project-ledger.test.mjs",
-    "tests/unit/widget-charts.test.mjs",
-    "tests/unit/widget-contract.test.mjs",
-    "tests/unit/widget-icons.test.mjs",
     "tests/unit/work-claim-race.test.mjs",
     "tests/unit/work-cli.test.mjs",
     "tests/unit/work-sync.test.mjs",
@@ -22437,9 +22456,7 @@
     "tests/watcher/watcher-id-race.test.mjs",
     "tests/watcher/watcher.regression.test.mjs",
     "widget",
-    "widget/collect.sh",
-    "widget/open-ui.sh",
-    "widget/propagate-queue.jsx"
+    "widget/open-ui.sh"
    ],
    "size": "medium",
    "partial": true,
@@ -22617,8 +22634,7 @@
     "skills/curate-docs/lib/evidence.mjs",
     "skills/curate-docs/lib/link-graph.mjs",
     "skills/curate-docs/lib/state.mjs",
-    "tests/unit/theme.test.mjs",
-    "widget/propagate-queue.jsx"
+    "tests/unit/theme.test.mjs"
    ],
    "size": "small"
   },
@@ -23301,68 +23317,6 @@
    ],
    "size": "medium",
    "tree": true
-  },
-  "tests/unit/widget-charts.test.mjs": {
-   "deps": [
-    "tests/unit/widget-charts.test.mjs",
-    "widget/propagate-queue.jsx"
-   ],
-   "size": "small"
-  },
-  "tests/unit/widget-contract.test.mjs": {
-   "deps": [
-    "SKILL.md",
-    "cli/ui.client.js",
-    "lib/core/config.mjs",
-    "lib/core/discovery.mjs",
-    "lib/core/git-context.mjs",
-    "lib/core/git-env.mjs",
-    "lib/core/lock.mjs",
-    "lib/core/paths.mjs",
-    "lib/core/runs.mjs",
-    "lib/core/unread.mjs",
-    "lib/core/v3-layout.mjs",
-    "lib/core/worktrees.mjs",
-    "lib/docs/tokens.mjs",
-    "lib/edges/content-id.mjs",
-    "lib/edges/disposition.mjs",
-    "lib/edges/edges.mjs",
-    "lib/edges/events.mjs",
-    "lib/edges/frontmatter.mjs",
-    "lib/edges/provenance.mjs",
-    "lib/edges/reconcile.mjs",
-    "lib/edges/refs.mjs",
-    "lib/edges/states.mjs",
-    "lib/gotchas/parse.mjs",
-    "lib/graph/graph.mjs",
-    "lib/migrate/workspace.mjs",
-    "lib/refs/active-lines.mjs",
-    "lib/refs/snapshot.mjs",
-    "lib/report/analytics.mjs",
-    "lib/report/backlog.mjs",
-    "lib/report/doctor/snapshot.mjs",
-    "lib/report/handovers.mjs",
-    "lib/report/queue.mjs",
-    "lib/report/registers.mjs",
-    "lib/report/stream.mjs",
-    "lib/report/surface.mjs",
-    "lib/report/usage.mjs",
-    "lib/tasks/tracker-cache.mjs",
-    "package.json",
-    "tests/unit/widget-contract.test.mjs",
-    "widget/collect.sh",
-    "widget/open-ui.sh",
-    "widget/propagate-queue.jsx"
-   ],
-   "size": "small"
-  },
-  "tests/unit/widget-icons.test.mjs": {
-   "deps": [
-    "scripts/vendor-lucide-icons.mjs",
-    "tests/unit/widget-icons.test.mjs",
-    "widget/propagate-queue.jsx"
-   ],
-   "size": "small"
   },
   "tests/unit/work-claim-race.test.mjs": {
    "deps": [

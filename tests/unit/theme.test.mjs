@@ -97,27 +97,6 @@ const SURFACES = [
     ground: { light: "--bg", dark: "--bg" },
     onFill: "--on-fill",
   },
-  {
-    name: "widget/propagate-queue.jsx",
-    css: (() => {
-      const s = read("widget/propagate-queue.jsx");
-      const i = s.indexOf("export const className = `") + "export const className = `".length;
-      const j = s.indexOf("`", i);
-      assert.ok(j > i, "className literal not found or truncated");
-      return s.slice(i, j);
-    })(),
-    darkStarts: ["@media (prefers-color-scheme: dark)"],
-    // Ubersicht window material: a translucent gradient over the wallpaper, so
-    // there is no --bg token to read. These are that composite at its least
-    // opaque stop over an appearance-matched desktop — the realistic worst
-    // case, not the flattering one. An earlier version read --bg, found
-    // nothing, and said so rather than passing; that is how the widget's own
-    // --st-accent failure was found.
-    ground: { light: "#fdfbfa", dark: "#151517" },
-    // The widget's state indicators are 7x7px swatches, never text on a fill.
-    // A claim, asserted below, not an omission.
-    onFill: null,
-  },
 ];
 
 const SEMANTIC = ["--st-ok", "--st-caution", "--st-warn", "--st-accent",
@@ -240,20 +219,18 @@ for (const s of SURFACES) {
 
 // ── one wheel, not three ───────────────────────────────────────────────────
 
-test("all three surfaces resolve the wheel to the SAME colours", () => {
-  // They render the same data side by side and the widget links to the graph
-  // page. Two near-identical palettes generated against two slightly different
-  // grounds is exactly the bug this caught once already.
+test("the web UI and the graph page resolve the wheel to the SAME colours", () => {
+  // They render the same data side by side. Two near-identical palettes generated
+  // against two slightly different grounds is exactly the bug this caught once
+  // already. The queue widget's palette left this repo with the Ubersicht widget
+  // (#415); its native renderer owns its own colours.
   const ui = themes(stylesheet(), ['@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]']);
-  const wi = themes(SURFACES[1].css, ["@media (prefers-color-scheme: dark)"]);
   const graph = read("lib/graph/graph-html.mjs");
   const graphName = { "--edge-drift": "--drift", "--edge-reverse": "--reverse", "--edge-diverge": "--diverge" };
 
-  for (const [theme, a, b, idx] of [["light", ui.light, wi.light, 0], ["dark", ui.darks[0].map, wi.darks[0].map, 1]]) {
+  for (const [theme, a, idx] of [["light", ui.light, 0], ["dark", ui.darks[0].map, 1]]) {
     for (const tok of SEMANTIC) {
       const x = resolveColor(a.get(tok), a);
-      const y = resolveColor(b.get(tok), b);
-      assert.equal(x, y, `${tok} differs between the web UI and the widget in ${theme}`);
       const g = graphName[tok];
       if (!g) continue;
       const hits = [...graph.matchAll(new RegExp(`\\${g}:\\s*(#[0-9a-f]{6})`, "g"))].map((m) => m[1]);
