@@ -108,6 +108,10 @@ test("every tagged reader answers an input it must not recognise with unread or 
 // individually mutated: moving one into READER is the way to put it under test. The per-function audit of the
 // own-state group (does a CORRUPT file read as empty?) is the follow-up the issue names.
 const EXEMPT = [
+  ["a `.lane-checks` entry list is never a count: every parsed line is run, a path that is not there or a command that cannot start is exit 2, and an empty list is exit 2 'blind list' (lib/lanes/lane-checks.mjs runLaneChecks, tests/unit/lane-checks.test.mjs); a missing file reads as null and the hook says nothing is enforced (#453)", [
+    "lanes/lane-checks.mjs::parseLaneChecks",
+    "lanes/lane-checks.mjs::readLaneChecks",
+  ]],
   ["reads propagate's own day snapshot for a hook; null (missing or unreadable) is never a count: the caller writes goal null with goal_source stating why (#442)", [
     "sessions/assoc-write.mjs::readSnapshot",
   ]],

@@ -296,6 +296,19 @@ Refusal codes: `REFS_PRUNE_HEAD_MISMATCH` (the head differs), `REFS_PRUNE_UNKNOW
 - the delete failed: the branch is still present at the same head, so one `prune-incomplete` event is emitted, carrying the record's `evidence`, `recorded_by` and `recorded_at`. It is deduped by project, ref and head, and the record is never silently cleared. `doctor` warns `prune incomplete` while the branch is still there at that head; a delete that lands later closes it, because the state is derived from the snapshot;
 - the branch was re-created at a different head: nothing is added here; the diff's own events say so.
 
+## `.lane-checks` and `propagate lane-checks`: the checks a lane runs before it reports (propagate#453)
+
+```
+propagate lane-checks [--repo <dir>] [--json]
+```
+
+A repo declares the checks a lane must run before reporting in a `.lane-checks` file at its git root, the way `.test-queue` opts a repo into the queue. One entry per line: a test path (run with the repo's own runner: `npm test --` when package.json's test script is itself vitest, jest or mocha, else `node --test`; anything else is a `run:` line, with `PROPAGATE_STATE_DIR` pointed at a temp dir when unset); `run: <command>` (a shell command from the repo root, exit 0 passes); `#` comments and blank lines are ignored. A per-repo floor ("fewer than N entries is blind") is the repo's own choice, not part of the format.
+
+- **Exit.** `0` every entry passed; `1` an entry ran and failed; `2` could not run: no file, an empty list, a listed path that does not exist, a `run:` command that cannot start (shell 126 or 127). `2` outranks `1`, so a list that could not be run in full is never reported as merely failing.
+- **Dispatch.** `hooks/dispatch-model.mjs` reads the file for the git root above the payload's `cwd`. A code lane serving an issue in such a repo must carry `lane-checks: <command it will run>` or `lane_checks_reason: <why not>` in its brief, or the dispatch is denied. Read-only agent types are exempt, as with live smoke. No file, no `cwd` or no served issue means nothing is enforced.
+- **Gates never read the file.** It is the lane's own pre-report check; a gate keeps its own selection. Parser, runner and hook: `lib/lanes/lane-checks.mjs`, `cli/lanes.mjs`, `tests/unit/lane-checks.test.mjs`.
+- propagate's own `.lane-checks` lists `run: node cli.mjs docs --reference --check` and the blind-readers, cli-commands and readme-commands tests.
+
 ## `propagate worktrees`: run the cleaner over lane worktrees, and its glance row (propagate#274, #446)
 
 ```

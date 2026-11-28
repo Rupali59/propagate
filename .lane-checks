@@ -1,0 +1,5 @@
+# The checks a lane on propagate runs before it reports (#453). Gates never read this file.
+run: node cli.mjs docs --reference --check
+tests/unit/blind-readers.test.mjs
+tests/unit/cli-commands.test.mjs
+tests/unit/readme-commands.test.mjs
