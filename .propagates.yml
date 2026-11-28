@@ -75,6 +75,13 @@ sources:
           tests/unit/widget-contract.test.mjs also checks it mechanically: the test proves
           today's fields exist, the edge makes someone LOOK when either side moves.
         kind: code
+      - path: widget/README.md
+        why: >-
+          The widget moved to claude-usage-widget's Sources/PropagateQueue (#415), which decodes this payload in
+          QueueContract.swift. The README is the only thing in this repo that names that consumer, so a payload change
+          that does not reach it leaves the pointer describing a contract that has moved on. The Swift side is in
+          another repo: the workspace sidecar has to declare it (a cross-repo edge cannot be declared from here).
+        kind: prose
       - path: cli/ui.mjs
         why: >-
           SERVED_VIEWS is a promise this file makes that ui.mjs has to keep. Every row's
