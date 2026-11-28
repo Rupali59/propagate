@@ -130,7 +130,8 @@ function runDoctor(root, stateDir = root) {
   return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, HOME: root },
+    // PROPAGATE_HUB_STATE: keep the private hub beside this checkout out of the run (#454).
+    env: { ...process.env, PROPAGATE_HUB_STATE: "absent", PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, HOME: root },
   });
 }
 
