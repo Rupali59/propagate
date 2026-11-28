@@ -56,14 +56,13 @@ export async function worktreesCmd(args, inject = {}) {
   const exit = run.exit === 0 && failed ? 1 : run.exit;
 
   if (json) {
-    out(JSON.stringify({ ok: true, exit, applied: apply, repos: repos.length ? repos : "cleaner-derived", cleaner_exit: run.exit, actions: run.result.actions, refused: run.result.refused, routes: posts.rows, route_counts: posts.counts, note: run.result.note }, null, 2));
+    out(JSON.stringify({ ok: true, exit, applied: apply, repos: repos.length ? repos : "cleaner-derived", cleaner_exit: run.exit, actions: run.result.actions, refused: run.result.refused, routes: posts.rows, route_counts: posts.counts }, null, 2));
     return exit;
   }
   out(`worktrees ${apply ? "(--apply)" : "(dry run)"} over ${repos.length ? `${repos.length} named repositor${repos.length === 1 ? "y" : "ies"}` : "the repositories the cleaner derives"}`);
   if (run.result.summary) out(`  cleaner summary: ${run.result.summary.total ?? "?"} worktrees, tier A ${run.result.summary.tier_a ?? "?"}, tier B ${run.result.summary.tier_b ?? "?"}`);
   for (const a of run.result.actions) out(`  ${String(a.status ?? "?").padEnd(8)} ${String(a.verdict ?? "?").padEnd(22)} ${a.path}${a.error ? `  ${a.error}` : ""}`);
   for (const r of run.result.refused) out(`  REFUSED ${r.path}: ${r.reason}`);
-  if (run.result.note) out(`  ${run.result.note}`);
   if (!run.result.actions.length && !run.result.refused.length) out("  the cleaner proposed no action");
   for (const r of posts.rows) out(`  route ${r.status}${r.key ? ` ${r.key}` : ""}${r.head_missing ? " (head missing)" : ""}${r.error ? `: ${r.error}` : ""}`);
   if (!posts.rows.length) out("  routes: none");

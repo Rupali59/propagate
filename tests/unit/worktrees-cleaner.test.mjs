@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { worktreesCmd } from "../../cli/worktrees.mjs";
-import { runCleanerGc, normaliseGcResult } from "../../lib/worktrees/cleaner-gc.mjs";
+import { runCleanerGc, normaliseGcResult, missingContractKeys } from "../../lib/worktrees/cleaner-gc.mjs";
 import { postRoutes, routeKey, ledgerPath } from "../../lib/worktrees/routes.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -24,6 +24,7 @@ const tmp = () => mkdtempSync(path.join(tmpdir(), "wtc-"));
 
 const ROUTE = { kind: "issue-comment", repo: "acme/widgets", issue: 42, head: "a".repeat(40), body: "branch feat/42-x is unmerged: 2 patches not upstream" };
 const RESULT = (extra = {}) => ({
+  summary: { total: 1, tier_a: 1, tier_b: 1 },
   schema_version: 1, now: "2026-11-28T10:00:00+05:30", applied: false,
   actions: [{ path: "/w/acme/.worktrees/old", verdict: "landed", status: "planned" }],
   refused: [{ path: "/w/acme/.worktrees/dirty", reason: "dirty" }],
@@ -162,23 +163,40 @@ test("a malformed route is reported as invalid, never dropped and never posted",
   assert.equal(existsSync(path.join(gh.dir, "argv.log")), false);
 });
 
-test("a route with no head still dedupes, by its body", () => {
-  const a = routeKey({ repo: "a/b", issue: 1, body: "same" });
-  assert.equal(a, routeKey({ repo: "a/b", issue: 1, body: "same" }));
-  assert.notEqual(a, routeKey({ repo: "a/b", issue: 1, body: "other" }));
+test("a route without a full 40-hex head is refused: counted head_missing, never posted, never keyed by its body", () => {
+  const gh = stubGh();
+  const state = tmp();
+  const routes = [{ kind: "issue-comment", repo: "a/b", issue: 1, body: "same" }, { kind: "issue-comment", repo: "a/b", issue: 2, head: "abc123", body: "short" }];
+  const { rows, counts } = postRoutes({ routes, apply: true, stateDir: state, ghBin: gh.bin });
+  assert.equal(counts.head_missing, 2);
+  assert.ok(rows.every((x) => x.status === "head_missing" && x.key === null));
+  assert.equal(existsSync(path.join(gh.dir, "argv.log")), false, "a headless route must never reach gh");
+  assert.equal(existsSync(ledgerPath(state)), false);
+  assert.equal(routeKey({ repo: "a/b", issue: 1, head: "c".repeat(40), body: "x" }), `a/b#1@${"c".repeat(40)}`);
 });
 
-test("normaliseGcResult reads both the apply shape and a dry run's classify shape", () => {
-  const applied = normaliseGcResult({ schema_version: 1, applied: true, actions: [{ path: "/p", verdict: "landed", status: "removed" }], refused: [], routes: [ROUTE] });
-  assert.equal(applied.applied, true);
-  assert.equal(applied.routes.length, 1);
-  const nested = normaliseGcResult({ worktrees: [], summary: { total: 3, tier_a: 1, tier_b: 2 }, proposal: { apply: [{ path: "/q", verdict: "landed" }] }, apply_result: { applied: true, actions: [{ path: "/q", verdict: "landed", status: "removed" }], refused: [] } });
-  assert.equal(nested.actions[0].status, "removed");
-  const classify = normaliseGcResult({ worktrees: [], summary: { total: 3, tier_a: 1, tier_b: 2 }, proposal: { apply: [{ path: "/q", verdict: "landed" }] } });
-  assert.deepEqual(classify.actions, [{ path: "/q", verdict: "landed", status: "planned" }]);
-  assert.equal(classify.summary.tier_b, 2);
+test("normaliseGcResult reads only the contract shape; a result missing contract keys is a could-not-run naming them", () => {
+  const ok = normaliseGcResult({ schema_version: 1, now: "n", summary: { total: 1 }, applied: true, actions: [{ path: "/p", verdict: "landed", status: "removed" }], refused: [], routes: [ROUTE] });
+  assert.equal(ok.applied, true);
+  assert.equal(ok.routes.length, 1);
+  assert.equal(ok.summary.total, 1);
   assert.equal(normaliseGcResult([]), null);
   assert.equal(normaliseGcResult(null), null);
+  assert.deepEqual(missingContractKeys({ schema_version: 1, now: "n", summary: {}, applied: false, actions: [], refused: [], routes: [] }), []);
+  assert.deepEqual(missingContractKeys({ worktrees: [], summary: {}, proposal: { apply: [] } }), ["schema_version", "now", "applied", "actions", "refused", "routes"]);
+});
+
+test("an old-shape result (proposal.apply, no actions/routes) exits 2 naming the missing keys, never an empty plan", async () => {
+  const old = { schema_version: 1, now: "n", summary: { total: 3 }, worktrees: [], proposal: { apply: [{ path: "/q", verdict: "landed" }], tier_b: [] } };
+  const dir = stubCleaner({ result: old, exit: 1 });
+  const r = runCleanerGc({ cleanerDir: dir, paths: [] });
+  assert.equal(r.ok, false);
+  assert.equal(r.exit, 2);
+  assert.equal(r.code, "CLEANER_BAD_CONTRACT");
+  assert.match(r.reason, /applied, actions, refused, routes/);
+  const c = await run(["--json"], { cleanerDir: dir });
+  assert.equal(c.code, 2);
+  assert.equal(JSON.parse(c.out).code, "CLEANER_BAD_CONTRACT");
 });
 
 // Regression, propagate#274 live smoke: a workspace-derived repo set omitted a repository the cleaner audits, so one
@@ -192,34 +210,6 @@ test("with no paths named, propagate passes no repo and both routes the cleaner 
   assert.equal(argvLog(dir)[0], "--json", "no repository path may be passed when none was named");
   const j = JSON.parse(lines.join("\n"));
   assert.deepEqual(j.routes.map((r) => r.key), [`acme/widgets#42@${"a".repeat(40)}`, `acme/gadgets#7@${"b".repeat(40)}`]);
-});
-
-// Regression: a literal C1 --json shaped like the real output (top-level routes WITHOUT head, tier_b rows carry it).
-test("a route with no head borrows the full head from its proposal.tier_b row; none is hashed silently", async () => {
-  const sha = "1e50309938799cfdbbeaedcafd47d603e2632c7c";
-  const sha2 = "151a777aeabc05daf386a6ec4ddaa9c2d994dac4";
-  const real = {
-    now: "2026-11-28T10:00:00+05:30", schema_version: 1, summary: { total: 3, tier_a: 0, tier_b: 3 },
-    routes: [
-      { kind: "issue-comment", repo: "owner/repo", issue: 618, path: "/w/repo/.claude/worktrees/perf-618-x", branch: "perf/618-x", verdict: "unlanded", body: "cleaner: 1 unlanded commit(s)" },
-      { kind: "issue-comment", repo: "owner/other", issue: 162, path: "/w/other/.claude/worktrees/refactor-162-y", branch: "refactor/162-y", verdict: "unlanded", body: "cleaner: 4 unlanded commit(s)" },
-      { kind: "issue-comment", repo: "owner/third", issue: 9, path: "/w/third/.claude/worktrees/fix-9-z", branch: "fix/9-z", verdict: "unlanded", body: "cleaner: 2 unlanded commit(s)" },
-    ],
-    proposal: { apply: [], tier_b: [
-      { path: "/w/repo/.claude/worktrees/perf-618-x", repo: "/w/repo", branch: "perf/618-x", head: sha, verdict: "unlanded", route: { kind: "issue-comment", repo: "owner/repo", issue: 618, head: sha, body: "cleaner: 1 unlanded commit(s)" } },
-      { path: "/w/other/.claude/worktrees/refactor-162-y", repo: "/w/other", branch: "refactor/162-y", head: sha2, verdict: "unlanded", route: { kind: "issue-comment", repo: "owner/other", issue: 162, body: "cleaner: 4 unlanded commit(s)" } },
-    ] },
-  };
-  const dir = stubCleaner({ result: real, exit: 1 });
-  const lines = [];
-  await worktreesCmd(["--json"], { cleanerDir: dir, stateDirPath: tmp(), out: (s) => lines.push(s), err: () => {} });
-  const j = JSON.parse(lines.join("\n"));
-  assert.equal(j.routes[0].key, `owner/repo#618@${sha}`);
-  assert.equal(j.routes[0].head, sha);
-  assert.equal(j.routes[1].key, `owner/other#162@${sha2}`, "head taken from the tier_b row when the route lacks it");
-  assert.equal(j.routes[2].head_missing, true);
-  assert.match(j.routes[2].key, /^owner\/third#9@body-/);
-  assert.equal(j.route_counts.head_missing, 1);
 });
 
 test("the spawned CLI: unset cleaner is exit 2 'cleaner not configured'; an unknown flag is exit 2", () => {
