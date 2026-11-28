@@ -301,6 +301,12 @@ Refusal codes: `REFS_PRUNE_HEAD_MISMATCH` (the head differs), `REFS_PRUNE_LIVE_M
 - the delete failed: the branch is still present at the same head, so one `prune-incomplete` event is emitted, carrying the record's `evidence`, `recorded_by` and `recorded_at`. It is deduped by project, ref and head, and the record is never silently cleared. `doctor` warns `prune incomplete` while the branch is still there at that head; a delete that lands later closes it, because the state is derived from the snapshot;
 - the branch was re-created at a different head: nothing is added here; the diff's own events say so.
 
+## The digest never waits on a notification (propagate#462)
+
+`notify()` (`lib/report/notify.mjs`) spawns `terminal-notifier` detached and `unref()`ed and resolves on the spawn, never on the exit: with `-execute` the notifier stays alive until the notice is clicked, and awaiting it held the digest for 9 days. The osascript fallback runs only when the spawn itself fails (ENOENT, EACCES), and every path is bounded by `NOTIFY_TIMEOUT_MS` (10 s).
+
+A real digest run (not `--dry-run`, not `--stdout`) writes `{started, finished, pid}` to `<state dir>/digest-run.json` (`lib/glance/digest-run.mjs`). The glance carries one `digest` signal over it: a run that started more than 24 h ago (2 x the 12 h schedule) with no finish reads `digest stuck: started <age> ago, never finished` (broken); a start inside the window reads as running; no record at all is skipped as `digest never ran`, never stuck; an unreadable record is unknown.
+
 ## `propagate worktrees`: run the cleaner over lane worktrees, and its glance row (propagate#274, #446)
 
 ```

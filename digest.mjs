@@ -42,6 +42,8 @@ import { readLedgerWithStats, lastActivityAt } from "./lib/edges/ledger.mjs";
 import { reconcile, inboundRows, toNodeId } from "./lib/edges/reconcile.mjs";
 import { PLIST_PATH, heartbeatState } from "./lib/core/plist.mjs";
 import { notify } from "./lib/report/notify.mjs";
+import { recordDigestStart, recordDigestFinish } from "./lib/glance/digest-run.mjs";
+import { stateDir as runStateDir } from "./lib/core/paths.mjs";
 import {
   findDuplicateOpenAcrossLedgers,
   parsePlistWatchPaths,
@@ -2198,11 +2200,20 @@ async function main() {
     return;
   }
 
+  // #462: a real run leaves {started, finished}; the glance flags a start with no finish as a stuck run. A dry run or
+  // --stdout run delivers nothing and is not the scheduled run, so it leaves no record.
+  const track = !dryRun && !stdoutOnly;
+  const runDir = runStateDir();
+  const safely = (fn) => { try { fn(); } catch (e) { process.stderr.write(`[propagate-digest] run record not written: ${e.message}\n`); } };
+  if (track) safely(() => recordDigestStart(runDir));
+  let ok = false;
   const indexDb = await rebuildIndexForDigest();
   try {
     await runDigest({ dryRun, stdoutOnly, indexDb });
+    ok = true;
   } finally {
     if (indexDb) indexDb.close();
+    if (track) safely(() => recordDigestFinish(runDir, Date.now(), ok));
   }
 }
 
