@@ -1855,3 +1855,27 @@ walk: n/a — single-source render, no tree walk
 inputs:
   lib/report/doc-kind.mjs :: 1ab6002bb761
 -->
+
+## attention: jump to the Ghostty tab that needs you (propagate#445)
+
+When several Claude Code sessions run in Ghostty tabs, a session that needs input only rings the bell. `attention` queues those sessions and takes you to the one that has waited longest. It pulls, never pushes: nothing switches tabs while you type.
+
+| Command | What |
+|---|---|
+| `attention next` | focus the Ghostty tab of the oldest waiting session whose tab still exists, and mark it handled. Exit 0 focused, 1 nothing waiting, 2 could not run (osascript or Ghostty absent, Automation denied; the reason is printed). |
+| `attention list [--json]` | the waiting sessions, oldest first: age, session, folder, message. Read-only. |
+| `attention clear [--apply]` | mark every waiting session handled. A dry run without `--apply`. |
+
+A session whose tab is gone is skipped, printed as `skipped <session> (tab closed)`, and recorded handled with reason `stale`.
+
+**How it works.** The `Notification` hook `scripts/attention-queue/hook.mjs` appends `{ts, session_id, tty, cwd, message, notification_type}` to `$PROPAGATE_STATE_DIR/attention/queue.jsonl` (append-only; a handled session gets a `handled` line, nothing is rewritten). It finds the tty by walking parent pids with `ps -o ppid=,tty=`. A session already waiting is not queued twice. It is silent in a subagent and on any error. `next` lists Ghostty's terminals through AppleScript (`id` and `tty` of every terminal) and runs `focus` on the match. Tests stub the binary with `PROPAGATE_OSASCRIPT_BIN`; the hook's `ps` is `PROPAGATE_PS_BIN`.
+
+**Bind a global hotkey** to `node <plugin root>/cli.mjs attention next`. A Ghostty keybind cannot run a script, so use one of:
+
+- Raycast: a script command whose body is that command.
+- macOS Shortcuts: a "Run Shell Script" action, then give the shortcut a keyboard shortcut.
+- skhd: `cmd + alt - n : node <plugin root>/cli.mjs attention next`.
+
+**One-time permission.** The first `next` makes macOS ask whether the calling app (Terminal, Raycast, skhd) may control Ghostty. Allow it (System Settings, Privacy and Security, Automation). If it was denied, `next` exits 2 and prints the denial; re-enable it there.
+
+A tab you focus by hand stays queued until `next` passes it or `clear` runs. Needs `/reload-plugins` after the hook is added.

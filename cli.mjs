@@ -4099,6 +4099,10 @@ if (_invokedDirectly) {
     // Dynamic like broadcast. Reads `claude agents --json` through lib/sessions/live.mjs, the only place claude is run.
     const { sessionsCmd } = await import("./cli/sessions.mjs");
     process.exitCode = await sessionsCmd(process.argv.slice(3));
+  } else if (mode === "attention") {
+    // Dynamic like sessions. Reads $STATE/attention/queue.jsonl; `next` runs osascript (PROPAGATE_OSASCRIPT_BIN in tests).
+    const { attentionCmd } = await import("./cli/attention.mjs");
+    process.exitCode = await attentionCmd(process.argv.slice(3));
   } else if (mode === "work") {
     // Dynamic like sessions. The queue is lib/work/ (node:sqlite); `work sync` is the only subcommand that reaches GitHub.
     const { workCmd } = await import("./cli/work.mjs");
