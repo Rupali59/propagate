@@ -82,7 +82,10 @@ function strangerMachine() {
     ...process.env,
     HOME: home,
     PROPAGATE_STATE_DIR: path.join(home, ".propagate"),
+    // A stranger's clone has no private hub beside it; this checkout may (#454).
+    PROPAGATE_HUB_STATE: "absent",
   };
+  delete env.PROPAGATE_RULES_DIR;
 
   return {
     home,
