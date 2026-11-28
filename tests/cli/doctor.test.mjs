@@ -63,8 +63,21 @@ function runDoctor(root, stateDir = root, extraEnv = {}) {
   return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, ...extraEnv },
+    env: { ...process.env, ...machineIsolation(root), PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: stateDir, ...extraEnv },
   });
+}
+
+/**
+ * What keeps a doctor run off THIS machine's own files (#454). Without it the same commit passed
+ * 28/28 from a detached worktree and failed 26/28 from the main checkout:
+ *  - PROPAGATE_HUB_STATE=absent: doctor reads propagate's DECISIONS.md from the private hub beside
+ *    the checkout (lib/core/hub-state.mjs), so a real entry lacking `Affects:` failed the
+ *    calibrated `decisions.with_tokens` expectation on a fixture that has no DECISIONS at all.
+ *  - PROPAGATE_RULES_DIR → a path that does not exist: otherwise the real ~/.claude/rules is
+ *    walked against this tiny fixture root and the paths: check reports a blind scan.
+ */
+function machineIsolation(root) {
+  return { PROPAGATE_HUB_STATE: "absent", PROPAGATE_RULES_DIR: path.join(root, ".no-rules-here") };
 }
 
 test("doctor fails when a ledger contains an unknown row type, and names the type (N1)", async () => {
@@ -134,6 +147,8 @@ test("doctor's new checks pass cleanly on a healthy ledger (no spurious failure)
     assert.match(out, /·.*at least one workspace discovered/);
     assert.match(out, /✓.*no malformed ledger lines/);
     assert.match(out, /✓.*all calibrated expectations hold/);
+    // #454: the machine's own ~/.claude/rules must not be walked against this tiny fixture root.
+    assert.doesNotMatch(out, /✗.*path-scoped rules can still load/);
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
@@ -691,8 +706,14 @@ function runDoctorWithHome(root, home) {
   return spawnSync(process.execPath, [CLI_PATH, "doctor", "--full"], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root, HOME: home },
+    // Rules come from HOME here on purpose, so drop any caller's PROPAGATE_RULES_DIR rather than redirect it.
+    env: { ...withoutRulesOverride(process.env), PROPAGATE_HUB_STATE: "absent", PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root, HOME: home },
   });
+}
+
+function withoutRulesOverride(env) {
+  const { PROPAGATE_RULES_DIR: _drop, ...rest } = env;
+  return rest;
 }
 
 test("doctor FAILS when a CLAUDE.md restates a canonical rule, and names the file", async () => {
@@ -785,7 +806,7 @@ test("doctor's default view is shorter than --full, names every failure, and exi
       spawnSync(process.execPath, [CLI_PATH, "doctor", ...extra], {
         cwd: root,
         encoding: "utf8",
-        env: { ...process.env, PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root },
+        env: { ...process.env, ...machineIsolation(root), PROPAGATE_SEARCH_ROOTS: root, PROPAGATE_STATE_DIR: root },
       });
     const folded = run([]);
     const full = run(["--full"]);

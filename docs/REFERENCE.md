@@ -192,6 +192,11 @@ the maintainer's machine and not on a clone elsewhere — which is intended. Cod
 file (`lib/core/hub-state.mjs`) derives the hub path from the repo's PARENT and checks the hub
 sidecar's `repo_root`; tests that read a moved file skip with a stated reason when it is absent
 rather than pass on a stub.
+`PROPAGATE_HUB_STATE=absent` makes that lookup return null, as on a clone with no hub: the
+stranger-install and upgrade-path gates and doctor's subprocess tests set it, so a run of the
+maintainer's checkout grades the fixture and not the hub's own DECISIONS.md (#454). Doctor's rules
+checks read `RULES_DIR` (`PROPAGATE_RULES_DIR`, then config.yml `rulesDir:`, then `~/.claude/rules`),
+the same resolution `rules check` uses.
 
 **`refs/snapshot.json` and `refs/lifecycle.jsonl` are not tracked** (same date): they enumerate every
 branch of every workspace on the machine that wrote them. They are gitignored in this repo and
