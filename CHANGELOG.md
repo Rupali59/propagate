@@ -8,6 +8,7 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ### Added
 
+- refs: `record-pruned` accepts a branch newer than the last snapshot by reading its live head from the project's `repo_root` (`head_source: "live-ref"`; snapshot-proved events carry `"snapshot"`); new refusals `REFS_PRUNE_LIVE_MISMATCH` and `REFS_PRUNE_NO_SUCH_BRANCH` replace `REFS_PRUNE_UNKNOWN_BRANCH`; an unreadable repo is exit 2 (#455).
 - digest: the digest never waits on a notification: `notify()` spawns the notifier detached and resolves at once (an unclicked `-execute` notice held the digest for 9 days), and `glance` gains a `digest` row that reads `digest stuck` for a run that started over 24 h ago and never finished (#462).
 - worktrees: `propagate worktrees [<repo>...] [--apply]` runs the cleaner's worktree collector (dry run unless `--apply`), passes its exit through, and posts the issue comments it routes once per head; `glance` gains a `cleaner` row from the cleaner's `last-audit.json` ("not built", "never run" and "not configured" are never 0); new `cleanerDir` integration (`PROPAGATE_CLEANER_DIR`) (#274, #446).
 - refs: `propagate refs record-pruned` records a branch an outside tool prunes, validated (`detected_by` allowlist, evidence JSON, head equal to the snapshot's), dry run unless `--apply`; the next `migrate-refs` drops the duplicate `pruned` or emits one `prune-incomplete`, which `doctor` warns on (#448).

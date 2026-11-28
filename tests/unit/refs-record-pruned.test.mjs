@@ -110,7 +110,7 @@ test("each refusal code fires, and --apply of a refusal writes nothing", async (
   const before = treeSnapshot(f.root);
   const cases = [
     [{ head: "1".repeat(40) }, PRUNE_CODES.HEAD_MISMATCH],
-    [{ branch: "never/seen" }, PRUNE_CODES.UNKNOWN_BRANCH],
+    [{ branch: "never/seen" }, PRUNE_CODES.NO_SUCH_BRANCH],
     [{ detectedBy: "snapshot-diff" }, PRUNE_CODES.DETECTED_BY],
     [{ detectedBy: undefined }, PRUNE_CODES.DETECTED_BY],
     [{ evidence: "not json" }, PRUNE_CODES.EVIDENCE],
@@ -223,4 +223,52 @@ test("the pure planner needs no I/O and names the project", () => {
   const both = { projects: { p: { refs: { b: { head: "h1" } } }, q: { refs: { b: { head: "h1" } } } } };
   assert.equal(mk({ snapshot: both }).code, PRUNE_CODES.AMBIGUOUS);
   assert.equal(mk({ snapshot: both, project: "q" }).event.project, "q");
+});
+
+// ── a branch newer than the snapshot (propagate#455) ────────────────────────────────────────────────
+
+test("a branch created after the snapshot records from its live ref; a moved head and a missing branch are refused", async (t) => {
+  const f = await fixture(t);
+  f.git("checkout", "-q", "-b", "fix/9-new");
+  await writeFile(path.join(f.root, "g.txt"), "y\n");
+  f.git("add", "g.txt");
+  f.git("commit", "-qm", "work");
+  f.git("checkout", "-q", "main");
+  const live = f.git("rev-parse", "fix/9-new");
+  const before = treeSnapshot(f.root);
+
+  const dry = await applyRecord(base(f, { branch: "fix/9-new", head: live }));
+  assert.equal(dry.ok, true, JSON.stringify(dry));
+  assert.equal(dry.event.head_source, "live-ref");
+  assert.equal(treeSnapshot(f.root), before, "a live-ref dry run wrote something");
+
+  const moved = await applyRecord(base(f, { branch: "fix/9-new", head: f.head, apply: true }));
+  assert.equal(moved.ok, false);
+  assert.equal(moved.exit, 1);
+  assert.equal(moved.code, PRUNE_CODES.LIVE_MISMATCH);
+  const gone = await applyRecord(base(f, { branch: "fix/9-nope", head: live, apply: true }));
+  assert.equal(gone.code, PRUNE_CODES.NO_SUCH_BRANCH);
+  assert.equal(gone.exit, 1);
+  assert.equal(treeSnapshot(f.root), before, "a refusal wrote something");
+
+  const snapBefore = readFileSync(path.join(f.refs, "snapshot.json"), "utf8");
+  const ok = await applyRecord(base(f, { branch: "fix/9-new", head: live, apply: true }));
+  assert.equal(ok.applied, true);
+  assert.equal(readLifecycle(f.root).current.at(-1).head_source, "live-ref");
+  assert.equal(readFileSync(path.join(f.refs, "snapshot.json"), "utf8"), snapBefore, "the snapshot is never refreshed");
+  const snapProved = await applyRecord(base(f, { branch: "fix/9-y", head: f.git("rev-parse", "fix/9-y"), apply: true }));
+  assert.equal(readLifecycle(f.root).current.at(-1).head_source, "snapshot");
+  assert.equal(snapProved.event.head_source, "snapshot");
+});
+
+test("an unreadable repo for a branch newer than the snapshot is exit 2, not a refusal", async (t) => {
+  const f = await fixture(t);
+  const r = planRecord({
+    snapshot: { projects: { p: { repo_root: "/nonexistent", refs: {} } } },
+    lifecycle: { current: [] },
+    branch: "b", head: "h", evidence: EV, detectedBy: "cleaner",
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.exit, 2);
+  void f;
 });
