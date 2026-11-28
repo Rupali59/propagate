@@ -281,7 +281,7 @@ propagate refs record-pruned --workspace <dir|name> --branch <name> --head <sha>
 
 `refs/lifecycle.jsonl` is written by the snapshot diff, which stamps `detected_by: snapshot-diff`. A tool that deletes branches records them here instead of appending to the file, so the shape check (`detected_by` and `evidence` on every record) cannot be bypassed. **The order is snapshot, then record, then delete, and a non-zero exit means do not delete.**
 
-- **Accepted** only when the branch is in the current snapshot and `--head` equals the snapshot's head for it, which proves it is the same ref about to go. A branch that exists in several projects with that head needs `--project`.
+- **Accepted** only when `--head` equals the head the ref has: the snapshot's head when the branch is in the current snapshot (event `head_source: "snapshot"`), or, when the snapshot has never seen it (a lane branch made after the last snapshot), its live head read with `git rev-parse --verify refs/heads/<branch>` in each project's snapshot `repo_root` (event `head_source: "live-ref"`, #455). That proves it is the same ref about to go. A branch that exists in several projects with that head needs `--project`. The snapshot is never refreshed by a record.
 - **Dry run unless `--apply`.** Without it nothing is written (no lock directory either), for an accepted and a refused case alike; `tests/unit/refs-record-pruned.test.mjs` asserts the refs directory is byte-identical.
 - **With `--apply`** it takes the lock on `lifecycle.jsonl`, re-reads under it, and appends one `schema: 2` line: `type: pruned`, `project`, `ref`, `head`, `detected_by`, `evidence` (the parsed JSON), `recorded_before_delete: true`, `at`. It never rewrites `snapshot.json`. `migrate-refs --apply` takes the same lock around its append.
 
@@ -289,9 +289,9 @@ propagate refs record-pruned --workspace <dir|name> --branch <name> --head <sha>
 |---|---|
 | `0` | recorded, or a dry run that would be accepted |
 | `1` | refused, with a code below |
-| `2` | could not run: usage, no or unreadable snapshot or lifecycle, an unknown snapshot shape (a v1 or flat one: convert it with `migrate-refs`), or the lock held elsewhere. A missing snapshot is never read as an empty one. |
+| `2` | could not run: usage, no or unreadable snapshot or lifecycle, an unreadable repo when the live ref is needed, an unknown snapshot shape (a v1 or flat one: convert it with `migrate-refs`), or the lock held elsewhere. A missing snapshot is never read as an empty one. |
 
-Refusal codes: `REFS_PRUNE_HEAD_MISMATCH` (the head differs), `REFS_PRUNE_UNKNOWN_BRANCH` (the snapshot has never seen it), `REFS_PRUNE_DUPLICATE` (a `pruned` with this branch and head is already recorded, checked before the snapshot), `REFS_PRUNE_DETECTED_BY` (not allowlisted), `REFS_PRUNE_EVIDENCE` (not valid JSON, or empty), `REFS_PRUNE_AMBIGUOUS` (several projects match; pass `--project`).
+Refusal codes: `REFS_PRUNE_HEAD_MISMATCH` (the head differs), `REFS_PRUNE_LIVE_MISMATCH` (the snapshot has never seen it and the live head differs), `REFS_PRUNE_NO_SUCH_BRANCH` (neither in the snapshot nor live), `REFS_PRUNE_DUPLICATE` (a `pruned` with this branch and head is already recorded, checked before the snapshot), `REFS_PRUNE_DETECTED_BY` (not allowlisted), `REFS_PRUNE_EVIDENCE` (not valid JSON, or empty), `REFS_PRUNE_AMBIGUOUS` (several projects match; pass `--project`).
 
 **Who may record.** `ALLOWED_DETECTORS` in `lib/refs/record-pruned.mjs` is `cleaner` only; `snapshot-diff` stays internal. To admit another tool, add its name there and to this paragraph in one commit.
 
@@ -313,6 +313,12 @@ A repo declares the checks a lane must run before reporting in a `.lane-checks` 
 - **Dispatch.** `hooks/dispatch-model.mjs` reads the file for the git root above the payload's `cwd`. A code lane serving an issue in such a repo must carry `lane-checks: <command it will run>` or `lane_checks_reason: <why not>` in its brief, or the dispatch is denied. Read-only agent types are exempt, as with live smoke. No file, no `cwd` or no served issue means nothing is enforced.
 - **Gates never read the file.** It is the lane's own pre-report check; a gate keeps its own selection. Parser, runner and hook: `lib/lanes/lane-checks.mjs`, `cli/lanes.mjs`, `tests/unit/lane-checks.test.mjs`.
 - propagate's own `.lane-checks` lists `run: node cli.mjs docs --reference --check` and the blind-readers, cli-commands and readme-commands tests.
+
+## The digest never waits on a notification (propagate#462)
+
+`notify()` (`lib/report/notify.mjs`) spawns `terminal-notifier` detached and `unref()`ed and resolves on the spawn, never on the exit: with `-execute` the notifier stays alive until the notice is clicked, and awaiting it held the digest for 9 days. The osascript fallback runs only when the spawn itself fails (ENOENT, EACCES), and every path is bounded by `NOTIFY_TIMEOUT_MS` (10 s).
+
+A real digest run (not `--dry-run`, not `--stdout`) writes `{started, finished, pid}` to `<state dir>/digest-run.json` (`lib/glance/digest-run.mjs`). The glance carries one `digest` signal over it: a run that started more than 24 h ago (2 x the 12 h schedule) with no finish reads `digest stuck: started <age> ago, never finished` (broken); a start inside the window reads as running; no record at all is skipped as `digest never ran`, never stuck; an unreadable record is unknown.
 
 ## `propagate worktrees`: run the cleaner over lane worktrees, and its glance row (propagate#274, #446)
 

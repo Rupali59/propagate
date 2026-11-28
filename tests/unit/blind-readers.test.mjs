@@ -112,6 +112,9 @@ const EXEMPT = [
     "lanes/lane-checks.mjs::parseLaneChecks",
     "lanes/lane-checks.mjs::readLaneChecks",
   ]],
+  ["reads one ref's head for a refusal check; an unreadable repo returns {error}, never a bare null, and the caller exits 2 (#455)", [
+    "refs/record-pruned.mjs::readLiveHead",
+  ]],
   ["reads propagate's own day snapshot for a hook; null (missing or unreadable) is never a count: the caller writes goal null with goal_source stating why (#442)", [
     "sessions/assoc-write.mjs::readSnapshot",
   ]],
