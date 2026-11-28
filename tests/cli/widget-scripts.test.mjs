@@ -1,11 +1,12 @@
 /**
- * widget-scripts.test.mjs — collect.sh and open-ui.sh run against stubs.
+ * widget-scripts.test.mjs — open-ui.sh runs against stubs.
  *
- * WHAT THIS PROVES (plan E1/E2, 2026-10-15). Übersicht has no command timeout and
- * turns ANY stderr into a 500, so collect.sh must be bounded and silent; and a
- * stale `propagate ui` (alive, token rejected) must be replaced only when it is
- * VERIFIED to be `cli.mjs ui`. Every case measures the SIDE EFFECT (processes
- * killed, servers started, what was opened), not the script's own description.
+ * WHAT THIS PROVES (plan E1/E2, 2026-10-15). A stale `propagate ui` (alive, token
+ * rejected) must be replaced only when it is VERIFIED to be `cli.mjs ui`. Every
+ * case measures the SIDE EFFECT (processes killed, servers started, what was
+ * opened), not the script's own description. The Übersicht widget's collect script
+ * and its bound-and-silent tests left with the widget (#415); the native panel
+ * runs `cli.mjs surface --json` itself and still opens routes through open-ui.sh.
  *
  * Nothing here touches the real UI: node/curl/lsof/ps/open are stubs on PATH.
  */
@@ -18,7 +19,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
-const COLLECT = path.join(ROOT, "widget", "collect.sh");
 const OPENUI = path.join(ROOT, "widget", "open-ui.sh");
 
 function sandbox() {
@@ -45,43 +45,6 @@ function run(script, sb, env = {}, args = [], timeout = 60000) {
   });
   return { ...r, ms: Date.now() - t0 };
 }
-
-// ---------------------------------------------------------------- collect.sh
-
-test("collect.sh: a hung surface is cut at the bound, stdout is exactly the timed-out JSON, stderr empty", () => {
-  const sb = sandbox();
-  try {
-    sb.stub("node", "sleep 60");
-    const r = run(COLLECT, sb, { PROPAGATE_NODE: path.join(sb.bin, "node"), PROPAGATE_COLLECT_TIMEOUT: "2" });
-    assert.equal(r.stdout, '{"error":"timed out after 2s"}\n');
-    assert.equal(r.stderr, "", "stderr must be empty — Übersicht turns any stderr into a 500");
-    assert.ok(r.ms < 15000, `returned in ${r.ms}ms; the bound did not hold`);
-  } finally { sb.cleanup(); }
-});
-
-test("collect.sh: the default bound is 30s (read from the script, not re-measured)", () => {
-  assert.match(readFileSync(COLLECT, "utf8"), /PROPAGATE_COLLECT_TIMEOUT:-30\}/);
-});
-
-test("collect.sh: node warning on stderr does not reach stderr; JSON survives", () => {
-  const sb = sandbox();
-  try {
-    sb.stub("node", `echo "(node:1) ExperimentalWarning: noisy" >&2\necho '{"ok":true}'`);
-    const r = run(COLLECT, sb, { PROPAGATE_NODE: path.join(sb.bin, "node") });
-    assert.equal(r.stdout, '{"ok":true}\n');
-    assert.equal(r.stderr, "");
-  } finally { sb.cleanup(); }
-});
-
-test("collect.sh: a failing surface still yields JSON on stdout and nothing on stderr", () => {
-  const sb = sandbox();
-  try {
-    sb.stub("node", `echo boom >&2\nexit 7`);
-    const r = run(COLLECT, sb, { PROPAGATE_NODE: path.join(sb.bin, "node") });
-    assert.equal(r.stdout, '{"error":"propagate surface exited 7 with no output"}\n');
-    assert.equal(r.stderr, "");
-  } finally { sb.cleanup(); }
-});
 
 // --------------------------------------------------------------- open-ui.sh
 
@@ -181,4 +144,42 @@ test("open-ui.sh: dead (no answer, nothing on the port) -> starts one server and
     assert.equal(readFileSync(path.join(sb.state, "ui-url"), "utf8"), NEW_URL);
     assert.match(readFileSync(path.join(sb.state, "ui-pid"), "utf8"), /^\d+$/);
   } finally { killNewServer(sb); sb.cleanup(); }
+});
+
+// ------------------------------------------------- external commands exist
+
+test("every external command open-ui.sh invokes EXISTS on this machine", () => {
+  // THE BUG THIS CAUGHT. `open-ui.sh` ran `nohup setsid node ...`. `setsid` is a
+  // LINUX utility and macOS does not have it, so nohup refused to exec, no server
+  // started, and a click did nothing but append one line to a log nobody opens.
+  // Nothing else could see it: the script is valid bash and exits 0 on the failure
+  // path by design (a click must not crash its caller). Moved here from the widget
+  // contract test (#415), which also covered the deleted collector script.
+  const KEYWORDS = new Set([
+    "if", "then", "else", "elif", "fi", "for", "in", "do", "done", "while", "case", "esac",
+    "function", "return", "exit", "local", "set", "echo", "printf", "cd", "read", "export",
+    "break", "continue", "shift", "eval", "trap", "true", "false", "sleep", "command", "mkdir",
+    "grep", "cat", "seq", "curl", "disown", "nohup", "sed", "awk",
+  ]);
+  const src = readFileSync(OPENUI, "utf8");
+  const defined = new Set([...src.matchAll(/^\s*([a-z][a-z0-9_-]*)\s*\(\)\s*\{/gm)].map((m) => m[1]));
+  const missing = [];
+  let checked = 0;
+  for (const line of src.split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    // Tokenise, do not regex the line: a regex that consumes `nohup` via its `^`
+    // branch can never see the command after it (rule:discernment-checks section 4).
+    const words = t.split(/\s+/);
+    let i = 0;
+    while (i < words.length && /^(nohup|exec|env|time)$/.test(words[i])) i += 1;
+    const cmd = (words[i] ?? "").replace(/^["']|["']$/g, "");
+    if (/^[a-z][a-z0-9_-]{2,}$/.test(cmd) && !KEYWORDS.has(cmd) && !defined.has(cmd)) {
+      checked += 1;
+      const r = spawnSync("/bin/sh", ["-c", `command -v ${cmd}`], { encoding: "utf8" });
+      if (r.status !== 0) missing.push(cmd);
+    }
+  }
+  assert.ok(checked >= 1, "no external command found in open-ui.sh - this check has gone blind");
+  assert.deepEqual(missing, [], `these commands do not exist here, so the click silently does nothing: ${missing.join(", ")}`);
 });

@@ -116,7 +116,7 @@ const JSON_HEADERS = { "content-type": "application/json" };
 // ROUTE RENAME 2026-10-15 (plan F11): nine data-source views became the views
 // built for what a human does -- judge, unblock, health, activity -- plus the
 // secondary Explore set. Keys are exactly SERVED_VIEWS minus the slash
-// (lib/report/surface.mjs), asserted by widget-contract.test.mjs.
+// (lib/report/surface.mjs), asserted by surface-payload-contract.test.mjs.
 // "overview" joined at the FRONT on 2026-10-16: the dashboard is what an empty hash opens.
 // An unknown hash still lands on Judge, because Judge is where the work is.
 const DIVISIONS = [
@@ -360,7 +360,7 @@ function remindersTimeoutText(why) {
 
 /**
  * Tooltip content, ONE pure formatter for every chart shape and row on this page; the web
- * counterpart of the widget's tipLines (widget/propagate-queue.jsx). Returns
+ * counterpart of the retired Ubersicht widget's tipLines (#415). Returns
  * {title, lines} or null.
  *
  * TWO RULES, both from the owner's standard for the widget. (1) Every figure comes from a

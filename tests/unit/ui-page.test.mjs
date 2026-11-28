@@ -99,9 +99,7 @@ test("every view the page routes is reachable from both fragment spellings", () 
   // and teaches people to route around checks.
   //
   // The real guards are above: the emitted script PARSES, and it IS the client
-  // file byte for byte. The template-literal hazard is still live in
-  // widget/propagate-queue.jsx, whose className is still a literal, and
-  // widget-contract.test.mjs guards that one.
+  // file byte for byte.
   // Named against the DIVISIONS, not the tabs they replaced. This listed
   // queue/issues/todos and went red the moment the page stopped having them --
   // which is the check working, not the check being brittle.
