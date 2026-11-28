@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "FIFTEEN registrations, not eleven hooks (session-title added #442, close-guard 2026-11-27, #280). gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
+    "SIXTEEN registrations, not eleven hooks (attention-queue Notification added #445, session-title added #442, close-guard 2026-11-27, #280). gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
     "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
@@ -184,6 +184,21 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-title.mjs\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "_comment": [
+          "attention-queue, added #445. Queues the session that just asked for the user (tty found from the process tree) so",
+          "`propagate attention next` can focus its Ghostty tab, oldest first. Lives under scripts/, not hooks/. Silent on error and in subagents.",
+          "Needs /reload-plugins."
+        ],
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/attention-queue/hook.mjs\""
           }
         ]
       }
