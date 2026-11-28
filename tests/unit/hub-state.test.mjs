@@ -67,3 +67,20 @@ test("docs are reported only when the state directory is ours too", async (t) =>
   t.after(() => rm(hub, { recursive: true, force: true }));
   assert.equal(hubDocsDir(repo), null);
 });
+
+test("PROPAGATE_HUB_STATE=absent: a real hub beside the checkout is NOT read, as on a stranger's clone (#454)", async (t) => {
+  const { hub, repo, dir } = await tree({ docs: true });
+  const prev = process.env.PROPAGATE_HUB_STATE;
+  t.after(async () => {
+    if (prev === undefined) delete process.env.PROPAGATE_HUB_STATE;
+    else process.env.PROPAGATE_HUB_STATE = prev;
+    await rm(hub, { recursive: true, force: true });
+  });
+  // Control: the same tree IS found without the override, so the null below is the override's doing.
+  delete process.env.PROPAGATE_HUB_STATE;
+  assert.equal(hubStateDir(repo), dir);
+  process.env.PROPAGATE_HUB_STATE = "absent";
+  assert.equal(hubStateDir(repo), null);
+  assert.equal(hubStateFile(repo, "DECISIONS.md"), null);
+  assert.equal(hubDocsDir(repo), null);
+});
