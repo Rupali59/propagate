@@ -146,6 +146,7 @@ test("migration equality — all 36 pre-existing config.mjs exports are byte-ide
       telegramDir: null,
       notifier: null,
       usageWidgetDir: null,
+      cleanerDir: null,
     });
     assert.equal(
       after["searchRootsExplain()"],
