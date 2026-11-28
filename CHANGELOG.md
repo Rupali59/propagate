@@ -6,6 +6,10 @@ Releases v0.15.50 to v0.15.59 were backfilled once, from their tags' ranges (`gi
 
 ## [Unreleased]
 
+### Added
+
+- sessions: a session's board item is derived from the work it does (`gh issue close|comment|edit`, `gh pr create|merge`, a `<type>/<n>-<slug>` branch start) by the PostToolUse hook, and the newest association wins, dispatch included; the new `session-title` UserPromptSubmit hook prefixes the session title with `owner/repo#n` (#442). Needs `/reload-plugins`.
+
 ## [0.20.0] — 2026-11-19
 
 This release carries two pieces of work: standards increment 1 (#320, `071aebc`) and the rename of the standards and references model to the knowledge base, `kb` (#322, `f8bdd7d`). The plan was to release them separately (#332), but the rename merged before 0.20.0 was tagged, so both ship here.

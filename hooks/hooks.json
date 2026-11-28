@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "FOURTEEN registrations, not eleven hooks (close-guard added 2026-11-27, #280). gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
+    "FIFTEEN registrations, not eleven hooks (session-title added #442, close-guard 2026-11-27, #280). gotcha-guard.mjs and rule-guard.mjs are each registered TWICE, against",
     "different matchers (Edit|Write and Bash), because it guards two different hazard",
     "classes. A verification phrased as 'all four hooks fire' counts it once and would",
     "pass green while the Bash matcher silently stopped firing — the same shape as the",
@@ -168,6 +168,22 @@
             "type": "command",
             "if": "Bash(*gh *)",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/close-guard.mjs\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "_comment": [
+          "session-title, added #442. Prefixes the session title with the board item the session is working on",
+          "(`owner/repo#n · <title>`), through the built-in UserPromptSubmit `sessionTitle` output. Reads the association log",
+          "(agent-nudge derives, dispatch-model dispatches). Silent with no association, in subagents, on error.",
+          "Needs /reload-plugins."
+        ],
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-title.mjs\""
           }
         ]
       }

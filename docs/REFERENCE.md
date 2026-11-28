@@ -931,13 +931,25 @@ Session: <project> (<workspace>) · repos: a, b · goal G<n> · item owner/repo#
 ```
 
 - With no association it says `unassociated: propagate sessions assoc <id> --from owner/repo#n`.
-- **Associated without `assoc` (#318):** the `dispatch-model` hook, on an allowed Agent/Task dispatch naming a board item in today's day snapshot, appends one `associate` line (`rowKey` `session:<session_id>`, `source: dispatch`) for the dispatching session with that item's goal and item. A session that already has an association is never overwritten; the hook's context line says it skipped. A deny, a missing session id or an item with no goal associates nothing.
+- **Associated without `assoc` (#318, #442):** two hooks append `associate` lines for a session (`rowKey` `session:<session_id>`, one O_APPEND line each, through `lib/sessions/assoc-write.mjs`), and **the newest wins**: a session with no association, or one holding a DIFFERENT item, gets a new line; the same item is a no-op; the fold's history keeps every line, so `sessions show` lists both. This supersedes #318's "never overwrites". Each line carries `source` (`dispatch` or `derived`) and `signal`.
+  - **`dispatch` (`dispatch-model`):** an allowed Agent/Task dispatch naming a board item in today's day snapshot. A deny, a missing session id or an item with no goal writes nothing.
+  - **`derived` (`agent-nudge`, PostToolUse on Bash):** the item the session's own successful command works on, read by `lib/sessions/derive.mjs`. PostToolUse fires only on success, so a failed command never associates. Never in a subagent (`agent_type` set): a lane's commands are not the coordinator's work.
+  - **The goal** of a derived line comes from today's day snapshot when the item is in it; otherwise it is null with `goal_source: "not in today's snapshot"`, never guessed.
+
+  | Signal (a write or a start of work) | Example |
+  |---|---|
+  | issue write | `gh issue close`, `comment`, `edit`, `reopen`, `develop` `<n> [-R o/r]` |
+  | PR write | `gh pr create` / `merge`, with `Closes #n` in its arguments, else the `--head` or checked-out branch's `<n>` |
+  | branch start | `git switch -c`, `git checkout -b`, `git worktree add -b`, or `scripts/worktree-new.sh`, with `<type>/<n>-<slug>` (`rule:branch-and-worktree-names`) |
+
+  Reads never count (`gh issue view`, `gh issue list`), nor does text that only mentions a command (`echo gh issue close 9`, a commit message, a heredoc body), nor `gh project item-edit` (its `PVTI_` id needs the network). The repo is `-R`/`--repo`, else the cwd's git origin read from `.git/config` (a linked worktree follows its `commondir`), with no subprocess and no network; with neither, nothing is written. In a compound command (`&&`, `;`, `||`, newline) the last signal wins. `sessions assoc` stays the manual override.
+- **The session title (#442):** the `session-title` hook (UserPromptSubmit) reads the session's association by `session_id` and returns `hookSpecificOutput.sessionTitle` = `owner/repo#n · <rest>`, where `<rest>` is the payload's `session_title` with any earlier `owner/repo#n · ` prefix stripped (a `/rename` name survives). It is silent with no association, when the title already starts with the item, in a subagent and on any error. It builds on Claude Code's own display: the session title is shown in agent view, `/resume`, the statusline `session_name` and `claude agents --json` `name`, and a UserPromptSubmit hook may set it with `sessionTitle` ([hooks](https://code.claude.com/docs/en/hooks)); `PostToolUse` fires only on success and `PostToolUseFailure` on failure. Claude Code has no issue field or per-session metadata, which is why the association log stays the `sessionId -> item` map. A new registration needs `/reload-plugins`.
 - The block is at most 2,000 characters; a long repo list ends with `+N more: propagate sessions show <id>`.
 - It reads only `$STATE/sessions/checkouts.json` (refreshed by the sessions CLI), `assoc.jsonl` and `.propagates.yml` markers up the cwd ancestry. Its state dir comes from `lib/core/paths.mjs`.
 - It never calls `claude`, the network or git, except one `git rev-parse --git-common-dir` when cwd is inside `.claude/worktrees/`.
 - A cwd outside every workspace, or no cache, injects nothing.
 - Any error appends one line to `$STATE/sessions/errors.log`, and the hook exits 0 silently.
-- Plugin hook registrations: 12. It applies after `/reload-plugins`, and does not run under `--bare` or in cloud sessions.
+- Plugin hook registrations: count them in `hooks/hooks.json`. It applies after `/reload-plugins`, and does not run under `--bare` or in cloud sessions.
 
 ### Broadcast delivery (propagate#267 phase 2)
 

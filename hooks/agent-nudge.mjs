@@ -9,10 +9,21 @@
  *
  * Informs only: never blocks, always exit 0, no output when it has nothing to say. Silent inside any subagent
  * (agent_type set), so edge-settler's own `settle --json` never tells it to dispatch itself.
+ *
+ * SECOND JOB (propagate#442): after the nudge, derive the board item the session is working on from the command it just
+ * ran (lib/sessions/derive.mjs) and append one `derived` association (lib/sessions/assoc-write.mjs, newest wins, the same
+ * item is a no-op). PostToolUse fires only on success, so a failed command never associates; a read (`gh issue view`)
+ * is not a signal. Never in a subagent: a lane's commands are not the coordinator's work. The goal comes from today's
+ * day snapshot when the item is in it, else null. Errors leave the hook silent. The name stays because hooks.json and
+ * tests/hooks/hook-imports.test.mjs name it. The session title is set by hooks/session-title.mjs.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { associateSession, goalFromSnapshot } from "../lib/sessions/assoc-write.mjs";
+import { deriveItem } from "../lib/sessions/derive.mjs";
+import { stateDir } from "../lib/core/paths.mjs";
 
 // #253: `propagate` is not on PATH; skills call `node ${CLAUDE_PLUGIN_ROOT}/cli.mjs`. A hook gets
 // CLAUDE_PLUGIN_ROOT in its env, so the nudge names the absolute CLI it can actually run.
@@ -60,9 +71,29 @@ export function nudge(input) {
   );
 }
 
+/** Append the derived association for this payload, if it carries a signal. Silent on every error. */
+export function deriveAssociation(input, dir = stateDir(), now = new Date()) {
+  try {
+    if (input?.agent_type || input?.tool_name !== "Bash" || typeof input.session_id !== "string" || !input.session_id) return null;
+    const hit = deriveItem(String(input.tool_input?.command ?? ""), String(input.cwd ?? process.cwd()));
+    if (!hit) return null;
+    const goal = goalFromSnapshot(hit.item, dir, now);
+    return associateSession(
+      input.session_id,
+      { item: hit.item, goal, source: "derived", signal: hit.signal, ...(goal ? {} : { goal_source: "not in today's snapshot" }) },
+      dir,
+      now,
+    );
+  } catch {
+    return null; // a hook that informs must never wedge the session
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const line = nudge(JSON.parse(readFileSync(0, "utf8") || "{}"));
+    const input = JSON.parse(readFileSync(0, "utf8") || "{}");
+    deriveAssociation(input);
+    const line = nudge(input);
     if (line) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: line } }));
   } catch {
     /* an informing hook must never wedge the session */
