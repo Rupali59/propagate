@@ -194,6 +194,45 @@ test("readingAt: latest ok non-zero line at or before ts; skips cc_cost_week 0; 
   });
 });
 
+test("readingAt: falls back to archive/samples-YYYY-MM.jsonl beside the samples file", async () => {
+  const { mkdir } = await import("node:fs/promises");
+  await withTmp(async (dir) => {
+    const f = path.join(dir, "samples.jsonl");
+    const arch = path.join(dir, "archive");
+    await mkdir(arch);
+    await writeFile(f, sampleLine("2026-11-20T09:00:00Z", { week_pct: 50, cc_cost_week: 5 }) + "\n");
+    // previous month's last reading, for a ts at the start of October (IST)
+    await writeFile(
+      path.join(arch, "samples-2026-09.jsonl"),
+      sampleLine("2026-09-20T06:00:00Z", { week_pct: 11, cc_cost_week: 1.5 }) +
+        "\n" +
+        sampleLine("2026-09-30T18:00:00Z", { week_pct: 12, cc_cost_week: 1.9 }) +
+        "\n",
+    );
+    await writeFile(path.join(arch, "samples-2026-10.jsonl"), sampleLine("2026-10-05T06:00:00Z", { week_pct: 30, cc_cost_week: 3 }) + "\n");
+
+    // live window: unchanged
+    assert.equal(readingAt(f, "2026-11-20T10:00:00Z").week_pct, 50);
+    // older than the live file's first line: archive month
+    assert.equal(readingAt(f, "2026-09-20T12:00:00+05:30").week_pct, 11);
+    // start of a month (01 Oct 00:10 IST = 30 Sep 18:40Z): previous month's last reading
+    const r = readingAt(f, "2026-10-01T00:10:00+05:30");
+    assert.equal(r.week_pct, 12);
+    assert.equal(r.t, "2026-09-30T18:00:00Z");
+    // archive month with nothing before ts and nothing in the previous month
+    assert.match(readingAt(f, "2026-08-01T10:00:00Z").missing, /none at or before/);
+  });
+});
+
+test("readingAt: no archive dir behaves as before and never throws", async () => {
+  await withTmp(async (dir) => {
+    const f = path.join(dir, "samples.jsonl");
+    await writeFile(f, sampleLine("2026-11-20T09:00:00Z", { week_pct: 50, cc_cost_week: 5 }) + "\n");
+    assert.match(readingAt(f, "2026-09-20T12:00:00+05:30").missing, /none at or before/);
+    assert.equal(readingAt(path.join(dir, "absent.jsonl"), "2026-09-20T12:00:00Z").missing, "no samples file");
+  });
+});
+
 test("hook: append-only — two runs give exactly two rows and the first row's bytes never change", async () => {
   await withTmp(async (dir) => {
     await writeFile(path.join(dir, "samples.jsonl"), sampleLine("2026-11-06T05:30:00Z") + "\n");
