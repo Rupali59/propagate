@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { nudge, NUDGE_AT } from "../../hooks/agent-nudge.mjs";
@@ -53,4 +53,56 @@ test("a large output: truncated stdout plus persistedOutputPath is read from the
   assert.match(nudge(p), /10 edges to settle/);
   p.tool_response.persistedOutputPath = path.join(dir, "gone.txt");
   assert.equal(nudge(p), null, "an unreadable persisted file falls back to stdout, which stays silent");
+});
+
+// ── the second job: derive the session's board item (propagate#442) ──────────
+// Tested by EFFECT: the lines the real hook process appended to a temp state dir's assoc.jsonl (GOTCHAS G56).
+const withState = () => {
+  const state = mkdtempSync(path.join(tmpdir(), "nudge-state-"));
+  const log = path.join(state, "sessions", "assoc.jsonl");
+  const run = (p) => spawnSync(process.execPath, [HOOK], { input: JSON.stringify(p), encoding: "utf8", env: { ...process.env, PROPAGATE_STATE_DIR: state } });
+  const lines = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
+  return { run, lines };
+};
+const bash = (command, extra = {}) => ({ session_id: "sess-1", tool_name: "Bash", tool_input: { command }, tool_response: { stdout: "ok" }, cwd: tmpdir(), ...extra });
+
+test("a gh issue close payload appends one derived association", () => {
+  const s = withState();
+  const r = s.run(bash("gh issue close 5 -R o/r"));
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "", "the derive is silent");
+  const l = s.lines();
+  assert.equal(l.length, 1);
+  assert.equal(l[0].event, "associate");
+  assert.equal(l[0].rowKey, "session:sess-1");
+  assert.equal(l[0].item, "o/r#5");
+  assert.equal(l[0].source, "derived");
+  assert.equal(l[0].signal, "gh issue close");
+  assert.equal(l[0].goal, null);
+  assert.equal(l[0].goal_source, "not in today's snapshot");
+});
+
+test("the same item again appends nothing; a different item appends a second line", () => {
+  const s = withState();
+  s.run(bash("gh issue comment 5 -R o/r --body x"));
+  s.run(bash("gh issue close 5 -R o/r"));
+  assert.equal(s.lines().length, 1);
+  s.run(bash("gh issue comment 9 -R o/r --body x"));
+  assert.deepEqual(s.lines().map((e) => e.item), ["o/r#5", "o/r#9"]);
+});
+
+test("reads, a subagent payload and a payload with no session id append nothing", () => {
+  const s = withState();
+  s.run(bash("gh issue view 5 -R o/r"));
+  s.run(bash("gh issue list -R o/r"));
+  s.run(bash("gh issue close 5 -R o/r", { agent_type: "general-purpose" }));
+  s.run(bash("gh issue close 5 -R o/r", { session_id: undefined }));
+  assert.deepEqual(s.lines(), []);
+});
+
+test("a derive that fails stays silent and exits 0", () => {
+  const s = withState();
+  const r = s.run({ session_id: "x", tool_name: "Bash", tool_input: { command: 7 }, tool_response: 3, cwd: null });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
 });

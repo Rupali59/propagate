@@ -27,7 +27,7 @@
  * THE OTHER WRITE (#318). An allowed dispatch for a board item also associates the DISPATCHING session with that item's
  * goal and item (one `associate` line in `<stateDir>/sessions/assoc.jsonl`, rowKey `session:<session_id>`), so
  * `propagate sessions` and `day open` show it without anyone running `assoc`. A session that already has an
- * association keeps it: this never overwrites one, it says it skipped. The hook cannot read `claude agents` (nothing
+ * association on a DIFFERENT item is moved: newest wins (#442, which supersedes "never overwrites"); the same item is a no-op and it says it skipped. The hook cannot read `claude agents` (nothing
  * outside lib/sessions/live.mjs runs claude), which is why the key is the session id and not a row key; the sessions
  * view joins on `row.sessionId`.
  *
@@ -38,6 +38,11 @@ import { readFileSync, readdirSync, writeFileSync, renameSync, mkdirSync, append
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+
+import { associateSession, existingAssociation, readSnapshot } from "../lib/sessions/assoc-write.mjs";
+
+// Re-exported: tests and callers import these from here (they moved to lib/sessions/assoc-write.mjs, #442).
+export { associateSession, existingAssociation };
 
 export const MOVE_FROM = Object.freeze(["Backlog", "Ready"]);
 const REPO = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
@@ -214,51 +219,6 @@ export function decide(input, snapshot, now = new Date()) {
   return out;
 }
 
-/**
- * The association a session already holds in the log text: an `associate` not followed by a `forgotten` on its rowKey,
- * whose row carries this session id (or whose key is `session:<id>`). Unparseable lines are skipped, as fold() does.
- */
-export function existingAssociation(text, sessionId) {
-  const cur = new Map();
-  for (const line of String(text ?? "").split("\n")) {
-    if (!line.trim()) continue;
-    let ev;
-    try {
-      ev = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!ev || typeof ev.event !== "string" || typeof ev.rowKey !== "string") continue;
-    if (ev.event === "associate") cur.set(ev.rowKey, ev);
-    else if (ev.event === "forgotten") cur.set(ev.rowKey, null);
-  }
-  for (const a of cur.values()) if (a && (a.row?.sessionId === sessionId || a.rowKey === `session:${sessionId}`)) return a;
-  return null;
-}
-
-/**
- * Associate the dispatching session unless it already has an association. One O_APPEND line; the hook is
- * dependency-free (no proper-lockfile), like session-guide.
- * @returns {{written: boolean, why?: string}}
- */
-export function associateSession(sessionId, assoc, stateDirPath, now = new Date()) {
-  if (!sessionId) return { written: false, why: "no session id in the payload" };
-  const dir = path.join(stateDirPath, "sessions");
-  const file = path.join(dir, "assoc.jsonl");
-  let text = "";
-  try {
-    text = readFileSync(file, "utf8");
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e; // unreadable is not "no association": refuse rather than write blind
-  }
-  const have = existingAssociation(text, sessionId);
-  if (have) return { written: false, why: `already associated with ${have.item ?? "?"}` };
-  mkdirSync(dir, { recursive: true });
-  const ev = { ts: now.toISOString(), event: "associate", rowKey: `session:${sessionId}`, goal: assoc.goal, item: assoc.item, source: "dispatch", workspace: null, project: null, row: { sessionId } };
-  appendFileSync(file, JSON.stringify(ev) + "\n");
-  return { written: true };
-}
-
 const q = (s) => JSON.stringify(String(s));
 
 /** One Status -> In progress write. @returns {{ok: boolean, error?: string}} */
@@ -276,14 +236,6 @@ export function moveToInProgress(m, gh = process.env.PROPAGATE_GH_BIN || "gh") {
     /* gh printed no JSON: exit 0 is the signal */
   }
   return { ok: true };
-}
-
-function readSnapshot(file) {
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
 }
 
 /** Atomic: temp file, then rename. */
@@ -338,8 +290,8 @@ async function main() {
     if (d.assoc) {
       try {
         const sid = typeof input.session_id === "string" ? input.session_id : "";
-        const a = associateSession(sid, d.assoc, stateDir());
-        notes.push(a.written ? `session associated with ${d.assoc.item} (${d.assoc.goal})` : `session not associated (${a.why})`);
+        const a = associateSession(sid, { ...d.assoc, source: "dispatch", signal: "dispatch" }, stateDir());
+        notes.push(a.written ? `session associated with ${d.assoc.item} (${d.assoc.goal})${a.from ? `, moved from ${a.from}` : ""}` : `session not associated (${a.why})`);
       } catch (e) {
         notes.push(`session not associated (${e.message}); dispatch allowed`);
       }

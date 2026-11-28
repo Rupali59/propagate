@@ -293,15 +293,30 @@ test("an allowed dispatch associates the dispatching session with the item's goa
   assert.match(r.ctx, /session associated with o\/r#7 \(G1\)/);
 });
 
-test("an existing association is not overwritten: the log is byte-identical and the hook says it skipped", () => {
+test("a dispatch for a DIFFERENT item moves the association (newest wins, #442): both lines stay in the log", () => {
   const sb = sandbox({ snapshot: SNAP("Ready", "Sonnet") });
   mkdirSync(path.join(sb.state, "sessions"), { recursive: true });
   const prior = JSON.stringify({ ts: "2026-11-18T00:00:00.000Z", event: "associate", rowKey: "interactive:sess-bbbb:42", goal: "G9", item: "o/other#1", row: { sessionId: "sess-bbbb" } }) + "\n";
   writeFileSync(path.join(sb.state, "sessions", "assoc.jsonl"), prior);
   const r = sb.run(withSession(dispatch("Do o/r#7 now.", "sonnet"), "sess-bbbb"));
   assert.equal(r.deny, false);
+  const lines = assocLog(sb).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(lines.length, 2, "history keeps the prior line");
+  assert.ok(assocLog(sb).startsWith(prior), "the prior line is untouched");
+  assert.equal(lines[1].item, "o/r#7");
+  assert.equal(lines[1].source, "dispatch");
+  assert.match(r.ctx, /session associated with o\/r#7 \(G1\), moved from o\/other#1/);
+});
+
+test("a dispatch for the SAME item is a no-op: the log is byte-identical and the hook says it skipped", () => {
+  const sb = sandbox({ snapshot: SNAP("Ready", "Sonnet") });
+  mkdirSync(path.join(sb.state, "sessions"), { recursive: true });
+  const prior = JSON.stringify({ ts: "2026-11-18T00:00:00.000Z", event: "associate", rowKey: "interactive:sess-bbbb:42", goal: "G1", item: "o/r#7", row: { sessionId: "sess-bbbb" } }) + "\n";
+  writeFileSync(path.join(sb.state, "sessions", "assoc.jsonl"), prior);
+  const r = sb.run(withSession(dispatch("Do o/r#7 now.", "sonnet"), "sess-bbbb"));
+  assert.equal(r.deny, false);
   assert.equal(assocLog(sb), prior, "not one byte appended");
-  assert.match(r.ctx, /session not associated \(already associated with o\/other#1\)/);
+  assert.match(r.ctx, /session not associated \(already associated with o\/r#7\)/);
 });
 
 test("a denied dispatch associates nothing", () => {

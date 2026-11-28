@@ -54,7 +54,7 @@ function skillJoinTargets(src) {
 
 test("hooks/ contains the hooks the plugin ships", () => {
   const names = hookFiles().map((f) => path.basename(f)).sort();
-  assert.deepEqual(names, ["agent-guard.mjs", "agent-nudge.mjs", "background-guard.mjs", "close-guard.mjs", "dispatch-model.mjs", "doc-authority.mjs", "gotcha-guard.mjs", "load-rules.mjs", "plan-goal.mjs", "rule-guard.mjs", "session-guide.mjs", "subagent-cost.mjs"],
+  assert.deepEqual(names, ["agent-guard.mjs", "agent-nudge.mjs", "background-guard.mjs", "close-guard.mjs", "dispatch-model.mjs", "doc-authority.mjs", "gotcha-guard.mjs", "load-rules.mjs", "plan-goal.mjs", "rule-guard.mjs", "session-guide.mjs", "session-title.mjs", "subagent-cost.mjs"],
     "a hook was added or removed without updating this assertion");
 });
 
@@ -100,7 +100,7 @@ test("doc-authority distinguishes ABSENT from BROKEN", () => {
  * silently stop guarding every shell command while the check still passed. That is the
  * doc-authority failure shape reproduced inside the verification written to catch it.
  */
-test("hooks.json declares exactly 14 registrations, and every command resolves", () => {
+test("hooks.json declares exactly 15 registrations, and every command resolves", () => {
   const manifest = JSON.parse(readFileSync(path.join(HOOKS, "hooks.json"), "utf8"));
   const seen = [];
   for (const [event, groups] of Object.entries(manifest.hooks)) {
@@ -112,8 +112,9 @@ test("hooks.json declares exactly 14 registrations, and every command resolves",
   }
 
   // 13 -> 14: close-guard (#280) is a new Bash registration, narrowed by an `if`.
-  assert.equal(seen.length, 14,
-    `expected 14 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
+  // 14 -> 15: session-title (#442) is the first UserPromptSubmit registration.
+  assert.equal(seen.length, 15,
+    `expected 15 registrations, found ${seen.length}. gotcha-guard is registered twice by ` +
       `design (Edit|Write and Bash); collapsing it to one silently stops guarding Bash.`);
   // #272: session-guide is a SessionStart registration with NO matcher, so it fires on every source (compaction included).
   const guideReg = seen.find((s) => s.event === "SessionStart" && /session-guide\.mjs/.test(s.command));
@@ -122,6 +123,9 @@ test("hooks.json declares exactly 14 registrations, and every command resolves",
   // #188: the cost ledger is written only by this registration. Without it, lanes finish unrecorded.
   assert.ok(seen.some((s) => s.event === "SubagentStop" && /subagent-cost\.mjs/.test(s.command)),
     "SubagentStop must run hooks/subagent-cost.mjs (#188 cost ledger)");
+  // #442: the session title is set only by this registration; without it the derived item never reaches the title.
+  assert.ok(seen.some((s) => s.event === "UserPromptSubmit" && /session-title\.mjs/.test(s.command)),
+    "UserPromptSubmit must run hooks/session-title.mjs (#442)");
   // #251: the read-only guard is the ONLY enforcement for propagate agents (plugin agents cannot carry hooks).
   // Its matcher must cover every write tool, or a read-only agent writes with one of the uncovered ones.
   const guard = seen.find((s) => s.event === "PreToolUse" && /agent-guard\.mjs/.test(s.command));
