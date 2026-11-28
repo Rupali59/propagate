@@ -189,6 +189,7 @@ Regenerate it with `npm run readme:commands`.
 - `propagate manifest` — how to stand a workspace up on another machine
 - `propagate migrate` — move a workspace to the v3 layout (dry-run unless --apply)
 - `propagate migrate-refs` — migrate a workspace's ref snapshots (dry-run unless --apply)
+- `propagate refs record-pruned` — record a branch an outside tool is about to delete (dry-run unless --apply)
 - `propagate migrate-ledger` — copy a ledger to the v3 layout (dry-run by default)
 - `propagate relocate-ledger` — relocate a ledger (dry-run by default)
 - `propagate freeze-ledger` — freeze a v1 ledger (dry-run by default)

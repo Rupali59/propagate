@@ -212,14 +212,14 @@ export async function migrateRefsCmd(argv = []) {
     console.log(`${DIM}no ref transitions since the previous capture${RESET}`);
   } else {
     const byKind = {};
-    for (const e of plan.events) byKind[e.event] = (byKind[e.event] ?? 0) + 1;
+    for (const e of plan.events) byKind[e.type ?? e.event] = (byKind[e.type ?? e.event] ?? 0) + 1;
     console.log(
       Object.entries(byKind)
         .map(([k, n]) => `${k} ${n}`)
         .join(" · "),
     );
     for (const e of plan.events.slice(0, 20)) {
-      console.log(`  ${e.event} ${e.project}/${e.ref ?? e.path}${e.classification ? ` (${e.classification})` : ""}`);
+      console.log(`  ${e.type ?? e.event} ${e.project}/${e.ref ?? e.path}${e.classification ? ` (${e.classification})` : ""}`);
     }
     if (plan.events.length > 20) console.log(`  ${DIM}… ${plan.events.length - 20} more${RESET}`);
   }
