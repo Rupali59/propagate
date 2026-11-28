@@ -268,6 +268,34 @@ their repo; dated records describing that layout keep it.
 archive, deferred designs and audit are at `propagation/docs/propagate/` (2026-10-19, #12). A
 reader looking for `<workspace>/docs/<project>/` in the hub will not find it; this is why.
 
+## `propagate refs record-pruned`: record a branch an outside tool prunes (propagate#448)
+
+```
+propagate refs record-pruned --workspace <dir|name> --branch <name> --head <sha> --evidence <json> --detected-by cleaner [--project <p>] [--apply] [--json]
+```
+
+`refs/lifecycle.jsonl` is written by the snapshot diff, which stamps `detected_by: snapshot-diff`. A tool that deletes branches records them here instead of appending to the file, so the shape check (`detected_by` and `evidence` on every record) cannot be bypassed. **The order is snapshot, then record, then delete, and a non-zero exit means do not delete.**
+
+- **Accepted** only when the branch is in the current snapshot and `--head` equals the snapshot's head for it, which proves it is the same ref about to go. A branch that exists in several projects with that head needs `--project`.
+- **Dry run unless `--apply`.** Without it nothing is written (no lock directory either), for an accepted and a refused case alike; `tests/unit/refs-record-pruned.test.mjs` asserts the refs directory is byte-identical.
+- **With `--apply`** it takes the lock on `lifecycle.jsonl`, re-reads under it, and appends one `schema: 2` line: `type: pruned`, `project`, `ref`, `head`, `detected_by`, `evidence` (the parsed JSON), `recorded_before_delete: true`, `at`. It never rewrites `snapshot.json`. `migrate-refs --apply` takes the same lock around its append.
+
+| Exit | Meaning |
+|---|---|
+| `0` | recorded, or a dry run that would be accepted |
+| `1` | refused, with a code below |
+| `2` | could not run: usage, no or unreadable snapshot or lifecycle, an unknown snapshot shape (a v1 or flat one: convert it with `migrate-refs`), or the lock held elsewhere. A missing snapshot is never read as an empty one. |
+
+Refusal codes: `REFS_PRUNE_HEAD_MISMATCH` (the head differs), `REFS_PRUNE_UNKNOWN_BRANCH` (the snapshot has never seen it), `REFS_PRUNE_DUPLICATE` (a `pruned` with this branch and head is already recorded, checked before the snapshot), `REFS_PRUNE_DETECTED_BY` (not allowlisted), `REFS_PRUNE_EVIDENCE` (not valid JSON, or empty), `REFS_PRUNE_AMBIGUOUS` (several projects match; pass `--project`).
+
+**Who may record.** `ALLOWED_DETECTORS` in `lib/refs/record-pruned.mjs` is `cleaner` only; `snapshot-diff` stays internal. To admit another tool, add its name there and to this paragraph in one commit.
+
+**The next snapshot reconciles** (`migrate-refs`, through `reconcileOutsidePrunes`):
+
+- the delete went through: the diff's own `pruned` for that branch and head is dropped, so the branch is recorded once;
+- the delete failed: the branch is still present at the same head, so one `prune-incomplete` event is emitted, carrying the record's `evidence`, `recorded_by` and `recorded_at`. It is deduped by project, ref and head, and the record is never silently cleared. `doctor` warns `prune incomplete` while the branch is still there at that head; a delete that lands later closes it, because the state is derived from the snapshot;
+- the branch was re-created at a different head: nothing is added here; the diff's own events say so.
+
 ## Ledger resolution
 
 ⚠️ **Resolve the ledger path from the workspace the row belongs to — do NOT

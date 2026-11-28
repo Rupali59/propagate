@@ -3932,6 +3932,9 @@ if (_invokedDirectly) {
   } else if (mode === "migrate-refs") {
     const { migrateRefsCmd } = await import("./cli/ledger.mjs");
     await migrateRefsCmd(process.argv.slice(3));
+  } else if (mode === "refs") {
+    const { refsCmd } = await import("./cli/refs.mjs");
+    process.exitCode = await refsCmd(process.argv.slice(3));
   } else if (mode === "init") {
     const { init } = await import("./cli/ledger.mjs");
     await init(process.argv[3], process.argv.slice(4));
