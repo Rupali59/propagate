@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { worktreesCmd } from "../../cli/worktrees.mjs";
-import { runCleanerGc, deriveRepos, normaliseGcResult } from "../../lib/worktrees/cleaner-gc.mjs";
+import { runCleanerGc, normaliseGcResult } from "../../lib/worktrees/cleaner-gc.mjs";
 import { postRoutes, routeKey, ledgerPath } from "../../lib/worktrees/routes.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -73,10 +73,11 @@ test("a cleanerDir with no worktree-gc.sh is its own coded exit 2", () => {
   assert.equal(r.code, "CLEANER_SCRIPT_MISSING");
 });
 
-test("no repositories to hand over is exit 2, a blind scan and not a clean one", () => {
-  const r = runCleanerGc({ cleanerDir: stubCleaner(), paths: [] });
-  assert.equal(r.code, "CLEANER_NO_PATHS");
-  assert.equal(r.exit, 2);
+test("an empty path list is allowed: the cleaner derives its own set, so argv carries no repo", () => {
+  const dir = stubCleaner({ result: RESULT({ routes: [] }), exit: 0 });
+  const r = runCleanerGc({ cleanerDir: dir, paths: [] });
+  assert.equal(r.ok, true);
+  assert.equal(argvLog(dir)[0], "--json");
 });
 
 for (const code of [0, 1]) {
@@ -180,30 +181,45 @@ test("normaliseGcResult reads both the apply shape and a dry run's classify shap
   assert.equal(normaliseGcResult(null), null);
 });
 
-test("deriveRepos dedupes by git common dir and names workspaces that are not repositories", () => {
-  const answers = {
-    "/ws/a": { status: 0, stdout: "/ws/a\n.git\n" },
-    "/ws/a/sub": { status: 0, stdout: "/ws/a\n.git\n" },
-    "/ws/b": { status: 0, stdout: "/ws/b\n.git\n" },
-    "/ws/none": { status: 128, stdout: "" },
-  };
-  const spawn = (_g, args) => answers[args[1]];
-  const { repos, skipped } = deriveRepos([{ root: "/ws/a" }, { root: "/ws/a/sub" }, { root: "/ws/b" }, { root: "/ws/none" }], { spawn, realpath: (p) => p });
-  assert.deepEqual(repos, ["/ws/a", "/ws/b"]);
-  assert.equal(skipped.length, 1);
+// Regression, propagate#274 live smoke: a workspace-derived repo set omitted a repository the cleaner audits, so one
+// of two routes was lost. With no paths named propagate must pass NONE and let the cleaner derive its own set.
+test("with no paths named, propagate passes no repo and both routes the cleaner prints come back", async () => {
+  const other = { ...ROUTE, repo: "acme/gadgets", issue: 7, head: "b".repeat(40) };
+  const dir = stubCleaner({ result: RESULT({ routes: [ROUTE, other] }), exit: 1 });
+  const lines = [];
+  const code = await worktreesCmd(["--json"], { cleanerDir: dir, workspaces: [{ root: "/ws/a" }], stateDirPath: tmp(), out: (s) => lines.push(s), err: () => {} });
+  assert.equal(code, 1);
+  assert.equal(argvLog(dir)[0], "--json", "no repository path may be passed when none was named");
+  const j = JSON.parse(lines.join("\n"));
+  assert.deepEqual(j.routes.map((r) => r.key), [`acme/widgets#42@${"a".repeat(40)}`, `acme/gadgets#7@${"b".repeat(40)}`]);
 });
 
-test("with no paths named, the repos come from discovery; an empty discovery is exit 2 (blind)", async () => {
-  const dir = stubCleaner({ result: RESULT({ routes: [] }), exit: 0 });
-  const spawnFor = (stdout) => (cmd, args, o) => (cmd === "git" ? { status: 0, stdout } : spawnSync(cmd, args, o));
+// Regression: a literal C1 --json shaped like the real output (top-level routes WITHOUT head, tier_b rows carry it).
+test("a route with no head borrows the full head from its proposal.tier_b row; none is hashed silently", async () => {
+  const sha = "1e50309938799cfdbbeaedcafd47d603e2632c7c";
+  const sha2 = "151a777aeabc05daf386a6ec4ddaa9c2d994dac4";
+  const real = {
+    now: "2026-11-28T10:00:00+05:30", schema_version: 1, summary: { total: 3, tier_a: 0, tier_b: 3 },
+    routes: [
+      { kind: "issue-comment", repo: "owner/repo", issue: 618, path: "/w/repo/.claude/worktrees/perf-618-x", branch: "perf/618-x", verdict: "unlanded", body: "cleaner: 1 unlanded commit(s)" },
+      { kind: "issue-comment", repo: "owner/other", issue: 162, path: "/w/other/.claude/worktrees/refactor-162-y", branch: "refactor/162-y", verdict: "unlanded", body: "cleaner: 4 unlanded commit(s)" },
+      { kind: "issue-comment", repo: "owner/third", issue: 9, path: "/w/third/.claude/worktrees/fix-9-z", branch: "fix/9-z", verdict: "unlanded", body: "cleaner: 2 unlanded commit(s)" },
+    ],
+    proposal: { apply: [], tier_b: [
+      { path: "/w/repo/.claude/worktrees/perf-618-x", repo: "/w/repo", branch: "perf/618-x", head: sha, verdict: "unlanded", route: { kind: "issue-comment", repo: "owner/repo", issue: 618, head: sha, body: "cleaner: 1 unlanded commit(s)" } },
+      { path: "/w/other/.claude/worktrees/refactor-162-y", repo: "/w/other", branch: "refactor/162-y", head: sha2, verdict: "unlanded", route: { kind: "issue-comment", repo: "owner/other", issue: 162, body: "cleaner: 4 unlanded commit(s)" } },
+    ] },
+  };
+  const dir = stubCleaner({ result: real, exit: 1 });
   const lines = [];
-  const code = await worktreesCmd([], { cleanerDir: dir, workspaces: [{ root: "/ws/a" }], spawn: spawnFor("/ws/a\n.git\n"), stateDirPath: tmp(), out: (s) => lines.push(s), err: () => {} });
-  assert.equal(code, 0);
-  assert.equal(argvLog(dir)[0], "--json /ws/a");
-  const errs = [];
-  const none = await worktreesCmd([], { cleanerDir: dir, workspaces: [], stateDirPath: tmp(), out: () => {}, err: (s) => errs.push(s) });
-  assert.equal(none, 2);
-  assert.match(errs.join(""), /discovery found none/);
+  await worktreesCmd(["--json"], { cleanerDir: dir, stateDirPath: tmp(), out: (s) => lines.push(s), err: () => {} });
+  const j = JSON.parse(lines.join("\n"));
+  assert.equal(j.routes[0].key, `owner/repo#618@${sha}`);
+  assert.equal(j.routes[0].head, sha);
+  assert.equal(j.routes[1].key, `owner/other#162@${sha2}`, "head taken from the tier_b row when the route lacks it");
+  assert.equal(j.routes[2].head_missing, true);
+  assert.match(j.routes[2].key, /^owner\/third#9@body-/);
+  assert.equal(j.route_counts.head_missing, 1);
 });
 
 test("the spawned CLI: unset cleaner is exit 2 'cleaner not configured'; an unknown flag is exit 2", () => {

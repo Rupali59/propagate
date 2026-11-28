@@ -1,6 +1,6 @@
 /**
  * `propagate worktrees [<repo-or-worktree>...] [--apply] [--json]` (propagate#274, #446): run the cleaner's worktree
- * collector (contract C1) over the named repos, or over the repos propagate discovers, and post the issue comments
+ * collector (contract C1) over the named repos, or over the repos the cleaner derives, and post the issue comments
  * it routes (C4). propagate decides nothing: lib/worktrees/cleaner-gc.mjs calls the cleaner, lib/worktrees/routes.mjs posts.
  *
  * Without --apply the cleaner is called WITHOUT --apply and nothing is posted: the dry run lists what would happen.
@@ -10,14 +10,14 @@
 import path from "node:path";
 
 import { stateDir } from "../lib/core/paths.mjs";
-import { runCleanerGc, deriveRepos } from "../lib/worktrees/cleaner-gc.mjs";
+import { runCleanerGc } from "../lib/worktrees/cleaner-gc.mjs";
 import { postRoutes } from "../lib/worktrees/routes.mjs";
 
 const USAGE = "usage: propagate worktrees [<repo-or-worktree>...] [--apply] [--json]";
 
 /**
  * @param {string[]} args argv after `worktrees`
- * @param {{cleanerDir?: string|null, workspaces?: object[], stateDirPath?: string, out?: Function, err?: Function, spawn?: Function, ghBin?: string}} [inject] tests
+ * @param {{cleanerDir?: string|null, stateDirPath?: string, out?: Function, err?: Function, spawn?: Function, ghBin?: string}} [inject] tests
  * @returns {Promise<number>} exit code
  */
 export async function worktreesCmd(args, inject = {}) {
@@ -34,12 +34,9 @@ export async function worktreesCmd(args, inject = {}) {
   let cleanerDir = inject.cleanerDir;
   if (cleanerDir === undefined) cleanerDir = (await import("../lib/core/config.mjs")).INTEGRATIONS.cleanerDir;
 
-  let repos = named;
-  let skipped = [];
-  if (!repos.length && cleanerDir) {
-    const workspaces = inject.workspaces ?? (await import("../lib/core/config.mjs")).WORKSPACES;
-    ({ repos, skipped } = deriveRepos(workspaces, inject.spawn ? { spawn: inject.spawn } : {}));
-  }
+  // No paths named: pass none and the cleaner derives its own repository set (C1). A set derived from propagate's
+  // workspaces omitted a repository the cleaner audits, and its route was lost (propagate#274 live smoke).
+  const repos = named;
 
   const run = runCleanerGc({ cleanerDir, paths: repos, apply, ...(inject.spawn ? { spawn: inject.spawn } : {}) });
   if (!run.ok) {
@@ -59,16 +56,16 @@ export async function worktreesCmd(args, inject = {}) {
   const exit = run.exit === 0 && failed ? 1 : run.exit;
 
   if (json) {
-    out(JSON.stringify({ ok: true, exit, applied: apply, repos, skipped_workspaces: skipped, cleaner_exit: run.exit, actions: run.result.actions, refused: run.result.refused, routes: posts.rows, route_counts: posts.counts, note: run.result.note }, null, 2));
+    out(JSON.stringify({ ok: true, exit, applied: apply, repos: repos.length ? repos : "cleaner-derived", cleaner_exit: run.exit, actions: run.result.actions, refused: run.result.refused, routes: posts.rows, route_counts: posts.counts, note: run.result.note }, null, 2));
     return exit;
   }
-  out(`worktrees ${apply ? "(--apply)" : "(dry run)"} over ${repos.length} repositor${repos.length === 1 ? "y" : "ies"}`);
+  out(`worktrees ${apply ? "(--apply)" : "(dry run)"} over ${repos.length ? `${repos.length} named repositor${repos.length === 1 ? "y" : "ies"}` : "the repositories the cleaner derives"}`);
   if (run.result.summary) out(`  cleaner summary: ${run.result.summary.total ?? "?"} worktrees, tier A ${run.result.summary.tier_a ?? "?"}, tier B ${run.result.summary.tier_b ?? "?"}`);
   for (const a of run.result.actions) out(`  ${String(a.status ?? "?").padEnd(8)} ${String(a.verdict ?? "?").padEnd(22)} ${a.path}${a.error ? `  ${a.error}` : ""}`);
   for (const r of run.result.refused) out(`  REFUSED ${r.path}: ${r.reason}`);
   if (run.result.note) out(`  ${run.result.note}`);
   if (!run.result.actions.length && !run.result.refused.length) out("  the cleaner proposed no action");
-  for (const r of posts.rows) out(`  route ${r.status}${r.key ? ` ${r.key}` : ""}${r.error ? `: ${r.error}` : ""}`);
+  for (const r of posts.rows) out(`  route ${r.status}${r.key ? ` ${r.key}` : ""}${r.head_missing ? " (head missing)" : ""}${r.error ? `: ${r.error}` : ""}`);
   if (!posts.rows.length) out("  routes: none");
   if (!apply && posts.rows.some((r) => r.status === "would-post")) out("  dry run: nothing was removed or posted; pass --apply");
   if (failed) err(`worktrees: ${failed} route comment(s) failed; they are retried on the next --apply`);
